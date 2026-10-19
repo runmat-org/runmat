@@ -1,3 +1,7 @@
+import { MemoryWorkspaceAuthority } from "./workspace-memory.js";
+import type { BrowserWorkspaceEntry } from "./browser-workspace.js";
+import type { WorkspaceCaptureRequest, WorkspacePublicationRequest } from "../generated/fea-workspace-contracts.js";
+import type { AtomicCreateResult } from "../generated/collaboration-contracts.js";
 import { basename, dirname, isSubPath, normalizePath } from "./path.js";
 import { notifyCommittedMutation } from "./mutation-notification.js";
 import type {
@@ -43,7 +47,13 @@ export interface VolumeSnapshotEntry {
 }
 
 export class MemoryVolume {
-  private readonly entries = new Map<string, Entry>();
+  private entries = new Map<string, Entry>();
+  readonly workspace = new MemoryWorkspaceAuthority(
+    () => new Map([...this.entries].map(([path, entry]): [string, BrowserWorkspaceEntry] =>
+      [path, entry.kind === "file" ? { kind: "file", bytes: entry.data, readonly: entry.readonly }
+        : { kind: "dir", readonly: entry.readonly }])),
+    entries => this.replaceWorkspaceInventory(entries),
+  );
   private readonly now: () => number;
   private readonly encoder = new TextEncoder();
 
@@ -133,6 +143,18 @@ export class MemoryVolume {
         return null;
       }
     });
+  }
+
+  atomicCreateNew(path: string, data: Uint8Array): AtomicCreateResult {
+    const normalized = normalizeAbsolute(path);
+    const existing = this.entries.get(normalized);
+    if (existing) {
+      if (existing.kind !== "file") throw new Error(`Path ${normalized} is a directory`);
+      return { kind: "existing", result: Array.from(existing.data) };
+    }
+    // No await: observation and insertion belong to one volume operation.
+    this.writeFile(normalized, data);
+    return { kind: "published", result: { durability: "atomic_visibility" } };
   }
 
   writeFile(path: string, data: Uint8Array, readonly = false, modified?: number): void {
@@ -386,6 +408,29 @@ export class MemoryVolume {
     entry.modified = this.now();
   }
 
+  replaceWorkspaceInventory(inventory: Map<string, BrowserWorkspaceEntry>): void {
+    const next = new Map<string, Entry>();
+    const timestamp = this.now();
+    for (const [path, entry] of inventory) {
+      const previous = this.entries.get(path);
+      if (entry.kind === "dir") {
+        next.set(path, { kind: "dir", readonly: !!entry.readonly,
+          modified: previous?.modified ?? timestamp, children: new Set() });
+      } else {
+        const unchanged = previous?.kind === "file" && previous.data.length === entry.bytes.length
+          && previous.data.every((byte, index) => byte === entry.bytes[index]);
+        next.set(path, { kind: "file", data: entry.bytes.slice(), readonly: !!entry.readonly,
+          modified: unchanged ? previous.modified : timestamp });
+      }
+    }
+    for (const path of next.keys()) if (path !== "/") {
+      const parent = next.get(dirname(path));
+      if (parent?.kind !== "dir") throw new Error(`Workspace parent missing: ${path}`);
+      parent.children.add(basename(path));
+    }
+    this.entries = next;
+  }
+
   private coerceBuffer(value: Uint8Array | ArrayBuffer | ArrayBufferView | string): Uint8Array {
     if (typeof value === "string") {
       return this.encoder.encode(value);
@@ -445,6 +490,18 @@ class MemoryProvider implements RunMatFilesystemProvider {
     notifyCommittedMutation(this.onMutate, this.onObserverError);
   }
 
+  captureWorkspace(request: WorkspaceCaptureRequest) {
+    return this.volume.workspace.captureWorkspace(request);
+  }
+  lookupWorkspacePublication(request: WorkspacePublicationRequest) {
+    return this.volume.workspace.lookupWorkspacePublication(request);
+  }
+  async publishWorkspace(request: WorkspacePublicationRequest) {
+    const result = await this.volume.workspace.publishWorkspace(request);
+    if (result.type === "published") this.notifyMutation();
+    return result;
+  }
+
   readFile(path: string): Uint8Array {
     return this.volume.readFile(path);
   }
@@ -453,8 +510,14 @@ class MemoryProvider implements RunMatFilesystemProvider {
     return this.volume.readMany(paths);
   }
 
+  atomicCreateNew(path: string, data: Uint8Array): AtomicCreateResult {
+    const result = this.volume.atomicCreateNew(path, data);
+    if (result.kind === "published") this.notifyMutation();
+    return result;
+  }
+
   writeFile(path: string, data: Uint8Array | ArrayBuffer | ArrayBufferView): void {
-    this.volume.writeFile(path, coerce(data));
+    this.volume.writeFile(path, coerceFilesystemBytes(data));
     this.notifyMutation();
   }
 
@@ -524,7 +587,7 @@ export function createInMemoryFsProvider(options?: InMemoryFsProviderOptions): R
   return volume.createProvider();
 }
 
-function coerce(value: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array {
+export function coerceFilesystemBytes(value: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array {
   if (value instanceof Uint8Array) {
     return value;
   }

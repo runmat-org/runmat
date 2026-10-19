@@ -39,6 +39,9 @@ pub struct BarStyle {
     pub bar_width: f32,
     pub label: Option<String>,
     pub face_color_flat: bool,
+    /// The call gave a face color; otherwise each series takes the next color in the
+    /// axes color order, as in MATLAB.
+    pub face_color_explicit: bool,
     pub layout: BarLayout,
 }
 
@@ -1139,6 +1142,7 @@ pub fn parse_bar_style_args(
         bar_width: defaults.bar_width.clamp(0.1, 1.0),
         label: None,
         face_color_flat: false,
+        face_color_explicit: false,
         layout: BarLayout::Grouped,
     };
 
@@ -1165,6 +1169,7 @@ pub fn parse_bar_style_args(
                 ));
             }
             style.face_color = parse_bar_color_literal(&opts, trimmed)?;
+            style.face_color_explicit = true;
             saw_positional_color = true;
             idx += 1;
             continue;
@@ -1227,6 +1232,7 @@ pub fn parse_bar_style_args(
                     style.face_color = color;
                     style.face_alpha = 1.0;
                     style.face_color_flat = false;
+                    style.face_color_explicit = true;
                 }
             },
             "edgecolor" => {

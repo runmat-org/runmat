@@ -689,7 +689,8 @@ pub async fn scatter3_builtin(
     .await?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_scatter3_invalid_argument)?;
     let opts = PlotRenderOptions {
-        axis_equal: true,
+        // MATLAB leaves the data aspect free; `axis equal` sets it.
+        axis_equal: false,
         ..Default::default()
     };
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -863,8 +864,16 @@ async fn resolve_scatter3_style(
         _ => {}
     }
 
-    if style.per_point_colors.is_some() || style.color_values.is_some() {
-        style.filled = true;
+    // MATLAB leaves markers unfilled unless 'filled' or a MarkerFaceColor asks; with color
+    // data, the edge takes each point's color ('flat') unless MarkerEdgeColor is given.
+    let edge_color_given = args
+        .style
+        .appearance
+        .marker
+        .as_ref()
+        .is_some_and(|marker| !matches!(marker.edge_color, MarkerColor::Auto));
+    if (style.per_point_colors.is_some() || style.gpu_colors.is_some()) && !edge_color_given {
+        style.marker_edge_flat = true;
     }
 
     if style.marker_face_flat {
@@ -954,6 +963,9 @@ async fn build_scatter3_plot_numeric(
         scatter = scatter
             .with_colors(colors)
             .map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
+    }
+    if let Some(values) = style.color_values.take() {
+        scatter = scatter.with_color_values(values, style.color_limits);
     }
     Ok(scatter)
 }

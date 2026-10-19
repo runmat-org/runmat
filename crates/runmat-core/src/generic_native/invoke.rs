@@ -442,12 +442,14 @@ pub(crate) async fn invoke(
 
     let previous_external_invoker = user_functions::current_external_function_invoker();
     let external_registry = Rc::clone(&registry);
+    let external_unit = unit.clone();
     let external_dynamic_admission = dynamic_admission.clone();
     let external_runtime = runtime.native_invocation_context().0;
     let external_invoker =
         user_functions::install_local_external_function_invoker(Rc::new(move |selected, call| {
             let previous = previous_external_invoker.clone();
             let registry = Rc::clone(&external_registry);
+            let unit = external_unit.clone();
             let dynamic_admission = external_dynamic_admission.clone();
             let same_owner = selected.as_ref().is_none_or(|context| {
                 context.local_identity() == external_runtime.local_identity()
@@ -473,9 +475,9 @@ pub(crate) async fn invoke(
                     ));
                 }
                 let runtime = isolated_procedure_runtime(runtime);
-                if registry
-                    .get(runmat_hir::FunctionId(call.function))
-                    .is_some()
+                if u32::try_from(call.function)
+                    .map(ProgramFunctionId)
+                    .is_ok_and(|id| unit.owns_callable(id))
                 {
                     return invoke_vm_with_admission(
                         call.function,
@@ -756,6 +758,7 @@ fn program_function(
 fn isolated_procedure_runtime(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> runmat_runtime::context::RuntimeContext {
+    let runtime = runtime.inherit_same_session_environment();
     let ports = runtime.service_ports().clone().without_workspace();
     runtime.with_service_ports(ports)
 }

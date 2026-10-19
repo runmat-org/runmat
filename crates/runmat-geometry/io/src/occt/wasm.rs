@@ -307,7 +307,7 @@ fn compact_wasm_vertices(
     }
 
     let mut vertices = Vec::with_capacity(remap.len().saturating_mul(3));
-    for (source_index, _) in &remap {
+    for source_index in remap.keys() {
         let start = *source_index as usize * 3;
         vertices.extend_from_slice(&payload.vertices[start..start + 3]);
     }

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::{
-    BodyMassProperties, CurveEvaluatorId, ExactCurveImplementation,
+    BodyMassProperties, CurveEvaluatorId, ExactCurveImplementation, ExactEvaluatorRegistry,
     ExactMassPropertiesImplementation, ExactPcurveImplementation, ExactSurfaceImplementation,
     ExactTrimClassifierImplementation, GeometryEvaluationError, GeometryEvaluationErrorKind,
     MassPropertiesEvaluatorId, PcurveEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
@@ -36,9 +36,23 @@ pub(super) enum MassPropertiesBinding {
 
 impl EvaluatorBindings {
     pub fn from_import(imported: &ImportedExactCad) -> Result<Self, GeometryEvaluationError> {
-        let representation_digest = imported.representation_digest();
+        Self::from_closure(
+            &imported.representation,
+            &imported.topology,
+            &imported.evaluators,
+            Some(&imported.kernel_body_shapes),
+        )
+    }
+
+    pub fn from_closure(
+        representation: &[u8],
+        topology: &runmat_geometry_core::ExactBRepTopology,
+        evaluators: &ExactEvaluatorRegistry,
+        kernel_body_shapes: Option<&BTreeMap<MassPropertiesEvaluatorId, Vec<u64>>>,
+    ) -> Result<Self, GeometryEvaluationError> {
+        let representation_digest = crate::exact::exact_representation_digest(representation);
         let mut curves = BTreeMap::new();
-        for record in &imported.evaluators.curves {
+        for record in &evaluators.curves {
             let ExactCurveImplementation::Kernel { reference } = &record.implementation else {
                 return Err(inconsistent(
                     "an OCCT import cannot contain a portable curve evaluator",
@@ -61,8 +75,7 @@ impl EvaluatorBindings {
         }
         require_inventory(
             "curve",
-            imported
-                .topology
+            topology
                 .edges
                 .iter()
                 .map(|edge| &edge.curve_evaluator_id)
@@ -71,7 +84,7 @@ impl EvaluatorBindings {
         )?;
 
         let mut pcurves = BTreeMap::new();
-        for record in &imported.evaluators.pcurves {
+        for record in &evaluators.pcurves {
             let ExactPcurveImplementation::Kernel { reference } = &record.implementation else {
                 return Err(inconsistent(
                     "an OCCT import cannot contain a portable pcurve evaluator",
@@ -94,8 +107,7 @@ impl EvaluatorBindings {
         }
         require_inventory(
             "pcurve",
-            imported
-                .topology
+            topology
                 .coedges
                 .iter()
                 .map(|coedge| &coedge.pcurve_evaluator_id)
@@ -104,7 +116,7 @@ impl EvaluatorBindings {
         )?;
 
         let mut surfaces = BTreeMap::new();
-        for record in &imported.evaluators.surfaces {
+        for record in &evaluators.surfaces {
             let ExactSurfaceImplementation::Kernel { reference } = &record.implementation else {
                 return Err(inconsistent(
                     "an OCCT import cannot contain a portable surface evaluator",
@@ -127,8 +139,7 @@ impl EvaluatorBindings {
         }
         require_inventory(
             "surface",
-            imported
-                .topology
+            topology
                 .faces
                 .iter()
                 .map(|face| &face.surface_evaluator_id)
@@ -137,7 +148,7 @@ impl EvaluatorBindings {
         )?;
 
         let mut trims = BTreeMap::new();
-        for record in &imported.evaluators.trim_classifiers {
+        for record in &evaluators.trim_classifiers {
             let ExactTrimClassifierImplementation::Kernel { reference } = &record.implementation
             else {
                 return Err(inconsistent(
@@ -161,8 +172,7 @@ impl EvaluatorBindings {
         }
         require_inventory(
             "trim classifier",
-            imported
-                .topology
+            topology
                 .faces
                 .iter()
                 .map(|face| &face.trim_classifier_id)
@@ -171,13 +181,12 @@ impl EvaluatorBindings {
         )?;
 
         let mut mass_properties = BTreeMap::new();
-        let bodies_by_evaluator = imported
-            .topology
+        let bodies_by_evaluator = topology
             .bodies
             .iter()
             .map(|body| (&body.mass_properties_evaluator_id, body))
             .collect::<BTreeMap<_, _>>();
-        for record in &imported.evaluators.mass_properties {
+        for record in &evaluators.mass_properties {
             let body = bodies_by_evaluator
                 .get(&record.id)
                 .ok_or_else(|| inconsistent("OCCT mass-properties evaluator has no body"))?;
@@ -199,9 +208,8 @@ impl EvaluatorBindings {
                         ));
                     }
                     MassPropertiesBinding::Kernel {
-                        shape_keys: imported
-                            .kernel_body_shapes
-                            .get(&record.id)
+                        shape_keys: kernel_body_shapes
+                            .and_then(|shapes| shapes.get(&record.id))
                             .filter(|keys| !keys.is_empty())
                             .cloned()
                             .ok_or_else(|| {
@@ -235,8 +243,7 @@ impl EvaluatorBindings {
         }
         require_inventory(
             "mass-properties",
-            imported
-                .topology
+            topology
                 .bodies
                 .iter()
                 .map(|body| &body.mass_properties_evaluator_id)

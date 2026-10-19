@@ -1,5 +1,6 @@
 mod callbacks;
 mod extras;
+pub mod fea;
 mod scan;
 mod token;
 mod tokenizer;

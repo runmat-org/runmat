@@ -3,7 +3,7 @@ use crate::quality::tolerance::MeshingTolerance;
 use super::{
     solve::solve_3x3,
     types::{Point3, Tetrahedron3},
-    vector::{distance_squared, dot},
+    vector::{add, distance_squared, dot, sub},
 };
 
 pub fn tetrahedron_circumsphere_contains_point(
@@ -22,28 +22,17 @@ pub fn tetrahedron_circumsphere(
     points: Tetrahedron3,
     tolerance: MeshingTolerance,
 ) -> Option<(Point3, f64)> {
-    let a = [
-        [
-            2.0 * (points[1][0] - points[0][0]),
-            2.0 * (points[1][1] - points[0][1]),
-            2.0 * (points[1][2] - points[0][2]),
-        ],
-        [
-            2.0 * (points[2][0] - points[0][0]),
-            2.0 * (points[2][1] - points[0][1]),
-            2.0 * (points[2][2] - points[0][2]),
-        ],
-        [
-            2.0 * (points[3][0] - points[0][0]),
-            2.0 * (points[3][1] - points[0][1]),
-            2.0 * (points[3][2] - points[0][2]),
-        ],
+    // Solve relative to the first point. Expanding squared absolute
+    // coordinates loses the cell-scale signal when a small mesh is translated
+    // far from the origin.
+    let edges = [
+        sub(points[1], points[0]),
+        sub(points[2], points[0]),
+        sub(points[3], points[0]),
     ];
-    let b = [
-        dot(points[1], points[1]) - dot(points[0], points[0]),
-        dot(points[2], points[2]) - dot(points[0], points[0]),
-        dot(points[3], points[3]) - dot(points[0], points[0]),
-    ];
-    let center = solve_3x3(a, b, tolerance)?;
-    Some((center, distance_squared(center, points[0])))
+    let a = edges.map(|edge| edge.map(|coordinate| 2.0 * coordinate));
+    let b = edges.map(|edge| dot(edge, edge));
+    let center_offset = solve_3x3(a, b, tolerance)?;
+    let center = add(points[0], center_offset);
+    Some((center, dot(center_offset, center_offset)))
 }

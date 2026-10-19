@@ -156,7 +156,7 @@ fn rvalue_contract_with_facts_and_literals(
                 effects.0.insert(EffectKind::MaySuspend);
             }
         }
-        MirRvalue::Future { .. } | MirRvalue::Spawn(_) => {
+        MirRvalue::Future { .. } | MirRvalue::ExternalFuture { .. } | MirRvalue::Spawn(_) => {
             effects.0.insert(EffectKind::MaySuspend);
             capabilities
                 .0

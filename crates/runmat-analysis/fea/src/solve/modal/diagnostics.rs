@@ -1,22 +1,23 @@
 use crate::{
+    algebra::{apply_m, AssembledRealSystem},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_m, OperatorSystem},
 };
 
 use super::math::dot;
 
 pub(super) fn push_modal_quality_diagnostics(
     diagnostics: &mut Vec<FeaDiagnostic>,
-    system: &OperatorSystem,
-    eigenvalues_hz: &[f64],
+    system: &AssembledRealSystem,
+    frequencies_hz: &[f64],
     mode_shapes: &[Vec<f64>],
     residual_norms: &[f64],
+    residual_tolerance: f64,
 ) {
     if !residual_norms.is_empty() {
         let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MODAL_RESIDUAL".to_string(),
-            severity: if max_residual <= 1.0e-3 {
+            severity: if max_residual <= residual_tolerance {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
@@ -37,7 +38,7 @@ pub(super) fn push_modal_quality_diagnostics(
             message: format!("max_m_orthogonality_offdiag={max_offdiag}"),
         });
 
-        let min_separation = modal_min_frequency_separation(eigenvalues_hz);
+        let min_separation = modal_min_frequency_separation(frequencies_hz);
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MODAL_SEPARATION".to_string(),
             severity: if min_separation >= 1.0e-3 {
@@ -47,11 +48,11 @@ pub(super) fn push_modal_quality_diagnostics(
             },
             message: format!("min_relative_frequency_separation={min_separation}"),
         });
-        diagnostics.push(modal_cluster_diagnostic(eigenvalues_hz));
+        diagnostics.push(modal_cluster_diagnostic(frequencies_hz));
     }
 }
 
-fn modal_max_m_orthogonality_offdiag(system: &OperatorSystem, modes: &[Vec<f64>]) -> f64 {
+fn modal_max_m_orthogonality_offdiag(system: &AssembledRealSystem, modes: &[Vec<f64>]) -> f64 {
     let mut max_offdiag = 0.0_f64;
     for i in 0..modes.len() {
         for j in 0..modes.len() {

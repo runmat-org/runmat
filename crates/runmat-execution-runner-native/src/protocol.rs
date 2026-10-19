@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 pub use runmat_execution_artifact::{
-    ProgramExecutionResponse as WorkerResponse, WorkerProgramRequest as WorkerRequest,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+    ProgramExecutionResponse as WorkerResponse, ReservedProgramExecutionRequest,
+    WorkerProgramRequest as WorkerRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 
 /// The Direct arm serializes as the existing WorkerRequest with no new fields.
@@ -12,6 +12,9 @@ pub use runmat_execution_artifact::{
 #[serde(untagged)]
 pub(crate) enum WorkerLaunchRequest {
     Direct(Box<WorkerRequest>),
+    /// A Direct program with the scheduler's reserved resources, so the worker
+    /// admits CPU parallelism within its own reservation.
+    Reserved(Box<ReservedProgramExecutionRequest>),
     StagedGraph(Box<StagedGraphWorkerLaunch>),
 }
 
@@ -72,11 +75,16 @@ pub enum WorkerProcessMessage {
     Progress {
         progress: ProgramProgress,
     },
+    Console {
+        record: runmat_execution::console::ConsoleRecord,
+    },
     CollectiveRequest {
         request: runmat_execution::CollectiveRequest,
     },
     Completed {
         response: WorkerResponse,
+        #[serde(deserialize_with = "required_option")]
+        console: Option<runmat_execution::console::ConsoleReceipt>,
     },
     /// Worker-side admission/transport failure before a Program response
     /// exists. It cannot be mistaken for a user-code execution failure.
@@ -136,6 +144,14 @@ pub enum StoredProgram {
 pub struct StoredDirectProgram {
     pub recipe: runmat_execution_artifact::ProgramBuildRecipe,
     pub artifact: runmat_execution_artifact::ProgramArtifact,
+}
+
+fn required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    serde::Deserialize::deserialize(deserializer)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

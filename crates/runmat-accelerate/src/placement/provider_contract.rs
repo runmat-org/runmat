@@ -281,7 +281,8 @@ pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
     max_buffer_bytes: u64,
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 20, WGPU_OPERATIONS);
+    // Revision 22 advertises governed dense reductions and native sparse capability.
+    let mut snapshot = dense_capability_snapshot(provider, 22, WGPU_OPERATIONS);
     // This operation has its own typed F32/F64 feasibility. Do not widen the
     // general element-type inventory: unrelated hooks retain their preferred
     // precision contracts.
@@ -304,7 +305,7 @@ pub(crate) fn wgpu_capability_snapshot(
                 operation.identity != ProviderOperationIdentity::new(fusion_operation_token(kind))
             })
         });
-        snapshot.revision = 21;
+        snapshot.revision = 23;
     }
     // WebGPU's adapter limit is a maximum for one buffer. It does not
     // establish a total device-memory capacity.
@@ -585,6 +586,7 @@ pub(crate) fn dense_capability_snapshot(
         ],
         max_rank: None,
         max_allocation_bytes: device.memory_bytes,
+        sparse: None,
         concurrency: ProviderConcurrencyCapabilities {
             spawn_handles: provider.spawn_handle_concurrency(),
             concurrent_dispatch: true,
@@ -891,6 +893,7 @@ mod tests {
             element_types: vec![ProviderElementType::F64],
             max_rank: None,
             max_allocation_bytes: Some(1024),
+            sparse: None,
             concurrency: ProviderConcurrencyCapabilities {
                 spawn_handles: runmat_accelerate_api::SpawnHandleConcurrency::Reject,
                 concurrent_dispatch: false,

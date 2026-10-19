@@ -449,7 +449,13 @@ fn outcome_named_upsert_value<'a>(
 }
 
 fn comparable_path_text(path: &str) -> String {
-    let mut text = path.replace('\\', "/");
+    let path = Path::new(path);
+    let canonical = std::fs::canonicalize(path).ok().or_else(|| {
+        let parent = std::fs::canonicalize(path.parent()?).ok()?;
+        Some(parent.join(path.file_name()?))
+    });
+    let comparable = canonical.as_deref().unwrap_or(path);
+    let mut text = comparable.to_string_lossy().replace('\\', "/");
     if let Some(stripped) = text.strip_prefix("//?/UNC/") {
         text = format!("//{stripped}");
     } else if let Some(stripped) = text.strip_prefix("//?/") {
@@ -14559,6 +14565,34 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
     .expect("invoke replacement publication");
     assert_single_output(&second, runmat_value::Value::Num(12.0));
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
+}
+
+#[test]
+fn executable_function_interface_preserves_source_parameters_and_static_facts() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = ExecutableSource::new(
+        "function-interface-test@1",
+        "signals.m",
+        "function y = signals(amplitude, width)\narguments\n  amplitude (1,1) double\n  width (1,1) double = 0.5\nend\ny = amplitude * width;\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let interface = unit
+        .primary_function_interface("signals")
+        .expect("primary function interface");
+
+    assert_eq!(
+        interface
+            .inputs
+            .iter()
+            .map(|input| (input.name.as_str(), input.arity))
+            .collect::<Vec<_>>(),
+        vec![
+            ("amplitude", runmat_types::OperationParameterArity::Required),
+            ("width", runmat_types::OperationParameterArity::Optional),
+        ]
+    );
+    assert_eq!(interface.outputs.len(), 1);
+    assert!(unit.primary_function_interface("missing").is_err());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

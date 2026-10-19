@@ -4,7 +4,7 @@ use super::{
     materialize_call, FutureState, NativeExecutionService, RunningCompletion, State, TaskRecord,
 };
 use crate::driver::{LocalDriver, LocalGraphSubmission, LocalProgramSubmission};
-use runmat_execution::{FutureHandle, TaskHandle, TaskId};
+use runmat_execution::{CancellationReason, FutureHandle, TaskHandle, TaskId};
 use runmat_runtime::execution::{
     DeferredCall, DeferredProgram, ExecutionServiceError, GraphResultReceipt,
 };
@@ -189,7 +189,7 @@ impl Drop for MaterializationGuard<'_> {
                     // original unwind and never make this future schedulable
                     // again, even if task-level cancellation also fails.
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        self.driver.cancel_task(task_id)
+                        self.driver.cancel_task(task_id, CancellationReason::User)
                     }));
                 }
                 let _ = settle_submission_failed(
@@ -276,6 +276,8 @@ pub(super) fn spawn(
                     inputs,
                     outputs: future.outputs.clone(),
                     retry: call.retry,
+                    environment: call.environment.clone(),
+                    console: call.console,
                 })
                 .map(|completion| (completion, None))
         }
@@ -295,7 +297,7 @@ pub(super) fn spawn(
         Ok(accepted) => accepted,
         Err(error) => {
             drop(call);
-            let failure = match service.driver.cancel_task(task_id) {
+            let failure = match service.driver.cancel_task(task_id, CancellationReason::User) {
                 Ok(_) => ExecutionServiceError::Failed(error.to_string()),
                 Err(cancel_error) => ExecutionServiceError::Infrastructure(format!(
                     "native submission failed ({error}) and accepted-task cancellation failed ({cancel_error})"
@@ -355,7 +357,10 @@ pub(super) fn spawn(
     guard.armed = false;
     if !committed {
         completion.cancel();
-        match service.driver.cancel_task(task_id) {
+        match service
+            .driver
+            .cancel_task(task_id, CancellationReason::User)
+        {
             Ok(true) => return Err(ExecutionServiceError::Cancelled),
             Ok(false) => {
                 return Err(ExecutionServiceError::Infrastructure(

@@ -126,9 +126,7 @@ fn render_imhist_plot(counts: &Tensor, locations: &Tensor) -> BuiltinResult<()> 
     let render_result = crate::builtins::plotting::state::render_active_plot(
         NAME,
         crate::builtins::plotting::state::PlotRenderOptions {
-            title: "Image Histogram",
-            x_label: "Intensity",
-            y_label: "Count",
+            // MATLAB's imhist writes no title or axis labels (DEF-31).
             ..Default::default()
         },
         move |figure, axes| {

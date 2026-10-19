@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "topics": [
+    {
+      "id": "linear-static",
+      "route": "/docs/simulation/physics/structural",
+      "title": "Linear static analysis",
+      "summary": "Predict deformation and stress under steady loading. Create a structural study, explore its results, and open the complete example in RunMat Desktop.",
+      "keywords": [
+        "linear elasticity",
+        "static",
+        "stress",
+        "displacement",
+        "traction",
+        "STEP",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 1,
+      "narrative": "docs/simulation/physics/structural-static.md",
+      "requirements": [
+        "FEA-STRUCTURAL-SOLID-001",
+        "FEA-STRUCTURAL-REFERENCE-001",
+        "FEA-STRUCTURAL-EXECUTION-001"
+      ],
+      "examples": [
+        "cantilever-static"
+      ],
+      "related_topics": [
+        {
+          "title": "Structural validation",
+          "href": "/docs/simulation/validation/structural"
+        },
+        {
+          "title": "RunMat Desktop",
+          "href": "/docs/desktop"
+        },
+        {
+          "title": "Command-line workflow",
+          "href": "/docs/runtime/getting-started/cli"
+        }
+      ],
+      "scope": {
+        "procedure": "Linear static",
+        "example_mesh": "Quadratic tetrahedra",
+        "maturity": "Experimental"
+      },
+      "verification_labels": {
+        "FEA-STRUCTURAL-SOLID-001": "Element formulation and integration",
+        "FEA-STRUCTURAL-REFERENCE-001": "Physical references and mesh convergence",
+        "FEA-STRUCTURAL-EXECUTION-001": "Execution and durable results"
+      }
+    },
+    {
+      "id": "validation-methodology",
+      "title": "Validation methodology and coverage",
+      "route": "/docs/simulation/validation",
+      "summary": "Understand how RunMat checks its finite-element formulations, physical accuracy, and complete execution workflows.",
+      "keywords": [
+        "validation",
+        "verification",
+        "finite element"
+      ],
+      "group": "Validation",
+      "order": 0,
+      "narrative": "docs/simulation/validation/methodology.md",
+      "requirements": [],
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Linear static analysis guide",
+          "href": "/docs/simulation/physics/structural"
+        }
+      ],
+      "scope": {
+        "procedure": "Cross-domain",
+        "example_mesh": "Not applicable",
+        "maturity": "Assessment-specific"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "structural-validation",
+      "title": "Structural validation",
+      "route": "/docs/simulation/validation/structural",
+      "summary": "Explore structural mechanics requirements, reference problems, and available assessment records.",
+      "keywords": [
+        "validation",
+        "verification",
+        "finite element"
+      ],
+      "group": "Validation",
+      "order": 1,
+      "narrative": "docs/simulation/validation/structural.md",
+      "requirements": [
+        "FEA-STRUCTURAL-SOLID-001",
+        "FEA-STRUCTURAL-REFERENCE-001",
+        "FEA-STRUCTURAL-EXECUTION-001"
+      ],
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Linear static analysis guide",
+          "href": "/docs/simulation/physics/structural"
+        }
+      ],
+      "scope": {
+        "procedure": "Structural",
+        "example_mesh": "Not applicable",
+        "maturity": "Assessment-specific"
+      },
+      "verification_labels": {
+        "FEA-STRUCTURAL-SOLID-001": "Element formulation and integration",
+        "FEA-STRUCTURAL-REFERENCE-001": "Physical references and mesh convergence",
+        "FEA-STRUCTURAL-EXECUTION-001": "Execution and durable results"
+      }
+    },
+    {
+      "id": "steady-heat-transfer",
+      "route": "/docs/simulation/guides/steady-heat-transfer",
+      "title": "Steady heat transfer",
+      "summary": "Model heater power and air cooling on a real finned heat sink, and explore its saved temperature and heat-flow fields in RunMat.",
+      "keywords": [
+        "Steady heat transfer",
+        "RunMat",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 2,
+      "narrative": "docs/simulation/guides/steady-heat-transfer.md",
+      "requirements": [
+        "FEA-THERMAL-DOMAIN-001",
+        "FEA-THERMAL-FIELDS-001",
+        "FEA-THERMAL-ACCURACY-001",
+        "FEA-THERMAL-EXECUTION-001"
+      ],
+      "examples": [
+        "heatsink-steady"
+      ],
+      "related_topics": [
+        {
+          "title": "Validation: thermal",
+          "href": "/docs/simulation/validation/thermal"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/physics/structural"
+        }
+      ],
+      "scope": {
+        "procedure": "Thermal steady",
+        "example_mesh": "Linear tetrahedra",
+        "maturity": "Experimental"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "modal-analysis",
+      "route": "/docs/simulation/guides/modal-analysis",
+      "title": "Modal analysis",
+      "summary": "Extract a tuning fork\u2019s natural frequencies and compare its original mode shapes in RunMat.",
+      "keywords": [
+        "Modal analysis",
+        "RunMat",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 3,
+      "narrative": "docs/simulation/guides/modal-analysis.md",
+      "requirements": [
+        "FEA-DYNAMICS-MODAL-001",
+        "FEA-DYNAMICS-GOVERNANCE-001"
+      ],
+      "examples": [
+        "tuning-fork-modal"
+      ],
+      "related_topics": [
+        {
+          "title": "Validation: modal",
+          "href": "/docs/simulation/validation/modal"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/physics/structural"
+        }
+      ],
+      "scope": {
+        "procedure": "Structural modal",
+        "example_mesh": "Quadratic tetrahedra",
+        "maturity": "Experimental"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "mesh-refinement",
+      "route": "/docs/simulation/guides/mesh-refinement",
+      "title": "Mesh refinement",
+      "summary": "Compare the same physical model on several meshes and decide which result quantities are stable.",
+      "keywords": [
+        "Mesh refinement",
+        "RunMat",
+        "finite element"
+      ],
+      "group": "Guides",
+      "order": 4,
+      "narrative": "docs/simulation/guides/mesh-refinement.md",
+      "requirements": [
+        "FEA-STRUCTURAL-REFERENCE-001"
+      ],
+      "examples": [
+        "cantilever-coarse",
+        "cantilever-medium",
+        "cantilever-static"
+      ],
+      "related_topics": [
+        {
+          "title": "Validation: structural",
+          "href": "/docs/simulation/validation/structural"
+        },
+        {
+          "title": "Linear static analysis",
+          "href": "/docs/simulation/physics/structural"
+        }
+      ],
+      "scope": {
+        "procedure": "Structural static",
+        "example_mesh": "Quadratic tetrahedra",
+        "maturity": "Experimental"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "thermal-validation",
+      "route": "/docs/simulation/validation/thermal",
+      "title": "Thermal validation",
+      "summary": "Explore the thermal requirements, acceptance criteria and available assessment records.",
+      "keywords": [
+        "validation",
+        "thermal"
+      ],
+      "group": "Validation",
+      "order": 2,
+      "narrative": "docs/simulation/validation/thermal.md",
+      "requirements": [
+        "FEA-THERMAL-DOMAIN-001",
+        "FEA-THERMAL-FIELDS-001",
+        "FEA-THERMAL-ACCURACY-001",
+        "FEA-THERMAL-EXECUTION-001"
+      ],
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Validation methodology",
+          "href": "/docs/simulation/validation"
+        }
+      ],
+      "scope": {
+        "procedure": "Thermal",
+        "example_mesh": "Assessment-specific",
+        "maturity": "Assessment-specific"
+      },
+      "verification_labels": {}
+    },
+    {
+      "id": "modal-validation",
+      "route": "/docs/simulation/validation/modal",
+      "title": "Modal validation",
+      "summary": "Explore the modal requirements, acceptance criteria and available assessment records.",
+      "keywords": [
+        "validation",
+        "modal"
+      ],
+      "group": "Validation",
+      "order": 3,
+      "narrative": "docs/simulation/validation/modal.md",
+      "requirements": [
+        "FEA-DYNAMICS-MODAL-001",
+        "FEA-DYNAMICS-GOVERNANCE-001"
+      ],
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Validation methodology",
+          "href": "/docs/simulation/validation"
+        }
+      ],
+      "scope": {
+        "procedure": "Modal",
+        "example_mesh": "Assessment-specific",
+        "maturity": "Assessment-specific"
+      },
+      "verification_labels": {}
+    }
+  ]
+}

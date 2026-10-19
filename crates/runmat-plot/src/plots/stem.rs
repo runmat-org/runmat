@@ -2,12 +2,13 @@
 
 use crate::context::shared_wgpu_context;
 use crate::core::{
-    marker_shape_code, vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material,
-    PipelineType, RenderData, Vertex,
+    marker_shape_code, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType,
+    RenderData, Vertex,
 };
 use crate::gpu::stem::StemGpuInputs;
 use crate::gpu::util::readback_scalar_buffer_f64;
 use crate::plots::line::{LineMarkerAppearance, LineStyle};
+use crate::plots::stroke;
 use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
 
@@ -418,45 +419,41 @@ impl StemPlot {
     }
 
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
-        self.render_data_with_resolved_viewport(crate::core::ResolvedViewport {
-            pixels: viewport_px,
-            view: None,
-        })
+        self.render_data_on_axes(viewport_px, None, (false, false))
     }
 
-    pub(crate) fn render_data_with_resolved_viewport(
+    /// Render data sized in pixels for axes with the given visible bounds and log scales.
+    pub fn render_data_on_axes(
         &mut self,
-        viewport: crate::core::ResolvedViewport,
+        viewport_px: Option<(u32, u32)>,
+        view_bounds: Option<(f64, f64, f64, f64)>,
+        log_axes: (bool, bool),
     ) -> RenderData {
-        let viewport_px = viewport.pixels;
         if self.gpu_vertices.is_some() {
             return self.render_data();
         }
 
         let bounds = self.bounds();
-        let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
-            let Some(viewport_px) = viewport_px else {
-                return self.render_data();
-            };
-            let data_per_px = crate::core::data_units_per_px(&viewport.bounds(bounds), viewport_px);
-            let width_data = self.line_width.max(0.1) * data_per_px;
-            let verts = self.generate_vertices().clone();
-            let mut thick = Vec::new();
-            for segment in verts.chunks_exact(2) {
-                let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
-                let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
-                let color = Vec4::from_array(segment[0].color);
-                thick.extend(vertex_utils::create_thick_polyline(
-                    &x, &y, color, width_data,
-                ));
+        let thick = self.line_width > 1.0;
+        let (vertices, pipeline_type) = match viewport_px {
+            // Widths are in pixels and log axes are nonlinear, so build in pixel space.
+            Some(viewport_px) if thick || log_axes != (false, false) => {
+                let map = stroke::PixelMap::new(
+                    stroke::stroke_bounds(bounds, view_bounds),
+                    viewport_px,
+                    log_axes,
+                    &self.x,
+                    &self.y,
+                );
+                let pairs = self.generate_vertices().clone();
+                // A baseline at or below zero on a log axis starts stems at the axes edge.
+                let segments = stroke::pixel_segments_from_pairs(&map, &pairs, true);
+                stroke::segment_geometry(&map, &segments, self.line_width.max(0.1))
             }
-            let count = thick.len();
-            (thick, count, PipelineType::Triangles)
-        } else {
-            let verts = self.generate_vertices().clone();
-            let count = verts.len();
-            (verts, count, PipelineType::Lines)
+            None if thick => return self.render_data(),
+            _ => (self.generate_vertices().clone(), PipelineType::Lines),
         };
+        let vertex_count = vertices.len();
         RenderData {
             pipeline_type,
             vertices,

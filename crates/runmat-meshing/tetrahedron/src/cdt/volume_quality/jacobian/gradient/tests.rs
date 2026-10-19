@@ -1,0 +1,71 @@
+use super::*;
+use runmat_meshing_size::metric::MetricTensor3;
+
+// Independent physical-coordinate metric formula, without Cholesky or derivatives.
+fn corner_value(points: [[f64; 3]; 4], corner: usize, m: MetricTensor3) -> f64 {
+    let edges = (0..4)
+        .filter(|i| *i != corner)
+        .map(|i| std::array::from_fn(|a| points[i][a] - points[corner][a]))
+        .collect::<Vec<[f64; 3]>>();
+    let determinant = dot(cross(edges[0], edges[1]), edges[2]).abs();
+    let metric_det = m.xx * (m.yy * m.zz - m.yz * m.yz) - m.xy * (m.xy * m.zz - m.xz * m.yz)
+        + m.xz * (m.xy * m.yz - m.xz * m.yy);
+    let product = edges
+        .into_iter()
+        .map(|[x, y, z]| {
+            m.xx * x * x
+                + m.yy * y * y
+                + m.zz * z * z
+                + 2. * (m.xy * x * y + m.xz * x * z + m.yz * y * z)
+        })
+        .product::<f64>();
+    2_f64.sqrt() * determinant * metric_det.sqrt() / product.sqrt()
+}
+#[test]
+fn corner_derivatives_match_independent_metric_differences_across_orders_and_scales() {
+    let metric = MetricTensor3 {
+        xx: 4.,
+        yy: 9.,
+        zz: 16.,
+        xy: 0.5,
+        xz: 0.25,
+        yz: 0.75,
+    };
+    let prepared = PreparedJacobian::new(metric).unwrap();
+    for scale in [1e-3, 1., 1e3] {
+        for reverse in [false, true] {
+            let mut points = [
+                [0.1, 0.2, 0.3],
+                [1.3, 0.1, 0.2],
+                [0.2, 1.1, 0.4],
+                [0.3, 0.4, 0.9],
+            ]
+            .map(|p| p.map(|v| scale * (v + 8.)));
+            if reverse {
+                points.swap(1, 2);
+            }
+            let samples = prepared.corner_gradients(points).unwrap();
+            for (corner, sample) in samples.into_iter().enumerate() {
+                assert!((sample.value - corner_value(points, corner, metric)).abs() < 1e-12);
+                for vertex in 0..4 {
+                    for axis in 0..3 {
+                        let h = scale * 1e-6;
+                        let mut plus = points;
+                        plus[vertex][axis] += h;
+                        let mut minus = points;
+                        minus[vertex][axis] -= h;
+                        let numerical = (corner_value(plus, corner, metric)
+                            - corner_value(minus, corner, metric))
+                            / (2. * h);
+                        assert!(
+                            (sample.gradients[vertex][axis] - numerical).abs() * scale < 2e-8,
+                            "corner={corner} vertex={vertex} axis={axis}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(prepared.corner_gradients([[0.; 3]; 4]).is_none());
+    assert!(prepared.corner_gradients([[f64::NAN; 3]; 4]).is_none());
+}

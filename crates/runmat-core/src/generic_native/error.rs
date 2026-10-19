@@ -26,6 +26,12 @@ pub(super) fn from_native_executor_error(
                 .with_phase("native")
                 .build()
         }
+        runmat_native_executor::NativeExecutorError::Deadline => {
+            runmat_runtime::build_runtime_error("native execution deadline elapsed")
+                .with_identifier("RunMat:ExecutionDeadline")
+                .with_phase("native")
+                .build()
+        }
         runmat_native_executor::NativeExecutorError::UnsupportedSite(message) => {
             stage("NativeUnsupportedSite", message)
         }

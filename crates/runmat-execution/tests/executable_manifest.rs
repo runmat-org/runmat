@@ -109,6 +109,7 @@ fn manifest() -> ExecutableUnitManifest {
         },
         revisions,
         components,
+        dependencies: Vec::new(),
         capabilities: CapabilitySet(BTreeSet::from([
             CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::ParallelRuntime,
@@ -411,3 +412,6 @@ fn decoder_rejects_unknown_core_fields_and_noncanonical_json() {
 fn wasm_uses_the_same_executable_manifest_vector() {
     round_trip_vector();
 }
+
+#[path = "executable_manifest/dependencies.rs"]
+mod dependencies;

@@ -4,13 +4,18 @@ use std::time::Duration;
 use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, EncryptionPurpose, PortableExecutionEncryption,
 };
-use runmat_execution_artifact::ProgramExecutionResponse;
+use runmat_execution_artifact::{
+    ProgramExecutionObject, ProgramExecutionObjectLocation, ProgramExecutionOutputs,
+    ProgramExecutionResponse,
+};
 use runmat_execution_transport_native::control::{
-    CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverControlPlane,
-    DriverRunTarget, DriverRunTransition, HttpDriverControlPlane, StoreDriverArtifact,
+    CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
+    DriverControlPlane, DriverRunTarget, DriverRunTransition, HttpDriverControlPlane,
+    StoreDriverArtifact,
 };
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 
+use super::checkpoint::{RemoteDriverCheckpoint, RemoteDriverCheckpointPhase};
 use super::config::RemoteDriverConfig;
 use super::crypto::{ciphertext_digest, open_object, seal_object};
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -88,14 +93,115 @@ pub(super) async fn run_remote_driver(
         bootstrap.driver_resources.scratch_bytes,
     )
     .await?;
+    let program_identity = admitted.checkpoint_identity()?;
+    let input_locations = admitted.input_locations().to_vec();
+    let (mut checkpoint_sequence, closure_catalog, pool_catalog) =
+        match bootstrap.checkpoint.as_ref() {
+            Some(download) => {
+                if download.kind != "checkpoint" {
+                    return Err(protocol(
+                        "driver bootstrap checkpoint has the wrong artifact kind",
+                    ));
+                }
+                let plaintext = open_download(
+                    control.as_ref(),
+                    &run_key,
+                    download,
+                    &config.authority.run_id,
+                    EncryptionPurpose::Checkpoint,
+                )
+                .await?;
+                let checkpoint = RemoteDriverCheckpoint::from_canonical_bytes(&plaintext)?;
+                checkpoint.validate_for_program(
+                    &config.authority,
+                    &bootstrap.project_revision,
+                    program_identity,
+                )?;
+                (
+                    checkpoint.sequence,
+                    checkpoint.closure_catalog,
+                    checkpoint.pool_catalog,
+                )
+            }
+            None => (0, None, None),
+        };
+    let mut input_objects = Vec::with_capacity(input_locations.len());
+    for location in input_locations {
+        let artifact = control
+            .execution_artifact(&config.authority, &location.artifact_id)
+            .await
+            .map_err(protocol)?;
+        if artifact.artifact_id != location.artifact_id || artifact.kind != "input" {
+            return Err(protocol(
+                "Server resolved the wrong independent input artifact",
+            ));
+        }
+        let object = ProgramExecutionObject {
+            reference: location.reference,
+            bytes: open_download(
+                control.as_ref(),
+                &run_key,
+                &artifact,
+                &config.authority.run_id,
+                EncryptionPurpose::Input,
+            )
+            .await?,
+        };
+        object.validate().map_err(protocol)?;
+        input_objects.push(object);
+    }
+    let recovered = match closure_catalog.as_ref() {
+        Some(location) => Some(
+            super::recovery::restore(control.as_ref(), &run_key, &config.authority, location)
+                .await?,
+        ),
+        None => None,
+    };
+    let recovered_pool = match pool_catalog.as_ref() {
+        Some(location) => {
+            if bootstrap.desired_worker_count == 0 {
+                return Err(protocol(
+                    "a pool checkpoint requires a remote worker allocation",
+                ));
+            }
+            Some(
+                super::pool_checkpoint::restore(
+                    control.as_ref(),
+                    &run_key,
+                    &config.authority,
+                    location,
+                )
+                .await?,
+            )
+        }
+        None => None,
+    };
+    if let Some(recovered) = &recovered {
+        input_objects.extend(recovered.objects.iter().cloned());
+        if !input_objects
+            .iter()
+            .any(|object| object.reference == recovered.root)
+        {
+            return Err(protocol("restored recovery closure omits its root object"));
+        }
+    }
 
-    store_checkpoint(
+    checkpoint_sequence = checkpoint_sequence
+        .checked_add(1)
+        .ok_or_else(|| protocol("remote driver checkpoint sequence overflow"))?;
+    store_driver_checkpoint(
         control.as_ref(),
-        &config,
+        &config.authority,
         &run_key,
-        1,
-        CheckpointDisposition::ResumeSafe,
-        b"ready",
+        &RemoteDriverCheckpoint::for_program(
+            checkpoint_sequence,
+            &config.authority,
+            &bootstrap.project_revision,
+            program_identity,
+            RemoteDriverCheckpointPhase::ReadyToExecute,
+            closure_catalog.clone(),
+        )?
+        .with_pool_catalog(pool_catalog.clone())?,
     )
     .await?;
     transition(
@@ -107,13 +213,22 @@ pub(super) async fn run_remote_driver(
         None,
     )
     .await?;
-    store_checkpoint(
+    checkpoint_sequence = checkpoint_sequence
+        .checked_add(1)
+        .ok_or_else(|| protocol("remote driver checkpoint sequence overflow"))?;
+    store_driver_checkpoint(
         control.as_ref(),
-        &config,
+        &config.authority,
         &run_key,
-        2,
-        CheckpointDisposition::Indeterminate,
-        b"execution-started",
+        &RemoteDriverCheckpoint::for_program(
+            checkpoint_sequence,
+            &config.authority,
+            &bootstrap.project_revision,
+            program_identity,
+            admitted.execution_start_phase(),
+            closure_catalog,
+        )?
+        .with_pool_catalog(pool_catalog)?,
     )
     .await?;
 
@@ -123,27 +238,16 @@ pub(super) async fn run_remote_driver(
         bootstrap.desired_worker_count > 0 || matches!(&admitted, AdmittedRemoteProgram::Graph(_));
     let execution = async {
         if bootstrap.desired_worker_count == 0 {
-            let response = match admitted {
+            match admitted {
                 AdmittedRemoteProgram::Direct(admitted) => {
-                    let program::AdmittedDirectProgram {
-                        request,
-                        materialized,
-                        bundle,
-                        ..
-                    } = *admitted;
-                    crate::test_workload::execute_host_program_request_with_validated_bundle(
-                        request,
-                        materialized.as_ref(),
-                        None,
-                        Some(bundle),
-                    )
-                    .await
+                    let response = execute_local_direct(*admitted, input_objects).await?;
+                    Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(response))
                 }
                 AdmittedRemoteProgram::Graph(admitted) => {
                     let program::AdmittedGraphProgram {
                         request, _staged, ..
                     } = *admitted;
-                    return local_graph::execute(
+                    local_graph::execute(
                         &config.authority.run_id,
                         request,
                         _staged,
@@ -151,16 +255,20 @@ pub(super) async fn run_remote_driver(
                         &bootstrap.driver_accelerator_devices,
                         cancellation_receiver,
                     )
-                    .await;
+                    .await
                 }
-            };
-            Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(response))
+            }
         } else {
             super::pool_execution::execute(super::pool_execution::RemotePoolExecution {
                 control: control.as_ref(),
                 authority: &config.authority,
                 run_key: &run_key,
                 program: admitted,
+                input_objects,
+                recovered,
+                recovered_pool,
+                project_revision: bootstrap.project_revision.clone(),
+                checkpoint_sequence,
                 desired_workers: bootstrap.desired_worker_count,
                 resources: bootstrap.worker_resources,
                 cancellation: cancellation_receiver,
@@ -186,7 +294,7 @@ pub(super) async fn run_remote_driver(
                         transition(
                             control.as_ref(),
                             &config,
-                            DriverRunTarget::Indeterminate,
+                            DriverRunTarget::Cancelled,
                             Some("cancelled-during-execution"),
                             None,
                             None,
@@ -196,7 +304,7 @@ pub(super) async fn run_remote_driver(
                     super::pool_execution::RemotePoolExecutionOutcome::Indeterminate(message) => {
                         let diagnostic = store_encrypted(
                             control.as_ref(),
-                            &config,
+                            &config.authority,
                             &run_key,
                             DriverArtifactKind::Diagnostic,
                             EncryptionPurpose::DetailedEvent,
@@ -258,6 +366,69 @@ pub(super) async fn run_remote_driver(
     commit_response(control.as_ref(), &config, &run_key, response).await
 }
 
+/// Execute an admitted Direct program on the driver host with its independent
+/// input objects; values are materialized only for language programs.
+async fn execute_local_direct(
+    admitted: program::AdmittedDirectProgram,
+    input_objects: Vec<ProgramExecutionObject>,
+) -> NativeExecutionResult<super::pool_execution::RemotePoolExecutionResult> {
+    let program::AdmittedDirectProgram {
+        mut request,
+        materialized,
+        bundle,
+        ..
+    } = admitted;
+    let objects = super::object_transfer::RemoteObjectStore::new()?;
+    let mut values = std::collections::HashMap::new();
+    for object in input_objects {
+        if let Some(value) = object.decode_externalized_value().map_err(protocol)? {
+            values.insert(object.reference.id, value);
+        } else {
+            objects.register(object)?;
+        }
+    }
+    let response = match request.artifact.form {
+        runmat_execution_artifact::ExecutableForm::AnalysisWorkload => {
+            let mut objects = objects.clone();
+            crate::execute_analysis_program_request(
+                &request,
+                &mut objects,
+                &crate::NativeAnalysisKernel,
+                crate::NativeAnalysisHostLimits::default(),
+            )
+        }
+        runmat_execution_artifact::ExecutableForm::GeometryWorkload => {
+            let mut objects = objects.clone();
+            crate::execute_geometry_materialization_program_request(
+                &request,
+                &mut objects,
+                crate::NativeGeometryMaterializationLimits::default(),
+            )
+        }
+        _ => {
+            request.arguments = request
+                .arguments
+                .iter()
+                .map(|argument| super::value_transfer::materialize(argument, &values))
+                .collect::<NativeExecutionResult<Vec<_>>>()?;
+            let environment = bundle.manifest.portable_environment.clone();
+            crate::test_workload::execute_host_program_request_in_context(
+                request,
+                crate::test_workload::HostProgramContext {
+                    materialized: materialized.as_ref(),
+                    collective: None,
+                    bundle: Some(bundle),
+                    environment: Some(&environment),
+                    cancellation: None,
+                    resources: None,
+                },
+            )
+            .await
+        }
+    };
+    collect_result_objects(response, objects)
+}
+
 async fn report_usage(
     control: &dyn DriverControlPlane,
     config: &RemoteDriverConfig,
@@ -273,19 +444,19 @@ async fn report_usage(
     Ok(())
 }
 
-async fn commit_response(
+pub(super) async fn commit_response(
     control: &dyn DriverControlPlane,
     config: &RemoteDriverConfig,
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
-    response: ProgramExecutionResponse,
+    result: super::pool_execution::RemotePoolExecutionResult,
 ) -> NativeExecutionResult<()> {
-    match response {
-        response @ (ProgramExecutionResponse::Success { .. }
-        | ProgramExecutionResponse::GraphSuccess { .. }) => {
+    let super::pool_execution::RemotePoolExecutionResult { response, objects } = result;
+    let response = match response {
+        response @ ProgramExecutionResponse::GraphSuccess { .. } => {
             let plaintext = serde_json::to_vec(&response).map_err(protocol)?;
             let result = store_encrypted(
                 control,
-                config,
+                &config.authority,
                 run_key,
                 DriverArtifactKind::Result,
                 EncryptionPurpose::Result,
@@ -293,7 +464,7 @@ async fn commit_response(
                 None,
             )
             .await?;
-            transition(
+            return transition(
                 control,
                 config,
                 DriverRunTarget::Succeeded,
@@ -301,97 +472,153 @@ async fn commit_response(
                 Some(result),
                 None,
             )
-            .await
-        }
-        ProgramExecutionResponse::ExternalizedSuccess { .. } => {
-            let message = "remote externalized results require verified artifact transfer";
-            let diagnostic = store_encrypted(
-                control,
-                config,
-                run_key,
-                DriverArtifactKind::Diagnostic,
-                EncryptionPurpose::DetailedEvent,
-                message.as_bytes(),
-                None,
-            )
-            .await?;
-            transition(
-                control,
-                config,
-                DriverRunTarget::Failed,
-                Some("artifact-transfer-unavailable"),
-                None,
-                Some(diagnostic),
-            )
-            .await
+            .await;
         }
         ProgramExecutionResponse::SpmdSuccess { .. } => {
-            let message = "SPMD worker response requires the typed remote gang driver";
-            let diagnostic = store_encrypted(
+            return fail_with_diagnostic(
                 control,
                 config,
                 run_key,
-                DriverArtifactKind::Diagnostic,
-                EncryptionPurpose::DetailedEvent,
-                message.as_bytes(),
-                None,
+                b"SPMD worker response requires the typed remote gang driver",
+                "spmd-gang-driver-required",
             )
-            .await?;
-            transition(
-                control,
-                config,
-                DriverRunTarget::Failed,
-                Some("spmd-gang-driver-required"),
-                None,
-                Some(diagnostic),
-            )
-            .await
+            .await;
         }
-        ProgramExecutionResponse::Failure { message } => {
-            let diagnostic = store_encrypted(
-                control,
-                config,
-                run_key,
-                DriverArtifactKind::Diagnostic,
-                EncryptionPurpose::DetailedEvent,
-                message.as_bytes(),
-                None,
-            )
-            .await?;
-            transition(
-                control,
-                config,
-                DriverRunTarget::Failed,
-                Some("execution-failed"),
-                None,
-                Some(diagnostic),
-            )
-            .await
-        }
-        ProgramExecutionResponse::RuntimeFailure { failure } => {
-            let response = ProgramExecutionResponse::RuntimeFailure { failure };
+        response @ ProgramExecutionResponse::RuntimeFailure { .. } => {
             let plaintext = serde_json::to_vec(&response).map_err(protocol)?;
-            let diagnostic = store_encrypted(
+            return fail_with_diagnostic(
                 control,
                 config,
                 run_key,
-                DriverArtifactKind::Diagnostic,
-                EncryptionPurpose::DetailedEvent,
                 &plaintext,
-                None,
+                "runtime-execution-failed",
             )
-            .await?;
-            transition(
-                control,
-                config,
-                DriverRunTarget::Failed,
-                Some("runtime-execution-failed"),
-                None,
-                Some(diagnostic),
+            .await;
+        }
+        response => response,
+    };
+    if let ProgramExecutionResponse::Failure { message } = response {
+        return fail_with_diagnostic(
+            control,
+            config,
+            run_key,
+            message.as_bytes(),
+            "execution-failed",
+        )
+        .await;
+    }
+
+    let references: &[runmat_execution::value::ValueRef] = match &response {
+        ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } => result_objects,
+        _ => &[],
+    };
+    let mut locations = Vec::with_capacity(references.len());
+    for reference in references {
+        let object = ProgramExecutionObject {
+            reference: reference.clone(),
+            bytes: objects.read(reference, &config.authority.run_id)?,
+        };
+        object.validate().map_err(protocol)?;
+        if object.reference.authorization_scope != config.authority.run_id {
+            return Err(protocol("result object is outside the run authority"));
+        }
+        let ciphertext = seal_object(
+            run_key,
+            &config.authority.run_id,
+            EncryptionPurpose::Result,
+            &object.bytes,
+        )?;
+        let artifact = control
+            .store_artifact(
+                &config.authority,
+                StoreDriverArtifact {
+                    kind: DriverArtifactKind::Result,
+                    ciphertext_digest: ciphertext_digest(&ciphertext),
+                    ciphertext: &ciphertext,
+                    media_type: MEDIA_TYPE.into(),
+                    retain_for_seconds: RETAIN_FOR_SECONDS,
+                    checkpoint: None,
+                },
             )
             .await
+            .map_err(protocol)?;
+        locations.push(ProgramExecutionObjectLocation {
+            reference: object.reference,
+            artifact_id: artifact.artifact_id,
+        });
+    }
+    let outputs = ProgramExecutionOutputs::new(response, locations).map_err(protocol)?;
+    let plaintext = serde_json::to_vec(&outputs).map_err(protocol)?;
+    let result = store_encrypted(
+        control,
+        &config.authority,
+        run_key,
+        DriverArtifactKind::Result,
+        EncryptionPurpose::Result,
+        &plaintext,
+        None,
+    )
+    .await?;
+    transition(
+        control,
+        config,
+        DriverRunTarget::Succeeded,
+        None,
+        Some(result),
+        None,
+    )
+    .await
+}
+
+async fn fail_with_diagnostic(
+    control: &dyn DriverControlPlane,
+    config: &RemoteDriverConfig,
+    run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
+    diagnostic: &[u8],
+    reason: &str,
+) -> NativeExecutionResult<()> {
+    let diagnostic = store_encrypted(
+        control,
+        &config.authority,
+        run_key,
+        DriverArtifactKind::Diagnostic,
+        EncryptionPurpose::DetailedEvent,
+        diagnostic,
+        None,
+    )
+    .await?;
+    transition(
+        control,
+        config,
+        DriverRunTarget::Failed,
+        Some(reason),
+        None,
+        Some(diagnostic),
+    )
+    .await
+}
+
+fn collect_result_objects(
+    response: ProgramExecutionResponse,
+    store: super::object_transfer::RemoteObjectStore,
+) -> NativeExecutionResult<super::pool_execution::RemotePoolExecutionResult> {
+    let references: &[runmat_execution::value::ValueRef] = match &response {
+        ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } => result_objects,
+        _ => &[],
+    };
+    for reference in references {
+        if store
+            .object(reference, &reference.authorization_scope)
+            .map_err(protocol)?
+            .is_none()
+        {
+            return Err(protocol("result object is absent from the execution store"));
         }
     }
+    Ok(super::pool_execution::RemotePoolExecutionResult {
+        response,
+        objects: super::result_objects::RemoteResultObjects::Local(store),
+    })
 }
 
 async fn open_download(
@@ -405,39 +632,38 @@ async fn open_download(
     open_object(run_key, &ciphertext, run_id, purpose)
 }
 
-async fn store_checkpoint(
+pub(super) async fn store_driver_checkpoint(
     control: &dyn DriverControlPlane,
-    config: &RemoteDriverConfig,
+    authority: &DriverAuthority,
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
-    sequence: u64,
-    disposition: CheckpointDisposition,
-    plaintext: &[u8],
+    checkpoint: &RemoteDriverCheckpoint,
 ) -> NativeExecutionResult<String> {
+    let plaintext = checkpoint.canonical_bytes()?;
     store_encrypted(
         control,
-        config,
+        authority,
         run_key,
         DriverArtifactKind::Checkpoint,
         EncryptionPurpose::Checkpoint,
-        plaintext,
-        Some((sequence, disposition)),
+        &plaintext,
+        Some((checkpoint.sequence, checkpoint.phase.disposition())),
     )
     .await
 }
 
-async fn store_encrypted(
+pub(super) async fn store_encrypted(
     control: &dyn DriverControlPlane,
-    config: &RemoteDriverConfig,
+    authority: &DriverAuthority,
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
     kind: DriverArtifactKind,
     purpose: EncryptionPurpose,
     plaintext: &[u8],
     checkpoint: Option<(u64, CheckpointDisposition)>,
 ) -> NativeExecutionResult<String> {
-    let ciphertext = seal_object(run_key, &config.authority.run_id, purpose, plaintext)?;
+    let ciphertext = seal_object(run_key, &authority.run_id, purpose, plaintext)?;
     let artifact = control
         .store_artifact(
-            &config.authority,
+            authority,
             StoreDriverArtifact {
                 kind,
                 ciphertext_digest: ciphertext_digest(&ciphertext),

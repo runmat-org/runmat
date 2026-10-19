@@ -9,7 +9,7 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 use sha2::{Digest as _, Sha256};
 
-use super::worker_entry::{run_remote_worker_relay_cached, RemoteWorkerRelayRequest};
+use super::worker_entry::{run_remote_meshing_worker_relay_cached, RemoteWorkerRelayRequest};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
@@ -46,6 +46,13 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
     if resources.request.maximum_wall_millis == 0 {
         return Err(invalid("worker maximum wall time is zero"));
     }
+    crate::accelerator_placement::validate_active_provider_for(&resources.request.accelerators)?;
+    let accelerators = resources.accelerator_devices;
+    let mut capabilities = super::pool_resources::native_worker_capabilities()?;
+    capabilities.extend(super::worker_protocol::software_capabilities());
+    capabilities.extend(accelerators.iter().map(|accelerator| {
+        runmat_execution::resource::Capability::Accelerator(accelerator.class.clone())
+    }));
     let worker = WorkerSpec {
         id: WorkerId::derive(&[run_id.as_bytes(), allocation_id.as_bytes()]),
         pool_id: PoolId::derive(&[run_id.as_bytes(), b"remote-pool"]),
@@ -54,8 +61,8 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
                 .map_err(|_| invalid("worker CPU allocation exceeds scheduler units"))?,
             memory_bytes: resources.request.memory_bytes,
             scratch_bytes: resources.request.scratch_bytes,
-            accelerators: resources.accelerator_devices,
-            capabilities: super::worker_protocol::software_capabilities(),
+            accelerators,
+            capabilities,
         },
         host: resources.host,
     };
@@ -73,7 +80,7 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
     if !bundle_cache.is_absolute() {
         return Err(invalid("worker node bundle cache path must be absolute"));
     }
-    run_remote_worker_relay_cached(
+    run_remote_meshing_worker_relay_cached(
         RemoteWorkerRelayRequest {
             url: &relay_url,
             headers: &headers,
@@ -89,6 +96,8 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
                 == Some("1"),
         },
         Some(bundle_cache),
+        std::sync::Arc::new(crate::native_meshing_kernel_dispatcher()),
+        crate::NativeMeshingHostLimits::default(),
     )
     .await
 }

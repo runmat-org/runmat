@@ -1118,7 +1118,8 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f
     apply_axes_target(parsed.axes_target, BUILTIN_NAME).map_err(map_contour_invalid_argument)?;
     let mut call = Some(parsed);
     let opts = PlotRenderOptions {
-        axis_equal: true,
+        // MATLAB leaves the data aspect free; `axis equal` sets it.
+        axis_equal: false,
         ..Default::default()
     };
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -1883,6 +1884,7 @@ pub(crate) fn build_contour_gpu_plot_prepared(
         Ok(
             ContourPlot::from_gpu_buffer(gpu_vertices, vertex_count, base_z, bounds)
                 .with_force_3d(z_mode == ContourZMode::Level)
+                .with_value_range(Some((min_z as f64, max_z as f64)))
                 .with_label("Contours"),
         )
     })();
@@ -1931,6 +1933,8 @@ pub(crate) fn build_contour_plot_with_z_mode(
         ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
     };
     let mut vertices = Vec::new();
+    // Each vertex's colormap position, so a later colormap change can recolor the lines.
+    let mut positions: Vec<f32> = Vec::new();
 
     for (level_idx, level) in levels.iter().enumerate() {
         let color = match line_color {
@@ -1938,6 +1942,7 @@ pub(crate) fn build_contour_plot_with_z_mode(
             ContourLineColor::Color(color) => *color,
             ContourLineColor::None => Vec4::new(0.0, 0.0, 0.0, 0.0),
         };
+        let first_vertex = vertices.len();
         march_cells(
             x_axis,
             y_axis,
@@ -1948,6 +1953,12 @@ pub(crate) fn build_contour_plot_with_z_mode(
             z_mode,
             &mut vertices,
         );
+        let t = if levels.len() > 1 {
+            level_idx as f32 / (levels.len() - 1) as f32
+        } else {
+            0.0
+        };
+        positions.resize(positions.len() + (vertices.len() - first_vertex), t);
     }
 
     let bounds = contour_plot_bounds(
@@ -1969,8 +1980,16 @@ pub(crate) fn build_contour_plot_with_z_mode(
         z_mode,
     );
 
-    Ok(ContourPlot::from_vertices(vertices, base_z, bounds)
+    let follows_colormap = matches!(line_color, ContourLineColor::Auto);
+    let contour = ContourPlot::from_vertices(vertices, base_z, bounds);
+    let contour = if follows_colormap {
+        contour.with_colormap_positions(positions)
+    } else {
+        contour
+    };
+    Ok(contour
         .with_force_3d(z_mode == ContourZMode::Level)
+        .with_value_range(Some((min_z as f64, max_z as f64)))
         .with_label("Contours"))
 }
 
@@ -2065,6 +2084,7 @@ pub(crate) fn build_contour_fill_gpu_plot(
         let vertex_count = gpu_vertices.vertex_count;
         Ok(
             ContourFillPlot::from_gpu_buffer(gpu_vertices, vertex_count, bounds)
+                .with_value_range(level_value_range(&levels))
                 .with_label("Filled Contours"),
         )
     })();
@@ -2096,6 +2116,10 @@ pub(crate) fn build_contour_fill_plot(
 
     let band_count = levels.len() - 1;
     let mut vertices = Vec::with_capacity((nx - 1) * (ny - 1) * band_count * 12);
+    // Each vertex's colormap position, so a later colormap change can recolor the bands.
+    let mut positions: Vec<f32> = Vec::with_capacity(vertices.capacity());
+    let band_position =
+        |band_idx: usize| band_idx as f32 / (palette_size(&levels).max(2) - 1) as f32;
     for col in 0..ny - 1 {
         for row in 0..nx - 1 {
             let p0 = ScalarPoint2 {
@@ -2121,6 +2145,7 @@ pub(crate) fn build_contour_fill_plot(
                 let color = palette[band_idx.min(palette.len() - 1)];
                 let cell_tris = [[p0, p1, p2], [p0, p2, p3]];
                 for tri in cell_tris {
+                    let first_vertex = vertices.len();
                     triangulate_band_triangle(
                         tri,
                         lo,
@@ -2129,6 +2154,10 @@ pub(crate) fn build_contour_fill_plot(
                         color,
                         base_z,
                         &mut vertices,
+                    );
+                    positions.resize(
+                        positions.len() + (vertices.len() - first_vertex),
+                        band_position(band_idx),
                     );
                 }
             }
@@ -2151,7 +2180,17 @@ pub(crate) fn build_contour_fill_plot(
         base_z,
     );
 
-    Ok(ContourFillPlot::from_vertices(vertices, bounds).with_label("Filled Contours"))
+    Ok(ContourFillPlot::from_vertices(vertices, bounds)
+        .with_colormap_positions(positions)
+        .with_value_range(Some((min_z as f64, max_z as f64)))
+        .with_label("Filled Contours"))
+}
+
+/// The span of the contour levels, for the colorbar.
+fn level_value_range(levels: &[f32]) -> Option<(f64, f64)> {
+    let lo = levels.iter().copied().fold(f32::INFINITY, f32::min);
+    let hi = levels.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    (lo.is_finite() && hi.is_finite()).then_some((lo as f64, hi as f64))
 }
 
 fn grid_extents(name: &'static str, grid: &[Vec<f64>]) -> BuiltinResult<(f32, f32)> {

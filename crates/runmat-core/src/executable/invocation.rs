@@ -14,6 +14,8 @@ pub(crate) enum ExecutableBackendPolicy {
 pub enum ProcedureTarget {
     Entrypoint,
     Function(String),
+    /// Exact compiler identity; display names are not callable authority.
+    SemanticFunction(runmat_types::ProgramFunctionId),
 }
 
 #[derive(Clone, Debug)]
@@ -86,3 +88,6 @@ impl InvocationControl {
             .is_some_and(|deadline| runmat_time::unix_timestamp_ms() >= deadline as u128)
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;

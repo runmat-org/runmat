@@ -6,6 +6,7 @@
 // ===== CORE ARCHITECTURE =====
 
 // Core rendering engine (always available)
+pub mod collaboration;
 pub mod context;
 pub mod core;
 pub mod data;
@@ -52,11 +53,12 @@ pub use event::{
 };
 pub use geometry_scene::{
     cad_default_material, vertex as geometry_scene_vertex, GeometryScene,
-    GeometrySceneAssemblyNode, GeometrySceneCacheKey, GeometrySceneChunk,
-    GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
-    GeometryScenePickIndex, GeometryScenePickRequest, GeometryScenePickResult,
-    GeometryScenePresentation, GeometrySceneRegion, GeometrySceneRegionAnnotation,
-    GeometrySceneRegionSummary, GeometrySceneTriangleRange,
+    GeometrySceneAnnotationKind, GeometrySceneAssemblyNode, GeometrySceneCacheKey,
+    GeometrySceneChunk, GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
+    GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest,
+    GeometryScenePickResult, GeometryScenePresentation, GeometrySceneRegion,
+    GeometrySceneRegionAnnotation, GeometrySceneRegionSummary, GeometrySceneTopologySelection,
+    GeometrySceneTriangleRange,
 };
 pub use plots::{
     project_figure_for_persistence, AreaPlot, AxesGridCell, ContourFillPlot, ContourPlot, Figure,

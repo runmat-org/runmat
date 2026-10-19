@@ -132,3 +132,23 @@ pub fn write_payload_blocking(
     writer.flush()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod blocking_write_tests {
+    use super::*;
+    #[tokio::test]
+    async fn blocking_frames_use_the_same_codec_and_reject_before_writing() {
+        let limits = FrameLimits {
+            max_message_bytes: 64,
+        };
+        let mut bytes = Vec::new();
+        write_payload_blocking(&mut bytes, b"original\0\n", limits).unwrap();
+        assert_eq!(
+            read_payload(&mut bytes.as_slice(), limits).await.unwrap(),
+            b"original\0\n"
+        );
+        let mut oversized = Vec::new();
+        assert!(write_payload_blocking(&mut oversized, &[1; 65], limits).is_err());
+        assert!(oversized.is_empty());
+    }
+}

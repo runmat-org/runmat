@@ -644,6 +644,67 @@ pub fn references_locations_at(
     locations
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct RenameSubject {
+    pub name: String,
+    pub is_local: bool,
+    pub parameter_owner: Option<String>,
+    pub range: Range,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn rename_subject_at(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+) -> Option<RenameSubject> {
+    let symbol = symbol_name_at(text, analysis, position)?;
+    let offset = position_to_offset(text, position);
+    let token = token_at_offset(&analysis.tokens, offset)?;
+    let parameter_owner = analysis.semantic.as_ref().and_then(|semantic| {
+        let function = semantic.function_at_offset(offset)?;
+        function
+            .variables
+            .get(&symbol.name)
+            .is_some_and(|variable| variable.kind == VariableKind::Parameter)
+            .then(|| function.name.clone())
+    });
+    Some(RenameSubject {
+        name: symbol.name,
+        is_local: symbol.is_local,
+        parameter_owner,
+        range: TextRange {
+            start: token.start,
+            end: token.end,
+        }
+        .to_lsp_range(text),
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn rename_subject_has_collision(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+    new_name: &str,
+) -> bool {
+    let Some(subject) = symbol_name_at(text, analysis, position) else {
+        return true;
+    };
+    if !subject.is_local || subject.name == new_name {
+        return false;
+    }
+    let offset = position_to_offset(text, position);
+    let Some(semantic) = analysis.semantic.as_ref() else {
+        return true;
+    };
+    if let Some(function) = semantic.function_at_offset(offset) {
+        return function.variables.contains_key(new_name);
+    }
+    semantic.globals.contains_key(new_name)
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub async fn references_locations_at_async(
     text: &str,
@@ -804,19 +865,37 @@ pub fn document_symbols(_text: &str, _analysis: &DocumentAnalysis) -> Vec<Docume
     };
     let mut symbols = Vec::new();
     for func in &semantic.functions {
-        #[allow(deprecated)]
-        symbols.push(DocumentSymbol {
-            name: func.signature.name.clone(),
-            detail: Some(func.signature.display()),
-            kind: lsp_types::SymbolKind::FUNCTION,
-            tags: None,
-            deprecated: None,
-            range: func.range.to_lsp_range(_text),
-            selection_range: func.selection.to_lsp_range(_text),
-            children: None,
-        });
+        symbols.push(make_document_symbol(
+            func.signature.name.clone(),
+            Some(func.signature.display()),
+            lsp_types::SymbolKind::FUNCTION,
+            func.range.to_lsp_range(_text),
+            func.selection.to_lsp_range(_text),
+        ));
     }
     symbols
+}
+
+pub(crate) fn make_document_symbol(
+    name: String,
+    detail: Option<String>,
+    kind: lsp_types::SymbolKind,
+    range: Range,
+    selection_range: Range,
+) -> DocumentSymbol {
+    // lsp-types 0.94 requires this deprecated wire field in the struct literal;
+    // omitting it is not possible until the shared protocol dependency advances.
+    #[allow(deprecated)]
+    DocumentSymbol {
+        name,
+        detail,
+        kind,
+        tags: None,
+        deprecated: None,
+        range,
+        selection_range,
+        children: None,
+    }
 }
 
 pub fn semantic_tokens_legend() -> lsp_types::SemanticTokensLegend {
@@ -1310,6 +1389,41 @@ pub fn function_references_in_document(
         .filter(|call| call_resolution_matches_symbol(call, symbol_name))
         .filter_map(|call| span_to_text_range(call.span, text.len()))
         .map(|range| range.to_lsp_range(text))
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn function_rename_references_in_document(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    symbol_name: &str,
+) -> Vec<Range> {
+    let Some(lowering) = analysis.lowering.as_ref() else {
+        return Vec::new();
+    };
+    let leaf = symbol_name.rsplit('.').next().unwrap_or(symbol_name);
+    lowering
+        .hir_index
+        .calls
+        .iter()
+        .filter(|call| call_resolution_matches_symbol(call, symbol_name))
+        .filter_map(|call| {
+            analysis
+                .tokens
+                .iter()
+                .take_while(|token| token.start < call.span.end)
+                .filter(|token| call.span.start <= token.start)
+                .take_while(|token| token.token != Token::LParen)
+                .filter(|token| token.token == Token::Ident && token.lexeme == leaf)
+                .last()
+        })
+        .map(|token| {
+            TextRange {
+                start: token.start,
+                end: token.end,
+            }
+            .to_lsp_range(text)
+        })
         .collect()
 }
 
@@ -5226,6 +5340,36 @@ end
     }
 
     #[test]
+    fn rename_subject_retains_parameter_owner() {
+        let source = "function y = impactPulse(t, scale)\n    y = t * scale;\nend\n";
+        let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
+        let offset = source.find("scale").unwrap();
+        let subject = rename_subject_at(source, &analysis, &offset_to_position(source, offset))
+            .expect("parameter should be renameable");
+        assert_eq!(subject.name, "scale");
+        assert!(subject.is_local);
+        assert_eq!(subject.parameter_owner.as_deref(), Some("impactPulse"));
+    }
+
+    #[test]
+    fn rename_subject_rejects_a_name_already_bound_in_its_scope() {
+        let source =
+            "function y = impactPulse(t, scale)\n    gain = 2;\n    y = t * scale * gain;\nend\n";
+        let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
+        let offset = source.find("scale").unwrap();
+        let position = offset_to_position(source, offset);
+        assert!(rename_subject_has_collision(
+            source, &analysis, &position, "gain"
+        ));
+        assert!(!rename_subject_has_collision(
+            source,
+            &analysis,
+            &position,
+            "amplitude"
+        ));
+    }
+
+    #[test]
     fn semantic_tokens_mark_builtin_calls_as_default_library() {
         let text = "y = sin(1);";
         let analysis = analyze_document_with_compat(text, CompatMode::RunMat);
@@ -5331,6 +5475,15 @@ roots = ["."]
                     definition.package_instance.is_some() && definition.source_id.is_some()
                 })
         }));
+        let rename_ranges =
+            function_rename_references_in_document(source_text, &analysis, "summarize");
+        assert_eq!(rename_ranges.len(), 1);
+        let rename_range = rename_ranges[0];
+        assert_eq!(
+            &source_text[position_to_offset(source_text, &rename_range.start)
+                ..position_to_offset(source_text, &rename_range.end)],
+            "summarize"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

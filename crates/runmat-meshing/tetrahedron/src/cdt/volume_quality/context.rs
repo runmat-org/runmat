@@ -21,6 +21,8 @@ pub(super) fn validate_metric_contexts(
             "metric context count must equal the tetrahedron count",
         ));
     }
+    // IDs are immutable within this pass; validate each distinct value once.
+    let mut validated_entities = std::collections::BTreeSet::new();
     for (index, (tetrahedron, context)) in topology.tetrahedra.iter().zip(contexts).enumerate() {
         let identities = tetrahedron
             .vertex_indices
@@ -43,6 +45,9 @@ pub(super) fn validate_metric_contexts(
             ));
         }
         for entity_id in &context.incident_entity_ids {
+            if !validated_entities.insert(entity_id) {
+                continue;
+            }
             entity_id.validate().map_err(|failure| {
                 invalid(
                     Some(index),
@@ -80,3 +85,6 @@ fn invalid(index: Option<usize>, reason: impl Into<String>) -> DelaunayVolumeQua
         reason,
     )
 }
+
+mod inventory;
+pub(super) use inventory::{MetricContextInventory, MetricContexts};

@@ -13,11 +13,11 @@ struct SnapshotListResponse {
 
 #[derive(Deserialize)]
 struct SnapshotResponse {
-    id: Uuid,
+    id: runmat_server_client::ids::SnapshotId,
     #[serde(rename = "projectId")]
-    _project_id: Uuid,
+    _project_id: runmat_server_client::ids::ProjectId,
     #[serde(rename = "parentId")]
-    parent_id: Option<Uuid>,
+    parent_id: Option<runmat_server_client::ids::SnapshotId>,
     message: Option<String>,
     #[serde(rename = "createdAt")]
     created_at: DateTime<Utc>,
@@ -35,14 +35,18 @@ struct SnapshotTagListResponse {
 struct SnapshotTagResponse {
     tag: String,
     #[serde(rename = "snapshotId")]
-    snapshot_id: Uuid,
+    snapshot_id: runmat_server_client::ids::SnapshotId,
     #[serde(rename = "createdAt")]
     created_at: DateTime<Utc>,
     #[serde(rename = "createdBy")]
     created_by: Option<Uuid>,
 }
 
-pub async fn list_snapshots(server_url: &str, token: &str, project_id: Uuid) -> Result<()> {
+pub async fn list_snapshots(
+    server_url: &str,
+    token: &str,
+    project_id: &runmat_server_client::ids::ProjectId,
+) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!("{}/v1/projects/{}/fs/snapshots", base, project_id);
     let response = client
@@ -85,11 +89,12 @@ pub async fn list_snapshots(server_url: &str, token: &str, project_id: Uuid) -> 
 pub async fn create_snapshot(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     message: Option<String>,
     parent: Option<Uuid>,
     tag: Option<String>,
 ) -> Result<()> {
+    let parent = parent.map(runmat_server_client::ids::SnapshotId::from_uuid);
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!("{}/v1/projects/{}/fs/snapshots", base, project_id);
     let response = client
@@ -135,9 +140,10 @@ pub async fn create_snapshot(
 pub async fn restore_snapshot(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     snapshot_id: Uuid,
 ) -> Result<()> {
+    let snapshot_id = runmat_server_client::ids::SnapshotId::from_uuid(snapshot_id);
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!(
         "{}/v1/projects/{}/fs/snapshots/{}/restore",
@@ -164,9 +170,10 @@ pub async fn restore_snapshot(
 pub async fn delete_snapshot(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     snapshot_id: Uuid,
 ) -> Result<()> {
+    let snapshot_id = runmat_server_client::ids::SnapshotId::from_uuid(snapshot_id);
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!(
         "{}/v1/projects/{}/fs/snapshots/{}",
@@ -190,7 +197,11 @@ pub async fn delete_snapshot(
     Ok(())
 }
 
-pub async fn list_snapshot_tags(server_url: &str, token: &str, project_id: Uuid) -> Result<()> {
+pub async fn list_snapshot_tags(
+    server_url: &str,
+    token: &str,
+    project_id: &runmat_server_client::ids::ProjectId,
+) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!("{}/v1/projects/{}/fs/snapshots/tags", base, project_id);
     let response = client
@@ -223,10 +234,11 @@ pub async fn list_snapshot_tags(server_url: &str, token: &str, project_id: Uuid)
 pub async fn set_snapshot_tag(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     snapshot_id: Uuid,
     tag: &str,
 ) -> Result<()> {
+    let snapshot_id = runmat_server_client::ids::SnapshotId::from_uuid(snapshot_id);
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!(
         "{}/v1/projects/{}/fs/snapshots/{}/tags",
@@ -261,7 +273,7 @@ pub async fn set_snapshot_tag(
 pub async fn delete_snapshot_tag(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     tag: &str,
 ) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;

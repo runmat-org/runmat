@@ -29,6 +29,7 @@ mod refill_tetrahedra;
 mod retriangulate;
 mod selection;
 mod solid_empty;
+mod star_refill;
 mod steiner_candidates;
 mod topology;
 mod types;
@@ -93,6 +94,7 @@ use refill_tetrahedra::{
     star_refill_candidate_with_rejection_reason,
 };
 pub use retriangulate::retriangulate_constrained_cavity_from_nodes;
+pub(crate) use retriangulate::retriangulate_constrained_cavity_from_nodes_with_diagnostics;
 use selection::*;
 pub use selection::{
     constrained_cavity_expanded_across_boundary_edge_star_excluding_nodes,
@@ -111,7 +113,11 @@ pub use solid_empty::{
     constrained_cavity_solid_empty_boundary_faces,
     recover_constrained_cavity_solid_empty_boundaries,
 };
+pub use star_refill::{
+    constrained_cavity_boundary_node_ids, constrained_cavity_star_refill_for_apex,
+};
 pub use steiner_candidates::generate_constrained_cavity_interior_steiner_candidates;
+pub(crate) use steiner_candidates::generate_constrained_cavity_interior_steiner_candidates_with_diagnostics;
 use topology::*;
 pub use types::*;
 use validation::*;

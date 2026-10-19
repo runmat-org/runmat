@@ -396,6 +396,7 @@ mod tests {
                 LinkerDriver {
                     path: "linker".into(),
                     family,
+                    environment: Vec::new(),
                 },
                 "program.o".as_ref(),
                 "runtime.a".as_ref(),
@@ -422,6 +423,7 @@ mod tests {
             LinkerDriver {
                 path: "linker".into(),
                 family: LinkerFamily::Msvc,
+                environment: Vec::new(),
             },
             "program.obj".as_ref(),
             "runtime.lib".as_ref(),

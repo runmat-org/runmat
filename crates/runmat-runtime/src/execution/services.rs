@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+use runmat_execution::resource::ResourceRequest;
 use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionHandleState, ExecutionScopeId,
     FutureHandle, FutureId, JobHandle, OutputContract, PoolBackend, PoolHandle, PoolId,
@@ -82,6 +83,10 @@ pub struct DeferredCall {
     /// adapters must carry this value unchanged into their task request.
     pub retry: runmat_execution::RetryPolicy,
     pub program_revision: Option<runmat_execution::ProgramRevision>,
+    /// Invocation environment frozen at the call's semantic origin.
+    pub environment: runmat_execution::EnvironmentSnapshot,
+    /// Console capture controls requested by the invoking owner.
+    pub console: Option<runmat_execution::console::ConsoleLimits>,
     /// Whole-call semantic capabilities emitted by analysis and retained in
     /// bytecode. Execution adapters translate these facts into leases; they do
     /// not rediscover requirements from source or builtin spelling.
@@ -146,6 +151,7 @@ impl SpmdGangCall {
 pub struct DurableJobOptions {
     pub idempotency_key: Option<String>,
     pub retention_millis: u64,
+    pub resources: ResourceRequest,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -638,9 +644,11 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             .get_mut(&future.id)
             .ok_or(ExecutionServiceError::UnknownHandle)?;
         match record {
-            FutureState::Deferred(call) => {
-                let call = call.clone();
-                *record = FutureState::Running;
+            FutureState::Deferred(_) => {
+                let FutureState::Deferred(call) = std::mem::replace(record, FutureState::Running)
+                else {
+                    unreachable!("deferred state matched while holding its owner lock")
+                };
                 Ok(AwaitAction::ExecuteFuture {
                     handle: future,
                     call,
@@ -836,6 +844,8 @@ mod tests {
             ),
             retry: runmat_execution::RetryPolicy::Never,
             program_revision: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
             capabilities: Default::default(),
             program: DeferredProgram::Local,
         }
@@ -1000,6 +1010,29 @@ mod tests {
                 .unwrap()
             ))
         );
+    }
+
+    #[test]
+    fn await_handoff_moves_the_original_environment_without_cloning() {
+        let environment =
+            runmat_execution::EnvironmentSnapshot::new(vec![("NAME".into(), "original".into())])
+                .unwrap();
+        let environment_pointer = environment.entries()[0].1.as_ptr();
+        let service = RuntimeExecutionService::new();
+        let mut call = deferred_call(7, vec![Value::Num(3.0)]);
+        call.environment = environment;
+        let future = service.create_future(call).unwrap();
+        let AwaitAction::ExecuteFuture { handle, call } =
+            service.begin_await(Value::Future(future.clone())).unwrap()
+        else {
+            panic!("original future did not enter execution")
+        };
+        assert_eq!(handle, future);
+        assert_eq!(
+            call.environment.entries()[0].1.as_ptr(),
+            environment_pointer
+        );
+        assert!(service.begin_await(Value::Future(future)).is_err());
     }
 
     #[test]

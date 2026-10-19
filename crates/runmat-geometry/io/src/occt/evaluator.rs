@@ -3,9 +3,12 @@ use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
     ParameterRange,
 };
+use std::{sync::mpsc, time::Duration};
 
 use super::{evaluator_bindings::EvaluatorBindings, ffi};
 use crate::exact::ImportedExactCad;
+
+mod session;
 
 /// Native evaluator for kernel-backed geometry from one admitted OCCT representation.
 ///
@@ -19,9 +22,101 @@ pub struct OcctExactEvaluator {
 impl OcctExactEvaluator {
     pub fn new(imported: &ImportedExactCad) -> Result<Self, GeometryEvaluationError> {
         let bindings = EvaluatorBindings::from_import(imported)?;
-        let session_id = ffi::bridge::start_exact_evaluator_session(
+        Self::start(
             &imported.representation,
             imported.meters_per_source_unit,
+            bindings,
+        )
+    }
+
+    /// Reconstructs an evaluator from the canonical exact-geometry closure transferred to a
+    /// worker. Kernel-only mass-property records require private import-time shape inventory and
+    /// are rejected; kernel-validated mass properties are fully reconstructible.
+    pub fn from_closure(
+        representation: &[u8],
+        meters_per_source_unit: f64,
+        topology: &runmat_geometry_core::ExactBRepTopology,
+        evaluators: &runmat_geometry_core::ExactEvaluatorRegistry,
+    ) -> Result<Self, GeometryEvaluationError> {
+        if !meters_per_source_unit.is_finite() || meters_per_source_unit <= 0.0 {
+            return Err(invalid_result(
+                "OCCT evaluator unit scale must be finite and positive",
+            ));
+        }
+        let bindings = EvaluatorBindings::from_closure(representation, topology, evaluators, None)?;
+        Self::start(representation, meters_per_source_unit, bindings)
+    }
+
+    /// Reconstructs a transferred evaluator while preserving the execution
+    /// host's cancellation and time-checkpoint contract during native session
+    /// startup.
+    pub fn from_closure_controlled(
+        representation: &[u8],
+        meters_per_source_unit: f64,
+        topology: &runmat_geometry_core::ExactBRepTopology,
+        evaluators: &runmat_geometry_core::ExactEvaluatorRegistry,
+        control: &dyn GeometryEvaluationControl,
+    ) -> Result<Self, GeometryEvaluationError> {
+        control.checkpoint()?;
+        control.consume_allocation_bytes(representation.len() as u64)?;
+        if !meters_per_source_unit.is_finite() || meters_per_source_unit <= 0.0 {
+            return Err(invalid_result(
+                "OCCT evaluator unit scale must be finite and positive",
+            ));
+        }
+        let bindings = EvaluatorBindings::from_closure(representation, topology, evaluators, None)?;
+        control.checkpoint()?;
+        let face_keys = session::face_keys(&bindings, Some(control))?;
+        let owned_representation = representation.to_vec();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let result = ffi::bridge::start_exact_evaluator_session(
+                &owned_representation,
+                meters_per_source_unit,
+                &face_keys,
+            )
+            .map_err(kernel_error);
+            match result {
+                Ok(session_id) => {
+                    if sender.send(Ok(session_id)).is_err() {
+                        ffi::bridge::close_exact_evaluator_session(session_id);
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(Err(error));
+                }
+            }
+        });
+        let session_id = loop {
+            match receiver.recv_timeout(Duration::from_millis(10)) {
+                Ok(result) => break result?,
+                Err(mpsc::RecvTimeoutError::Timeout) => control.checkpoint()?,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(invalid_result(
+                        "OCCT evaluator session worker stopped before returning a result",
+                    ));
+                }
+            }
+        };
+        let evaluator = Self {
+            session_id,
+            bindings,
+        };
+        // Own the session before the final checkpoint so cancellation releases it.
+        control.checkpoint()?;
+        Ok(evaluator)
+    }
+
+    fn start(
+        representation: &[u8],
+        meters_per_source_unit: f64,
+        bindings: EvaluatorBindings,
+    ) -> Result<Self, GeometryEvaluationError> {
+        let face_keys = session::face_keys(&bindings, None)?;
+        let session_id = ffi::bridge::start_exact_evaluator_session(
+            representation,
+            meters_per_source_unit,
+            &face_keys,
         )
         .map_err(kernel_error)?;
         Ok(Self {

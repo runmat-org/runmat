@@ -159,6 +159,18 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
     LoggingGuard { _guard: guard }
 }
 
+/// Flushes and shuts down the process-global OpenTelemetry trace provider.
+///
+/// Short-lived native hosts call this before exiting so their final spans are not left in the
+/// batch exporter's queue.
+#[cfg(feature = "otlp")]
+pub fn shutdown_otel() {
+    opentelemetry::global::shutdown_tracer_provider();
+}
+
+#[cfg(not(feature = "otlp"))]
+pub fn shutdown_otel() {}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn update_log_filter(spec: &str) -> Result<(), String> {
     let handle = LOG_FILTER_HANDLE
@@ -498,8 +510,13 @@ where
     use opentelemetry_sdk::{runtime::Tokio, trace, Resource};
 
     let endpoint = std::env::var("RUNMAT_OTEL_ENDPOINT").unwrap_or_default();
+    let http_client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("failed to construct OTEL HTTP client");
     let otel_exporter = opentelemetry_otlp::new_exporter()
         .http()
+        .with_http_client(http_client)
         .with_endpoint(endpoint);
     let otel_tracer = opentelemetry_otlp::new_pipeline()
         .tracing()

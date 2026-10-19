@@ -202,6 +202,8 @@ pub async fn execute_deferred_program_in_context(
         job_id: None,
         arguments,
         requested_outputs,
+        environment: call.environment.clone(),
+        console: call.console,
     };
     request
         .validate_for_portable_host()
@@ -428,6 +430,17 @@ async fn execute_program_request_in_context(
             message: "worker rejected a protocol or program identity mismatch".into(),
         };
     }
+    let runtime = match runtime
+        .map(|runtime| runtime.with_invocation_environment(&request.environment))
+        .transpose()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected the invocation environment: {error}"),
+            }
+        }
+    };
     if let Err(error) = request.recipe.program_revision.validate_current_compiler() {
         return ProgramExecutionResponse::Failure {
             message: format!("worker rejected compiler-incompatible program: {error}"),
@@ -441,6 +454,15 @@ async fn execute_program_request_in_context(
     if request.artifact.form == ExecutableForm::MeshingWorkload {
         return ProgramExecutionResponse::Failure {
             message: "meshing workloads require a meshing-capable execution host".into(),
+        };
+    }
+    if matches!(
+        request.artifact.form,
+        ExecutableForm::AnalysisWorkload | ExecutableForm::GeometryWorkload
+    ) {
+        return ProgramExecutionResponse::Failure {
+            message: "domain workloads require an analysis- or geometry-capable execution host"
+                .into(),
         };
     }
     if request.artifact.form == ExecutableForm::NativeObjectV1 {
@@ -979,8 +1001,14 @@ async fn execute_function_request(
 
 async fn execute_unit_script(
     bytecode: crate::Bytecode,
+    requested_outputs: u16,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
+    if requested_outputs > 1 {
+        return ProgramExecutionResponse::Failure {
+            message: "scripts do not define multiple output ordinals".into(),
+        };
+    }
     let result_slot = bytecode
         .var_names
         .iter()
@@ -995,9 +1023,20 @@ async fn execute_unit_script(
     .await;
     match result {
         Ok(crate::InterpreterOutcome::Completed(completion)) => {
-            let value = result_slot
+            if requested_outputs == 0 {
+                return ProgramExecutionResponse::Success {
+                    outputs: Vec::new(),
+                };
+            }
+            // Allocated slots are not results: never fabricate an unassigned `ans`.
+            let Some(value) = result_slot
+                .filter(|slot| completion.assigned_slots.contains(slot))
                 .and_then(|slot| completion.values.get(slot).map(|value| value.clone()))
-                .unwrap_or(runmat_value::Value::Num(0.0));
+            else {
+                return ProgramExecutionResponse::Failure {
+                    message: "script did not produce the requested ans value".into(),
+                };
+            };
             match runmat_runtime::execution::value_codec::encode_inline_value_in_context(
                 &value, &runtime,
             ) {
@@ -1039,7 +1078,7 @@ async fn execute_script_request(
             }
         }
     };
-    execute_unit_script(bytecode, runtime).await
+    execute_unit_script(bytecode, request.requested_outputs, runtime).await
 }
 
 #[cfg(test)]
@@ -1102,6 +1141,8 @@ mod tests {
             job_id: None,
             arguments: Vec::new(),
             requested_outputs: 1,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
         }
     }
 
@@ -1139,6 +1180,8 @@ mod tests {
             job_id: None,
             arguments: Vec::new(),
             requested_outputs: 1,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
         }
     }
 
@@ -1217,6 +1260,8 @@ mod tests {
                 job_id: None,
                 arguments: Vec::new(),
                 requested_outputs: 1,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
             }));
         let ProgramExecutionResponse::Success { outputs } = response else {
             panic!("standalone worker must execute and retire its workspace: {response:?}");
@@ -1372,6 +1417,8 @@ mod tests {
                 job_id: None,
                 arguments: Vec::new(),
                 requested_outputs: 1,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
             }));
         assert_eq!(
             response,

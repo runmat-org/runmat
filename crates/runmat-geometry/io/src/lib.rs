@@ -1,8 +1,15 @@
 //! Geometry import and normalization pipeline.
 
+/// Actual package build configuration used for internal artifact reuse.
+#[doc(hidden)]
+pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
+
+pub mod ap242;
 pub mod cad;
 pub mod exact;
 pub mod faceted;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub mod feature;
 pub mod import;
 pub mod normalize;
 pub mod preview;
@@ -36,6 +43,17 @@ pub fn native_cad_backend_was_used() -> bool {
 #[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
 pub fn native_cad_backend_was_used() -> bool {
     false
+}
+
+/// Exact CAD kernel ABI implemented by this native build, when present.
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub fn native_exact_kernel_abi() -> Option<String> {
+    Some(occt::exact_kernel_abi())
+}
+
+#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+pub fn native_exact_kernel_abi() -> Option<String> {
+    None
 }
 
 #[cfg(test)]

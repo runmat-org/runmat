@@ -196,6 +196,12 @@ pub(super) fn create_future(
             invocation,
             retry: runmat_execution::RetryPolicy::Never,
             program_revision,
+            environment: runmat_runtime::execution::capture_deferred_environment(&context.runtime)?,
+            console: context
+                .runtime
+                .service_ports()
+                .host()
+                .and_then(|host| host.console_limits()),
             capabilities,
             program,
         })

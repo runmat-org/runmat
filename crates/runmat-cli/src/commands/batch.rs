@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use runmat_execution_runner_native::supervisor::{
-    complete_batch_driver, complete_batch_driver_with_response, execute_graph_batch,
-    execute_program_batch, prepare_batch_driver, BatchDriverInvocation, BatchSubmission,
+    complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_program_batch,
+    execute_graph_batch, prepare_batch_driver, BatchDriverInvocation, BatchSubmission,
     LocalJobRecord, LocalJobState, LocalSupervisorClient,
 };
 use runmat_execution_runner_native::WorkerResponse;
@@ -25,6 +25,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
             json,
             args,
         } => {
+            crate::commands::script::validate_local_script_arguments(&args)?;
             let file = std::fs::canonicalize(&file)
                 .with_context(|| format!("failed to resolve batch source {}", file.display()))?;
             let source_name = source_name(&file)?;
@@ -122,20 +123,31 @@ pub async fn run_driver() -> std::process::ExitCode {
             ..
         } => run_script_driver(source_path, arguments, working_directory).await,
         BatchDriverInvocation::Program {
-            job_id, submission, ..
+            attempt,
+            submission,
+            lease,
+            ..
         } => {
-            let response = execute_program_batch(*submission, job_id).await;
+            let execution =
+                match execute_and_complete_program_batch(*attempt, *submission, *lease).await {
+                    Ok(execution) => execution,
+                    Err(error) => {
+                        let message = error.to_string();
+                        // Original provider ownership/report recovery records this loss.
+                        // A script completion cannot stand in for a portable attempt.
+                        eprintln!("runmat batch driver failed: {message}");
+                        return std::process::ExitCode::from(1);
+                    }
+                };
             let success = matches!(
-                response,
+                &execution.response,
                 WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. }
             );
-            if let Err(error) = complete_batch_driver_with_response(&job_directory, response) {
-                Err(error.to_string())
-            } else if success {
-                return std::process::ExitCode::SUCCESS;
+            return if success {
+                std::process::ExitCode::SUCCESS
             } else {
-                return std::process::ExitCode::from(1);
-            }
+                std::process::ExitCode::from(1)
+            };
         }
         BatchDriverInvocation::Graph {
             job_id, submission, ..

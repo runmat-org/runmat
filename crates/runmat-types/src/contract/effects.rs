@@ -22,6 +22,51 @@ pub enum EffectKind {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct EffectSet(pub BTreeSet<EffectKind>);
 
+impl EffectKind {
+    /// A deterministic local evaluation may reject its inputs without reading or
+    /// changing external state. Unknown effects and suspension are not admitted.
+    pub const fn is_side_effect_free(self) -> bool {
+        matches!(self, Self::MayThrow)
+    }
+}
+
+impl EffectSet {
+    pub fn is_side_effect_free(&self) -> bool {
+        self.0.iter().all(|effect| effect.is_side_effect_free())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pure_evaluation_may_throw_but_cannot_observe_or_change_external_state() {
+        assert!(EffectSet::default().is_side_effect_free());
+        assert!(EffectSet(BTreeSet::from([EffectKind::MayThrow])).is_side_effect_free());
+        for forbidden in [
+            EffectKind::WorkspaceRead,
+            EffectKind::WorkspaceWrite,
+            EffectKind::EnvironmentRead,
+            EffectKind::EnvironmentWrite,
+            EffectKind::FilesystemRead,
+            EffectKind::FilesystemWrite,
+            EffectKind::Network,
+            EffectKind::UserInterface,
+            EffectKind::Randomness,
+            EffectKind::Clock,
+            EffectKind::HostCallback,
+            EffectKind::MaySuspend,
+            EffectKind::Unknown,
+        ] {
+            assert!(!EffectSet(BTreeSet::from([forbidden])).is_side_effect_free());
+            assert!(
+                !EffectSet(BTreeSet::from([EffectKind::MayThrow, forbidden])).is_side_effect_free()
+            );
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum CapabilityRequirement {
     HostRuntime,

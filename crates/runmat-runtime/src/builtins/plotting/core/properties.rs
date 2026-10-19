@@ -756,7 +756,7 @@ fn get_text_property(
                 st.insert("Interpreter", Value::string(interpreter));
             }
             if let Some(color) = style.color {
-                st.insert("Color", Value::string(color_to_short_name(color)));
+                st.insert("Color", rgb_triplet_value(color));
             }
             Ok(Value::Struct(st))
         }
@@ -783,7 +783,7 @@ fn get_text_property(
             .unwrap_or_else(|| Value::string(String::new()))),
         Some("color") => Ok(style
             .color
-            .map(|c| Value::string(color_to_short_name(c)))
+            .map(|c| rgb_triplet_value(c))
             .unwrap_or_else(|| Value::string(String::new()))),
         Some(other) => Err(plotting_error(
             builtin,
@@ -896,7 +896,7 @@ fn get_legend_property(
                 st.insert("Orientation", Value::string(orientation));
             }
             if let Some(color) = meta.legend_style.text_color {
-                st.insert("TextColor", Value::string(color_to_short_name(color)));
+                st.insert("TextColor", rgb_triplet_value(color));
             }
             Ok(Value::Struct(st))
         }
@@ -949,7 +949,7 @@ fn get_legend_property(
         Some("textcolor") | Some("color") => Ok(meta
             .legend_style
             .text_color
-            .map(|c| Value::string(color_to_short_name(c)))
+            .map(|c| rgb_triplet_value(c))
             .unwrap_or_else(|| Value::string(String::new()))),
         Some(other) => Err(plotting_error(
             builtin,
@@ -2647,7 +2647,7 @@ fn get_world_text_property(
                 st.insert("Interpreter", Value::string(interpreter));
             }
             if let Some(color) = annotation.style.color {
-                st.insert("Color", Value::string(color_to_short_name(color)));
+                st.insert("Color", rgb_triplet_value(color));
             }
             if let Some(font_size) = annotation.style.font_size {
                 st.insert("FontSize", Value::Num(font_size as f64));
@@ -2678,7 +2678,7 @@ fn get_world_text_property(
         Some("color") => Ok(annotation
             .style
             .color
-            .map(|c| Value::string(color_to_short_name(c)))
+            .map(|c| rgb_triplet_value(c))
             .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontsize") => Ok(Value::Num(
             annotation.style.font_size.unwrap_or_default() as f64
@@ -2797,7 +2797,7 @@ fn line_property_with_data(
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
             st.insert("XData", numeric_plot_data_value(&x_data));
             st.insert("YData", numeric_plot_data_value(&y_data));
-            st.insert("Color", Value::string(color_to_short_name(line.color)));
+            st.insert("Color", rgb_triplet_value(line.color));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -2844,7 +2844,7 @@ fn line_property_without_data(
         Some("type") => Value::String("line".into()),
         Some("parent") => child_parent_handle(line_handle.figure, line_handle.axes_index),
         Some("children") => handles_value(Vec::new()),
-        Some("color") => Value::string(color_to_short_name(line.color)),
+        Some("color") => rgb_triplet_value(line.color),
         Some("linewidth") => Value::Num(line.line_width as f64),
         Some("linestyle") => Value::String(line_style_name(line.line_style).into()),
         Some("displayname") => Value::string(line.label.clone().unwrap_or_default()),
@@ -2876,7 +2876,7 @@ fn get_animated_line_property(
                     );
                     st.insert("XData", numeric_plot_data_value(&x_data));
                     st.insert("YData", numeric_plot_data_value(&y_data));
-                    st.insert("Color", Value::string(color_to_short_name(line.color)));
+                    st.insert("Color", rgb_triplet_value(line.color));
                     st.insert("LineWidth", Value::Num(line.line_width as f64));
                     st.insert(
                         "LineStyle",
@@ -2906,7 +2906,7 @@ fn get_animated_line_property(
                 Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
                 Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
                 Some("zdata") => Ok(tensor_from_vec(Vec::new())),
-                Some("color") => Ok(Value::string(color_to_short_name(line.color))),
+                Some("color") => Ok(rgb_triplet_value(line.color)),
                 Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
                 Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
                 Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
@@ -2931,7 +2931,7 @@ fn get_animated_line_property(
                     st.insert("XData", numeric_plot_data_value(&x_data));
                     st.insert("YData", numeric_plot_data_value(&y_data));
                     st.insert("ZData", numeric_plot_data_value(&z_data));
-                    st.insert("Color", Value::string(color_to_short_name(line.color)));
+                    st.insert("Color", rgb_triplet_value(line.color));
                     st.insert("LineWidth", Value::Num(line.line_width as f64));
                     st.insert(
                         "LineStyle",
@@ -2960,7 +2960,7 @@ fn get_animated_line_property(
                 Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
                 Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
                 Some("zdata") => Ok(numeric_plot_data_value(&z_data)),
-                Some("color") => Ok(Value::string(color_to_short_name(line.color))),
+                Some("color") => Ok(rgb_triplet_value(line.color)),
                 Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
                 Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
                 Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
@@ -3023,7 +3023,7 @@ fn get_reference_line_property(
                 child_base_struct("constantline", line_handle.figure, line_handle.axes_index);
             st.insert("Value", Value::Num(line.value));
             st.insert("Orientation", Value::String(orientation.into()));
-            st.insert("Color", Value::string(color_to_short_name(line.color)));
+            st.insert("Color", rgb_triplet_value(line.color));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -3055,7 +3055,7 @@ fn get_reference_line_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("value") => Ok(Value::Num(line.value)),
         Some("orientation") => Ok(Value::String(orientation.into())),
-        Some("color") => Ok(Value::string(color_to_short_name(line.color))),
+        Some("color") => Ok(rgb_triplet_value(line.color)),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
         Some("label") => Ok(Value::string(line.label.clone().unwrap_or_default())),
@@ -3102,7 +3102,7 @@ fn get_stairs_property(
                 child_base_struct("stairs", stairs_handle.figure, stairs_handle.axes_index);
             st.insert("XData", x_data.clone());
             st.insert("YData", y_data.clone());
-            st.insert("Color", Value::string(color_to_short_name(stairs.color)));
+            st.insert("Color", rgb_triplet_value(stairs.color));
             st.insert("LineWidth", Value::Num(stairs.line_width as f64));
             if let Some(label) = stairs.label.clone() {
                 st.insert("DisplayName", Value::string(label));
@@ -3117,7 +3117,7 @@ fn get_stairs_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(x_data),
         Some("ydata") => Ok(y_data),
-        Some("color") => Ok(Value::string(color_to_short_name(stairs.color))),
+        Some("color") => Ok(rgb_triplet_value(stairs.color)),
         Some("linewidth") => Ok(Value::Num(stairs.line_width as f64)),
         Some("displayname") => Ok(Value::string(stairs.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
@@ -3176,11 +3176,11 @@ fn scatter_property_with_data(
             st.insert("SizeData", scatter_size_data_value(scatter));
             st.insert(
                 "MarkerFaceColor",
-                Value::string(color_to_short_name(scatter.color)),
+                rgb_triplet_value(scatter.color),
             );
             st.insert(
                 "MarkerEdgeColor",
-                Value::string(color_to_short_name(scatter.edge_color)),
+                rgb_triplet_value(scatter.edge_color),
             );
             st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
             if let Some(label) = scatter.label.clone() {
@@ -3224,8 +3224,8 @@ fn scatter_property_without_data(
         Some("rdata") => tensor_from_vec(scatter.r_data.clone().unwrap_or_default()),
         Some("marker") => Value::String(marker_style_name(scatter.marker_style).into()),
         Some("sizedata") => scatter_size_data_value(scatter),
-        Some("markerfacecolor") => Value::string(color_to_short_name(scatter.color)),
-        Some("markeredgecolor") => Value::string(color_to_short_name(scatter.edge_color)),
+        Some("markerfacecolor") => rgb_triplet_value(scatter.color),
+        Some("markeredgecolor") => rgb_triplet_value(scatter.edge_color),
         Some("linewidth") => Value::Num(scatter.edge_thickness as f64),
         Some("displayname") => Value::string(scatter.label.clone().unwrap_or_default()),
         Some(other) => {
@@ -3254,7 +3254,7 @@ fn get_bar_property(
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("bar", bar_handle.figure, bar_handle.axes_index);
-            st.insert("FaceColor", Value::string(color_to_short_name(bar.color)));
+            st.insert("FaceColor", rgb_triplet_value(bar.color));
             st.insert("BarWidth", Value::Num(bar.bar_width as f64));
             if let Some(label) = bar.label.clone() {
                 st.insert("DisplayName", Value::string(label));
@@ -3267,7 +3267,7 @@ fn get_bar_property(
             bar_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("facecolor") | Some("color") => Ok(Value::string(color_to_short_name(bar.color))),
+        Some("facecolor") | Some("color") => Ok(rgb_triplet_value(bar.color)),
         Some("barwidth") => Ok(Value::Num(bar.bar_width as f64)),
         Some("displayname") => Ok(Value::string(bar.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
@@ -3764,7 +3764,7 @@ fn line3_property_with_data(
             st.insert("XData", numeric_plot_data_value(x_data));
             st.insert("YData", numeric_plot_data_value(y_data));
             st.insert("ZData", numeric_plot_data_value(z_data));
-            st.insert("Color", Value::string(color_to_short_name(line.color)));
+            st.insert("Color", rgb_triplet_value(line.color));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -3804,7 +3804,7 @@ fn line3_property_with_data(
             })?;
             Ok(numeric_plot_data_value(z))
         }
-        Some("color") => Ok(Value::string(color_to_short_name(line.color))),
+        Some("color") => Ok(rgb_triplet_value(line.color)),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
         Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
@@ -3862,13 +3862,13 @@ fn get_scatter3_property(
             );
             st.insert(
                 "MarkerFaceColor",
-                Value::string(color_to_short_name(
+                rgb_triplet_value(
                     scatter.colors.first().copied().unwrap_or_default(),
-                )),
+                ),
             );
             st.insert(
                 "MarkerEdgeColor",
-                Value::string(color_to_short_name(scatter.edge_color)),
+                rgb_triplet_value(scatter.edge_color),
             );
             st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
             if let Some(label) = scatter.label.clone() {
@@ -3891,10 +3891,10 @@ fn get_scatter3_property(
         Some("sizedata") => Ok(Value::Num(marker_diameter_px_to_area_points2(
             scatter.point_size,
         ))),
-        Some("markerfacecolor") => Ok(Value::string(color_to_short_name(
+        Some("markerfacecolor") => Ok(rgb_triplet_value(
             scatter.colors.first().copied().unwrap_or_default(),
-        ))),
-        Some("markeredgecolor") => Ok(Value::string(color_to_short_name(scatter.edge_color))),
+        )),
+        Some("markeredgecolor") => Ok(rgb_triplet_value(scatter.edge_color)),
         Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
         Some("displayname") => Ok(Value::string(scatter.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
@@ -4062,7 +4062,7 @@ fn get_stem_property(
                 "LineStyle",
                 Value::String(line_style_name(stem.line_style).into()),
             );
-            st.insert("Color", Value::string(color_to_short_name(stem.color)));
+            st.insert("Color", rgb_triplet_value(stem.color));
             if let Some(marker) = &stem.marker {
                 st.insert(
                     "Marker",
@@ -4071,11 +4071,11 @@ fn get_stem_property(
                 st.insert("MarkerSize", Value::Num(marker.size as f64));
                 st.insert(
                     "MarkerFaceColor",
-                    Value::string(color_to_short_name(marker.face_color)),
+                    rgb_triplet_value(marker.face_color),
                 );
                 st.insert(
                     "MarkerEdgeColor",
-                    Value::string(color_to_short_name(marker.edge_color)),
+                    rgb_triplet_value(marker.edge_color),
                 );
                 st.insert("Filled", Value::Bool(marker.filled));
             }
@@ -4093,8 +4093,8 @@ fn get_stem_property(
         Some("baseline") => Ok(Value::Bool(stem.baseline_visible)),
         Some("linewidth") => Ok(Value::Num(stem.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(stem.line_style).into())),
-        Some("color") => Ok(Value::string(color_to_short_name(stem.color))),
-        Some("marker") => Ok(Value::string(
+        Some("color") => Ok(rgb_triplet_value(stem.color)),
+        Some("marker") => Ok(Value::String(
             stem.marker
                 .as_ref()
                 .map(|m| marker_style_name(m.kind).to_string())
@@ -4103,18 +4103,16 @@ fn get_stem_property(
         Some("markersize") => Ok(Value::Num(
             stem.marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
         )),
-        Some("markerfacecolor") => Ok(Value::string(
-            stem.marker
-                .as_ref()
-                .map(|m| color_to_short_name(m.face_color))
-                .unwrap_or("none".into()),
-        )),
-        Some("markeredgecolor") => Ok(Value::string(
-            stem.marker
-                .as_ref()
-                .map(|m| color_to_short_name(m.edge_color))
-                .unwrap_or("none".into()),
-        )),
+        Some("markerfacecolor") => Ok(stem
+            .marker
+            .as_ref()
+            .map(|m| rgb_triplet_value(m.face_color))
+            .unwrap_or_else(|| Value::String("none".into()))),
+        Some("markeredgecolor") => Ok(stem
+            .marker
+            .as_ref()
+            .map(|m| rgb_triplet_value(m.edge_color))
+            .unwrap_or_else(|| Value::String("none".into()))),
         Some("filled") => Ok(Value::Bool(
             stem.marker.as_ref().map(|m| m.filled).unwrap_or(false),
         )),
@@ -4161,7 +4159,7 @@ fn get_errorbar_property(
                 "LineStyle",
                 Value::String(line_style_name(errorbar.line_style).into()),
             );
-            st.insert("Color", Value::string(color_to_short_name(errorbar.color)));
+            st.insert("Color", rgb_triplet_value(errorbar.color));
             st.insert("CapSize", Value::Num(errorbar.cap_size as f64));
             if let Some(marker) = &errorbar.marker {
                 st.insert(
@@ -4180,7 +4178,7 @@ fn get_errorbar_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("linewidth") => Ok(Value::Num(errorbar.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(errorbar.line_style).into())),
-        Some("color") => Ok(Value::string(color_to_short_name(errorbar.color))),
+        Some("color") => Ok(rgb_triplet_value(errorbar.color)),
         Some("capsize") => Ok(Value::Num(errorbar.cap_size as f64)),
         Some("marker") => Ok(Value::string(
             errorbar
@@ -4236,7 +4234,7 @@ fn get_quiver_property(
                 )),
             );
             st.insert("Children", handles_value(Vec::new()));
-            st.insert("Color", Value::string(color_to_short_name(quiver.color)));
+            st.insert("Color", rgb_triplet_value(quiver.color));
             st.insert("LineWidth", Value::Num(quiver.line_width as f64));
             st.insert("AutoScaleFactor", Value::Num(quiver.scale as f64));
             st.insert("MaxHeadSize", Value::Num(quiver.head_size as f64));
@@ -4279,7 +4277,7 @@ fn get_quiver_property(
             quiver_handle.axes_index,
         ))),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("color") => Ok(Value::string(color_to_short_name(quiver.color))),
+        Some("color") => Ok(rgb_triplet_value(quiver.color)),
         Some("linewidth") => Ok(Value::Num(quiver.line_width as f64)),
         Some("autoscalefactor") => Ok(Value::Num(quiver.scale as f64)),
         Some("maxheadsize") => Ok(Value::Num(quiver.head_size as f64)),
@@ -4545,7 +4543,7 @@ fn get_area_property(
             st.insert("XData", tensor_from_vec(area.x.clone()));
             st.insert("YData", tensor_from_vec(area.y.clone()));
             st.insert("BaseValue", Value::Num(area.baseline));
-            st.insert("Color", Value::string(color_to_short_name(area.color)));
+            st.insert("Color", rgb_triplet_value(area.color));
             Ok(Value::Struct(st))
         }
         Some("type") => Ok(Value::String("area".into())),
@@ -4557,7 +4555,7 @@ fn get_area_property(
         Some("xdata") => Ok(tensor_from_vec(area.x.clone())),
         Some("ydata") => Ok(tensor_from_vec(area.y.clone())),
         Some("basevalue") => Ok(Value::Num(area.baseline)),
-        Some("color") => Ok(Value::string(color_to_short_name(area.color))),
+        Some("color") => Ok(rgb_triplet_value(area.color)),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported area property `{other}`"),
@@ -7989,7 +7987,7 @@ fn axis_to_y_grid(axis: &[f64], x_len: usize) -> Vec<Vec<f64>> {
 fn surface_face_color_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
     match &surface.colormap {
         ColorMap::Custom(min, max) if (*min - *max).abs().max_element() < 1e-6 => {
-            Value::string(color_to_short_name(*min))
+            rgb_triplet_value(*min)
         }
         _ => Value::String("flat".into()),
     }
@@ -8101,7 +8099,7 @@ fn patch_color_property(mode: runmat_plot::plots::PatchFaceColorMode, color: gla
         runmat_plot::plots::PatchFaceColorMode::None => Value::String("none".into()),
         runmat_plot::plots::PatchFaceColorMode::Flat => Value::String("flat".into()),
         runmat_plot::plots::PatchFaceColorMode::Interp => Value::String("interp".into()),
-        runmat_plot::plots::PatchFaceColorMode::Color => Value::string(color_to_short_name(color)),
+        runmat_plot::plots::PatchFaceColorMode::Color => rgb_triplet_value(color),
     }
 }
 
@@ -8111,7 +8109,7 @@ fn patch_edge_color_property(
 ) -> Value {
     match mode {
         runmat_plot::plots::PatchEdgeColorMode::None => Value::String("none".into()),
-        runmat_plot::plots::PatchEdgeColorMode::Color => Value::string(color_to_short_name(color)),
+        runmat_plot::plots::PatchEdgeColorMode::Color => rgb_triplet_value(color),
     }
 }
 
@@ -8127,11 +8125,11 @@ fn insert_line_marker_struct_props(
         st.insert("MarkerSize", Value::Num(marker.size as f64));
         st.insert(
             "MarkerFaceColor",
-            Value::string(color_to_short_name(marker.face_color)),
+            rgb_triplet_value(marker.face_color),
         );
         st.insert(
             "MarkerEdgeColor",
-            Value::string(color_to_short_name(marker.edge_color)),
+            rgb_triplet_value(marker.edge_color),
         );
         st.insert("Filled", Value::Bool(marker.filled));
     }
@@ -8152,18 +8150,14 @@ fn line_marker_property_value(
         "markersize" => Ok(Value::Num(
             marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
         )),
-        "markerfacecolor" => Ok(Value::string(
-            marker
-                .as_ref()
-                .map(|m| color_to_short_name(m.face_color))
-                .unwrap_or_else(|| "none".into()),
-        )),
-        "markeredgecolor" => Ok(Value::string(
-            marker
-                .as_ref()
-                .map(|m| color_to_short_name(m.edge_color))
-                .unwrap_or_else(|| "none".into()),
-        )),
+        "markerfacecolor" => Ok(marker
+            .as_ref()
+            .map(|m| rgb_triplet_value(m.face_color))
+            .unwrap_or_else(|| Value::String("none".into()))),
+        "markeredgecolor" => Ok(marker
+            .as_ref()
+            .map(|m| rgb_triplet_value(m.edge_color))
+            .unwrap_or_else(|| Value::String("none".into()))),
         "filled" => Ok(Value::Bool(
             marker.as_ref().map(|m| m.filled).unwrap_or(false),
         )),
@@ -8361,23 +8355,15 @@ where
     }
 }
 
-fn color_to_short_name(color: glam::Vec4) -> String {
-    let candidates = [
-        (glam::Vec4::new(1.0, 0.0, 0.0, 1.0), "r"),
-        (glam::Vec4::new(0.0, 1.0, 0.0, 1.0), "g"),
-        (glam::Vec4::new(0.0, 0.0, 1.0, 1.0), "b"),
-        (glam::Vec4::new(0.0, 0.0, 0.0, 1.0), "k"),
-        (glam::Vec4::new(1.0, 1.0, 1.0, 1.0), "w"),
-        (glam::Vec4::new(1.0, 1.0, 0.0, 1.0), "y"),
-        (glam::Vec4::new(1.0, 0.0, 1.0, 1.0), "m"),
-        (glam::Vec4::new(0.0, 1.0, 1.0, 1.0), "c"),
-    ];
-    for (candidate, name) in candidates {
-        if (candidate - color).abs().max_element() < 1e-6 {
-            return name.to_string();
-        }
-    }
-    format!("[{:.3},{:.3},{:.3}]", color.x, color.y, color.z)
+/// A color property as `get` returns it in MATLAB: a 1-by-3 RGB vector, whether it was set by
+/// name ('r'), short name or triplet.
+fn rgb_triplet_value(color: glam::Vec4) -> Value {
+    Tensor::new(
+        vec![color.x as f64, color.y as f64, color.z as f64],
+        vec![1, 3],
+    )
+    .map(Value::Tensor)
+    .unwrap_or_else(|_| Value::String(String::new()))
 }
 
 fn key_name(kind: PlotObjectKind) -> &'static str {

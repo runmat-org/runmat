@@ -1,6 +1,6 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/occt_bridge.hxx"
-#include "runmat-geometry-io/src/occt/exact_evaluator_internal.hxx"
+#include "occt_bridge.hxx"
+#include "exact_evaluator_internal.hxx"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRep_Tool.hxx>
@@ -39,13 +39,29 @@ void require_bounds(const BRepAdaptor_Surface& surface) {
   }
 }
 
-void require_parameters(const BRepAdaptor_Surface& surface, double u, double v) {
-  require_finite(u, "U parameter");
-  require_finite(v, "V parameter");
-  if (u < surface.FirstUParameter() || u > surface.LastUParameter() ||
-      v < surface.FirstVParameter() || v > surface.LastVParameter()) {
+double admitted_parameter(double value,
+                          double start,
+                          double end,
+                          bool periodic,
+                          double period,
+                          const char* role) {
+  require_finite(value, role);
+  if (periodic && (!std::isfinite(period) || period <= 0.0)) {
+    throw std::runtime_error("OCCT exact surface has an invalid period");
+  }
+  const double tolerance = Precision::PConfusion() *
+                           std::max({1.0, std::abs(start), std::abs(end), std::abs(value)});
+  if ((value < start - tolerance || value > end + tolerance) && periodic) {
+    double offset = std::fmod(value - start, period);
+    if (offset < 0.0) {
+      offset += period;
+    }
+    value = start + offset;
+  }
+  if (value < start - tolerance || value > end + tolerance) {
     throw std::runtime_error("OCCT exact surface parameter is outside the face domain");
   }
+  return std::clamp(value, start, end);
 }
 
 double parameter_tolerance(double resolution) {
@@ -132,9 +148,18 @@ OcctSurfaceDerivativesPayload exact_surface_derivatives(std::uint64_t session_id
                                                         double u,
                                                         double v) {
   const detail::ExactFaceContext context = detail::exact_face_context(session_id, face_key);
-  const BRepAdaptor_Surface surface(context.face, Standard_True);
-  require_bounds(surface);
-  require_parameters(surface, u, v);
+  // Unrestricted adaptation avoids recomputing the trimmed wire domain. Admit
+  // parameters against the identical bounds captured with this session face.
+  const BRepAdaptor_Surface surface(context.face, Standard_False);
+  const auto& bounds = context.parameter_bounds;
+  for (const double bound : bounds) require_finite(bound, "cached parameter bound");
+  if (bounds[0] > bounds[1] || bounds[2] > bounds[3]) {
+    throw std::runtime_error("OCCT exact surface has a reversed parameter domain");
+  }
+  u = admitted_parameter(u, bounds[0], bounds[1], surface.IsUPeriodic(),
+                         surface.IsUPeriodic() ? surface.UPeriod() : 0.0, "U parameter");
+  v = admitted_parameter(v, bounds[2], bounds[3], surface.IsVPeriodic(),
+                         surface.IsVPeriodic() ? surface.VPeriod() : 0.0, "V parameter");
   gp_Pnt point;
   gp_Vec du;
   gp_Vec dv;

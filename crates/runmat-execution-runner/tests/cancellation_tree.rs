@@ -143,3 +143,70 @@ fn maximum_wall_time_and_cancellation_escalation_are_deterministic() {
         0
     );
 }
+
+#[test]
+fn direct_task_cancellation_preserves_reason_isolates_siblings_and_validates_cold_lineage() {
+    let mut fixture = common::fixture(2, 2);
+    let first = common::task("direct", fixture.scope, fixture.pool, RetryPolicy::Never);
+    let first_id = first.request.id;
+    let _first = common::submit(&mut fixture.driver, first);
+    let second = common::task("sibling", fixture.scope, fixture.pool, RetryPolicy::Never);
+    let second_id = second.request.id;
+    let _second = common::submit(&mut fixture.driver, second);
+    let actions = fixture
+        .driver
+        .handle(DriverCommand::CancelTask {
+            task_id: first_id,
+            reason: CancellationReason::Quota,
+            now_millis: 100,
+        })
+        .unwrap();
+    assert_eq!(actions.iter().filter(|action| matches!(action, DriverAction::Cancel(request) if request.task_id == first_id)).count(), 1);
+    let snapshot = fixture.driver.snapshot();
+    assert_eq!(snapshot.tasks[&first_id].state, TaskState::Cancelled);
+    assert_ne!(snapshot.tasks[&second_id].state, TaskState::Cancelled);
+    assert!(
+        matches!(snapshot.tasks[&first_id].cancellation.unwrap().cause, runmat_execution_runner::TaskCancellationCause::Task { task_id, reason: CancellationReason::Quota } if task_id == first_id)
+    );
+    let cold: runmat_execution_runner::DriverSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    cold.validate().unwrap();
+    let mut foreign = cold.clone();
+    foreign
+        .tasks
+        .get_mut(&first_id)
+        .unwrap()
+        .cancellation
+        .as_mut()
+        .unwrap()
+        .cause = runmat_execution_runner::TaskCancellationCause::Task {
+        task_id: second_id,
+        reason: CancellationReason::Quota,
+    };
+    assert!(foreign.validate().is_err());
+    let mut wrong_reason = cold;
+    wrong_reason
+        .tasks
+        .get_mut(&first_id)
+        .unwrap()
+        .cancellation
+        .as_mut()
+        .unwrap()
+        .cause = runmat_execution_runner::TaskCancellationCause::Task {
+        task_id: first_id,
+        reason: CancellationReason::User,
+    };
+    assert!(wrong_reason.validate().is_err());
+    fixture
+        .driver
+        .handle(DriverCommand::CancelTask {
+            task_id: first_id,
+            reason: CancellationReason::User,
+            now_millis: 101,
+        })
+        .unwrap();
+    assert_eq!(
+        fixture.driver.snapshot().tasks[&first_id].cancellation,
+        snapshot.tasks[&first_id].cancellation
+    );
+}

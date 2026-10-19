@@ -76,6 +76,8 @@ mod tests {
             ),
             retry: runmat_execution::RetryPolicy::Never,
             program_revision: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
             capabilities: Default::default(),
             program: crate::execution::DeferredProgram::Local,
         }

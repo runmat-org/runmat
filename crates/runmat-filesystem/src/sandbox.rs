@@ -3,7 +3,7 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::{DirEntry, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use crate::{AtomicCreateResult, DirEntry, FsFileType, FsMetadata, FsProvider, OpenFlags};
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
 #[cfg(not(target_arch = "wasm32"))]
@@ -18,6 +18,8 @@ use std::fs;
 use std::io;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Component, Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "sandbox/staged.rs"]
@@ -30,6 +32,61 @@ mod staged;
 /// Attempts to traverse outside the root using `..` simply clamp to the root, preventing escape.
 pub struct SandboxFsProvider {
     root: PathBuf,
+    captured_io: Option<Arc<dyn CapturedIo>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait(?Send)]
+pub trait CapturedIo: Send + Sync + 'static {
+    async fn publish_workspace_fenced(
+        &self,
+        _request: crate::workspace::WorkspacePublicationRequest,
+        _lease: &crate::execution::ExecutionLease,
+    ) -> io::Result<crate::execution::FencedWorkspacePublicationOutcome> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "authoritative fenced publication is unavailable"))
+    }
+    async fn transition_execution(
+        &self,
+        _work: &crate::execution::ExecutionWorkId,
+        _command: crate::execution::ExecutionLeaseCommand,
+    ) -> io::Result<crate::execution::ExecutionLeaseOutcome> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "authoritative execution ownership is unavailable"))
+    }
+    async fn lookup_workspace_publication(&self, _request: &crate::workspace::WorkspacePublicationRequest) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "authoritative workspace receipts are unavailable"))
+    }
+    async fn capture_workspace(
+        &self,
+        _request: crate::workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<crate::workspace::WorkspaceSnapshot> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "authoritative workspace capture is unavailable",
+        ))
+    }
+    async fn publish_workspace(
+        &self,
+        _request: crate::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<crate::workspace::WorkspacePublicationOutcome> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "authoritative workspace publication is unavailable",
+        ))
+    }
+    async fn read_version(
+        &self,
+        path: &Path,
+        version: &str,
+        size: u64,
+        snapshot: &str,
+    ) -> io::Result<Vec<u8>>;
+    async fn publish_output(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String>;
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()>;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -40,7 +97,17 @@ impl SandboxFsProvider {
             fs::create_dir_all(&root)?;
         }
         let canonical = fs::canonicalize(root)?;
-        Ok(Self { root: canonical })
+        Ok(Self {
+            root: canonical,
+            captured_io: None,
+        })
+    }
+
+    /// Keep ordinary project reads in the sandbox while captured runs use the
+    /// authoritative provider for immutable versions and conditional outputs.
+    pub fn with_captured_io(mut self, provider: Arc<dyn CapturedIo>) -> Self {
+        self.captured_io = Some(provider);
+        self
     }
 
     /// Return the sandbox root on the host filesystem.
@@ -81,7 +148,7 @@ impl SandboxFsProvider {
     }
 
     fn make_dir_entry(&self, real_path: PathBuf, file_name: OsString) -> DirEntry {
-        let file_type = fs::metadata(&real_path)
+        let file_type = fs::symlink_metadata(&real_path)
             .ok()
             .map(|m| FsFileType::from(m.file_type()))
             .unwrap_or(FsFileType::Unknown);
@@ -96,6 +163,54 @@ impl SandboxFsProvider {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl FsProvider for SandboxFsProvider {
+    fn workspace_access(&self, root: &Path, writable: bool, maximum_resident_bytes: u64) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
+        if self.captured_io.is_some() {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "captured authority does not expose coherent workspace access"));
+        }
+        if root.components().any(|part| matches!(part, Component::ParentDir | Component::Prefix(_))) {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "workspace access root escapes its mount"));
+        }
+        let target = self.resolve(root);
+        let mount_guard = if target != self.root { crate::workspace_native::guard_admitted(&self.root, true, maximum_resident_bytes)? } else { None };
+        Ok(Box::new(crate::workspace_access::NativeAccess::open(target, writable, mount_guard, maximum_resident_bytes)?))
+    }
+    async fn publish_workspace_fenced(&self, request: crate::workspace::WorkspacePublicationRequest, lease: &crate::execution::ExecutionLease) -> io::Result<crate::execution::FencedWorkspacePublicationOutcome> {
+        if let Some(authority) = &self.captured_io { return authority.publish_workspace_fenced(request, lease).await; }
+        crate::execution::fenced_outcome(crate::workspace_native::publish_with_lease(&self.root, request, Some(lease)).await)
+    }
+    async fn transition_execution(
+        &self,
+        work: &crate::execution::ExecutionWorkId,
+        command: crate::execution::ExecutionLeaseCommand,
+    ) -> io::Result<crate::execution::ExecutionLeaseOutcome> {
+        if let Some(authority) = &self.captured_io {
+            return authority.transition_execution(work, command).await;
+        }
+        crate::workspace_native::transition_execution(&self.root, work, command)
+    }
+    async fn lookup_workspace_publication(&self, request: &crate::workspace::WorkspacePublicationRequest) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
+        if let Some(authority) = &self.captured_io { return authority.lookup_workspace_publication(request).await; }
+        crate::workspace_native::lookup(&self.root, request)
+    }
+    async fn capture_workspace(
+        &self,
+        request: crate::workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<crate::workspace::WorkspaceSnapshot> {
+        if let Some(authority) = &self.captured_io {
+            return authority.capture_workspace(request).await;
+        }
+        crate::workspace_native::capture(&self.root, request)
+    }
+
+    async fn publish_workspace(
+        &self,
+        request: crate::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<crate::workspace::WorkspacePublicationOutcome> {
+        if let Some(authority) = &self.captured_io {
+            return authority.publish_workspace(request).await;
+        }
+        crate::workspace_native::publish(&self.root, request).await
+    }
     fn path_namespace(&self) -> crate::FsPathNamespace {
         crate::FsPathNamespace::VirtualRooted
     }
@@ -123,8 +238,18 @@ impl FsProvider for SandboxFsProvider {
 
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn crate::FileHandle>> {
         let target = self.resolve(path);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)?;
+        let writable =
+            flags.write || flags.append || flags.truncate || flags.create || flags.create_new;
+        let _guard = crate::workspace_native::guard(&self.root, writable)?;
+        if writable {
+            crate::workspace_native::protected(&self.root, &target)?;
+        } else {
+            crate::workspace_native::ensure_no_symlink(&self.root, &target)?;
+        }
+        if writable {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
         }
         let mut opts = fs::OpenOptions::new();
         opts.read(flags.read);
@@ -134,16 +259,69 @@ impl FsProvider for SandboxFsProvider {
         opts.create(flags.create);
         opts.create_new(flags.create_new);
         let file = opts.open(&target)?;
-        Ok(Box::new(file))
+        if writable {
+            Ok(Box::new(crate::workspace_native::WritableHandle {
+                file,
+                root: self.root.clone(),
+                path: target,
+            }))
+        } else {
+            Ok(Box::new(file))
+        }
     }
 
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        let _guard = crate::workspace_native::guard(&self.root, false)?;
         let target = self.resolve(path);
+        crate::workspace_native::ensure_no_symlink(&self.root, &target)?;
         fs::read(target)
     }
 
+    async fn read_version(
+        &self,
+        path: &Path,
+        version: &str,
+        size: u64,
+        snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
+        let provider = self.captured_io.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "immutable version reads are unsupported by this provider",
+            )
+        })?;
+        provider.read_version(path, version, size, snapshot).await
+    }
+
+    async fn publish_output(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String> {
+        let provider = self.captured_io.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "conditional output publication is unsupported",
+            )
+        })?;
+        provider.publish_output(path, data, expected).await
+    }
+
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
+        let provider = self.captured_io.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "conditional output removal is unsupported",
+            )
+        })?;
+        provider.remove_output(path, expected).await
+    }
+
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
         let target = self.resolve(path);
+        crate::workspace_native::protected(&self.root, &target)?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -151,7 +329,9 @@ impl FsProvider for SandboxFsProvider {
     }
 
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
         let target = self.resolve(path);
+        crate::workspace_native::protected(&self.root, &target)?;
         if target.exists() {
             fs::remove_file(target)?;
         }
@@ -159,17 +339,28 @@ impl FsProvider for SandboxFsProvider {
     }
 
     async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        let _guard = crate::workspace_native::guard(&self.root, false)?;
         let target = self.resolve(path);
+        crate::workspace_native::ensure_no_symlink(&self.root, &target)?;
         fs::metadata(target).map(FsMetadata::from)
     }
 
     async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        let _guard = crate::workspace_native::guard(&self.root, false)?;
         let target = self.resolve(path);
+        if let Some(parent) = target
+            .parent()
+            .filter(|parent| parent.starts_with(&self.root))
+        {
+            crate::workspace_native::ensure_no_symlink(&self.root, parent)?;
+        }
         fs::symlink_metadata(target).map(FsMetadata::from)
     }
 
     async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+        let _guard = crate::workspace_native::guard(&self.root, false)?;
         let target = self.resolve(path);
+        crate::workspace_native::ensure_no_symlink(&self.root, &target)?;
         let entries = fs::read_dir(&target)?;
         let mut out = Vec::new();
         for entry in entries {
@@ -180,28 +371,47 @@ impl FsProvider for SandboxFsProvider {
     }
 
     async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        let _guard = crate::workspace_native::guard(&self.root, false)?;
         let target = self.resolve(path);
         let real = fs::canonicalize(target)?;
+        if !real.starts_with(&self.root) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "path escapes the filesystem sandbox",
+            ));
+        }
         Ok(self.virtualize(&real))
     }
 
     async fn create_dir(&self, path: &Path) -> io::Result<()> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
         let target = self.resolve(path);
+        crate::workspace_native::protected(&self.root, &target)?;
         fs::create_dir(&target)
     }
 
     async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
         let target = self.resolve(path);
+        if target.is_dir() {
+            crate::workspace_native::ensure_no_symlink(&self.root, &target)?;
+            return Ok(());
+        }
+        crate::workspace_native::protected(&self.root, &target)?;
         fs::create_dir_all(&target)
     }
 
     async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
         let target = self.resolve(path);
+        crate::workspace_native::protected(&self.root, &target)?;
         fs::remove_dir(&target)
     }
 
     async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
         let target = self.resolve(path);
+        crate::workspace_native::protected(&self.root, &target)?;
         if target.exists() {
             fs::remove_dir_all(&target)?;
         }
@@ -209,8 +419,11 @@ impl FsProvider for SandboxFsProvider {
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
         let src = self.resolve(from);
         let dst = self.resolve(to);
+        crate::workspace_native::protected(&self.root, &src)?;
+        crate::workspace_native::protected(&self.root, &dst)?;
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -222,10 +435,33 @@ impl FsProvider for SandboxFsProvider {
     }
 
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
         let target = self.resolve(path);
+        crate::workspace_native::protected(&self.root, &target)?;
         let mut perms = fs::metadata(&target)?.permissions();
         perms.set_readonly(readonly);
         fs::set_permissions(target, perms)
+    }
+
+    async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        let _guard = crate::workspace_native::guard(&self.root, true)?;
+        let target = self.resolve(path);
+        crate::workspace_native::protected(&self.root, &target)?;
+        let parent = target.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "atomic publication path has no parent directory",
+            )
+        })?;
+        fs::create_dir_all(parent)?;
+        let canonical_parent = fs::canonicalize(parent)?;
+        if !canonical_parent.starts_with(&self.root) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "atomic publication parent escapes the filesystem sandbox",
+            ));
+        }
+        crate::native::atomic_create_new_native(&target, bytes)
     }
 
     async fn data_manifest_descriptor(
@@ -332,16 +568,100 @@ fn sanitize_segment(input: &str) -> String {
 
 #[cfg(all(not(target_arch = "wasm32"), test))]
 mod tests {
-    use super::SandboxFsProvider;
+    use super::{CapturedIo, SandboxFsProvider};
     use crate::FsProvider;
     use futures::executor;
     use std::fs;
     use std::io::ErrorKind;
     use std::path::Path;
+    use std::{io, sync::Arc};
     use tempfile::tempdir;
 
     fn virtual_path(path: &Path) -> String {
         path.to_string_lossy().replace('\\', "/")
+    }
+
+    struct CapturedFixture;
+
+    #[async_trait::async_trait(?Send)]
+    impl CapturedIo for CapturedFixture {
+        async fn read_version(
+            &self,
+            _path: &Path,
+            version: &str,
+            size: u64,
+            snapshot: &str,
+        ) -> io::Result<Vec<u8>> {
+            if version != "v1" || snapshot != "snapshot" || size != 3 {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "version unavailable",
+                ));
+            }
+            Ok(b"old".to_vec())
+        }
+        async fn publish_output(
+            &self,
+            _path: &Path,
+            _data: &[u8],
+            _expected: Option<&str>,
+        ) -> io::Result<String> {
+            Ok("published".to_owned())
+        }
+        async fn remove_output(&self, _path: &Path, _expected: &str) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn execution_authority_never_falls_back_to_the_cache_for_a_remote_project() {
+        let temp = tempdir().unwrap();
+        let provider = SandboxFsProvider::new(temp.path().to_path_buf()).unwrap()
+            .with_captured_io(Arc::new(CapturedFixture));
+        let work = crate::execution::ExecutionWorkId {
+            session_id: crate::execution::SessionId("session".into()),
+            turn_id: crate::execution::TurnId("turn".into()),
+        };
+        let error = executor::block_on(provider.transition_execution(&work,
+            crate::execution::ExecutionLeaseCommand::Acquire {
+                owner: crate::execution::ExecutionOwnerId([1;16]), duration_ms:30_000,
+            })).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(!temp.path().join(".artifacts/workspace-publications").exists());
+    }
+
+    #[test]
+    fn cached_live_file_cannot_substitute_for_a_captured_version() {
+        let temp = tempdir().expect("tempdir");
+        let provider = SandboxFsProvider::new(temp.path().to_path_buf())
+            .expect("sandbox")
+            .with_captured_io(Arc::new(CapturedFixture));
+        executor::block_on(provider.write(Path::new("/basic.m"), b"new")).expect("cache write");
+        assert_eq!(
+            executor::block_on(provider.read(Path::new("/basic.m"))).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            executor::block_on(provider.read_version(Path::new("/basic.m"), "v1", 3, "snapshot"))
+                .unwrap(),
+            b"old"
+        );
+        assert_eq!(
+            executor::block_on(provider.read_version(
+                Path::new("/basic.m"),
+                "missing",
+                3,
+                "snapshot"
+            ))
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            executor::block_on(provider.publish_output(Path::new("/output"), b"data", None))
+                .unwrap(),
+            "published"
+        );
     }
 
     #[test]
@@ -379,6 +699,26 @@ mod tests {
         let canonical = executor::block_on(provider.canonicalize(Path::new("./data/./file.bin")))
             .expect("canonicalize");
         assert_eq!(virtual_path(&canonical), "/data/file.bin");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_publication_rejects_a_symlinked_parent_escape() {
+        use std::os::unix::fs::symlink;
+
+        let sandbox_root = tempdir().expect("sandbox root");
+        let outside = tempdir().expect("outside root");
+        symlink(outside.path(), sandbox_root.path().join("escape")).unwrap();
+        let provider =
+            SandboxFsProvider::new(sandbox_root.path().to_path_buf()).expect("sandbox provider");
+
+        let error = executor::block_on(
+            provider.atomic_create_new(Path::new("/escape/artifact"), b"payload"),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(!outside.path().join("artifact").exists());
     }
 
     #[test]

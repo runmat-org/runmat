@@ -1,3 +1,5 @@
+mod deferred;
+
 use crate::bytecode::instr::{BytecodeClassMethod, BytecodeClassProperty, PropertyDefaultLiteral};
 use crate::bytecode::StochasticSourceOperand;
 use crate::call::builtins::is_vm_intrinsic_builtin;
@@ -2824,6 +2826,12 @@ impl Compiler {
                 }
                 Ok(())
             }
+            MirRvalue::ExternalFuture {
+                function,
+                args,
+                requested_outputs,
+                ..
+            } => self.compile_external_future(*function, args, *requested_outputs),
             MirRvalue::Spawn(operand) => {
                 self.compile_mir_operand(operand)?;
                 self.emit(Instr::Spawn);

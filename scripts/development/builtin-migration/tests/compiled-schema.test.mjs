@@ -8,7 +8,7 @@ import { contentDigest } from "../evidence.mjs";
 
 test("compiled inventory accepts the actual declared feature set without widening to unknown features", () => {
   const fixture = compiledInventoryFixture();
-  assert.ok(fixture.snapshot.build.crate_feature_inventory.known_features.includes("fea-example-fixtures"));
+  assert.ok(fixture.snapshot.build.crate_feature_inventory.known_features.includes("plot-core"));
   assert.doesNotThrow(() => parseCompiledInventory(fixture));
   fixture.snapshot.build.crate_feature_inventory.known_features.push("guessed-feature");
   fixture.digest.value = contentDigest(Buffer.from(JSON.stringify(fixture.snapshot))).slice("sha256:".length);

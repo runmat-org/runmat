@@ -45,6 +45,91 @@ path = "src/main"
 }
 
 #[test]
+fn parses_strongly_typed_execution_profiles() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.engineering]
+cluster = "fea-production"
+queue = "cpu"
+trust-identity = "sha256:trusted-worker"
+[execution-profiles.engineering.accelerator]
+class = "metal"
+memory-bytes = 17179869184
+"#,
+    );
+
+    let loaded = load_project_manifest(&manifest_path).unwrap();
+    let profile = &loaded.execution_profiles["engineering"];
+    assert_eq!(profile.cluster, "fea-production");
+    assert_eq!(profile.queue.as_deref(), Some("cpu"));
+    assert_eq!(
+        profile.trust_identity.as_deref(),
+        Some("sha256:trusted-worker")
+    );
+    let accelerator = profile.accelerator.as_ref().unwrap();
+    assert_eq!(accelerator.class, "metal");
+    assert_eq!(accelerator.memory_bytes, 17_179_869_184);
+}
+
+#[test]
+fn rejects_malformed_execution_profile_routing() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.engineering]
+cluster = " "
+"#,
+    );
+
+    let error = load_project_manifest(&manifest_path).unwrap_err();
+    assert!(error.to_string().contains("execution profile cluster"));
+}
+
+#[test]
+fn rejects_unbounded_execution_profile_accelerator() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "analysis"
+
+[sources]
+roots = ["src"]
+
+[execution-profiles.gpu]
+cluster = "gpu-cluster"
+
+[execution-profiles.gpu.accelerator]
+class = "metal"
+memory-bytes = 0
+"#,
+    );
+    let error = load_project_manifest(&manifest_path).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("execution profile accelerator memory"));
+}
+
+#[test]
 fn validates_explicit_native_interface_artifacts() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();

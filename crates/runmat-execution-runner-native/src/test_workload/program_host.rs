@@ -117,7 +117,7 @@ fn prepare_host_unit_route<'a>(
     // Direct recipe, artifact, foreign closure and captured policy.
     let selected_direct = match &request {
         HostUnitRequest::Direct(direct)
-            if direct.artifact.form == ExecutableForm::ExecutableUnitV3
+            if direct.artifact.form == ExecutableForm::ExecutableUnitV4
                 && (interop != runmat_types::InteropManifest::empty()
                     || direct.recipe.foreign_policy.is_some()) =>
         {

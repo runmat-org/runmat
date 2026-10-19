@@ -1,0 +1,17 @@
+{
+  "title": "fea.ThermoMechanicalDomain.atReferenceTemperature",
+  "category": "fea",
+  "keywords": ["fea", "domain", "thermo-mechanical", "temperature"],
+  "summary": "Create a thermo-mechanical domain with a typed constitutive reference temperature.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_domain_constructors_preserve_typed_physics_boundaries", "integration": null },
+  "description": "`domain = fea.ThermoMechanicalDomain.atReferenceTemperature(temperature)` creates the constitutive domain for thermo-mechanical procedures.",
+  "behaviors": [
+    "`temperature` must be an `fea.Temperature`; bare numeric values are rejected.",
+    "Temperature histories and spatial fields are authored as signals and excitations, not stored in the domain.",
+    "A model accepts at most one thermo-mechanical domain."
+  ],
+  "examples": [{ "description": "Create a room-temperature domain", "input": "domain = fea.ThermoMechanicalDomain.atReferenceTemperature(fea.Temperature.celsius(20));" }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/domains.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/domains.rs" }
+}

@@ -185,9 +185,19 @@ pub(super) fn advance<'a>(
                     .take()
                     .expect("completed class identity")
                     .finish();
-                let identity = runmat_types::ClassIdentity::new(name)
-                    .map_err(|error| ValueCodecError::invalid(&path, error.to_string()))?;
-                if !crate::parallel::codistributor::is_supported_class(&identity) {
+                let registered =
+                    crate::execution::value_codec::immutable_class::schema_for_type_identity(
+                        &name,
+                    )?;
+                let identity = runmat_types::ClassIdentity::new(
+                    registered
+                        .as_ref()
+                        .map_or(name, |schema| schema.class_name().to_owned()),
+                )
+                .map_err(|error| ValueCodecError::invalid(&path, error.to_string()))?;
+                if registered.is_none()
+                    && !crate::parallel::codistributor::is_supported_class(&identity)
+                {
                     return Err(ValueCodecError::unsupported(
                         &path,
                         "the immutable value-class codec is not registered in this runtime",

@@ -8,12 +8,17 @@ use crate::import::{
     GeometryImportBudgetPolicy, GeometryImportContext, GeometryImportError, GeometryImportOptions,
     LabeledSubshapeRemapConflict, LabeledSubshapeRemapConflictKind,
 };
-use runmat_geometry_core::{BodyMassProperties, GeometryDigest, GeometrySourceFormat, UnitSystem};
+use runmat_geometry_core::{
+    BodyMassProperties, ExactMassPropertiesEvaluator, ExactMassPropertiesImplementation,
+    GeometryDigest, GeometrySourceFormat, UnitSystem,
+};
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const DEFAULT_LINEAR_DEFLECTION: f64 = 0.01;
 const DEFAULT_ANGULAR_DEFLECTION: f64 = 0.5;
+const IGES_MATERIALIZATION_CHUNK_BYTES: usize = 1024 * 1024;
 const OCCT_IMPORT_CANCELLED_MESSAGE: &str = "OCCT CAD import cancelled";
 const XCAF_REMAP_CONFLICT_PREFIX: &str = "RUNMAT_XCAF_REMAP|";
 static NATIVE_CAD_BACKEND_USED: AtomicBool = AtomicBool::new(false);
@@ -31,12 +36,14 @@ pub(crate) fn import_cad_topology(
 ) -> Result<OcctCadTopology, GeometryImportError> {
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
+    let materialized = materialize_iges_input(bytes, format, context)?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_probe());
     let payload = ffi::bridge::import_cad_bytes(
         path,
         bytes,
+        materialized_path(&materialized)?,
         ffi_format(format),
-        ffi_import_options(options, cancel_token.id()),
+        ffi_import_options(options, cancel_token.id())?,
     )
     .map_err(|err| occt_bridge_error("OCCT CAD import failed", err))?;
     context.check_cancelled()?;
@@ -53,11 +60,20 @@ pub(crate) fn import_exact_cad_shape(
 ) -> Result<ImportedExactCad, GeometryImportError> {
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
-    let meters_per_source_unit = meters_per_unit(options.source_units)?;
+    // Exchange readers resolve file-declared units into a stable millimetre
+    // kernel representation. Keep kernel tolerances independent of the caller's
+    // fallback units; BREP has no declared units and uses that explicit fallback.
+    let fallback_unit_m = meters_per_unit(options.source_units)?;
+    let meters_per_source_unit = match format {
+        OcctCadFormat::Step | OcctCadFormat::Iges => 0.001,
+        OcctCadFormat::Brep => fallback_unit_m,
+    };
+    let materialized = materialize_iges_input(bytes, format, context)?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_probe());
     let payload = ffi::bridge::import_exact_cad_bytes(
         path,
         bytes,
+        materialized_path(&materialized)?,
         ffi_format(format),
         ffi_exact_import_options(options, cancel_token.id(), meters_per_source_unit),
     )
@@ -168,8 +184,10 @@ pub(crate) fn import_exact_cad_shape(
         evaluators: projection.evaluators,
         model: projection.model,
         healing_report: None,
+        source_face_ids: projection.source_face_ids,
         analysis: options.analysis.clone(),
         kernel_body_shapes: projection.kernel_body_shapes,
+        kernel_entity_ids: projection.kernel_entity_ids,
     };
     let tolerance_m = imported
         .topology
@@ -187,6 +205,36 @@ pub(crate) fn import_exact_cad_shape(
             &import_validation::ImportEvaluationControl::new(context, options),
         )
         .map_err(import_validation::map_validation_error)?;
+    let evaluation_control = import_validation::ImportEvaluationControl::new(context, options);
+    let validated_mass_properties = imported
+        .topology
+        .bodies
+        .iter()
+        .map(|body| {
+            ExactMassPropertiesEvaluator::mass_properties(
+                &evaluator,
+                &body.mass_properties_evaluator_id,
+                &evaluation_control,
+            )
+            .map(|properties| (body.mass_properties_evaluator_id.clone(), properties))
+            .map_err(import_validation::map_validation_error)
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    let representation_digest = imported.representation_digest();
+    for record in &mut imported.evaluators.mass_properties {
+        let properties = validated_mass_properties.get(&record.id).ok_or_else(|| {
+            GeometryImportError::InvalidGeometry(
+                "OCCT body mass-properties evidence is incomplete".into(),
+            )
+        })?;
+        record.implementation = ExactMassPropertiesImplementation::KernelValidated {
+            properties: *properties,
+            validation_digest: exact_projection::mass_validation_digest(
+                representation_digest,
+                properties,
+            ),
+        };
+    }
     if orientation_repaired
         || duplicates_consolidated
         || sewn
@@ -235,6 +283,53 @@ fn meters_per_unit(units: UnitSystem) -> Result<f64, GeometryImportError> {
     }
 }
 
+fn materialize_iges_input(
+    bytes: &[u8],
+    format: OcctCadFormat,
+    context: &GeometryImportContext,
+) -> Result<Option<tempfile::NamedTempFile>, GeometryImportError> {
+    if format != OcctCadFormat::Iges {
+        return Ok(None);
+    }
+    let mut file = tempfile::Builder::new()
+        .prefix("runmat-iges-")
+        .suffix(".iges")
+        .tempfile()
+        .map_err(|error| {
+            GeometryImportError::ParseFailed(format!(
+                "could not securely materialize IGES input: {error}"
+            ))
+        })?;
+    for chunk in bytes.chunks(IGES_MATERIALIZATION_CHUNK_BYTES) {
+        context.check_cancelled()?;
+        file.write_all(chunk).map_err(|error| {
+            GeometryImportError::ParseFailed(format!(
+                "could not write securely materialized IGES input: {error}"
+            ))
+        })?;
+    }
+    file.flush().map_err(|error| {
+        GeometryImportError::ParseFailed(format!(
+            "could not flush securely materialized IGES input: {error}"
+        ))
+    })?;
+    context.check_cancelled()?;
+    Ok(Some(file))
+}
+
+fn materialized_path(file: &Option<tempfile::NamedTempFile>) -> Result<&str, GeometryImportError> {
+    file.as_ref()
+        .map(|file| {
+            file.path().to_str().ok_or_else(|| {
+                GeometryImportError::ParseFailed(
+                    "securely materialized IGES path is not valid UTF-8".into(),
+                )
+            })
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
 pub(crate) fn start_cad_preview_session(
     path: &str,
     bytes: &[u8],
@@ -244,12 +339,14 @@ pub(crate) fn start_cad_preview_session(
 ) -> Result<OcctCadPreviewSessionStart, GeometryImportError> {
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
+    let materialized = materialize_iges_input(bytes, format, context)?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_probe());
     let payload = ffi::bridge::start_cad_preview_session(
         path,
         bytes,
+        materialized_path(&materialized)?,
         ffi_format(format),
-        ffi_import_options(options, cancel_token.id()),
+        ffi_import_options(options, cancel_token.id())?,
     )
     .map_err(|err| occt_bridge_error("OCCT CAD preview session failed", err))?;
     context.check_cancelled()?;
@@ -443,7 +540,7 @@ fn payload_to_topology(
 fn ffi_import_options(
     options: &GeometryImportOptions,
     cancel_token_id: u64,
-) -> ffi::bridge::OcctImportOptions {
+) -> Result<ffi::bridge::OcctImportOptions, GeometryImportError> {
     let linear_deflection = options
         .tessellation_profile
         .chord_tolerance
@@ -455,7 +552,8 @@ fn ffi_import_options(
         .filter(|value| value.is_finite() && *value > 0.0)
         .map(f64::to_radians)
         .unwrap_or(DEFAULT_ANGULAR_DEFLECTION);
-    ffi::bridge::OcctImportOptions {
+    Ok(ffi::bridge::OcctImportOptions {
+        step_coordinate_unit_m: meters_per_unit(options.units)?,
         linear_deflection,
         angular_deflection,
         relative_deflection: options.relative_deflection,
@@ -471,15 +569,16 @@ fn ffi_import_options(
         heal_short_edges_and_sliver_faces: false,
         maximum_healing_displacement: 0.0,
         cancel_token_id,
-    }
+    })
 }
 
-fn ffi_exact_import_options(
+pub(super) fn ffi_exact_import_options(
     options: &ExactCadImportOptions,
     cancel_token_id: u64,
     meters_per_source_unit: f64,
 ) -> ffi::bridge::OcctImportOptions {
     ffi::bridge::OcctImportOptions {
+        step_coordinate_unit_m: meters_per_source_unit,
         linear_deflection: DEFAULT_LINEAR_DEFLECTION,
         angular_deflection: DEFAULT_ANGULAR_DEFLECTION,
         relative_deflection: false,
@@ -511,8 +610,35 @@ fn ffi_format(format: OcctCadFormat) -> ffi::bridge::OcctCadFormat {
 }
 
 #[cfg(test)]
-mod remap_conflict_tests {
+mod tests {
     use super::*;
+
+    #[test]
+    fn iges_materialization_is_scoped_and_content_exact() {
+        let context = GeometryImportContext::new();
+        assert!(
+            materialize_iges_input(b"STEP", OcctCadFormat::Step, &context)
+                .unwrap()
+                .is_none()
+        );
+
+        let file = materialize_iges_input(b"IGES payload", OcctCadFormat::Iges, &context)
+            .unwrap()
+            .unwrap();
+        let path = file.path().to_owned();
+        assert_eq!(std::fs::read(&path).unwrap(), b"IGES payload");
+        drop(file);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn iges_materialization_observes_import_cancellation() {
+        let cancelled = std::sync::Arc::new(AtomicBool::new(true));
+        let context = GeometryImportContext::with_cancellation(cancelled);
+        let error = materialize_iges_input(b"IGES payload", OcctCadFormat::Iges, &context)
+            .expect_err("cancelled materialization must stop before writing");
+        assert!(matches!(error, GeometryImportError::Cancelled));
+    }
 
     #[test]
     fn parses_bounded_labeled_subshape_conflict_fields() {

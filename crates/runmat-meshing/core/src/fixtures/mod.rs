@@ -1,3 +1,18 @@
+mod connected;
+mod cube;
+mod solver_mesh;
+
+pub use cube::{quadratic_slab_mesh, slab_mesh};
+
+pub use connected::{
+    connected_quadratic_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh,
+    elevate_connected_tet4_fixture,
+};
+pub use solver_mesh::{
+    canonical_tetrahedron_meshing_evidence, canonical_tetrahedron_solver_mesh,
+    three_region_tetrahedron_solver_mesh, three_region_tetrahedron_solver_mesh_with_order,
+};
+
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
     RegionEntityMapping, SourceGeometry, SourceGeometryKind, SurfaceMesh, TessellationProfile,
@@ -16,6 +31,7 @@ pub fn through_hole_plate_geometry() -> GeometryAsset {
             kind: SourceGeometryKind::Cad,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile: TessellationProfile::default(),
@@ -141,65 +157,4 @@ pub fn split_material_through_hole_plate_geometry() -> GeometryAsset {
         ),
     ];
     geometry
-}
-
-pub fn nested_tetrahedron_shell_geometry() -> GeometryAsset {
-    GeometryAsset {
-        geometry_id: "geo_root_meshing_nested_tetrahedron_shell".to_string(),
-        source: GeometrySource {
-            path: "/fixtures/generic_nested_tetrahedron_shell.step".to_string(),
-            sha256: "generic-nested-tetrahedron-shell".to_string(),
-            importer_version: "test".to_string(),
-        },
-        source_geometry: SourceGeometry {
-            kind: SourceGeometryKind::Cad,
-            assembly: None,
-            material_evidence: Vec::new(),
-            cad_evaluators: Vec::new(),
-        },
-        tessellation_profile: TessellationProfile::default(),
-        units: UnitSystem::Meter,
-        revision: 1,
-        meshes: vec![MeshDescriptor {
-            mesh_id: "nested_tetrahedron_shell_surface".to_string(),
-            kind: MeshKind::Surface,
-            vertex_count: 8,
-            element_count: 8,
-        }],
-        surface_meshes: vec![SurfaceMesh::new(
-            "nested_tetrahedron_shell_surface",
-            vec![
-                [0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.2, 0.2, 0.2],
-                [0.3, 0.2, 0.2],
-                [0.2, 0.3, 0.2],
-                [0.2, 0.2, 0.3],
-            ],
-            vec![
-                [0, 2, 1],
-                [0, 1, 3],
-                [1, 2, 3],
-                [2, 0, 3],
-                [4, 6, 5],
-                [4, 5, 7],
-                [5, 6, 7],
-                [6, 4, 7],
-            ],
-        )],
-        regions: vec![Region {
-            region_id: "body".to_string(),
-            name: "body".into(),
-            tag: Some("material".to_string()),
-            cad_ownership: None,
-        }],
-        region_entity_mappings: vec![RegionEntityMapping::all_faces(
-            "body",
-            "nested_tetrahedron_shell_surface",
-            8,
-        )],
-        diagnostics: Vec::new(),
-    }
 }

@@ -1,0 +1,17 @@
+{
+  "title": "fea.FluidDomain.newtonian",
+  "category": "fea",
+  "keywords": ["fea", "domain", "fluid", "cfd", "newtonian"],
+  "summary": "Create a Newtonian fluid domain from typed constitutive properties.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_domain_constructors_preserve_typed_physics_boundaries", "integration": "tests/analysis" },
+  "description": "`domain = fea.FluidDomain.newtonian(density, viscosity, turbulenceIntensity)` creates a fluid domain without embedding a solver procedure or inlet condition.",
+  "behaviors": [
+    "Density and dynamic viscosity must be positive typed values; turbulence intensity must be a typed ratio between zero and one.",
+    "Steady versus transient execution is selected by the procedure step.",
+    "Inlet velocity and wall motion are authored as constraints or excitations, not stored in the domain."
+  ],
+  "examples": [{ "description": "Create an air domain", "input": "air = fea.FluidDomain.newtonian(fea.MassDensity.kilogramsPerCubicMeter(1.225), fea.DynamicViscosity.pascalSeconds(1.81e-5), fea.TurbulenceIntensity.ratio(0.05));" }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/domains.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/domains.rs" }
+}

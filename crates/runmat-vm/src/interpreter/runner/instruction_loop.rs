@@ -1021,6 +1021,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
             | Instr::CreateSemanticFuture(_, _, _)
             | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
+            | Instr::CreateExternalFuture(_, _, _)
             | Instr::ScheduleFeval { .. }
             | Instr::Spawn
             | Instr::SpawnOn

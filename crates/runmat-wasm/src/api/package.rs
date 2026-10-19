@@ -1,4 +1,5 @@
 mod cache;
+mod captured;
 mod provider;
 
 pub use cache::{
@@ -129,6 +130,13 @@ pub async fn resolve_project(
     )
     .await
     .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    finish_resolution(resolved, &provider).await
+}
+
+async fn finish_resolution(
+    resolved: runmat_package::ResolvedProject,
+    provider: &JsPackageSourceProvider,
+) -> Result<JsValue, JsValue> {
     let cache_bindings =
         js_sys::Reflect::get(&provider.bindings, &JsValue::from_str("packageCache"))?;
     let cache = crate::runtime::package_cache::JsPackageCacheBackend::new(&cache_bindings)?;

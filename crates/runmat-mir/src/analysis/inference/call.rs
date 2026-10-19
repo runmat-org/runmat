@@ -132,8 +132,7 @@ fn bound_function(call: &MirCall) -> Option<FunctionId> {
     match &call.callee {
         MirCallee::Static(
             CallableIdentity::BoundFunction(function)
-            | CallableIdentity::AnonymousFunction(function)
-            | CallableIdentity::ExternalFunction { function, .. },
+            | CallableIdentity::AnonymousFunction(function),
         ) => Some(*function),
         _ => None,
     }
@@ -164,8 +163,7 @@ fn operand_fact(
         MirOperand::FunctionHandle(identity) => {
             let summary = match identity {
                 CallableIdentity::BoundFunction(function)
-                | CallableIdentity::AnonymousFunction(function)
-                | CallableIdentity::ExternalFunction { function, .. } => summaries.get(function),
+                | CallableIdentity::AnonymousFunction(function) => summaries.get(function),
                 _ => None,
             };
             ValueFact::scalar(ValueKindFact::Callable(runmat_types::CallableFact {

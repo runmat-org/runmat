@@ -342,7 +342,7 @@ fn protected_boundary_complex() -> ProtectedBoundaryComplex {
             watertight: true,
             manifold: true,
             shell_nesting_classified: true,
-            material_interfaces_classified: true,
+            conformal_interfaces_classified: true,
         },
         evidence: StageEvidence::complete(MeshingStage::ProtectedBoundaryComplex),
     }
@@ -351,7 +351,6 @@ fn protected_boundary_complex() -> ProtectedBoundaryComplex {
 fn tetrahedron_mesh(recovery_complete: bool, quality_optimized: bool) -> TetrahedronMesh {
     TetrahedronMesh {
         mesh_id: "tetrahedron".to_string(),
-        tetrahedron_generation_family: "unknown".to_string(),
         nodes: vec![],
         elements: vec![],
         boundary_faces: vec![],

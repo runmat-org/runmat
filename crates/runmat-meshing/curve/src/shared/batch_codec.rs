@@ -18,6 +18,25 @@ pub fn encode_shared_curve_batch(
         .map_err(map_codec_error)
 }
 
+/// Admit the same canonical batch encoding under the caller's storage authority.
+/// Retained output charges belong to the caller's allocation scope.
+pub fn encode_shared_curve_batch_admitted(
+    batch: &SharedCurveBatch,
+    topology: &ExactBRepTopology,
+    signal: &dyn runmat_meshing_core::MeshingCancellationSignal,
+    allocations: &dyn runmat_geometry_core::GeometryEvaluationControl,
+) -> Result<Vec<u8>, SharedCurveError> {
+    super::batch::validate_batch_with_cancellation(batch, topology, Some(signal))?;
+    super::codec_admission::encode(
+        batch,
+        CODEC_PREFIX,
+        CONTRACT_DOMAIN,
+        CONTRACT_LIMITS,
+        signal,
+        allocations,
+    )
+}
+
 /// Decodes bounded hostile input and independently re-admits its topology slice.
 pub fn decode_shared_curve_batch(
     bytes: &[u8],

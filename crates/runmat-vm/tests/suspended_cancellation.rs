@@ -166,6 +166,8 @@ fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
         ),
         retry: runmat_execution::RetryPolicy::Never,
         program_revision: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        console: None,
         capabilities: Default::default(),
         program: DeferredProgram::Local,
     };

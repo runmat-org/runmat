@@ -3,16 +3,23 @@
 
 mod class_registration;
 mod conversion;
+pub(crate) mod display;
 mod entrypoints;
 mod errors;
 mod metadata;
 mod prelude;
+pub mod generated;
+pub mod region;
 pub mod triangulation;
 #[cfg(test)]
 mod tests;
 
 use class_registration::*;
 use conversion::*;
+pub(crate) use conversion::geometry_asset_from_value_with_builtin;
+pub use display::{
+    geometry_mesh_method_builtin, GEOMETRY_MESH_METHOD_DESCRIPTOR, GEOMETRY_MESH_METHOD_INTEGER_AUDIT,
+};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use entrypoints::{
     __runmat_wasm_register_builtin_geometry_inspect_builtin,

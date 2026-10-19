@@ -52,6 +52,12 @@ impl AllocationProcesses {
             "RUNMAT_EXECUTION_WORKER_REMOTE".to_string(),
             "1".to_string(),
         );
+        if !allocation.resources.accelerators.is_empty() {
+            command.environment.insert(
+                "RUNMAT_EXECUTION_ACCELERATOR_REQUIRED".to_string(),
+                "1".to_string(),
+            );
+        }
         if bootstrap.ready_v1 {
             command.environment.insert(
                 "RUNMAT_EXECUTION_WORKER_READY_V1".to_string(),

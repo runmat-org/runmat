@@ -1,7 +1,7 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_assembly.hxx"
-#include "runmat-geometry-io/src/occt/exact_xcaf_healing.hxx"
-#include "runmat-geometry-io/src/occt/exact_xcaf_subshape_remap.hxx"
+#include "exact_assembly.hxx"
+#include "exact_xcaf_healing.hxx"
+#include "exact_xcaf_subshape_remap.hxx"
 
 #include <BRepCheck_Analyzer.hxx>
 #include <TCollection_AsciiString.hxx>

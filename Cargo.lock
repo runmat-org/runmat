@@ -1226,6 +1226,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "ciborium"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
+dependencies = [
+ "ciborium-io",
+ "ciborium-ll",
+ "serde",
+]
+
+[[package]]
+name = "ciborium-io"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757"
+
+[[package]]
+name = "ciborium-ll"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
+dependencies = [
+ "ciborium-io",
+ "half",
+]
+
+[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3610,6 +3637,20 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
+dependencies = [
+ "futures-util",
+ "http 0.2.12",
+ "hyper 0.14.32",
+ "rustls 0.21.12",
+ "tokio",
+ "tokio-rustls 0.24.1",
+]
+
+[[package]]
+name = "hyper-rustls"
 version = "0.27.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
@@ -3617,9 +3658,9 @@ dependencies = [
  "http 1.4.2",
  "hyper 1.10.1",
  "hyper-util",
- "rustls",
+ "rustls 0.23.40",
  "tokio",
- "tokio-rustls",
+ "tokio-rustls 0.26.4",
  "tower-service",
  "webpki-roots 1.0.8",
 ]
@@ -5479,7 +5520,6 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "prost",
- "reqwest 0.11.27",
  "thiserror 1.0.69",
  "tokio",
  "tonic",
@@ -5943,6 +5983,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-error"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
+dependencies = [
+ "proc-macro-error-attr",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "version_check",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6135,7 +6199,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash 2.1.2",
- "rustls",
+ "rustls 0.23.40",
  "socket2 0.6.4",
  "thiserror 2.0.18",
  "tokio",
@@ -6156,7 +6220,7 @@ dependencies = [
  "rand 0.9.4",
  "ring",
  "rustc-hash 2.1.2",
- "rustls",
+ "rustls 0.23.40",
  "rustls-pki-types",
  "rustls-platform-verifier",
  "slab",
@@ -6484,6 +6548,7 @@ dependencies = [
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.32",
+ "hyper-rustls 0.24.2",
  "ipnet",
  "js-sys",
  "log",
@@ -6491,17 +6556,21 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
+ "rustls 0.21.12",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 0.1.2",
  "system-configuration",
  "tokio",
+ "tokio-rustls 0.24.1",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "webpki-roots 0.25.4",
  "winreg 0.50.0",
 ]
 
@@ -6521,7 +6590,7 @@ dependencies = [
  "http-body 1.0.1",
  "http-body-util",
  "hyper 1.10.1",
- "hyper-rustls",
+ "hyper-rustls 0.27.9",
  "hyper-util",
  "js-sys",
  "log",
@@ -6529,14 +6598,14 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls",
+ "rustls 0.23.40",
  "rustls-pki-types",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
  "tokio",
- "tokio-rustls",
+ "tokio-rustls 0.26.4",
  "tokio-util",
  "tower 0.5.3",
  "tower-http",
@@ -6636,6 +6705,10 @@ dependencies = [
  "reqwest 0.12.28",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-core",
+ "runmat-analysis-execution",
+ "runmat-analysis-fea",
+ "runmat-analysis-language",
  "runmat-aot",
  "runmat-builtins",
  "runmat-config",
@@ -6645,8 +6718,14 @@ dependencies = [
  "runmat-execution-runner-native",
  "runmat-filesystem",
  "runmat-gc",
+ "runmat-geometry-core",
+ "runmat-geometry-io",
+ "runmat-geometry-ops",
  "runmat-hir",
  "runmat-java",
+ "runmat-logging",
+ "runmat-meshing-core",
+ "runmat-meshing-execution",
  "runmat-mex",
  "runmat-mir",
  "runmat-native-codegen",
@@ -6754,8 +6833,33 @@ name = "runmat-analysis-core"
 version = "0.6.2"
 dependencies = [
  "runmat-geometry-core",
+ "runmat-types",
+ "schemars",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-analysis-execution"
+version = "0.6.2"
+dependencies = [
+ "runmat-analysis-core",
+ "runmat-analysis-fea",
+ "runmat-canonical-codec",
+ "runmat-execution",
+ "runmat-execution-artifact",
+ "runmat-execution-runner",
+ "runmat-geometry-core",
+ "runmat-geometry-io",
+ "runmat-geometry-ops",
+ "runmat-meshing-core",
+ "runmat-meshing-execution",
+ "runmat-mir",
+ "runmat-types",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -6765,14 +6869,45 @@ version = "0.6.2"
 dependencies = [
  "anyhow",
  "futures",
+ "libc",
  "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-canonical-codec",
+ "runmat-cpu-execution",
+ "runmat-execution",
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-analysis-language"
+version = "0.6.2"
+dependencies = [
+ "runmat-analysis-core",
+ "runmat-analysis-fea",
+ "runmat-geometry-core",
+ "runmat-geometry-fixtures",
+ "runmat-meshing-core",
+ "runmat-parser",
+ "runmat-types",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-analysis-qualification"
+version = "0.6.2"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6780,6 +6915,7 @@ name = "runmat-aot"
 version = "0.6.2"
 dependencies = [
  "ar_archive_writer",
+ "cc",
  "object 0.37.3",
  "runmat-builtins",
  "runmat-core",
@@ -6844,6 +6980,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-build-identity"
+version = "0.6.2"
+dependencies = [
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "runmat-builtins"
 version = "0.6.2"
 dependencies = [
@@ -6856,6 +6999,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "syn 1.0.109",
+ "thiserror 1.0.69",
  "url",
  "wasm-bindgen-test",
 ]
@@ -6865,6 +7009,7 @@ name = "runmat-canonical-codec"
 version = "0.6.2"
 dependencies = [
  "minicbor",
+ "runmat-build-identity",
  "serde",
  "serde_json",
 ]
@@ -6907,6 +7052,7 @@ dependencies = [
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
+ "runmat-fea-source",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
@@ -6942,11 +7088,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-cpu-execution"
+version = "0.6.2"
+dependencies = [
+ "rayon",
+ "runmat-build-identity",
+]
+
+[[package]]
 name = "runmat-execution"
 version = "0.6.2"
 dependencies = [
  "ed25519-dalek",
  "minicbor",
+ "runmat-time",
  "runmat-types",
  "serde",
  "serde_json",
@@ -6997,24 +7152,37 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "dirs 5.0.1",
+ "futures",
+ "libc",
  "rand 0.8.6",
  "rcgen",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-core",
+ "runmat-analysis-execution",
+ "runmat-analysis-fea",
+ "runmat-analysis-language",
  "runmat-builtins",
+ "runmat-canonical-codec",
  "runmat-config",
  "runmat-core",
+ "runmat-cpu-execution",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
  "runmat-execution-transport-native",
+ "runmat-filesystem",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
+ "runmat-geometry-io",
+ "runmat-geometry-ops",
  "runmat-java",
+ "runmat-logging",
  "runmat-meshing-core",
  "runmat-meshing-curve",
  "runmat-meshing-execution",
  "runmat-mex",
+ "runmat-mir",
  "runmat-native-codegen",
  "runmat-native-ffi",
  "runmat-package",
@@ -7027,13 +7195,17 @@ dependencies = [
  "runmat-types",
  "runmat-value",
  "runmat-vm",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sysinfo",
  "target-lexicon",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite",
+ "tracing",
  "uuid",
  "windows-sys 0.59.0",
 ]
@@ -7054,9 +7226,10 @@ dependencies = [
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-server-client",
- "rustls",
+ "rustls 0.23.40",
  "serde",
  "sha2 0.10.9",
+ "socket2 0.6.4",
  "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
@@ -7067,18 +7240,37 @@ name = "runmat-extension-abi"
 version = "0.6.2"
 
 [[package]]
+name = "runmat-fea-source"
+version = "0.6.2"
+dependencies = [
+ "runmat-analysis-core",
+ "runmat-analysis-language",
+ "runmat-geometry-core",
+ "runmat-meshing-core",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-filesystem"
 version = "0.6.2"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
  "chrono",
+ "ciborium",
  "crossbeam-utils",
+ "fs2",
  "futures",
  "js-sys",
  "log",
  "once_cell",
  "reqwest 0.12.28",
+ "runmat-canonical-codec",
+ "runmat-time",
+ "runmat-workspace-contracts",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7129,7 +7321,9 @@ dependencies = [
 name = "runmat-geometry-core"
 version = "0.6.2"
 dependencies = [
+ "runmat-build-identity",
  "runmat-canonical-codec",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7152,10 +7346,13 @@ dependencies = [
  "cxx-build",
  "js-sys",
  "occt-sys",
+ "runmat-build-identity",
  "runmat-geometry-core",
+ "runmat-geometry-ops",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 1.0.69",
  "wasm-bindgen",
 ]
@@ -7165,8 +7362,10 @@ name = "runmat-geometry-ops"
 version = "0.6.2"
 dependencies = [
  "delaunator",
+ "runmat-build-identity",
  "runmat-geometry-core",
  "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -7231,6 +7430,8 @@ name = "runmat-lexer"
 version = "0.6.2"
 dependencies = [
  "logos",
+ "runmat-types",
+ "serde",
 ]
 
 [[package]]
@@ -7241,8 +7442,10 @@ dependencies = [
  "js-sys",
  "once_cell",
  "opentelemetry",
+ "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "tracing",
@@ -7260,6 +7463,7 @@ dependencies = [
  "log",
  "lsp-types",
  "once_cell",
+ "runmat-analysis-language",
  "runmat-builtins",
  "runmat-config",
  "runmat-filesystem",
@@ -7301,35 +7505,19 @@ dependencies = [
 [[package]]
 name = "runmat-meshing"
 version = "0.6.2"
-dependencies = [
- "runmat-geometry-core",
- "runmat-meshing-cad",
- "runmat-meshing-core",
- "runmat-meshing-curve",
- "runmat-meshing-opt",
- "runmat-meshing-plc",
- "runmat-meshing-size",
- "runmat-meshing-surface",
- "runmat-meshing-tetrahedron",
- "serde",
-]
-
-[[package]]
-name = "runmat-meshing-cad"
-version = "0.6.2"
-dependencies = [
- "runmat-geometry-core",
- "serde",
-]
 
 [[package]]
 name = "runmat-meshing-core"
 version = "0.6.2"
 dependencies = [
  "minicbor",
+ "num-bigint",
  "robust",
+ "runmat-build-identity",
  "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-meshing-size",
  "serde",
  "serde_json",
@@ -7340,31 +7528,25 @@ dependencies = [
 name = "runmat-meshing-curve"
 version = "0.6.2"
 dependencies = [
+ "runmat-build-identity",
  "runmat-canonical-codec",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
- "runmat-meshing-cad",
  "runmat-meshing-core",
  "runmat-meshing-size",
  "serde",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "runmat-meshing-evidence"
-version = "0.6.2"
-dependencies = [
- "runmat-geometry-core",
- "runmat-geometry-io",
- "runmat-meshing-core",
- "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]
 name = "runmat-meshing-execution"
 version = "0.6.2"
 dependencies = [
+ "futures",
+ "runmat-build-identity",
+ "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
@@ -7376,28 +7558,17 @@ dependencies = [
  "runmat-meshing-tetrahedron",
  "runmat-types",
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "runmat-meshing-opt"
-version = "0.6.2"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "runmat-meshing-plc"
-version = "0.6.2"
-dependencies = [
- "runmat-meshing-core",
- "serde",
+ "tracing",
 ]
 
 [[package]]
 name = "runmat-meshing-size"
 version = "0.6.2"
 dependencies = [
+ "runmat-build-identity",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "serde",
@@ -7408,32 +7579,37 @@ dependencies = [
 name = "runmat-meshing-surface"
 version = "0.6.2"
 dependencies = [
+ "minicbor",
+ "runmat-build-identity",
  "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
- "runmat-meshing-cad",
  "runmat-meshing-core",
  "runmat-meshing-curve",
  "runmat-meshing-size",
  "serde",
  "sha2 0.10.9",
+ "tracing",
 ]
 
 [[package]]
 name = "runmat-meshing-tetrahedron"
 version = "0.6.2"
 dependencies = [
+ "minicbor",
+ "runmat-build-identity",
  "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-geometry-core",
  "runmat-meshing-core",
  "runmat-meshing-curve",
- "runmat-meshing-opt",
- "runmat-meshing-plc",
  "runmat-meshing-size",
  "runmat-meshing-surface",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tracing",
 ]
 
 [[package]]
@@ -7569,6 +7745,7 @@ dependencies = [
  "p256",
  "runmat-config",
  "runmat-filesystem",
+ "runmat-types",
  "semver",
  "serde",
  "serde_json",
@@ -7610,6 +7787,7 @@ dependencies = [
  "keyring",
  "p256",
  "rand_core 0.6.4",
+ "runmat-filesystem",
  "runmat-package",
  "runmat-package-cache",
  "runmat-server-client",
@@ -7754,21 +7932,23 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-analysis-fea",
+ "runmat-analysis-language",
  "runmat-async",
  "runmat-builtins",
+ "runmat-canonical-codec",
  "runmat-execution",
  "runmat-extension-abi",
+ "runmat-fea-source",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-gc-api",
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-geometry-io",
  "runmat-geometry-ops",
  "runmat-java",
  "runmat-macros",
- "runmat-meshing",
  "runmat-meshing-core",
- "runmat-meshing-evidence",
  "runmat-mex",
  "runmat-native-ffi",
  "runmat-plot",
@@ -7782,7 +7962,6 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.10.9",
  "target-lexicon",
  "tempfile",
@@ -7948,6 +8127,7 @@ dependencies = [
 name = "runmat-types"
 version = "0.6.2"
 dependencies = [
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -8022,12 +8202,14 @@ dependencies = [
  "miette",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-language",
  "runmat-builtins",
  "runmat-config",
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
+ "runmat-fea-source",
  "runmat-filesystem",
  "runmat-geometry-core",
  "runmat-geometry-io",
@@ -8056,6 +8238,22 @@ dependencies = [
  "wasm-bindgen-test",
  "web-sys",
  "zeroize",
+]
+
+[[package]]
+name = "runmat-workspace-contracts"
+version = "0.6.2"
+dependencies = [
+ "ciborium",
+ "schemars",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "ts-rs",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]
@@ -8158,6 +8356,18 @@ dependencies = [
 
 [[package]]
 name = "rustls"
+version = "0.21.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
+dependencies = [
+ "log",
+ "ring",
+ "rustls-webpki 0.101.7",
+ "sct",
+]
+
+[[package]]
+name = "rustls"
 version = "0.23.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
@@ -8167,7 +8377,7 @@ dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki",
+ "rustls-webpki 0.103.13",
  "subtle",
  "zeroize",
 ]
@@ -8182,6 +8392,15 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework 3.7.0",
+]
+
+[[package]]
+name = "rustls-pemfile"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c74cae0a4cf6ccbbf5f359f08efdf8ee7e1dc532573bf0db71968cb56b1448c"
+dependencies = [
+ "base64 0.21.7",
 ]
 
 [[package]]
@@ -8205,10 +8424,10 @@ dependencies = [
  "jni 0.21.1",
  "log",
  "once_cell",
- "rustls",
+ "rustls 0.23.40",
  "rustls-native-certs",
  "rustls-platform-verifier-android",
- "rustls-webpki",
+ "rustls-webpki 0.103.13",
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
@@ -8220,6 +8439,16 @@ name = "rustls-platform-verifier-android"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
+
+[[package]]
+name = "rustls-webpki"
+version = "0.101.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
+dependencies = [
+ "ring",
+ "untrusted",
+]
 
 [[package]]
 name = "rustls-webpki"
@@ -8339,6 +8568,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d68f2ec51b097e4c1a75b681a8bec621909b5e91f15bb7b840c4f2f7b01148b2"
 
 [[package]]
+name = "sct"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
+dependencies = [
+ "ring",
+ "untrusted",
+]
+
+[[package]]
 name = "sctk-adwaita"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8455,6 +8694,16 @@ dependencies = [
  "js-sys",
  "serde",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -9260,11 +9509,21 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
+dependencies = [
+ "rustls 0.21.12",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-rustls"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
- "rustls",
+ "rustls 0.23.40",
  "tokio",
 ]
 
@@ -9287,10 +9546,10 @@ checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
 dependencies = [
  "futures-util",
  "log",
- "rustls",
+ "rustls 0.23.40",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls",
+ "tokio-rustls 0.26.4",
  "tungstenite",
  "webpki-roots 0.26.11",
 ]
@@ -9667,6 +9926,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ts-rs"
+version = "10.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e640d9b0964e9d39df633548591090ab92f7a4567bc31d3891af23471a3365c6"
+dependencies = [
+ "lazy_static",
+ "thiserror 2.0.18",
+ "ts-rs-macros",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "10.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e9d8656589772eeec2cf7a8264d9cda40fb28b9bc53118ceb9e8c07f8f38730"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+ "termcolor",
+]
+
+[[package]]
 name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9685,7 +9967,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.6",
- "rustls",
+ "rustls 0.23.40",
  "rustls-pki-types",
  "sha1",
  "thiserror 1.0.69",
@@ -9863,7 +10145,7 @@ dependencies = [
  "base64 0.22.1",
  "log",
  "once_cell",
- "rustls",
+ "rustls 0.23.40",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -9880,7 +10162,7 @@ dependencies = [
  "base64 0.22.1",
  "log",
  "percent-encoding",
- "rustls",
+ "rustls 0.23.40",
  "rustls-pki-types",
  "ureq-proto",
  "utf8-zero",
@@ -9941,6 +10223,30 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utoipa"
+version = "4.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5afb1a60e207dca502682537fefcfd9921e71d0b83e9576060f09abc6efab23"
+dependencies = [
+ "indexmap 2.14.0",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "4.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20c24e8ab68ff9ee746aad22d39b5535601e6416d1b0feeabf78be986a5c4392"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
 
 [[package]]
 name = "uuid"
@@ -10339,6 +10645,12 @@ checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
 dependencies = [
  "rustls-pki-types",
 ]
+
+[[package]]
+name = "webpki-roots"
+version = "0.25.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 
 [[package]]
 name = "webpki-roots"

@@ -1,0 +1,142 @@
+use super::*;
+use runmat_geometry_core::{
+    GeometryEvaluationError, ParameterRange, PcurveDerivatives, PcurveEvaluatorId,
+};
+
+struct Pcurves {
+    representative: PcurveEvaluatorId,
+    offset: f64,
+}
+impl ExactPcurveEvaluator for Pcurves {
+    fn parameter_range(
+        &self,
+        _: &PcurveEvaluatorId,
+    ) -> Result<ParameterRange, GeometryEvaluationError> {
+        Ok(ParameterRange {
+            start: 0.0,
+            end: 1.0,
+        })
+    }
+    fn point(
+        &self,
+        id: &PcurveEvaluatorId,
+        _: f64,
+        control: &dyn GeometryEvaluationControl,
+    ) -> Result<[f64; 2], GeometryEvaluationError> {
+        control.checkpoint()?;
+        Ok([
+            1.0 + if id == &self.representative {
+                0.0
+            } else {
+                self.offset
+            },
+            2.0,
+        ])
+    }
+    fn derivatives(
+        &self,
+        _: &PcurveEvaluatorId,
+        _: f64,
+        _: &dyn GeometryEvaluationControl,
+    ) -> Result<PcurveDerivatives, GeometryEvaluationError> {
+        panic!("endpoint admission needs only points")
+    }
+}
+struct Control;
+impl GeometryEvaluationControl for Control {
+    fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
+        Ok(())
+    }
+    fn consume_iterations(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+        Ok(())
+    }
+    fn consume_search_work(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+        Ok(())
+    }
+    fn consume_allocation_bytes(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+        Ok(())
+    }
+}
+fn topology() -> ExactBRepTopology {
+    let mut topology = runmat_geometry_fixtures::exact_circle().1;
+    let mut edge = topology.edges[0].clone();
+    edge.id.source_topology_id.push_str(":other");
+    let mut coedge = topology.coedges[0].clone();
+    coedge.id.source_topology_id.push_str(":other");
+    coedge.edge_id = edge.id.clone();
+    coedge.pcurve_evaluator_id = PcurveEvaluatorId::new("pcurve:other").unwrap();
+    topology.edges.push(edge);
+    topology.coedges.push(coedge);
+    topology
+}
+
+#[test]
+fn incident_pcurves_share_one_coordinate_independently_of_partition_or_traversal() {
+    let mut topology = topology();
+    let edge = topology.edges[1].clone();
+    let coedge = topology.coedges[1].clone();
+    let vertex = edge.start_vertex_id.as_ref().unwrap();
+    let pcurves = Pcurves {
+        representative: topology.coedges[0].pcurve_evaluator_id.clone(),
+        offset: 7.0e-15,
+    };
+    let original = pcurves
+        .point(&coedge.pcurve_evaluator_id, 0.0, &Control)
+        .unwrap();
+    assert_ne!(original, [1.0, 2.0]);
+    for _ in 0..2 {
+        let uv = VertexUvContext {
+            topology: &topology,
+            pcurves: &pcurves,
+            control: &Control,
+            maximum_error: 1.0e-10,
+        }
+        .canonical_coordinate(&edge, &coedge, vertex, original)
+        .unwrap();
+        assert_eq!(uv, [1.0, 2.0]);
+        topology.coedges.reverse();
+    }
+}
+
+#[test]
+fn endpoint_authority_preserves_distinct_vertices_and_rejects_excess_error() {
+    let mut topology = topology();
+    let pcurves = Pcurves {
+        representative: topology.coedges[0].pcurve_evaluator_id.clone(),
+        offset: 0.01,
+    };
+    let mut edge = topology.edges[1].clone();
+    let coedge = &topology.coedges[1];
+    let original = pcurves
+        .point(&coedge.pcurve_evaluator_id, 0.0, &Control)
+        .unwrap();
+    let context = VertexUvContext {
+        topology: &topology,
+        pcurves: &pcurves,
+        control: &Control,
+        maximum_error: 1.0e-10,
+    };
+    let error = context
+        .canonical_coordinate(
+            &edge,
+            coedge,
+            edge.start_vertex_id.as_ref().unwrap(),
+            original,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, SharedCurveErrorKind::GeometricMismatch);
+    let mut distinct = edge.start_vertex_id.clone().unwrap();
+    distinct.source_topology_id.push_str(":distinct");
+    edge.start_vertex_id = Some(distinct.clone());
+    edge.end_vertex_id = Some(distinct.clone());
+    topology.edges[1] = edge.clone();
+    let uv = VertexUvContext {
+        topology: &topology,
+        pcurves: &pcurves,
+        control: &Control,
+        maximum_error: 1.0e-10,
+    }
+    .canonical_coordinate(&edge, &topology.coedges[1], &distinct, original)
+    .unwrap();
+    assert_eq!(uv, original);
+}

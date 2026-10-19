@@ -252,6 +252,8 @@ impl BrowserExecutionService {
                     host,
                     invocation_context: runmat_execution::ProgramInvocationContext::Direct,
                     inputs: request.arguments.clone(),
+                    environment: runmat_execution::EnvironmentSnapshot::default(),
+                    console: None,
                     outputs,
                     resources: request.resources.clone(),
                     retry: runmat_execution::RetryPolicy::Never,
@@ -307,6 +309,7 @@ impl BrowserExecutionService {
         &self,
         attempt: AttemptRequest,
         response: Result<ProgramExecutionResponse, String>,
+        wall_millis: u64,
     ) {
         let physical_completion = response.is_ok();
         let already_certified = self
@@ -353,10 +356,18 @@ impl BrowserExecutionService {
         let (result, report) = match admitted {
             Ok(ProgramExecutionResponse::Success { outputs }) => {
                 let decoded = decode_owned_outputs(&outputs);
-                let report = AttemptReport::Succeeded {
-                    result: AttemptSuccess::Values {
-                        outputs,
-                        result_objects: Vec::new(),
+                let report = match AttemptSuccess::new(
+                    &attempt,
+                    outputs,
+                    Vec::new(),
+                    wall_millis,
+                    0,
+                    0,
+                ) {
+                    Ok(result) => AttemptReport::Succeeded { result },
+                    Err(message) => AttemptReport::Failed {
+                        kind: AttemptFailureKind::Rejected,
+                        message,
                     },
                 };
                 (decoded, report)

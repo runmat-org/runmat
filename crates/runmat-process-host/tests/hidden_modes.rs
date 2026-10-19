@@ -15,6 +15,14 @@ fn registry_recognizes_exact_private_mode() {
 }
 
 #[test]
+fn registry_recognizes_meshing_worker_mode() {
+    let mode = HiddenModeRegistry::standard()
+        .detect(args(&["runmat", "--__runmat-meshing-worker"]))
+        .unwrap();
+    assert_eq!(mode, Some(HiddenMode::MeshingWorker));
+}
+
+#[test]
 fn registry_rejects_private_mode_mixed_with_user_arguments() {
     let error = HiddenModeRegistry::standard()
         .detect(args(&["runmat", "--__runmat-test-worker", "--help"]))

@@ -116,6 +116,14 @@ pub fn debug_stack_enabled() -> bool {
 pub fn check_cancelled(
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<(), RuntimeError> {
+    if runmat_runtime::interrupt::stop_reason()
+        == Some(runmat_execution::CancellationReason::Deadline)
+    {
+        return Err(crate::interpreter::errors::mex(
+            "ExecutionDeadline",
+            "Execution deadline elapsed",
+        ));
+    }
     if runmat_runtime::interrupt::is_cancelled() || runtime.is_cancelled() {
         return Err(cancellation_error());
     }

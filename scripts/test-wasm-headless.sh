@@ -12,19 +12,7 @@ export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-300}"
 # In CI this is already set at the job level; this is a local-run fallback.
 export RUSTFLAGS="${RUSTFLAGS:--Copt-level=1}"
 
-echo "==> regenerating wasm registry"
-"${REPO_ROOT}/scripts/regenerate-wasm-registry.sh"
 echo "==> wasm-bindgen timeout: ${WASM_BINDGEN_TEST_TIMEOUT}s"
-echo "==> cargo check runmat-core (wasm32 compatibility with OCCT wasm host)"
-cargo check -p runmat-core --target wasm32-unknown-unknown --no-default-features --features occt-wasm-host
-
-"${WASM_SUITE}" symptom-closure
-"${WASM_SUITE}" replay-smoke
-
-if [[ "${RUNMAT_WASM_INCLUDE_RUNTIME:-0}" == "1" ]]; then
-  "${WASM_SUITE}" runtime
-else
-  echo "==> skipping runmat-runtime (set RUNMAT_WASM_INCLUDE_RUNTIME=1 to attempt; requires gating I/O + ctor tests)"
-fi
+"${WASM_SUITE}" all
 
 echo "All wasm headless tests completed."

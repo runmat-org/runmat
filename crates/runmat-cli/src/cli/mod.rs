@@ -1,5 +1,7 @@
 mod batch;
 mod cluster;
+mod execution_target;
+mod fea;
 mod job;
 mod mex;
 mod native_interface;
@@ -15,6 +17,8 @@ pub use cluster::{
     ClusterCommand, ClusterStateArg, NodeJoinArgs, NodeJoinCommand, NodeServiceCommand,
     NodeStateArg, NodeTrustTier,
 };
+pub use execution_target::{ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
+pub use fea::{FeaCommand, FeaRootArgs};
 pub use job::{JobCommand, JobRecoveryCommand};
 pub use mex::MexArgs;
 pub use native_interface::{NativeInterfaceCommand, NativeInterfacePrepareArgs};
@@ -30,5 +34,6 @@ pub use remote::{
 pub use root::{Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, GcCommand};
 pub use test::{TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
 pub use value_types::{
-    AotOptLevel, AotPolicy, CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel, OptLevel,
+    AotOptLevel, AotPolicy, CaptureFiguresMode, ColorMode, FigureSize, GcPreset, LogLevel,
+    MeshElementOrderArg, MeshSourceUnitsArg, OptLevel,
 };

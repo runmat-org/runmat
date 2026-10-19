@@ -112,7 +112,10 @@ if [[ -n "$target" ]]; then
 fi
 runtime_build+=(--lib --crate-type staticlib -- --print native-static-libs)
 
-"${runtime_build[@]}" 2>&1 | tee "$rustc_log"
+# The native link line is machine-readable input to the packer. Keep this
+# command's diagnostics unstyled even when the caller requests colored Cargo
+# output so parsing never depends on terminal escape sequences.
+CARGO_TERM_COLOR=never "${runtime_build[@]}" 2>&1 | tee "$rustc_log"
 
 # Static-library naming belongs to the deployment target, not the build host.
 archive_name_command=("${RUSTC:-rustc}" --crate-name runmat_aot_runtime --crate-type staticlib --print file-names)

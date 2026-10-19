@@ -67,6 +67,7 @@ impl FsStagedOutput for MemoryStagedOutput {
             MemoryEntry::File {
                 bytes: Arc::new(std::mem::take(&mut self.bytes)),
                 readonly: false,
+                revision: uuid::Uuid::new_v4().to_string(),
                 identity: Arc::new(AtomicU64::new(0)),
             },
         );

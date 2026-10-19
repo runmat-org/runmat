@@ -8,12 +8,14 @@ use uuid::Uuid;
 use crate::cli::parse::{parse_bool_env, parse_figure_size, parse_log_level_env};
 use crate::cli::remote::{FsCommand, OrgCommand, ProjectCommand, RemoteCommand};
 use crate::cli::value_types::{
-    AotOptLevel, AotPolicy, CaptureFiguresMode, FigureSize, GcPreset, LogLevel, OptLevel,
+    AotOptLevel, AotPolicy, CaptureFiguresMode, FigureSize, GcPreset, LogLevel,
+    MeshElementOrderArg, MeshSourceUnitsArg, OptLevel,
 };
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
 use crate::cli::{
-    BatchCommand, ClusterCommand, JobCommand, MexArgs, NativeInterfaceCommand, PackageCommand,
+    BatchCommand, ClusterCommand, ExecutionTargetArgs, FeaCommand, JobCommand, MexArgs,
+    NativeInterfaceCommand, PackageCommand,
 };
 
 #[derive(Parser, Clone)]
@@ -236,12 +238,51 @@ pub enum Commands {
     Run {
         /// Script file to execute
         file: PathBuf,
+        #[command(flatten)]
+        execution: ExecutionTargetArgs,
         /// Emit structured JSON for .fea studies and sweeps
         #[arg(long)]
         json: bool,
-        /// Arguments to pass to script
+        /// Positional inputs; scripts currently reject them rather than inventing argv semantics
         #[arg(last = true)]
         args: Vec<String>,
+    },
+    /// Generate a validated solver mesh and factual meshing evidence from exact CAD
+    Mesh {
+        /// STEP, IGES, or B-rep source geometry
+        source: PathBuf,
+        #[command(flatten)]
+        execution: ExecutionTargetArgs,
+        /// Coordinate units used by source geometry that does not declare its units
+        #[arg(long, value_enum, default_value = "meter")]
+        source_units: MeshSourceUnitsArg,
+        /// Canonical solver-mesh output path
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Canonical meshing-evidence output path
+        #[arg(long)]
+        evidence: Option<PathBuf>,
+        /// Global target edge length in meters
+        #[arg(long, default_value_t = 0.01)]
+        target_size: f64,
+        /// Maximum curve and surface chordal deviation in meters
+        #[arg(long, default_value_t = 0.0001)]
+        deviation: f64,
+        /// Tetrahedral element order
+        #[arg(long, value_enum, default_value = "tet4")]
+        element_order: MeshElementOrderArg,
+        /// Hard maximum generated element count
+        #[arg(long, default_value_t = 10_000_000)]
+        max_elements: u64,
+        /// Deterministic meshing seed
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Replace existing output files atomically
+        #[arg(long)]
+        force: bool,
+        /// Emit a machine-readable result summary
+        #[arg(long)]
+        json: bool,
     },
     /// Compile a MATLAB program into a standalone native executable
     Compile {
@@ -306,6 +347,11 @@ pub enum Commands {
         /// Add a MATLAB lookup root while checking this source
         #[arg(long = "path", value_name = "DIRECTORY")]
         search_paths: Vec<PathBuf>,
+    },
+    /// Check, plan, or run a typed finite-element analysis
+    Fea {
+        #[command(subcommand)]
+        fea_command: FeaCommand,
     },
     /// Show version information
     Version {
@@ -385,10 +431,10 @@ pub enum Commands {
         #[arg(long, default_value = "file")]
         credential_store: CredentialStoreMode,
         /// Default organization id
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         /// Default project id
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Organization management
@@ -476,8 +522,12 @@ pub enum ConfigCommand {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{Cli, Commands};
-    use crate::cli::{AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg};
+    use crate::cli::{
+        AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, FeaCommand, MeshSourceUnitsArg,
+    };
     use clap::Parser;
 
     #[cfg(feature = "wgpu")]
@@ -505,6 +555,23 @@ mod tests {
     }
 
     #[test]
+    fn public_namespace_ids_parse_and_foreign_namespaces_are_rejected() {
+        let org = "org_0000000000000000000000000000002a";
+        let project = "proj_0000000000000000000000000000002a";
+        let parsed = Cli::try_parse_from(["runmat", "cluster", "list", "--org", org]).unwrap();
+        let Some(Commands::Cluster {
+            cluster_command: ClusterCommand::List { org: Some(id), .. },
+        }) = parsed.command
+        else {
+            panic!("expected cluster list with organization");
+        };
+        assert_eq!(id, uuid::Uuid::from_u128(42));
+        assert!(Cli::try_parse_from(["runmat", "cluster", "list", "--org", project]).is_err());
+        assert!(Cli::try_parse_from(["runmat", "run", "main.fea", "--project", project]).is_ok());
+        assert!(Cli::try_parse_from(["runmat", "run", "main.fea", "--project", org]).is_err());
+    }
+
+    #[test]
     fn removed_startup_snapshot_flag_is_rejected() {
         let error = match Cli::try_parse_from(["runmat", "--snapshot", "stdlib.snapshot", "main.m"])
         {
@@ -523,6 +590,239 @@ mod tests {
             cli.script.as_deref(),
             Some(std::path::Path::new("snapshot"))
         );
+    }
+
+    #[test]
+    fn mesh_rejects_analysis_material_assignment() {
+        let error = match Cli::try_parse_from([
+            "runmat",
+            "mesh",
+            "part.step",
+            "--material",
+            "aluminum_6061",
+        ]) {
+            Ok(_) => panic!("meshing must not accept analysis material assignment"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("--material"));
+    }
+
+    #[test]
+    fn mesh_accepts_explicit_source_units() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "mesh",
+            "part.step",
+            "--source-units",
+            "millimeter",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Mesh {
+                source_units: MeshSourceUnitsArg::Millimeter,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn mesh_uses_the_shared_remote_placement_surface() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "mesh",
+            "part.step",
+            "--cluster",
+            "engineering",
+            "--queue",
+            "cpu",
+            "--workers",
+            "16",
+            "--trust-identity",
+            "sha256:trusted-node",
+            "--output",
+            "artifacts/part.mesh.cbor",
+            "--evidence",
+            "artifacts/part.evidence.cbor",
+            "--force",
+            "--detach",
+        ])
+        .unwrap();
+        let Some(Commands::Mesh {
+            output,
+            evidence,
+            force,
+            execution,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected mesh command")
+        };
+        assert_eq!(output.unwrap(), PathBuf::from("artifacts/part.mesh.cbor"));
+        assert_eq!(
+            evidence.unwrap(),
+            PathBuf::from("artifacts/part.evidence.cbor")
+        );
+        assert!(force);
+        assert_eq!(
+            execution.resolve().unwrap(),
+            crate::cli::ExecutionTarget::Remote(crate::cli::RemoteExecutionTarget {
+                cluster: "engineering".into(),
+                project: None,
+                queue: "cpu".into(),
+                trust_identity: "sha256:trusted-node".into(),
+                idempotency_key: None,
+                workers: 16,
+                detach: true,
+            })
+        );
+    }
+
+    #[test]
+    fn fea_run_uses_the_shared_remote_placement_surface() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "run",
+            "model.fea",
+            "--cluster",
+            "engineering",
+            "--queue",
+            "cpu",
+            "--workers",
+            "8",
+            "--trust-identity",
+            "sha256:trusted-node",
+            "--detach",
+        ])
+        .unwrap();
+        let Some(Commands::Run { execution, .. }) = cli.command else {
+            panic!("expected run command")
+        };
+        assert_eq!(
+            execution.resolve().unwrap(),
+            crate::cli::ExecutionTarget::Remote(crate::cli::RemoteExecutionTarget {
+                cluster: "engineering".into(),
+                project: None,
+                queue: "cpu".into(),
+                trust_identity: "sha256:trusted-node".into(),
+                idempotency_key: None,
+                workers: 8,
+                detach: true,
+            })
+        );
+    }
+
+    #[test]
+    fn typed_fea_reassessment_requires_an_original_publication_identity() {
+        let digest = runmat_execution::Digest::sha256("original-study");
+        let encoded = digest.to_string();
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "fea",
+            "reassess",
+            "revised.fea",
+            "--study",
+            "response",
+            "--original-definition",
+            &encoded,
+            "--result-manifest",
+            "saved.json",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Commands::Fea {
+            fea_command:
+                FeaCommand::Reassess {
+                    original_definition,
+                    result_manifest,
+                    study,
+                    json,
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected reassessment command")
+        };
+        assert_eq!(original_definition, digest);
+        assert_eq!(result_manifest, PathBuf::from("saved.json"));
+        assert_eq!(study.as_deref(), Some("response"));
+        assert!(json);
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "fea",
+            "reassess",
+            "revised.fea",
+            "--original-definition",
+            "not-a-digest",
+            "--result-manifest",
+            "saved.json",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn typed_fea_run_selects_one_root_and_reuses_shared_placement() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "fea",
+            "run",
+            "model.fea",
+            "--study",
+            "static_case",
+            "--cluster",
+            "analysis-cluster",
+            "--workers",
+            "4",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Commands::Fea {
+            fea_command:
+                FeaCommand::Run {
+                    file,
+                    root,
+                    execution,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected typed FEA run command");
+        };
+        assert_eq!(file, PathBuf::from("model.fea"));
+        assert_eq!(root.study.as_deref(), Some("static_case"));
+        assert!(root.sweep.is_none());
+        assert_eq!(execution.cluster.as_deref(), Some("analysis-cluster"));
+        assert_eq!(execution.workers, Some(4));
+        assert!(json);
+
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "fea",
+            "check",
+            "model.fea",
+            "--study",
+            "a",
+            "--sweep",
+            "b",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn run_argument_delimiter_keeps_target_like_text_in_the_workload() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "run",
+            "model.m",
+            "--",
+            "--cluster",
+            "not-placement",
+        ])
+        .unwrap();
+        let Some(Commands::Run { args, .. }) = cli.command else {
+            panic!("expected run command")
+        };
+        assert_eq!(args, ["--cluster", "not-placement"]);
     }
 
     #[test]

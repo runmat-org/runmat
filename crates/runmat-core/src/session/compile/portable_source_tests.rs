@@ -590,7 +590,7 @@ fn imported_unit_worker_projects_portable_source_before_builtin_dispatch() {
     };
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::ExecutableUnitV3,
+        ExecutableForm::ExecutableUnitV4,
         envelope.canonical_bytes().expect("canonical unit"),
     )
     .expect("artifact");
@@ -636,7 +636,7 @@ fn imported_unit_worker_projects_portable_source_before_builtin_dispatch() {
     descriptor.schema_version = 3;
     let error = ProgramArtifact::materialize(
         &request.recipe,
-        ExecutableForm::ExecutableUnitV3,
+        ExecutableForm::ExecutableUnitV4,
         future_schema
             .canonical_bytes()
             .expect("forward schema envelope"),

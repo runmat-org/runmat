@@ -434,6 +434,7 @@ impl RunMatSession {
             .with_program_revision(Some(program_revision));
         self.source_evaluator.set_project_sources(Some(&handoff));
         self.project_handoff = Some(handoff);
+        self.checked_fea_sources = Default::default();
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.private_project_root = None;
@@ -501,6 +502,7 @@ impl RunMatSession {
 
     fn forget_project_handoff(&mut self) {
         self.project_handoff = None;
+        self.checked_fea_sources = Default::default();
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.private_project_root = None;

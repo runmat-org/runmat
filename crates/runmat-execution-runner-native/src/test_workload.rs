@@ -5,6 +5,7 @@ use runmat_test_runner::worker::WorkerExecution;
 use runmat_test_runner_execution::TestAttemptWorkload;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 mod graphics;
 #[cfg(test)]
@@ -66,10 +67,134 @@ pub(crate) async fn execute_host_program_request_with_validated_bundle(
     collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
     bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
 ) -> ProgramExecutionResponse {
+    execute_host_program_request_in_context(
+        request,
+        HostProgramContext {
+            materialized,
+            collective,
+            bundle,
+            ..HostProgramContext::default()
+        },
+    )
+    .await
+}
+
+/// Original host-owned context of one admitted program invocation.
+#[derive(Default)]
+pub(crate) struct HostProgramContext<'a> {
+    pub materialized: Option<&'a crate::materialized_project::MaterializedProject>,
+    pub collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+    pub bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+    /// Bundle-admitted environment; must equal the request's frozen environment.
+    pub environment: Option<&'a [(String, String)]>,
+    pub cancellation: Option<Arc<AtomicBool>>,
+    /// Scheduler reservation within which domain workers admit CPU parallelism.
+    pub resources: Option<&'a runmat_execution::resource::ResourceRequest>,
+}
+
+pub(crate) async fn execute_host_program_request_in_context(
+    request: ProgramExecutionRequest,
+    context: HostProgramContext<'_>,
+) -> ProgramExecutionResponse {
+    let HostProgramContext {
+        materialized,
+        collective,
+        bundle,
+        environment,
+        cancellation,
+        resources,
+    } = context;
+    let project = materialized.and_then(|materialized| materialized.handoff());
+    if let Err(error) = request.validate_for_portable_host() {
+        return ProgramExecutionResponse::Failure {
+            message: error.to_string(),
+        };
+    }
+    if environment.is_some_and(|entries| entries != request.environment.entries()) {
+        return ProgramExecutionResponse::Failure {
+            message: "portable invocation environment differs from admitted bundle context".into(),
+        };
+    }
+    if request.artifact.form == ExecutableForm::AnalysisWorkload {
+        // This branch is synchronous: the thread-affine context remains installed
+        // throughout the physical solve. Local process cancellation remains owned
+        // by the parent guard; callers that supply a token also reach the solver.
+        let _progress = crate::analysis_progress::install(
+            cancellation
+                .as_ref()
+                .map(|flag| {
+                    runmat_analysis_fea::FeaCancellationToken::from_shared(Arc::clone(flag))
+                })
+                .unwrap_or_default(),
+            None,
+        );
+        let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
+            return ProgramExecutionResponse::Failure {
+                message: "analysis worker object store is not configured".into(),
+            };
+        };
+        let mut store = match crate::FilesystemObjectStore::open(
+            root,
+            crate::NativeAnalysisHostLimits::default()
+                .inventory
+                .max_object_bytes,
+        ) {
+            Ok(store) => store,
+            Err(error) => {
+                return ProgramExecutionResponse::Failure {
+                    message: error.to_string(),
+                }
+            }
+        };
+        return match resources {
+            Some(resources) => crate::execute_reserved_analysis_program_request(
+                &request,
+                &mut store,
+                &crate::NativeAnalysisKernel,
+                crate::NativeAnalysisHostLimits::default(),
+                resources,
+            ),
+            None => crate::execute_analysis_program_request(
+                &request,
+                &mut store,
+                &crate::NativeAnalysisKernel,
+                crate::NativeAnalysisHostLimits::default(),
+            ),
+        };
+    }
+    if request.artifact.form == ExecutableForm::GeometryWorkload {
+        let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
+            return ProgramExecutionResponse::Failure {
+                message: "geometry worker object store is not configured".into(),
+            };
+        };
+        let limits = crate::NativeGeometryMaterializationLimits::default();
+        let mut store =
+            match crate::FilesystemObjectStore::open(root, limits.inventory.max_object_bytes) {
+                Ok(store) => store,
+                Err(error) => {
+                    return ProgramExecutionResponse::Failure {
+                        message: error.to_string(),
+                    }
+                }
+            };
+        return crate::execute_geometry_materialization_program_request(
+            &request, &mut store, limits,
+        );
+    }
+    // Complete V4 units without foreign closures or collectives run in an
+    // original session that owns their environment, console and dependencies.
+    if request.artifact.form == ExecutableForm::ExecutableUnitV4
+        && bundle.is_none()
+        && collective.is_none()
+    {
+        return crate::program_workload::execute_unit(&request, project, environment, cancellation)
+            .await;
+    }
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
         return execute_portable_request(request, materialized, collective, bundle).await;
     }
-    match execute_test_attempt(&request, materialized, bundle).await {
+    match execute_test_attempt(&request, materialized, bundle, cancellation).await {
         Ok(execution) => match runmat_test_runner_execution::encode_execution(&execution) {
             Ok(value) => ProgramExecutionResponse::Success {
                 outputs: vec![value],
@@ -455,16 +580,23 @@ fn execute_test_attempt<'a>(
     request: &'a ProgramExecutionRequest,
     materialized: Option<&'a crate::materialized_project::MaterializedProject>,
     bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<WorkerExecution, String>> + 'a>> {
     // Own the test lifecycle independently of the Direct request frame, just
     // as the selected program host owns its interpreter continuation.
-    Box::pin(execute_test_attempt_inner(request, materialized, bundle))
+    Box::pin(execute_test_attempt_inner(
+        request,
+        materialized,
+        bundle,
+        cancellation,
+    ))
 }
 
 async fn execute_test_attempt_inner(
     request: &ProgramExecutionRequest,
     materialized: Option<&crate::materialized_project::MaterializedProject>,
     bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<WorkerExecution, String> {
     let workload = TestAttemptWorkload::from_program_request(request)?;
     let project = materialized.and_then(|materialized| materialized.handoff());
@@ -501,8 +633,12 @@ async fn execute_test_attempt_inner(
         ),
         _ => None,
     };
-    let mut session = runmat_core::RunMatSession::with_options(true, false)
-        .map_err(|error| format!("failed to initialize test execution session: {error}"))?;
+    let mut session = runmat_core::RunMatSession::with_frozen_environment(
+        true,
+        false,
+        request.environment.entries().to_vec(),
+    )
+    .map_err(|error| format!("failed to initialize test execution session: {error}"))?;
     if let Some(materialized) = materialized {
         session
             .attach_foreign_private_root(materialized.private_root())
@@ -535,7 +671,9 @@ async fn execute_test_attempt_inner(
             &workload.submission.plan,
             &workload.test_id,
             workload.attempt,
-            runmat_execution::cancellation::CancellationSource::new().token(),
+            cancellation
+                .map(runmat_execution::CancellationToken::from_shared)
+                .unwrap_or_default(),
         )
         .await
         .map_err(|error| error.to_string());
@@ -576,8 +714,7 @@ mod tests {
 
     use super::{execute_host_program_request, execute_host_program_request_with_validated_bundle};
 
-    #[tokio::test]
-    async fn host_executes_an_exact_test_workload_and_returns_canonical_result() {
+    fn original_request(source: &str) -> runmat_execution_artifact::ProgramExecutionRequest {
         let snapshot = FrozenTestRunSnapshot::freeze(
             Digest::sha256(b"graph").to_string(),
             "sha256:base-sources",
@@ -586,7 +723,7 @@ mod tests {
             vec![SavedRunSource {
                 owner_identity: "path:workspace".into(),
                 relative_path: "tests/arithmeticTest.m".into(),
-                content: "function tests = arithmeticTest()\n tests = functiontests(localfunctions);\nend\nfunction testAddition(testCase)\n testCase.verifyEqual(1 + 1, 2);\nend\n".into(),
+                content: source.into(),
             }],
             Vec::new(),
         )
@@ -602,12 +739,15 @@ mod tests {
             1,
         )
         .unwrap();
-        let response = execute_host_program_request(
-            workload
-                .program_request(runmat_types::InteropManifest::empty())
-                .unwrap(),
-        )
-        .await;
+        workload
+            .program_request(runmat_types::InteropManifest::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn host_executes_an_exact_test_workload_and_returns_canonical_result() {
+        let request = original_request("function tests = arithmeticTest()\n tests = functiontests(localfunctions);\nend\nfunction testAddition(testCase)\n testCase.verifyEqual(1 + 1, 2);\nend\n");
+        let response = execute_host_program_request(request).await;
         let ProgramExecutionResponse::Success { outputs } = response else {
             panic!("test-capable host rejected a valid workload: {response:?}");
         };
@@ -622,6 +762,43 @@ mod tests {
         );
         assert!(!execution.events.is_empty());
         assert!(!execution.coverage.is_empty());
+    }
+
+    #[tokio::test]
+    async fn original_test_attempt_uses_request_context_and_rejects_bundle_substitution() {
+        let source = "function tests = arithmeticTest()\n tests = functiontests(localfunctions);\nend\nfunction testEnvironment(testCase)\n testCase.verifyEqual(getenv('RUNMAT_TEST_ORIGINAL'), 'captured');\n testCase.verifyEmpty(getenv('HOME'));\n setenv('RUNMAT_TEST_ORIGINAL','child');\nend\n";
+        let host = std::env::var_os("RUNMAT_TEST_ORIGINAL");
+        let mut request = original_request(source);
+        request.environment = runmat_execution::EnvironmentSnapshot::new(vec![(
+            "RUNMAT_TEST_ORIGINAL".into(),
+            "captured".into(),
+        )])
+        .unwrap();
+        let conflicting = [("RUNMAT_TEST_ORIGINAL".into(), "substituted".into())];
+        assert!(matches!(
+            super::execute_host_program_request_in_context(
+                request.clone(),
+                super::HostProgramContext {
+                    environment: Some(&conflicting),
+                    ..super::HostProgramContext::default()
+                },
+            )
+            .await,
+            ProgramExecutionResponse::Failure { .. }
+        ));
+        let ProgramExecutionResponse::Success { outputs } =
+            execute_host_program_request(request).await
+        else {
+            panic!("original test invocation failed");
+        };
+        let [value] = outputs.as_slice() else {
+            panic!("original test invocation returned an invalid output count");
+        };
+        assert_eq!(
+            decode_execution(value).unwrap().result.state.disposition,
+            TerminalDisposition::Passed
+        );
+        assert_eq!(std::env::var_os("RUNMAT_TEST_ORIGINAL"), host);
     }
 
     #[tokio::test]
@@ -696,7 +873,7 @@ mod tests {
         };
         let artifact = ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::ExecutableUnitV3,
+            ExecutableForm::ExecutableUnitV4,
             envelope.canonical_bytes().unwrap(),
         )
         .unwrap();
@@ -713,6 +890,8 @@ mod tests {
             job_id: None,
             arguments: Vec::new(),
             requested_outputs: 1,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
         })
         .await;
         let ProgramExecutionResponse::Failure { message } = response else {
@@ -857,7 +1036,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 .unwrap()
                 .with_materialized_program(
                     recipe,
-                    ExecutableForm::ExecutableUnitV3,
+                    ExecutableForm::ExecutableUnitV4,
                     envelope.canonical_bytes().unwrap(),
                 )
                 .build()
@@ -884,6 +1063,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 job_id: None,
                 arguments: Vec::new(),
                 requested_outputs: 1,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
             },
             Some(&materialized),
             None,
@@ -932,7 +1113,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 .unwrap()
                 .with_materialized_program(
                     empty_recipe,
-                    ExecutableForm::ExecutableUnitV3,
+                    ExecutableForm::ExecutableUnitV4,
                     empty_bytes.clone(),
                 )
                 .build()
@@ -1156,7 +1337,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .unwrap()
             .with_materialized_program(
                 recipe,
-                ExecutableForm::ExecutableUnitV3,
+                ExecutableForm::ExecutableUnitV4,
                 envelope.canonical_bytes().unwrap(),
             )
             .build()
@@ -1180,6 +1361,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 job_id: None,
                 arguments: Vec::new(),
                 requested_outputs: 1,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
             },
             Some(&materialized),
             None,

@@ -22,6 +22,8 @@ impl CancellationPolicy {
 }
 
 pub trait MeshingCancellationSignal: Send + Sync {
+    /// Retain the probe site for execution-owned responsiveness diagnostics.
+    #[track_caller]
     fn is_cancelled(&self) -> bool;
 }
 
@@ -31,5 +33,29 @@ pub struct NeverCancelled;
 impl MeshingCancellationSignal for NeverCancelled {
     fn is_cancelled(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MeshingCancellationSignal;
+    use std::sync::Mutex;
+
+    struct CallerCapture(Mutex<Option<(&'static str, u32)>>);
+    impl MeshingCancellationSignal for CallerCapture {
+        fn is_cancelled(&self) -> bool {
+            let caller = std::panic::Location::caller();
+            *self.0.lock().unwrap() = Some((caller.file(), caller.line()));
+            false
+        }
+    }
+
+    #[test]
+    fn dynamic_cancellation_probe_retains_its_caller() {
+        let capture = CallerCapture(Mutex::new(None));
+        let signal: &dyn MeshingCancellationSignal = &capture;
+        let expected_line = line!() + 1;
+        assert!(!signal.is_cancelled());
+        assert_eq!(*capture.0.lock().unwrap(), Some((file!(), expected_line)));
     }
 }

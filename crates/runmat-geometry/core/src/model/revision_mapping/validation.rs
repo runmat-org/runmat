@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use crate::model::validation_storage::{ValidationBuffer, ValidationWork};
 
 use super::{GeometryRevisionMap, GeometryRevisionOperation, GEOMETRY_REVISION_MAP_SCHEMA_VERSION};
 use crate::{GeometryContractError, PersistentEntityId};
@@ -8,6 +8,19 @@ const MAX_ENTITIES_PER_OPERATION: usize = 1_000_000;
 
 impl GeometryRevisionMap {
     pub fn validate(&self) -> Result<(), GeometryContractError> {
+        self.validated_index(ValidationWork(None)).map(|_| ())
+    }
+    pub(crate) fn validated_index<'a>(
+        &'a self,
+        work: ValidationWork<'a>,
+    ) -> Result<RevisionIndex<'a>, GeometryContractError> {
+        self.validate_index(work)
+    }
+    fn validate_index<'a>(
+        &'a self,
+        work: ValidationWork<'a>,
+    ) -> Result<RevisionIndex<'a>, GeometryContractError> {
+        work.checkpoint()?;
         if self.schema_version != GEOMETRY_REVISION_MAP_SCHEMA_VERSION {
             return Err(invalid(
                 "geometry revision map schema",
@@ -32,16 +45,24 @@ impl GeometryRevisionMap {
             ));
         }
 
-        let mut consumed_sources = BTreeSet::new();
-        let mut produced_targets = BTreeSet::new();
+        let source_count = self
+            .operations
+            .iter()
+            .try_fold(0usize, |sum, entry| sum.checked_add(entry.sources().len()))
+            .ok_or_else(|| invalid("geometry revision source ownership", "inventory overflow"))?;
+        let target_count = self
+            .operations
+            .iter()
+            .try_fold(0usize, |sum, entry| sum.checked_add(entry.targets().len()))
+            .ok_or_else(|| invalid("geometry revision target ownership", "inventory overflow"))?;
+        let mut sources = work.buffer(source_count)?;
+        let mut targets = work.buffer(target_count)?;
         let mut prior_primary_source = None;
         for operation in &self.operations {
+            work.checkpoint()?;
             validate_operation(operation)?;
-            let primary_source = operation.sources()[0].clone();
-            if prior_primary_source
-                .as_ref()
-                .is_some_and(|prior| prior >= &primary_source)
-            {
+            let primary_source = &operation.sources()[0];
+            if prior_primary_source.is_some_and(|prior| prior >= primary_source) {
                 return Err(invalid(
                     "geometry revision operation order",
                     "operations must be strictly ordered by their first source entity",
@@ -50,23 +71,27 @@ impl GeometryRevisionMap {
             prior_primary_source = Some(primary_source);
 
             for source in operation.sources() {
-                if !consumed_sources.insert(source.clone()) {
-                    return Err(invalid(
-                        "geometry revision source ownership",
-                        "a source entity may occur in exactly one operation",
-                    ));
-                }
+                sources.push(source);
             }
             for target in operation.targets() {
-                if !produced_targets.insert(target.clone()) {
-                    return Err(invalid(
-                        "geometry revision target ownership",
-                        "a target entity may be produced by exactly one operation",
-                    ));
-                }
+                targets.push(target);
             }
         }
-        Ok(())
+        sources.sort_unstable();
+        targets.sort_unstable();
+        if sources.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(invalid(
+                "geometry revision source ownership",
+                "a source entity may occur in exactly one operation",
+            ));
+        }
+        if targets.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(invalid(
+                "geometry revision target ownership",
+                "a target entity may be produced by exactly one operation",
+            ));
+        }
+        Ok(RevisionIndex { sources, targets })
     }
 }
 
@@ -182,4 +207,22 @@ fn validate_ids(
 
 fn invalid(field: &str, reason: impl Into<String>) -> GeometryContractError {
     GeometryContractError::invalid(field, reason)
+}
+
+/// Borrowed membership prepared once after complete revision-map validation.
+pub(crate) struct RevisionIndex<'a> {
+    sources: ValidationBuffer<'a, &'a PersistentEntityId>,
+    targets: ValidationBuffer<'a, &'a PersistentEntityId>,
+}
+impl RevisionIndex<'_> {
+    pub fn contains_source(&self, id: &PersistentEntityId) -> bool {
+        self.sources
+            .binary_search_by(|entry| (*entry).cmp(id))
+            .is_ok()
+    }
+    pub fn contains_target(&self, id: &PersistentEntityId) -> bool {
+        self.targets
+            .binary_search_by(|entry| (*entry).cmp(id))
+            .is_ok()
+    }
 }

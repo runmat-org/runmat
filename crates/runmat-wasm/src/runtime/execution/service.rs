@@ -294,6 +294,7 @@ impl BrowserExecutionService {
             self.finish_attempt(
                 attempt,
                 Err("browser scheduler lost the exact program request".into()),
+                1,
             );
             return;
         };
@@ -320,6 +321,7 @@ impl BrowserExecutionService {
             .then(|| weak.upgrade())
             .flatten();
         let host = self.host.clone();
+        let started_millis = js_sys::Date::now();
         wasm_bindgen_futures::spawn_local(async move {
             let response = match host {
                 Some(host) => {
@@ -330,10 +332,28 @@ impl BrowserExecutionService {
                     )
                     .await
                 }
-                None => Ok(super::admission::execute_local_worker_program(program).await),
+                None => match program {
+                    // Complete V4 units run in a portable session that retains
+                    // this service for nested execution.
+                    BrowserWorkerRequest::Direct(request)
+                        if request.artifact.form
+                            == runmat_execution_artifact::ExecutableForm::ExecutableUnitV4 =>
+                    {
+                        match weak.upgrade() {
+                            Some(service) => {
+                                Ok(super::program::execute(request, Some(service)).await)
+                            }
+                            None => {
+                                Err("browser execution authority ended before invocation".into())
+                            }
+                        }
+                    }
+                    program => Ok(super::admission::execute_local_worker_program(program).await),
+                },
             };
             if let Some(service) = retained_service.or_else(|| weak.upgrade()) {
-                service.finish_attempt(attempt, response);
+                let wall_millis = (js_sys::Date::now() - started_millis).max(1.0) as u64;
+                service.finish_attempt(attempt, response, wall_millis);
             }
         });
     }
@@ -342,9 +362,10 @@ impl BrowserExecutionService {
         &self,
         attempt: AttemptRequest,
         response: Result<ProgramExecutionResponse, String>,
+        wall_millis: u64,
     ) {
         if self.owned.borrow().contains_key(&attempt.task_id) {
-            self.finish_owned_attempt(attempt, response);
+            self.finish_owned_attempt(attempt, response, wall_millis);
             return;
         }
         let (selected_request, graph_receipt) = {
@@ -385,10 +406,15 @@ impl BrowserExecutionService {
                     })
                     .and_then(runmat_runtime::execution::RootedValueSequence::new);
                 let report = AttemptReport::Succeeded {
-                    result: AttemptSuccess::Values {
+                    result: AttemptSuccess::new(
+                        &attempt,
                         outputs,
-                        result_objects: Vec::new(),
-                    },
+                        Vec::new(),
+                        wall_millis,
+                        0,
+                        0,
+                    )
+                    .expect("browser attempt resource accounting must remain bounded"),
                 };
                 (
                     self.future_id(attempt.task_id),
@@ -719,7 +745,16 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 ),
             )?;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
-        let resources = browser_request(self.capabilities, recipe.accelerators.clone());
+        let mut resources = browser_request(self.capabilities, recipe.accelerators.clone());
+        let context_bytes =
+            runmat_execution::console::invocation_memory_bytes(&call.environment, call.console)
+                .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        resources.memory_bytes = resources
+            .memory_bytes
+            .checked_add(context_bytes)
+            .ok_or_else(|| {
+                ExecutionServiceError::Failed("invocation memory reservation overflow".into())
+            })?;
         recipe
             .validate_resource_request(&resources)
             .map_err(|error| {
@@ -769,6 +804,8 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             job_id: None,
             arguments: arguments.clone(),
             requested_outputs: future.outputs.requested_outputs,
+            environment: call.environment.clone(),
+            console: call.console,
         };
         let generation = 1;
         let actions = match state
@@ -785,6 +822,8 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                     callable: Callable::for_program("browser-session", &callable),
                     invocation_context,
                     inputs: arguments,
+                    environment: call.environment.clone(),
+                    console: call.console,
                     outputs: future.outputs.clone(),
                     resources,
                     host,
@@ -951,20 +990,22 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         };
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.borrow_mut();
-        match state
+        let record = state
             .futures
             .get_mut(&future.id)
-            .ok_or(ExecutionServiceError::UnknownHandle)?
-        {
-            FutureState::Deferred(call) => {
-                let call = Box::new(call.as_ref().clone());
-                *state
-                    .futures
-                    .get_mut(&future.id)
-                    .expect("future was just resolved") = FutureState::ExecutingInCaller;
+            .ok_or(ExecutionServiceError::UnknownHandle)?;
+        match record {
+            FutureState::Deferred(_) => {
+                let FutureState::Deferred(call) =
+                    std::mem::replace(record, FutureState::ExecutingInCaller)
+                else {
+                    unreachable!("deferred state matched while holding its owner borrow")
+                };
+                // Move the original call when this future is its only owner.
+                let call = Rc::try_unwrap(call).unwrap_or_else(|shared| (*shared).clone());
                 Ok(AwaitAction::ExecuteFuture {
                     handle: future,
-                    call,
+                    call: Box::new(call),
                 })
             }
             FutureState::Materializing {
@@ -1258,6 +1299,7 @@ fn browser_future_state(state: &FutureState) -> ExecutionHandleState {
 
 #[cfg(test)]
 mod tests {
+    use runmat_execution_artifact::{ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3};
     use wasm_bindgen_test::*;
 
     use runmat_execution::task::RetryPolicy;
@@ -1279,6 +1321,8 @@ mod tests {
             ),
             retry: RetryPolicy::Never,
             program_revision: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
             capabilities: Default::default(),
             program: runmat_runtime::execution::DeferredProgram::InterpreterV2(program.into()),
         }
@@ -1311,10 +1355,20 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn cancelling_a_scheduled_future_cancels_its_child_task() {
+    fn partial_registry_rejects_before_scheduling_child_work() {
         let service = BrowserExecutionService::new(None).unwrap();
         let future = service
             .create_future(deferred_test_call(b"invalid registry".to_vec()))
+            .unwrap();
+        assert!(service.spawn(&future).is_err());
+        assert!(service.state.borrow().requests.is_empty());
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn cancelling_a_scheduled_future_cancels_its_child_task() {
+        let service = BrowserExecutionService::new(None).unwrap();
+        let future = service
+            .create_future(original_deferred_failure().await)
             .unwrap();
         let task = service.spawn(&future).unwrap();
         service

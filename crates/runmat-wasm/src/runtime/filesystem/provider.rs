@@ -33,6 +33,17 @@ unsafe impl Sync for JsFsProvider {}
 
 #[async_trait(?Send)]
 impl FsProvider for JsFsProvider {
+    async fn capture_workspace(&self, request: runmat_filesystem::workspace::WorkspaceCaptureRequest) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
+        self.funcs.capture_workspace(&request).await
+    }
+
+    async fn lookup_workspace_publication(&self, request: &runmat_filesystem::workspace::WorkspacePublicationRequest) -> io::Result<Option<runmat_filesystem::workspace::WorkspacePublicationOutcome>> {
+        self.funcs.lookup_workspace_publication(request).await
+    }
+
+    async fn publish_workspace(&self, request: runmat_filesystem::workspace::WorkspacePublicationRequest) -> io::Result<runmat_filesystem::workspace::WorkspacePublicationOutcome> {
+        self.funcs.publish_workspace(&request).await
+    }
     fn supports_read(&self) -> bool {
         self.funcs.supports_read()
     }
@@ -61,6 +72,38 @@ impl FsProvider for JsFsProvider {
 
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         self.funcs.read_file_async(path).await
+    }
+    async fn read_version(
+        &self,
+        path: &Path,
+        version: &str,
+        size: u64,
+        snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
+        self.funcs
+            .read_version_async(path, version, size, snapshot)
+            .await
+    }
+
+    async fn publish_output(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String> {
+        self.funcs.publish_output_async(path, data, expected).await
+    }
+
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
+        self.funcs.remove_output_async(path, expected).await
+    }
+
+    async fn atomic_create_new(
+        &self,
+        path: &Path,
+        data: &[u8],
+    ) -> io::Result<runmat_filesystem::AtomicCreateResult> {
+        self.funcs.atomic_create_new_async(path, data).await
     }
 
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {

@@ -40,6 +40,7 @@ pub(super) fn classify_and_build(
         &blocked,
         exterior,
         Classification::Exterior,
+        None,
         &mut classifications,
         work,
     )?;
@@ -281,7 +282,6 @@ fn blocked_faces(
         .map(|triangle| {
             let indices = triangle.node_identities.map(|identity| {
                 recovery
-                    .segment_recovery
                     .topology
                     .nodes
                     .binary_search_by_key(&identity, |node| node.identity)
@@ -307,6 +307,7 @@ fn flood(
     blocked: &BTreeSet<[u32; 3]>,
     starts: BTreeSet<u32>,
     classification: Classification,
+    constraint_index: Option<u32>,
     classifications: &mut [Option<Classification>],
     work: &mut CarvingWork<'_>,
 ) -> Result<(), DelaunayCarvingError> {
@@ -316,11 +317,13 @@ fn flood(
         let slot = &mut classifications[tetrahedron_index as usize];
         match slot {
             Some(existing) if *existing == classification => continue,
-            Some(_) => {
+            Some(existing) => {
                 return Err(error(
                     DelaunayCarvingErrorKind::AmbiguousClassification,
-                    None,
-                    "carving floods overlap without a recovered facet between them",
+                    constraint_index,
+                    format!(
+                        "carving facet-side flood attempted {classification:?} on tetrahedron {tetrahedron_index}, already classified {existing:?}",
+                    ),
                 ));
             }
             None => *slot = Some(classification.clone()),

@@ -122,6 +122,7 @@ pub struct ExactFaceMeshBoundarySegment {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExactFaceJoinErrorKind {
+    Cancelled,
     InvalidOptions,
     InvalidInput,
     Acceptance(ExactFaceAcceptanceErrorKind),

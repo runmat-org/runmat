@@ -9,6 +9,7 @@ pub mod fact;
 pub mod geometry;
 pub mod identity;
 pub mod integer_literal;
+pub mod operation;
 mod matrix_work;
 pub use matrix_work::MatrixWorkGeometry;
 pub mod rules;
@@ -35,6 +36,7 @@ pub use declaration::{
 pub use dimension::{decode_shape_dimension, dimension_fits_platform, DimensionValueError};
 pub use fact::*;
 pub use identity::*;
+pub use operation::*;
 pub use integer_literal::{
     integer_magnitude_is_exact_binary64, IntegerClass, IntegerLiteral, IntegerLiteralClass,
 };
@@ -53,3 +55,6 @@ pub use symbolic::{
     SymbolicDeclarationError,
 };
 pub use version::{SchemaIdentity, RUNMAT_TYPES_SCHEMA};
+
+pub mod path;
+pub use path::{NormalizedRelativePath, RelativePathError};

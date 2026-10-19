@@ -213,7 +213,7 @@ fn executable_interop_must_match_the_recipe() {
     );
     let error = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::ExecutableUnitV3,
+        ExecutableForm::ExecutableUnitV4,
         executable_unit_support::bytes(revision),
     )
     .expect_err("recipe and executable interop must converge");

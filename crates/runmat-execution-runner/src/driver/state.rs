@@ -52,12 +52,17 @@ impl Driver {
         &mut self,
         task_id: TaskId,
         now_millis: u64,
+        cause: crate::TaskCancellationCause,
         actions: &mut Vec<DriverAction>,
     ) -> RunnerResult<()> {
         if self.task_is_terminal(task_id)? {
             return Ok(());
         }
         let task = self.task_mut(task_id)?;
+        task.cancellation = Some(crate::TaskCancellation {
+            cause,
+            requested_at_driver_millis: now_millis,
+        });
         let active = task.active_attempt;
         let graph_attempt = active.is_some()
             && matches!(
@@ -108,12 +113,17 @@ impl Driver {
                     .saturating_add(attempt.request.task.resources.max_wall_millis)
                     <= now_millis
             })
-            .map(|attempt| attempt.request.task_id)
+            .map(|attempt| (attempt.request.task_id, attempt.request.id))
             .collect::<Vec<_>>();
-        for task_id in expired {
+        for (task_id, attempt_id) in expired {
             if !self.task_is_terminal(task_id)? {
                 self.emit(DriverEventKind::DeadlineExpired { task_id });
-                self.cancel_task(task_id, now_millis, actions)?;
+                self.cancel_task(
+                    task_id,
+                    now_millis,
+                    crate::TaskCancellationCause::WallTime { attempt_id },
+                    actions,
+                )?;
             }
         }
         Ok(())
@@ -165,7 +175,12 @@ impl Driver {
                         ProgramCallable::GraphTarget { .. }
                     );
                     if !graph_attempt {
-                        self.finish_attempt(&attempt, AttemptState::Cancelled)?;
+                        self.finish_attempt(
+                            &attempt,
+                            crate::task::AttemptDisposition::Cancelled,
+                            super::reports::ProviderEvidence::default(),
+                            None,
+                        )?;
                     }
                     self.snapshot
                         .attempts
@@ -217,7 +232,16 @@ impl Driver {
                 continue;
             }
             self.snapshot.ready.remove_task(dependent);
+            let cancellation = if state == TaskState::Cancelled {
+                Some(crate::TaskCancellation {
+                    cause: crate::TaskCancellationCause::Dependency { task_id },
+                    requested_at_driver_millis: self.snapshot.now_millis,
+                })
+            } else {
+                None
+            };
             let task = self.task_mut(dependent)?;
+            task.cancellation = cancellation;
             task.state = state;
             task.active_attempt = None;
             self.remove_deadline(dependent);

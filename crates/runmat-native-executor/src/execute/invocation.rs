@@ -115,7 +115,9 @@ impl NativeInvocation {
                     .resume_suspension(continuation, generation)
             ));
             match futures::future::select(cancelled, operation).await {
-                futures::future::Either::Left(_) => Err(NativeExecutorError::Cancelled),
+                futures::future::Either::Left((reason, _)) => {
+                    Err(super::control::cancellation_error(reason))
+                }
                 futures::future::Either::Right((result, _)) => result,
             }
         };

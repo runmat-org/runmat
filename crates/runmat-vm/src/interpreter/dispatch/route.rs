@@ -29,6 +29,7 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         Instr::CreateFunctionHandle(..) | Instr::CreateExternalFunctionHandle(..) => NameHandle,
         Instr::CreateSemanticFuture(..)
         | Instr::CreateSemanticFutureExpandMultiOutput(..)
+        | Instr::CreateExternalFuture(..)
         | Instr::ScheduleFeval { .. }
         | Instr::Spawn
         | Instr::SpawnOn

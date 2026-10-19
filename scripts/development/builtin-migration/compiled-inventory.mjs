@@ -6,7 +6,7 @@ import { SAFE_IDENTITY, array, enumValue, exact, identity, integer, kind, nonemp
 import { canonicalRustModulePath, rustModuleScopesOverlap } from "./rust-module-path.mjs";
 
 const KNOWN_RUNTIME_FEATURES = Object.freeze([
-  "blas-lapack", "blas-only", "fea-example-fixtures", "gui", "interaction-test-hooks", "occt-native",
+  "blas-lapack", "blas-only", "gui", "interaction-test-hooks", "occt-native",
   "occt-wasm-host", "plot-core", "plot-web", "test-classes", "wgpu",
 ]);
 

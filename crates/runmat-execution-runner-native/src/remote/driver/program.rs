@@ -2,6 +2,7 @@
 //! Direct V7 keeps its separate bundle/input objects; Graph V10 carries its
 //! complete selected-unit authority in the program object itself.
 
+use runmat_execution::Digest;
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     decode_encrypted_run_object, open_program_chunk_manifest, ProgramManifestAuthority,
@@ -10,7 +11,7 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::encryption::{EncryptionPurpose, RunKeyMaterial};
 use runmat_execution_artifact::{
     admit_remote_program_object_bytes, GraphExecutionRequest, ProgramExecutionInputs,
-    ProgramExecutionRequest, RemoteProgramObject,
+    ProgramExecutionObjectLocation, ProgramExecutionRequest, RemoteProgramObject,
 };
 use runmat_execution_transport_native::control::{
     DriverArtifactDownload, DriverControlPlane, SignedArtifactDownloader,
@@ -31,13 +32,49 @@ pub(in crate::remote) struct AdmittedDirectProgram {
     pub bundle_archive: Vec<u8>,
     pub bundle: Arc<runmat_execution_artifact::ExecutionBundle>,
     pub materialized: Option<MaterializedProject>,
+    /// Independent encrypted input objects named by the admitted inputs.
+    pub input_locations: Vec<ProgramExecutionObjectLocation>,
 }
 
 pub(in crate::remote) struct AdmittedGraphProgram {
     pub request: GraphExecutionRequest,
     pub encoded_bytes: usize,
+    /// Digest of the exact authenticated Program object bytes.
+    pub program_digest: Digest,
     pub _staged: Option<StagedGraphProgram>,
     pub transfer: Option<super::super::pool::SignedGraphTransfer>,
+}
+
+impl AdmittedRemoteProgram {
+    /// Exact program identity bound into replacement-driver checkpoints.
+    pub(in crate::remote) fn checkpoint_identity(&self) -> NativeExecutionResult<Digest> {
+        match self {
+            Self::Direct(direct) => direct.request.canonical_digest().map_err(protocol),
+            Self::Graph(graph) => Ok(graph.program_digest),
+        }
+    }
+
+    /// Closed Direct host forms replay deterministically; Graph and arbitrary
+    /// language programs may have external effects once started.
+    pub(in crate::remote) fn execution_start_phase(
+        &self,
+    ) -> super::super::checkpoint::RemoteDriverCheckpointPhase {
+        match self {
+            Self::Direct(direct) => {
+                super::super::checkpoint::execution_start_phase(&direct.request)
+            }
+            Self::Graph(_) => {
+                super::super::checkpoint::RemoteDriverCheckpointPhase::EffectsMayHaveStarted
+            }
+        }
+    }
+
+    pub(in crate::remote) fn input_locations(&self) -> &[ProgramExecutionObjectLocation] {
+        match self {
+            Self::Direct(direct) => &direct.input_locations,
+            Self::Graph(_) => &[],
+        }
+    }
 }
 
 pub(super) async fn admit(
@@ -96,8 +133,18 @@ pub(super) async fn admit(
             )
             .map_err(protocol)?;
             inputs.validate().map_err(protocol)?;
+            if inputs
+                .objects
+                .iter()
+                .any(|object| object.reference.authorization_scope != run_id)
+            {
+                return Err(protocol(
+                    "program input object is outside the admitted run authority",
+                ));
+            }
             bundle.validate().map_err(protocol)?;
-            if bundle.manifest.program_revision != descriptor.recipe.program_revision
+            if bundle.manifest.portable_environment != descriptor.environment.entries()
+                || bundle.manifest.program_revision != descriptor.recipe.program_revision
                 || !bundle
                     .manifest
                     .recipes
@@ -116,6 +163,7 @@ pub(super) async fn admit(
                     "bundle, program, and admitted project revision do not converge",
                 ));
             }
+            let input_locations = inputs.objects.clone();
             let request =
                 ProgramExecutionRequest::from_parts(*descriptor, inputs).map_err(protocol)?;
             let materialized = (desired_worker_count == 0 && bundle.requires_materialization())
@@ -127,6 +175,7 @@ pub(super) async fn admit(
                     bundle_archive,
                     bundle: Arc::new(bundle),
                     materialized,
+                    input_locations,
                 },
             )))
         }
@@ -154,6 +203,7 @@ pub(super) async fn admit(
                 AdmittedGraphProgram {
                     request: *request,
                     encoded_bytes: program_bytes.len(),
+                    program_digest: Digest::sha256(&program_bytes),
                     _staged: None,
                     transfer: None,
                 },
@@ -263,6 +313,7 @@ async fn admit_chunked_graph(
         AdmittedGraphProgram {
             request,
             encoded_bytes,
+            program_digest,
             _staged: Some(staged),
             transfer: Some(super::super::pool::SignedGraphTransfer {
                 encrypted_manifest: Arc::from(encoded),

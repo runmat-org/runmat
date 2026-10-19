@@ -14,6 +14,7 @@ pub(super) async fn native_conformance() {
     for object in &exact.input.geometry_objects().objects {
         store.write_verified(object).unwrap();
     }
+    seed_host_invocation(&mut store, &exact.host, &exact.request);
     let task = session
         .submit(
             exact.request.clone(),
@@ -38,8 +39,104 @@ pub(super) async fn native_conformance() {
         .unwrap();
 }
 
+pub(super) fn native_dag_conformance() {
+    let serial_layout = execute_native_dag(1, 1, 1);
+    let parallel_layout = execute_native_dag(2, 3, 32);
+
+    assert_eq!(serial_layout.topology, parallel_layout.topology);
+    assert_eq!(
+        serial_layout.canonical_digest,
+        parallel_layout.canonical_digest
+    );
+}
+
+fn execute_native_dag(
+    max_workers: u32,
+    preferred_edges_per_partition: u32,
+    preferred_faces_per_partition: u32,
+) -> runmat_meshing_core::SolverMeshArtifact {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = config(directory.path(), "--exact-dag-child");
+    config.max_workers = max_workers;
+    let session = NativeProgramSession::new(config).unwrap();
+    let access = ArtifactAccess {
+        authorization_scope: format!("native-exact-dag-{max_workers}"),
+        encryption_context: Digest::sha256(
+            [
+                b"native-exact-dag-context".as_slice(),
+                &max_workers.to_be_bytes(),
+            ]
+            .concat(),
+        ),
+    };
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_tetrahedron();
+    let geometry_objects = prepare_exact_geometry_objects(
+        document,
+        topology,
+        evaluators,
+        None,
+        None,
+        limits().inventory,
+    )
+    .unwrap();
+    let document = geometry_objects.document.clone();
+    let geometry =
+        prepare_exact_geometry_input(geometry_objects, access.clone(), limits().inventory).unwrap();
+    let mut store = session.object_store();
+    for object in &geometry.geometry_objects().objects {
+        store.write_verified(object).unwrap();
+    }
+    let mut request = request();
+    request.tolerance = document.tolerance;
+    request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
+    request.quality.curve.maximum_chordal_deviation_m = 0.1;
+    request.quality.curve.maximum_tangent_change_degrees = 180.0;
+    request.quality.curve.minimum_metric_edge_length = 0.01;
+    request.quality.curve.maximum_metric_edge_length = 10.0;
+    request.quality.surface.minimum_metric_angle_degrees = 0.1;
+    request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
+    request.quality.surface.maximum_chordal_deviation_m = 0.1;
+    request.quality.surface.maximum_normal_deviation_degrees = 180.0;
+    request.quality.volume.maximum_metric_edge_length = 2.0;
+    request.quality.volume.maximum_radius_edge_ratio = 10.0;
+    request.quality.volume.minimum_scaled_jacobian = 0.01;
+    request.resources.maximum_search_work = 1_000_000;
+    request.resources.maximum_iterations = 1_000_000;
+
+    let mut executor =
+        NativeExactMeshingExecutor::new(&session, MeshingExecutionPolicy::default()).unwrap();
+    let result = runmat_meshing_execution::execute_exact_meshing_dag(
+        runmat_meshing_execution::ExactMeshingDagRun {
+            geometry: &geometry,
+            request,
+            artifact_access: access,
+            capability_cohort: Some("native-cohort-v1".into()),
+            program_revision: revision(),
+            preferred_edges_per_partition,
+            preferred_faces_per_partition,
+            inventory_limits: limits().inventory,
+            evidence: runmat_meshing_execution::MeshingRunEvidenceContext {
+                platform: runmat_meshing_core::PlatformBuildIdentity {
+                    capability_cohort: "native-cohort-v1".into(),
+                    target_triple: "native-process-test".into(),
+                    build_digest: stable(71),
+                    exact_kernel_abi: Some("occt-v1".into()),
+                },
+                sizing: Vec::new(),
+                cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
+            },
+        },
+        &mut executor,
+    )
+    .unwrap();
+    result.evidence.validate(&result.artifact).unwrap();
+    assert_eq!(result.artifact.topology.volume_elements.len(), 4);
+    assert!(!executor.drain_progress().is_empty());
+    result.artifact
+}
+
 pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> ExactFixture {
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: authorization_scope.into(),
         encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
     };
@@ -110,8 +207,9 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> E
     let host =
         MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
     let request = host
-        .program_request(revision, std::slice::from_ref(input.root_input()))
-        .unwrap();
+        .prepare_program_request(revision, std::slice::from_ref(input.root_input()))
+        .unwrap()
+        .into_request();
     ExactFixture {
         host,
         request,

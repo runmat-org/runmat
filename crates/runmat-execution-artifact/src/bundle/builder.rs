@@ -46,6 +46,7 @@ pub struct ExecutionBundleBuilder<'a, R> {
     materializations: Vec<Materialization>,
     resources: BuildResourceDeclaration,
     code_closure: CodeClosureMode,
+    portable_environment: Vec<(String, String)>,
     foreign_objects: Vec<LogicalObject>,
     foreign_policy_objects: Vec<LogicalObject>,
     foreign_artifact_closures: Vec<ForeignArtifactClosure>,
@@ -80,6 +81,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                 scratch_bytes: 1024 * 1024 * 1024,
             },
             code_closure: CodeClosureMode::SourceProject,
+            portable_environment: Vec::new(),
             foreign_objects: Vec::new(),
             foreign_policy_objects: Vec::new(),
             foreign_artifact_closures: Vec::new(),
@@ -147,15 +149,27 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         self
     }
 
+    /// Freeze explicitly selected nonsecret values. Never collects ambient process variables.
+    pub fn with_portable_environment(
+        mut self,
+        entries: Vec<(String, String)>,
+    ) -> ArtifactResult<Self> {
+        crate::environment::validate(&entries)?;
+        self.portable_environment = entries;
+        Ok(self)
+    }
+
     pub fn build(mut self) -> ArtifactResult<ExecutionBundle> {
         if self.code_closure == CodeClosureMode::Compiled
             && (self.materializations.is_empty()
                 || self.materializations.iter().any(|materialization| {
                     !matches!(
                         materialization.form,
-                        ExecutableForm::ExecutableUnitV3
+                        ExecutableForm::ExecutableUnitV4
                             | ExecutableForm::NativeObjectV1
                             | ExecutableForm::MeshingWorkload
+                            | ExecutableForm::AnalysisWorkload
+                            | ExecutableForm::GeometryWorkload
                     )
                 }))
         {
@@ -291,7 +305,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             artifacts,
             requested_capabilities: Default::default(),
             resources: self.resources,
-            portable_environment: Vec::new(),
+            portable_environment: self.portable_environment,
         };
         let bundle = ExecutionBundle { manifest, objects };
         bundle.validate()?;

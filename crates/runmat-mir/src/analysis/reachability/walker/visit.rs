@@ -289,6 +289,24 @@ impl Walker<'_> {
                     self.call_arg(from, argument);
                 }
             }
+            MirRvalue::ExternalFuture {
+                function,
+                display_name,
+                args,
+                ..
+            } => {
+                self.identity(
+                    from,
+                    &CallableIdentity::ExternalFunction {
+                        function: *function,
+                        display_name: display_name.clone(),
+                    },
+                    Reason::FutureCall,
+                );
+                for argument in args {
+                    self.call_arg(from, argument);
+                }
+            }
             MirRvalue::Distributed(operation) => {
                 for operand in operation.operands() {
                     self.operand(from, operand, Reason::FunctionHandle);

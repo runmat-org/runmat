@@ -148,6 +148,8 @@ mod select;
 mod signal;
 #[path = "ops/solve.rs"]
 mod solve;
+#[path = "ops/sparse/mod.rs"]
+mod sparse;
 #[path = "ops/storage_move.rs"]
 mod storage_move;
 #[path = "ops/telemetry.rs"]
@@ -185,23 +187,30 @@ use crate::telemetry::AccelTelemetry;
 pub(crate) mod backend_shared;
 #[path = "backend_types.rs"]
 pub(crate) mod backend_types;
+#[path = "health.rs"]
+mod health;
 #[path = "trait_impl.rs"]
 mod trait_impl;
 
 pub(super) use backend_shared::*;
 pub(super) use backend_types::*;
+pub(super) use health::WgpuDeviceHealth;
 #[cfg(not(target_arch = "wasm32"))]
 fn install_device_error_handlers(
     device: &wgpu::Device,
     allocations: &owner_shared::OwnerShared<allocation_state::AllocationState>,
+    health: Arc<WgpuDeviceHealth>,
 ) -> Arc<std::sync::atomic::AtomicBool> {
     device.on_uncaptured_error(Box::new(|error| {
         error!("WGPU uncaptured error: {:?}", error);
+        #[cfg(test)]
+        eprintln!("WGPU uncaptured error: {error:?}");
     }));
     let observation_stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let weak = Arc::downgrade(&observation_stopped);
     let allocation_owner = owner_shared::OwnerShared::downgrade(allocations);
     device.set_device_lost_callback(move |reason, message| {
+        health.mark_lost(health::loss_reason(reason));
         if let Some(owner) = allocation_owner.upgrade() {
             owner.mark_device_lost();
         }
@@ -216,7 +225,7 @@ fn install_device_error_handlers(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn install_device_error_handlers(device: &wgpu::Device) {
+fn install_device_error_handlers(device: &wgpu::Device, _health: Arc<WgpuDeviceHealth>) {
     device.on_uncaptured_error(Box::new(|error| {
         error!("WGPU uncaptured error (wasm): {:?}", error);
     }));

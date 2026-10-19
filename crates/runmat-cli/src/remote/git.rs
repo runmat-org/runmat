@@ -3,14 +3,13 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use uuid::Uuid;
 
 use crate::presentation;
 
 pub async fn git_clone(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     directory: &PathBuf,
 ) -> Result<()> {
     if directory.exists() && fs::read_dir(directory)?.next().is_some() {
@@ -29,7 +28,7 @@ pub async fn git_clone(
     .ok();
     run_git(
         directory,
-        &["config", "runmat.project", &project_id.to_string()],
+        &["config", "runmat.project", project_id.as_ref()],
     )
     .ok();
     println!(
@@ -43,7 +42,7 @@ pub async fn git_clone(
 pub async fn git_pull(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     directory: &PathBuf,
 ) -> Result<()> {
     let stream = fetch_git_stream(server_url, token, project_id).await?;
@@ -61,7 +60,7 @@ pub async fn git_pull(
 pub async fn git_push(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     directory: &PathBuf,
 ) -> Result<()> {
     let branches = run_git_capture(
@@ -108,7 +107,11 @@ pub async fn git_push(
     Ok(())
 }
 
-async fn fetch_git_stream(server_url: &str, token: &str, project_id: Uuid) -> Result<Vec<u8>> {
+async fn fetch_git_stream(
+    server_url: &str,
+    token: &str,
+    project_id: &runmat_server_client::ids::ProjectId,
+) -> Result<Vec<u8>> {
     let client = reqwest::Client::new();
     let url = format!(
         "{}/v1/projects/{}/fs/git/upload",

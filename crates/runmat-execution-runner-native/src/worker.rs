@@ -1,15 +1,22 @@
 use runmat_process_host::ipc::FrameLimits;
 
 use crate::protocol::{
-    StagedGraphWorkerReference, StoredGraphProgram, WorkerDriverMessage, WorkerLaunchRequest,
-    WorkerRequest, WorkerResponse,
+    ReservedProgramExecutionRequest, StagedGraphWorkerReference, StoredGraphProgram,
+    WorkerDriverMessage, WorkerLaunchRequest, WorkerRequest, WorkerResponse,
 };
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 mod collective;
+mod console;
+
+/// One bounded stdio frame between a native worker and its parent.
+const WORKER_MAX_MESSAGE_BYTES: u32 = 64 * 1024 * 1024;
 
 enum WorkerExecutionOutcome {
-    Completed(WorkerResponse),
+    Completed {
+        response: WorkerResponse,
+        console: Option<runmat_execution::console::ConsoleReceipt>,
+    },
     RetirementUnverified {
         message: String,
         owner: Box<crate::test_workload::RetainedGraphHost>,
@@ -17,9 +24,10 @@ enum WorkerExecutionOutcome {
 }
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
-    let (reader, writer) = runmat_process_host::ipc::stdio::endpoint();
+    let (reader, writer) = runmat_process_host::ipc::stdio::endpoint()
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let limits = FrameLimits {
-        max_message_bytes: 64 * 1024 * 1024,
+        max_message_bytes: WORKER_MAX_MESSAGE_BYTES,
     };
     let channel = collective::StdioCollectiveChannel::new(reader, writer, limits);
     let payload = channel.read_payload().await?;
@@ -37,28 +45,40 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
             },
             WorkerRequest::Graph(_) => None,
         },
+        WorkerLaunchRequest::Reserved(reserved) => match &reserved.request().context {
+            runmat_execution::ProgramInvocationContext::SpmdTask { task } => Some(task.clone()),
+            _ => None,
+        },
         WorkerLaunchRequest::StagedGraph(_) => None,
     };
     let response = if let Some(task) = spmd_task {
-        let WorkerLaunchRequest::Direct(direct) = request else {
-            unreachable!("SPMD request uses Direct worker wire")
-        };
-        let WorkerRequest::Direct(request) = *direct else {
-            unreachable!("SPMD request has Direct program")
+        let request = match request {
+            WorkerLaunchRequest::Direct(direct) => match *direct {
+                WorkerRequest::Direct(request) => request,
+                WorkerRequest::Graph(_) => unreachable!("SPMD request has a Direct program"),
+            },
+            WorkerLaunchRequest::Reserved(reserved) => reserved.into_parts().0,
+            WorkerLaunchRequest::StagedGraph(_) => unreachable!("SPMD request uses Direct wire"),
         };
         let service = collective::StdioCollectiveService::new(task, channel.clone());
-        Ok(WorkerExecutionOutcome::Completed(
-            crate::test_workload::execute_host_program_request_with_collective(
+        Ok(WorkerExecutionOutcome::Completed {
+            response: crate::test_workload::execute_host_program_request_with_collective(
                 request,
                 std::rc::Rc::new(service),
             )
             .await,
-        ))
+            console: None,
+        })
     } else {
         execute_launch(request, channel.clone()).await
     };
     let payload = match response {
-        Ok(WorkerExecutionOutcome::Completed(response)) => serde_json::to_vec(&response),
+        Ok(WorkerExecutionOutcome::Completed { response, console }) => {
+            serde_json::to_vec(&crate::protocol::WorkerProcessMessage::Completed {
+                response,
+                console,
+            })
+        }
         Ok(WorkerExecutionOutcome::RetirementUnverified { message, owner }) => {
             let _owner = owner;
             let payload = serde_json::to_vec(
@@ -89,13 +109,18 @@ async fn execute_launch(
 ) -> NativeExecutionResult<WorkerExecutionOutcome> {
     match request {
         WorkerLaunchRequest::Direct(direct) => match *direct {
-            WorkerRequest::Direct(request) => Ok(WorkerExecutionOutcome::Completed(
-                execute(WorkerRequest::Direct(request)).await,
-            )),
+            WorkerRequest::Direct(request) => Ok(WorkerExecutionOutcome::Completed {
+                response: execute(WorkerRequest::Direct(request)).await,
+                console: None,
+            }),
             WorkerRequest::Graph(_) => Err(NativeExecutionError::Protocol(
                 "Graph stdio requests require a verified staged artifact reference".into(),
             )),
         },
+        WorkerLaunchRequest::Reserved(reserved) => {
+            let (response, console) = console::execute_reserved(*reserved).await?;
+            Ok(WorkerExecutionOutcome::Completed { response, console })
+        }
         WorkerLaunchRequest::StagedGraph(staged) => {
             execute_staged_graph(staged.staged_graph_v10, channel).await
         }
@@ -123,7 +148,7 @@ async fn execute_staged_graph(
         tokio::select! {
             response = &mut execution => return Ok(match response {
                 crate::test_workload::GraphHostExecution::Completed(response) => {
-                    WorkerExecutionOutcome::Completed(response)
+                    WorkerExecutionOutcome::Completed { response, console: None }
                 }
                 crate::test_workload::GraphHostExecution::RetirementUnverified { message, owner } => {
                     WorkerExecutionOutcome::RetirementUnverified { message, owner }
@@ -203,6 +228,25 @@ pub(crate) async fn execute(request: WorkerRequest) -> WorkerResponse {
     }
 }
 
+/// Execute a Direct program within its scheduler reservation, so domain
+/// workers admit CPU parallelism inside the reserved CPU and memory.
+pub(crate) async fn execute_reserved(request: ReservedProgramExecutionRequest) -> WorkerResponse {
+    if let Err(error) = request.validate() {
+        return WorkerResponse::Failure {
+            message: error.to_string(),
+        };
+    }
+    let (program, resources) = request.into_parts();
+    crate::test_workload::execute_host_program_request_in_context(
+        program,
+        crate::test_workload::HostProgramContext {
+            resources: Some(&resources),
+            ..crate::test_workload::HostProgramContext::default()
+        },
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use runmat_execution::{
@@ -266,6 +310,8 @@ mod tests {
                 job_id: None,
                 arguments: Vec::new(),
                 requested_outputs: 1,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
             },
         ))
         .await;

@@ -28,6 +28,7 @@ pub(super) fn open(
                 bytes,
                 readonly,
                 identity,
+                ..
             }) => {
                 if writable && *readonly {
                     return Err(io::Error::new(
@@ -157,6 +158,7 @@ impl FsMappedBacking for MemoryMappedBacking {
         let MemoryEntry::File {
             bytes: target,
             identity,
+            revision,
             ..
         } = entry
         else {
@@ -185,6 +187,7 @@ impl FsMappedBacking for MemoryMappedBacking {
         let writable = Arc::make_mut(target);
         bump_identity(identity).map_err(FsMappedWriteFailure::before_effect)?;
         writable[start..end].copy_from_slice(bytes);
+        *revision = uuid::Uuid::new_v4().to_string();
         Ok(FsMappedWriteOutcome {
             accepted_bytes: bytes.len(),
             requested_bytes: bytes.len(),

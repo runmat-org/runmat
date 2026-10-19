@@ -1,3 +1,5 @@
+#[path = "meshing_process_conformance/attempt_lifecycle.rs"]
+mod attempt_lifecycle;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -13,7 +15,8 @@ use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
-    ArtifactResult, ExecutableForm, ExecutionBundleBuilder, LogicalObject, ProgramExecutionResponse,
+    ArtifactAccess, ArtifactResult, ExecutableForm, ExecutionBundleBuilder, LogicalObject,
+    ProgramExecutionResponse,
 };
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_transport_native::frame::FrameLimits;
@@ -30,18 +33,21 @@ use runmat_meshing_core::{
     MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 use runmat_meshing_execution::{
-    build_task_submission, import_result_publication, prepare_exact_geometry_input,
-    prepare_exact_geometry_objects, prepare_faceted_geometry_input,
-    prepare_faceted_geometry_objects, MeshingArtifactAccess, MeshingExecutionContext,
-    MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
-    MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
-    ValidatedMeshingStageOutput,
+    build_task_submission, execute_exact_meshing_dag_async, import_result_publication,
+    prepare_exact_geometry_input, prepare_exact_geometry_objects, prepare_faceted_geometry_input,
+    prepare_faceted_geometry_objects, ExactMeshingDagRun, MeshingExecutionContext,
+    MeshingHostResponse, MeshingHostWorkload, MeshingRunEvidenceContext, MeshingStageCheckpoint,
+    MeshingStageInvocation, MeshingStageKernel, MeshingTaskEffectPolicy, NoopMeshingProgress,
+    PreparedExactGeometryInput, ValidatedMeshingStageOutput,
 };
 
 use runmat_execution_runner_native::{
-    execute_meshing_program_request, run_meshing_worker_stdio, run_remote_meshing_worker_quic,
-    NativeMeshingHostLimits, NativeProgramSession, QuicRemoteWorkerChannel, RemotePoolDriver,
-    RemoteWorkerChannel, RemoteWorkerChannelConfig, NATIVE_OBJECT_STORE_ROOT_ENV,
+    execute_meshing_program_request, native_meshing_kernel_dispatcher, run_meshing_worker_stdio,
+    run_remote_meshing_worker_quic, MeshingExecutionPolicy, NativeExactMeshingExecutor,
+    NativeMeshingHostLimits, NativeProgramSession, QuicRemoteWorkerChannel,
+    RemoteExactMeshingExecutor, RemoteMeshingWorkerQuicRequest, RemotePoolDriver,
+    RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
+    NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 
 #[path = "meshing_process_conformance/curve_pipeline.rs"]
@@ -168,6 +174,27 @@ impl MeshingStageKernel for SlowKernel {
 struct AdmissionThenCooperativeSlowKernel {
     calls: AtomicUsize,
     cancellation_observed: AtomicBool,
+    execution_active: AtomicBool,
+}
+
+struct ProductionAndConformanceKernel {
+    production_request: StableDigest,
+    production: Arc<dyn MeshingStageKernel>,
+    conformance: Arc<AdmissionThenCooperativeSlowKernel>,
+}
+
+impl MeshingStageKernel for ProductionAndConformanceKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        if invocation.host.resolved_request.canonical_digest().ok() == Some(self.production_request)
+        {
+            self.production.execute(invocation)
+        } else {
+            self.conformance.execute(invocation)
+        }
+    }
 }
 
 impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
@@ -176,7 +203,7 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
         invocation: MeshingStageInvocation<'_, '_>,
     ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
         if invocation.host.workload.stage == MeshingStageKind::CurveMesh {
-            return curve_pipeline::CurvePipelineKernel.execute(invocation);
+            return curve_pipeline::CurvePipelineKernel::default().execute(invocation);
         }
         if !invocation.inputs.is_empty() {
             return ExactInputKernel.execute(invocation);
@@ -184,6 +211,7 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
         if self.calls.fetch_add(1, Ordering::AcqRel) == 0 {
             return AdmissionKernel.execute(invocation);
         }
+        self.execution_active.store(true, Ordering::Release);
         for work in 1..=100 {
             std::thread::sleep(Duration::from_millis(10));
             let checkpoint = MeshingStageCheckpoint {
@@ -194,15 +222,44 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
             };
             if let Err(error) = invocation.control.checkpoint(checkpoint) {
                 self.cancellation_observed.store(true, Ordering::Release);
+                self.execution_active.store(false, Ordering::Release);
                 return Err(error);
             }
         }
+        self.execution_active.store(false, Ordering::Release);
         AdmissionKernel.execute(invocation)
     }
 }
 
 fn main() {
     let arguments = std::env::args_os().collect::<Vec<_>>();
+    if let Some(mode) = arguments.get(1).and_then(|mode| mode.to_str()) {
+        if matches!(
+            mode,
+            "--exit-after-success-child"
+                | "--raw-terminal-child"
+                | "--retry-observed-child"
+                | "--checkpoint-failure-child"
+        ) {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(attempt_lifecycle::fault_child(mode));
+            return;
+        }
+    }
+    if arguments
+        .iter()
+        .any(|argument| argument == "--attempt-lifecycle-only")
+    {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(attempt_lifecycle::run());
+        return;
+    }
     if let Some(mode) = arguments.get(1) {
         if mode == runmat_process_host::HiddenMode::ExecutionDriver.marker() {
             tokio::runtime::Builder::new_current_thread()
@@ -231,7 +288,14 @@ fn main() {
             return;
         }
         if mode == "--curve-child" {
-            run_child(curve_pipeline::CurvePipelineKernel, Path::new(&root));
+            run_child(
+                curve_pipeline::CurvePipelineKernel::default(),
+                Path::new(&root),
+            );
+            return;
+        }
+        if mode == "--exact-dag-child" {
+            run_child(native_meshing_kernel_dispatcher(), Path::new(&root));
             return;
         }
     }
@@ -259,6 +323,7 @@ async fn parent() {
     let directory = tempfile::tempdir().unwrap();
     let (host, request) = fixture();
     let session = NativeProgramSession::new(config(directory.path(), "--child")).unwrap();
+    seed_host_invocation(&mut session.object_store(), &host, &request);
     let task_submission = submission(&session, &host, &request);
     let task = session.submit(request.clone(), task_submission).unwrap();
     let success = tokio::time::timeout(Duration::from_secs(10), async {
@@ -294,9 +359,24 @@ async fn parent() {
         panic!("native meshing child returned a non-object root")
     };
     let store = session.object_store();
-    let imported =
-        import_result_publication(&store, root, host.artifact_access, limits().inventory).unwrap();
-    assert_eq!(imported.result_objects(), result_objects);
+    let imported = import_result_publication(
+        &store,
+        root,
+        host.artifact_access.clone(),
+        limits().inventory,
+    )
+    .unwrap();
+    assert!(imported
+        .result_objects()
+        .iter()
+        .all(|reference| result_objects.contains(reference)));
+    runmat_meshing_execution::import_stage_evidence_observation(
+        &store,
+        &host,
+        &result_objects,
+        limits().inventory,
+    )
+    .unwrap();
 
     let mut progress = NoopMeshingProgress;
     let mut local_store = store.clone();
@@ -308,11 +388,15 @@ async fn parent() {
         &mut progress,
         limits(),
     );
-    assert!(matches!(
-        budget_failure,
-        ProgramExecutionResponse::Failure { message }
-            if message.contains("SearchWorkBudgetExceeded")
-    ));
+    match budget_failure {
+        ProgramExecutionResponse::Failure { message } => assert_eq!(
+            MeshingHostResponse::failure_from_program_message(&message)
+                .expect("canonical meshing budget failure")
+                .category,
+            runmat_meshing_core::MeshingFailureCategory::SearchWorkBudgetExceeded,
+        ),
+        response => panic!("search-budget kernel unexpectedly succeeded: {response:?}"),
+    }
 
     let mut malformed = request;
     malformed.artifact.executable_bytes.push(0);
@@ -327,6 +411,7 @@ async fn parent() {
     assert!(matches!(rejected, ProgramExecutionResponse::Failure { .. }));
 
     exact_input::native_conformance().await;
+    exact_input::native_dag_conformance();
     faceted_input::native_conformance().await;
     curve_pipeline::native_conformance().await;
     curve_pipeline::durable_conformance().await;
@@ -335,6 +420,11 @@ async fn parent() {
     let (cancel_host, cancel_request) = fixture();
     let cancel_session =
         NativeProgramSession::new(config(cancellation_directory.path(), "--slow-child")).unwrap();
+    seed_host_invocation(
+        &mut cancel_session.object_store(),
+        &cancel_host,
+        &cancel_request,
+    );
     let cancel_store_root = cancel_session.object_store().root().to_path_buf();
     let cancel_task = cancel_session
         .submit(
@@ -382,6 +472,7 @@ async fn parent() {
 
 async fn remote_conformance() {
     let (host, request, exact, curve, bundle_bytes) = remote_fixture("remote-meshing-run");
+    let full_dag = full_dag_fixture("remote-meshing-run");
 
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
@@ -405,18 +496,24 @@ async fn remote_conformance() {
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([17; 32]).unwrap();
     let kernel = Arc::new(AdmissionThenCooperativeSlowKernel::default());
-    let server_kernel = Arc::clone(&kernel);
-    let server = run_remote_meshing_worker_quic(
-        listener,
-        "remote-meshing-run",
-        worker.clone(),
-        31,
-        [19; 16],
-        run_key.clone(),
-        FrameLimits::default(),
-        server_kernel,
-        limits(),
-    );
+    let server_kernel = Arc::new(ProductionAndConformanceKernel {
+        production_request: full_dag.1.canonical_digest().unwrap(),
+        production: Arc::new(native_meshing_kernel_dispatcher()),
+        conformance: Arc::clone(&kernel),
+    });
+    let server = run_remote_meshing_worker_quic(RemoteMeshingWorkerQuicRequest {
+        worker: RemoteWorkerQuicRequest {
+            listener,
+            run_identity: "remote-meshing-run".into(),
+            worker: worker.clone(),
+            driver_fence: 31,
+            session_id: [19; 16],
+            run_key: run_key.clone(),
+            limits: FrameLimits::default(),
+        },
+        kernel: server_kernel,
+        meshing_limits: limits(),
+    });
     let client = async {
         let channel = QuicRemoteWorkerChannel::connect(
             RemoteWorkerChannelConfig {
@@ -451,6 +548,7 @@ async fn remote_conformance() {
         )
         .unwrap();
         pool.add_worker(channel.clone()).await.unwrap();
+        register_host_invocation(&pool, &host, &request);
         let completion = pool
             .submit(
                 submission_for(scope_id, pool_id, &host, &request),
@@ -501,7 +599,17 @@ async fn remote_conformance() {
             limits().inventory,
         )
         .unwrap();
-        assert_eq!(imported.result_objects(), success_result_objects);
+        assert!(imported
+            .result_objects()
+            .iter()
+            .all(|reference| success_result_objects.contains(reference)));
+        runmat_meshing_execution::import_stage_evidence_observation(
+            &remote_store,
+            &host,
+            success_result_objects,
+            limits().inventory,
+        )
+        .unwrap();
 
         for (object, reference) in exact
             .input
@@ -513,6 +621,7 @@ async fn remote_conformance() {
             pool.register_execution_object(reference.clone(), object.bytes.clone())
                 .unwrap();
         }
+        register_host_invocation(&pool, &exact.host, &exact.request);
         let exact_completion = pool
             .submit(
                 submission_for(scope_id, pool_id, &exact.host, &exact.request),
@@ -548,12 +657,56 @@ async fn remote_conformance() {
 
         curve_pipeline::remote_conformance(&pool, scope_id, pool_id, &curve).await;
 
+        let mut full_executor = RemoteExactMeshingExecutor::new(
+            Arc::clone(&pool),
+            full_dag.2.clone(),
+            MeshingExecutionPolicy::default(),
+            limits().inventory.max_object_bytes,
+        )
+        .unwrap();
+        let full_result = tokio::time::timeout(
+            Duration::from_secs(120),
+            execute_exact_meshing_dag_async(
+                ExactMeshingDagRun {
+                    geometry: &full_dag.0,
+                    request: full_dag.1.clone(),
+                    artifact_access: full_dag.2.clone(),
+                    capability_cohort: Some("native-cohort-v1".into()),
+                    program_revision: request.recipe.program_revision.clone(),
+                    preferred_edges_per_partition: 3,
+                    preferred_faces_per_partition: 2,
+                    inventory_limits: limits().inventory,
+                    evidence: MeshingRunEvidenceContext {
+                        platform: runmat_meshing_core::PlatformBuildIdentity {
+                            capability_cohort: "native-cohort-v1".into(),
+                            target_triple: "encrypted-remote-test".into(),
+                            build_digest: stable(72),
+                            exact_kernel_abi: Some("occt-v1".into()),
+                        },
+                        sizing: Vec::new(),
+                        cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
+                    },
+                },
+                &mut full_executor,
+            ),
+        )
+        .await
+        .expect("full remote exact-meshing DAG timed out")
+        .unwrap();
+        full_result
+            .evidence
+            .validate(&full_result.artifact)
+            .unwrap();
+        assert_eq!(full_result.artifact.topology.volume_elements.len(), 4);
+        assert!(!full_executor.drain_progress().is_empty());
+
         let mut exact_serial_store = TestStore::default();
         for object in &exact.input.geometry_objects().objects {
             exact_serial_store
                 .write_verified(object)
                 .expect("seed exact serial input");
         }
+        seed_host_invocation(&mut exact_serial_store, &exact.host, &exact.request);
         let exact_serial = execute_meshing_program_request(
             &exact.request,
             &mut exact_serial_store,
@@ -568,6 +721,7 @@ async fn remote_conformance() {
         assert_eq!(outputs, exact_outputs);
 
         let mut serial_store = TestStore::default();
+        seed_host_invocation(&mut serial_store, &host, &request);
         let serial = execute_meshing_program_request(
             &request,
             &mut serial_store,
@@ -598,6 +752,7 @@ async fn remote_conformance() {
         )
         .unwrap();
         cancel_pool.add_worker(channel.clone()).await.unwrap();
+        register_host_invocation(&cancel_pool, &host, &request);
         let cancelled = cancel_pool
             .submit(
                 submission_for(cancel_scope, pool_id, &host, &request),
@@ -627,6 +782,7 @@ async fn remote_conformance() {
                 .expect("remote cancellation completion timeout")
                 .is_err()
         );
+        assert!(!kernel.execution_active.load(Ordering::Acquire));
         tokio::time::timeout(Duration::from_secs(5), channel.drain())
             .await
             .expect("remote meshing drain timeout")
@@ -635,6 +791,47 @@ async fn remote_conformance() {
     let (server, ()) = tokio::join!(server, client);
     server.unwrap();
     assert!(kernel.cancellation_observed.load(Ordering::Acquire));
+}
+
+fn full_dag_fixture(
+    authorization_scope: &str,
+) -> (PreparedExactGeometryInput, MeshingRequest, ArtifactAccess) {
+    let access = ArtifactAccess {
+        authorization_scope: authorization_scope.into(),
+        encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
+    };
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_tetrahedron();
+    let objects = prepare_exact_geometry_objects(
+        document.clone(),
+        topology,
+        evaluators,
+        None,
+        None,
+        limits().inventory,
+    )
+    .unwrap();
+    let geometry =
+        prepare_exact_geometry_input(objects, access.clone(), limits().inventory).unwrap();
+    let mut request = request();
+    request.tolerance = document.tolerance;
+    request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
+    request.quality.curve.maximum_chordal_deviation_m = 0.1;
+    request.quality.curve.maximum_tangent_change_degrees = 180.0;
+    request.quality.curve.minimum_metric_edge_length = 0.01;
+    request.quality.curve.maximum_metric_edge_length = 10.0;
+    request.quality.surface.minimum_metric_angle_degrees = 0.1;
+    request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
+    request.quality.surface.maximum_chordal_deviation_m = 0.1;
+    request.quality.surface.maximum_normal_deviation_degrees = 180.0;
+    request.quality.volume.maximum_metric_edge_length = 2.0;
+    request.quality.volume.maximum_radius_edge_ratio = 10.0;
+    request.quality.volume.minimum_scaled_jacobian = 0.01;
+    request.resources.maximum_nodes = 10_000;
+    request.resources.maximum_elements = 10_000;
+    request.resources.maximum_search_work = 1_000_000;
+    request.resources.maximum_iterations = 1_000_000;
+    request.resources.maximum_wall_time_ms = 120_000;
+    (geometry, request, access)
 }
 
 fn remote_fixture(
@@ -687,6 +884,8 @@ fn remote_fixture(
         ),
     ];
     materializations.sort_by_key(|(recipe, _)| recipe.id().unwrap());
+    materializations.dedup_by_key(|(recipe, _)| recipe.id().unwrap());
+    assert_eq!(materializations.len(), 1);
     let mut builder = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_compiled_package_closure();
@@ -719,6 +918,38 @@ impl CacheExport for TestStore {
             .insert(object.descriptor.digest, object.bytes.clone());
         Ok(())
     }
+}
+
+fn seed_host_invocation(
+    store: &mut impl CacheExport,
+    host: &MeshingHostWorkload,
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
+) {
+    let roots = MeshingHostWorkload::semantic_input_roots(request).unwrap();
+    let invocation = host
+        .prepare_program_request(request.recipe.program_revision.clone(), &roots)
+        .unwrap();
+    assert_eq!(invocation.request(), request);
+    invocation.write_to(store).unwrap();
+}
+
+fn register_host_invocation(
+    pool: &RemotePoolDriver,
+    host: &MeshingHostWorkload,
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
+) {
+    let roots = MeshingHostWorkload::semantic_input_roots(request).unwrap();
+    let invocation = host
+        .prepare_program_request(request.recipe.program_revision.clone(), &roots)
+        .unwrap();
+    assert_eq!(invocation.request(), request);
+    let root = MeshingHostWorkload::invocation_root(request).unwrap();
+    assert_eq!(
+        root.logical_digest,
+        invocation.descriptor().descriptor.digest
+    );
+    pool.register_execution_object(root.clone(), invocation.descriptor().bytes.clone())
+        .unwrap();
 }
 
 fn worker_inventory() -> ResourceInventory {
@@ -763,23 +994,9 @@ fn submission_for(
     host: &MeshingHostWorkload,
     request: &runmat_execution_artifact::ProgramExecutionRequest,
 ) -> runmat_execution_runner::TaskSubmission {
-    let roots = request
-        .arguments
-        .iter()
-        .map(|value| match value {
-            ValuePayload::Object(root) => Ok((**root).clone()),
-            ValuePayload::Inline(_) => Err("meshing conformance inputs must be objects"),
-            ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
-                Err("meshing conformance inputs cannot be distributed handles")
-            }
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
     build_task_submission(
-        &host.workload,
-        &host.stage_identity,
-        &host.resolved_request,
-        &roots,
+        host,
+        &request.arguments,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
@@ -817,6 +1034,10 @@ fn worker_capabilities() -> BTreeSet<Capability> {
         Capability::Custom("runmat.meshing.algorithm:geometry/v2".into()),
         Capability::Custom("runmat.meshing.algorithm:curve/v2".into()),
         Capability::Custom("runmat.meshing.algorithm:surface/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:plc/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:tetrahedron/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:optimization/v2".into()),
+        Capability::Custom("runmat.meshing.algorithm:validation/v2".into()),
         Capability::Custom("runmat.meshing.element-order:tet4".into()),
         Capability::Custom("runmat.meshing.cohort:native-cohort-v1".into()),
     ])
@@ -836,7 +1057,7 @@ fn fixture_for(
     MeshingHostWorkload,
     runmat_execution_artifact::ProgramExecutionRequest,
 ) {
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: authorization_scope.into(),
         encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
     };
@@ -887,7 +1108,10 @@ fn fixture_for(
         ],
     };
     let host = MeshingHostWorkload::new(workload, identity, request, access, None).unwrap();
-    let program = host.program_request(revision, &[]).unwrap();
+    let program = host
+        .prepare_program_request(revision, &[])
+        .unwrap()
+        .into_request();
     (host, program)
 }
 
@@ -926,6 +1150,7 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,

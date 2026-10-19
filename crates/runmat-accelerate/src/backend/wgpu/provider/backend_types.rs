@@ -5,6 +5,15 @@ use super::*;
 pub struct WgpuProviderOptions {
     pub power_preference: wgpu::PowerPreference,
     pub force_fallback_adapter: bool,
+    pub precision: WgpuPrecisionPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WgpuPrecisionPolicy {
+    #[default]
+    Automatic,
+    RequireF32,
+    RequireF64,
 }
 
 impl Default for WgpuProviderOptions {
@@ -12,6 +21,7 @@ impl Default for WgpuProviderOptions {
         Self {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
+            precision: WgpuPrecisionPolicy::Automatic,
         }
     }
 }
@@ -54,6 +64,7 @@ pub struct WgpuProvider {
     /// Nested emitters borrow its permit; they must not reacquire the gate.
     pub(super) access: runmat_accelerate_api::WgpuDeviceAccess,
     pub(super) emission_authority: runmat_accelerate_api::CanonicalWgpuEmissionAuthority,
+    pub(super) device_health: Arc<WgpuDeviceHealth>,
     pub(super) adapter: Arc<wgpu::Adapter>,
     pub(super) adapter_info: wgpu::AdapterInfo,
     pub(super) adapter_limits: wgpu::Limits,
@@ -66,6 +77,8 @@ pub struct WgpuProvider {
     pub(super) linear_launch: crate::backend::wgpu::pipelines::FrozenLinearLaunch,
     pub(super) global_reduce_launch: crate::backend::wgpu::pipelines::FrozenGlobalReductionLaunch,
     pub(super) allocations: OwnerShared<super::allocation_state::AllocationState>,
+    pub(super) sparse: super::sparse::SparseState,
+    pub(super) sparse_pipelines: super::sparse::SparsePipelines,
     pub(super) pipelines: WgpuPipelines,
     pub(super) f32_real_floating: Option<crate::backend::wgpu::pipelines::F32RealFloatingPipelines>,
     pub(super) ordered_real_mean: Option<crate::backend::wgpu::pipelines::OrderedRealMeanPipelines>,

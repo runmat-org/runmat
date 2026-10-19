@@ -71,6 +71,7 @@ pub(crate) fn reference_line_builtin(
             line.display_name = options.display_name.clone();
             line.label_orientation = options.label_orientation.clone();
             line.visible = options.visible;
+            line.color_auto = options.color_auto;
             Ok(line)
         })
         .collect::<BuiltinResult<Vec<_>>>()
@@ -81,9 +82,6 @@ pub(crate) fn reference_line_builtin(
     let plot_indices = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices);
     let opts = PlotRenderOptions {
-        title: "",
-        x_label: "",
-        y_label: "",
         ..Default::default()
     };
     let axes_index_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -126,6 +124,8 @@ struct ReferenceLineOptions {
     display_name: Option<String>,
     label_orientation: String,
     visible: bool,
+    /// No color given: the line uses the theme's axes color, as MATLAB's default does.
+    color_auto: bool,
 }
 
 fn parse_reference_line_options(
@@ -225,7 +225,8 @@ fn parse_reference_line_options(
 
     let mut parsed = parse_line_style_args(&style_args, &LineStyleParseOptions::generic(builtin))?;
     if !color_explicit {
-        parsed.appearance.color = glam::Vec4::new(0.0, 0.0, 0.0, 1.0);
+        // MATLAB's default; drawn in the theme's axes color (`color_auto`).
+        parsed.appearance.color = glam::Vec4::new(0.15, 0.15, 0.15, 1.0);
     }
     if !width_explicit {
         parsed.appearance.line_width = 1.0;
@@ -240,6 +241,7 @@ fn parse_reference_line_options(
         display_name: parsed.label,
         label_orientation,
         visible,
+        color_auto: !color_explicit,
     })
 }
 

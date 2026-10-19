@@ -16,7 +16,8 @@ use runmat_execution_artifact::encryption::{
 };
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, ProgramBuildRecipe, ProgramExecutionDescriptor,
-    ProgramExecutionInputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_server_client::execution::{endpoint_evidence, public_error, ExecutionArtifactUpload};
 use runmat_server_client::public_api::types;
@@ -35,7 +36,8 @@ pub(crate) struct PreparedRemoteExecution {
     pub revision: ProgramRevision,
     pub bundle_archive: Vec<u8>,
     pub descriptor: Vec<u8>,
-    pub inputs: Vec<u8>,
+    pub inputs: ProgramExecutionInputs,
+    pub objects: Vec<ProgramExecutionObject>,
 }
 
 pub(crate) struct RemoteSubmissionOptions {
@@ -45,7 +47,9 @@ pub(crate) struct RemoteSubmissionOptions {
     pub trust_identity: String,
     pub idempotency_key: Option<String>,
     pub workers: u32,
+    pub accelerator: Option<runmat_execution::resource::AcceleratorRequest>,
     pub on_run_created: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    pub output_intent: super::secret::SavedOutputIntent,
 }
 
 pub(crate) struct JobSubmission {
@@ -126,19 +130,26 @@ pub async fn submit(
     {
         bail!("remote script jobs do not accept positional function arguments");
     }
+    let requested_outputs = match identity.entrypoint_kind {
+        runmat_execution::ExecutableEntrypointKind::Script => 0,
+        runmat_execution::ExecutableEntrypointKind::Function => 1,
+        runmat_execution::ExecutableEntrypointKind::DeclarationOnly => {
+            bail!("declaration-only executables cannot be submitted as jobs")
+        }
+    };
     let callable_function = identity.entrypoint_function.ok_or_else(|| {
         anyhow::anyhow!("declaration-only executables cannot be submitted as callable jobs")
     })?;
     let executable_function = usize::try_from(callable_function.0)
         .context("portable entrypoint identity exceeds this host")?;
     let executable_bytes = executable.canonical_bytes()?;
-    let form = ExecutableForm::ExecutableUnitV3;
+    let form = ExecutableForm::ExecutableUnitV4;
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
         entrypoint: executable_function.to_string(),
         outputs: OutputContract {
-            requested_outputs: 1,
+            requested_outputs,
             owned_work: None,
         },
         execution_mode: "interpreter".into(),
@@ -175,6 +186,8 @@ pub async fn submit(
         .cloned()
         .context("compiled bundle has no program artifact")?;
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
@@ -185,16 +198,18 @@ pub async fn submit(
             ),
             None,
         ),
-        requested_outputs: 1,
+        requested_outputs,
     })?;
-    let inputs = serde_json::to_vec(&ProgramExecutionInputs {
+    let inputs = ProgramExecutionInputs {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: args
             .into_iter()
             .map(|value| ValuePayload::Inline(Box::new(InlineValue::String(value))))
             .collect(),
-    })?;
+        objects: Vec::new(),
+    };
+    inputs.validate()?;
     let mut bundle_archive = Vec::new();
     write_bundle(&bundle, &mut bundle_archive, ArchiveLimits::default())?;
 
@@ -204,6 +219,7 @@ pub async fn submit(
             bundle_archive,
             descriptor,
             inputs,
+            objects: Vec::new(),
         },
         RemoteSubmissionOptions {
             project,
@@ -212,24 +228,33 @@ pub async fn submit(
             trust_identity,
             idempotency_key,
             workers,
+            accelerator: None,
             on_run_created: None,
+            output_intent: secret::SavedOutputIntent::Generic,
         },
     )
     .await?;
-    if json {
-        println!("{}", serde_json::to_string(&committed)?);
-    } else {
-        println!(
-            "{} {} ({})",
-            crate::presentation::stdout().success("Job"),
-            committed.id,
-            committed.state
+    if detach {
+        if json {
+            println!("{}", serde_json::to_string(&committed)?);
+        } else {
+            println!(
+                "{} {} ({})",
+                crate::presentation::stdout().success("Job"),
+                committed.id,
+                committed.state
+            );
+        }
+        return Ok(());
+    }
+    if !json {
+        eprintln!(
+            "{} {}",
+            crate::presentation::stderr().muted("Attached to remote job"),
+            committed.id
         );
     }
-    if !detach {
-        super::attach::attach(&committed.id, false, json).await?;
-    }
-    Ok(())
+    super::attach::attach(&committed.id, false, json).await
 }
 
 pub(crate) async fn submit_prepared(
@@ -245,17 +270,83 @@ pub(crate) async fn submit_prepared(
     if options.workers == 0 && !program_descriptor.recipe.accelerators.is_empty() {
         bail!("remote accelerator workloads require at least one worker");
     }
-    let worker_accelerators = program_descriptor
-        .recipe
-        .accelerators
-        .clone()
+    let accelerators = runmat_execution::resource::merge_accelerator_requirements(
+        program_descriptor
+            .recipe
+            .accelerators
+            .clone()
+            .into_iter()
+            .chain(options.accelerator.clone()),
+    )?;
+    let revision = prepared.revision.clone();
+    let bundle_archive_size = prepared.bundle_archive.len();
+    let mut prepared = Some(prepared);
+    submit_scoped_with_accelerators(
+        revision,
+        bundle_archive_size,
+        move |_| {
+            prepared
+                .take()
+                .context("remote execution content was prepared more than once")
+        },
+        options,
+        accelerators,
+    )
+    .await
+}
+
+/// Submit content whose access-bound references can only be finalized after the Server assigns
+/// the run identity. The declared revision and bundle size class are admission inputs; the factory
+/// must preserve both when it binds the encrypted content to `run_id`.
+pub(crate) async fn submit_scoped<F>(
+    revision: ProgramRevision,
+    bundle_archive_size: usize,
+    prepare: F,
+    options: RemoteSubmissionOptions,
+) -> Result<types::RunResponse>
+where
+    F: FnOnce(&str) -> Result<PreparedRemoteExecution>,
+{
+    let accelerators = options.accelerator.clone().into_iter().collect();
+    submit_scoped_with_accelerators(
+        revision,
+        bundle_archive_size,
+        prepare,
+        options,
+        accelerators,
+    )
+    .await
+}
+
+async fn submit_scoped_with_accelerators<F>(
+    revision: ProgramRevision,
+    bundle_archive_size: usize,
+    prepare: F,
+    options: RemoteSubmissionOptions,
+    accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
+) -> Result<types::RunResponse>
+where
+    F: FnOnce(&str) -> Result<PreparedRemoteExecution>,
+{
+    for accelerator in &accelerators {
+        accelerator.validate().map_err(anyhow::Error::msg)?;
+    }
+    let digest_accelerators = accelerators.clone();
+    let accelerator_bodies = accelerators
         .into_iter()
         .map(runmat_server_client::execution::accelerator_request_to_api)
         .collect::<Result<Vec<_>>>()?;
+    // Explicit accelerator placement runs on the driver when the job has no workers;
+    // otherwise accelerator work is placed on the workers.
+    let (driver_accelerators, worker_accelerators) = if options.workers == 0 {
+        (accelerator_bodies, Vec::new())
+    } else {
+        (Vec::new(), accelerator_bodies)
+    };
     let (client, server_url, project_id) = super::client(options.project).await?;
     let recovery_recipient = client
         .api()
-        .get_project_execution_policy(&project_id)
+        .get_project_execution_policy(project_id.as_str())
         .await
         .map_err(public_error)?
         .into_inner()
@@ -270,47 +361,40 @@ pub(crate) async fn submit_prepared(
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let request_digest = request_digest(
         &idempotency_key,
-        &prepared.revision,
+        &revision,
         &options.cluster,
         &options.queue,
         options.workers,
+        &digest_accelerators,
         recovery_fingerprint.as_deref(),
     );
     let run = client
         .api()
         .submit_run(
-            &project_id,
+            project_id.as_str(),
             &idempotency_key,
             &types::SubmitRunRequest {
                 cluster_id: options.cluster.clone(),
                 queue: options.queue,
                 request_digest,
                 recovery_recipient_fingerprint: recovery_fingerprint,
-                project_revision: project_revision_identity(&prepared.revision),
-                bundle_ciphertext_size_class: size_class(prepared.bundle_archive.len()),
+                project_revision: project_revision_identity(&revision),
+                bundle_ciphertext_size_class: size_class(bundle_archive_size),
                 compatibility_fingerprints: HashMap::from([
                     (
                         "runtime".into(),
-                        prepared
-                            .revision
-                            .environment()
-                            .runtime_fingerprint
-                            .to_string(),
+                        revision.environment().runtime_fingerprint.to_string(),
                     ),
                     (
                         "catalog".into(),
-                        prepared
-                            .revision
-                            .environment()
-                            .catalog_fingerprint
-                            .to_string(),
+                        revision.environment().catalog_fingerprint.to_string(),
                     ),
                 ]),
                 resources: types::ResourceRequestBody {
                     cpu_millicores: 1_000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerators: Vec::new(),
+                    accelerators: driver_accelerators,
                     maximum_wall_millis: 60 * 60 * 1_000,
                 },
                 worker_count: Some(
@@ -331,7 +415,13 @@ pub(crate) async fn submit_prepared(
     if let Some(observer) = &options.on_run_created {
         observer(run.id.clone());
     }
-    let admission = wait_for_admission(&client, &project_id, &run.id).await?;
+    let prepared = prepare(&run.id)?;
+    if prepared.revision != revision
+        || size_class(prepared.bundle_archive.len()) != size_class(bundle_archive_size)
+    {
+        bail!("run-scoped execution content changed its admitted revision or bundle size class");
+    }
+    let admission = wait_for_admission(&client, project_id.as_str(), &run.id).await?;
     let identity = admission
         .endpoint_identity
         .context("allocation did not publish endpoint identity")?;
@@ -352,7 +442,7 @@ pub(crate) async fn submit_prepared(
     client
         .api()
         .confirm_run_admission(
-            &project_id,
+            project_id.as_str(),
             &run.id,
             &types::ConfirmEndpointIdentityRequest {
                 endpoint_fingerprint: recipient.fingerprint.clone(),
@@ -376,15 +466,9 @@ pub(crate) async fn submit_prepared(
         EncryptionPurpose::Program,
         &prepared.descriptor,
     )?;
-    let input = seal(
-        &run_key,
-        &run.id,
-        EncryptionPurpose::Input,
-        &prepared.inputs,
-    )?;
     let bundle_id = upload(
         &client,
-        &project_id,
+        project_id.as_str(),
         &endpoint_fingerprint,
         types::ArtifactKindRequest::Bundle,
         bundle,
@@ -392,15 +476,46 @@ pub(crate) async fn submit_prepared(
     .await?;
     let program_id = upload(
         &client,
-        &project_id,
+        project_id.as_str(),
         &endpoint_fingerprint,
         types::ArtifactKindRequest::Program,
         program,
     )
     .await?;
+    let mut object_locations = Vec::with_capacity(prepared.objects.len());
+    for object in prepared.objects {
+        object.validate()?;
+        if object.reference.authorization_scope != run.id
+            || object.reference.kind != runmat_execution::value::ValueRefKind::DriverObject
+        {
+            bail!("prepared input object is outside the admitted run authority");
+        }
+        let ciphertext = seal(&run_key, &run.id, EncryptionPurpose::Input, &object.bytes)?;
+        let artifact_id = upload(
+            &client,
+            project_id.as_str(),
+            &endpoint_fingerprint,
+            types::ArtifactKindRequest::Input,
+            ciphertext,
+        )
+        .await?;
+        object_locations.push(ProgramExecutionObjectLocation {
+            reference: object.reference,
+            artifact_id,
+        });
+    }
+    let inputs = ProgramExecutionInputs {
+        schema_version: prepared.inputs.schema_version,
+        context: prepared.inputs.context,
+        arguments: prepared.inputs.arguments,
+        objects: object_locations,
+    };
+    inputs.validate()?;
+    let encoded_inputs = serde_json::to_vec(&inputs)?;
+    let input = seal(&run_key, &run.id, EncryptionPurpose::Input, &encoded_inputs)?;
     let input_id = upload(
         &client,
-        &project_id,
+        project_id.as_str(),
         &endpoint_fingerprint,
         types::ArtifactKindRequest::Input,
         input,
@@ -435,7 +550,7 @@ pub(crate) async fn submit_prepared(
     let committed = client
         .api()
         .commit_run_content(
-            &project_id,
+            project_id.as_str(),
             &run.id,
             &types::CommitRunContentRequest {
                 bundle_artifact_id: bundle_id,
@@ -451,9 +566,10 @@ pub(crate) async fn submit_prepared(
     secret::save(&SavedRemoteRun::new(
         committed.id.clone(),
         server_url,
-        project_id,
+        project_id.to_string(),
         endpoint_fingerprint,
         &run_key,
+        options.output_intent,
     ))?;
     Ok(committed)
 }
@@ -592,6 +708,7 @@ fn request_digest(
     cluster: &str,
     queue: &str,
     workers: u32,
+    accelerators: &[runmat_execution::resource::AcceleratorRequest],
     recovery_recipient_fingerprint: Option<&str>,
 ) -> String {
     let mut digest = Sha256::new();
@@ -601,6 +718,12 @@ fn request_digest(
     digest.update(cluster.as_bytes());
     digest.update(queue.as_bytes());
     digest.update(workers.to_be_bytes());
+    for accelerator in accelerators {
+        digest.update(b"\0accelerator\0");
+        digest.update(
+            serde_json::to_vec(accelerator).expect("accelerator requests serialize canonically"),
+        );
+    }
     if let Some(fingerprint) = recovery_recipient_fingerprint {
         digest.update(b"\0recovery-recipient\0");
         digest.update(fingerprint.as_bytes());

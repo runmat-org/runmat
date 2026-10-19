@@ -35,6 +35,9 @@ pub enum StdioPolicy {
     CompleteOutputWithInput,
     Inherit,
     Null,
+    /// Null stdin/stdout, bounded piped stderr. A detached child must release
+    /// this startup stream before readiness, so it can outlive the starter.
+    StartupDiagnostics,
     Files {
         stdout: PathBuf,
         stderr: PathBuf,
@@ -124,7 +127,7 @@ impl HostCommand {
             )
         {
             return Err(ProcessHostError::Configuration(
-                "detached children require null or file-backed stdio".into(),
+                "detached children require null, file-backed or startup diagnostic stdio".into(),
             ));
         }
         Ok(())

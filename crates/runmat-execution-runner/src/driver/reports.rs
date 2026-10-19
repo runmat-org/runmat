@@ -4,40 +4,35 @@ use runmat_execution::TaskId;
 use crate::port::BackendReport;
 use crate::scheduler;
 use crate::task::{
-    retry_decision, AttemptFailureKind, AttemptRecord, AttemptReport, CommitDecision, ResultCommit,
-    RetryCause, RetryDecision,
+    retry_decision, AttemptDisposition, AttemptFailureKind, AttemptRecord, AttemptReport,
+    AttemptTerminal, CommitDecision, ResultCommit, RetryCause, RetryDecision,
 };
 use crate::{RunnerError, RunnerResult};
 
 use super::state::attempt_state_is_terminal;
 use super::{Driver, DriverAction, DriverEventKind};
 
+#[derive(Default)]
+pub(super) struct ProviderEvidence {
+    pub resources: Option<Box<crate::task::AttemptResourceAccounting>>,
+    pub execution: Option<Box<crate::task::AttemptExecutionObservation>>,
+    pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+}
+
 impl Driver {
     pub(super) fn apply_backend_report(
         &mut self,
-        report: BackendReport,
+        mut report: BackendReport,
         actions: &mut Vec<DriverAction>,
     ) -> RunnerResult<()> {
-        let Some(attempt) = self.snapshot.attempts.get(&report.attempt_id).cloned() else {
-            self.discard_backend_report(report, "unknown attempt", actions);
-            return Ok(());
-        };
-        if report.driver_fence != self.snapshot.driver_fence
-            || report.driver_fence != attempt.request.driver_fence
-        {
-            self.discard_backend_report(report, "stale driver fence", actions);
+        if let Some(reason) = self.backend_report_rejection_reason(&report) {
+            self.discard_backend_report(report, reason, actions);
             return Ok(());
         }
-        if report.task_id != attempt.request.task_id
-            || report.worker_id != attempt.request.worker_id
-        {
-            self.discard_backend_report(report, "attempt identity mismatch", actions);
-            return Ok(());
-        }
-        if attempt_state_is_terminal(attempt.state) {
-            self.discard_backend_report(report, "attempt is already terminal", actions);
-            return Ok(());
-        }
+        let attempt = self.snapshot.attempts[&report.attempt_id].clone();
+        let resources = report.unsuccessful_resources.clone();
+        let execution = report.execution.clone();
+        let console = report.console.take();
         let cancelling_graph = attempt.cancellation_requested_at.is_some()
             && matches!(
                 &attempt.request.task.callable.program,
@@ -68,7 +63,16 @@ impl Driver {
                     objects: result.result_objects().to_vec(),
                 });
             }
-            self.finish_attempt(&attempt, AttemptState::Lost)?;
+            self.finish_attempt(
+                &attempt,
+                AttemptDisposition::Lost,
+                ProviderEvidence {
+                    resources,
+                    execution,
+                    console,
+                },
+                Some("Graph worker retirement was not certified after cancellation".into()),
+            )?;
             self.emit(DriverEventKind::AttemptLost {
                 task_id: report.task_id,
                 attempt_id: report.attempt_id,
@@ -84,9 +88,13 @@ impl Driver {
             if invalid_failure || contract.validate_json_wire(&report.report).is_err() {
                 self.fail_attempt(
                     &attempt,
-                    report.task_id,
-                    report.attempt_id,
                     AttemptFailureKind::Rejected,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    Some("owned builtin report differs from its output contract".into()),
                 )?;
                 return Ok(());
             }
@@ -94,20 +102,66 @@ impl Driver {
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
+                if (attempt.request.task.console.is_some()
+                    && console.as_ref().is_none_or(|console| {
+                        console.completion()
+                            != runmat_execution::console::ConsoleCompletion::Complete
+                    }))
+                    || result.validate_against(&attempt.request).is_err()
+                    || execution.as_ref().is_some_and(|execution| {
+                        !matches!(
+                            execution.termination,
+                            crate::task::AttemptExecutionTermination::ProcessExited {
+                                success: true,
+                                ..
+                            }
+                        ) || result.resources().is_some_and(|resources| {
+                            resources.resources.usage.wall_millis != execution.wall_millis
+                        })
+                    })
+                {
+                    self.fail_attempt(
+                        &attempt,
+                        AttemptFailureKind::Rejected,
+                        ProviderEvidence {
+                            resources: None,
+                            execution,
+                            console,
+                        },
+                        Some(
+                            "worker success contradicts admitted accounting or execution evidence"
+                                .into(),
+                        ),
+                    )?;
+                    return Ok(());
+                }
                 if result
                     .validate_for_portable_transport(&attempt.request.task)
                     .is_err()
                 {
                     self.fail_attempt(
                         &attempt,
-                        report.task_id,
-                        report.attempt_id,
                         AttemptFailureKind::Rejected,
+                        ProviderEvidence {
+                            resources: None,
+                            execution,
+                            console,
+                        },
+                        Some("worker success violates its portable transport contract".into()),
                     )?;
                     return Ok(());
                 }
                 let uncommitted_objects = result.result_objects().to_vec();
-                self.finish_attempt(&attempt, AttemptState::Completed)?;
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Succeeded,
+                    ProviderEvidence {
+                        resources: result.resources().cloned().map(Box::new),
+                        execution,
+                        console,
+                    },
+                    None,
+                )?;
                 let decision = self.commit_result(&attempt, result)?;
                 if let CommitDecision::Accepted(commit) = decision {
                     self.emit(DriverEventKind::ResultCommitted {
@@ -128,27 +182,58 @@ impl Driver {
                     });
                 }
             }
-            AttemptReport::Failed { kind, .. } => {
-                self.fail_attempt(&attempt, report.task_id, report.attempt_id, kind)?;
+            AttemptReport::Failed { kind, message } => {
+                self.fail_attempt(
+                    &attempt,
+                    kind,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    Some(message),
+                )?;
             }
             AttemptReport::RuntimeFailed { .. } => {
                 self.fail_attempt(
                     &attempt,
-                    report.task_id,
-                    report.attempt_id,
                     AttemptFailureKind::Execution,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    None,
                 )?;
             }
-            AttemptReport::Lost { .. } => {
-                self.finish_attempt(&attempt, AttemptState::Lost)?;
+            AttemptReport::Lost { message } => {
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Lost,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    Some(message),
+                )?;
                 self.emit(DriverEventKind::AttemptLost {
                     task_id: report.task_id,
                     attempt_id: report.attempt_id,
                 });
                 self.finish_unsuccessful(report.task_id, RetryCause::Lost)?;
             }
-            AttemptReport::RetirementUnverified { .. } => {
-                self.finish_attempt(&attempt, AttemptState::Lost)?;
+            AttemptReport::RetirementUnverified { message } => {
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Lost,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    Some(message),
+                )?;
                 self.emit(DriverEventKind::AttemptLost {
                     task_id: report.task_id,
                     attempt_id: report.attempt_id,
@@ -158,7 +243,16 @@ impl Driver {
                 }
             }
             AttemptReport::GraphRetiredCancelled => {
-                self.finish_attempt(&attempt, AttemptState::Cancelled)?;
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Cancelled,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    None,
+                )?;
                 self.emit(DriverEventKind::AttemptCancelled {
                     task_id: report.task_id,
                     attempt_id: report.attempt_id,
@@ -166,17 +260,89 @@ impl Driver {
                 self.transition_task(report.task_id, TaskState::Cancelled)?;
             }
             AttemptReport::Cancelled => {
-                self.finish_attempt(&attempt, AttemptState::Cancelled)?;
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Cancelled,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    None,
+                )?;
                 self.emit(DriverEventKind::AttemptCancelled {
                     task_id: report.task_id,
                     attempt_id: report.attempt_id,
                 });
                 if !self.task_is_terminal(report.task_id)? {
+                    let requested_at_driver_millis = self.snapshot.now_millis;
+                    self.task_mut(report.task_id)?.cancellation = Some(crate::TaskCancellation {
+                        cause: crate::TaskCancellationCause::Provider {
+                            attempt_id: attempt.request.id,
+                        },
+                        requested_at_driver_millis,
+                    });
                     self.transition_task(report.task_id, TaskState::Cancelled)?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Advisory validation under the caller's scheduler lock. Hosts must retain
+    /// that lock through a related authority transition; this is not a lease.
+    pub fn accepts_backend_report(&self, report: &BackendReport) -> bool {
+        self.backend_report_rejection_reason(report).is_none()
+    }
+
+    pub(super) fn backend_report_rejection_reason(
+        &self,
+        report: &BackendReport,
+    ) -> Option<&'static str> {
+        let Some(attempt) = self.snapshot.attempts.get(&report.attempt_id) else {
+            return Some("unknown attempt");
+        };
+        if report.driver_fence != self.snapshot.driver_fence
+            || report.driver_fence != attempt.request.driver_fence
+        {
+            return Some("stale driver fence");
+        }
+        if report.task_id != attempt.request.task_id
+            || report.worker_id != attempt.request.worker_id
+        {
+            return Some("attempt identity mismatch");
+        }
+        if attempt_state_is_terminal(attempt.state) {
+            return Some("attempt is already terminal");
+        }
+        if let Some(console) = &report.console {
+            if matches!(report.report, AttemptReport::Started)
+                || console.validate().is_err()
+                || Some(console.limits()) != attempt.request.task.console
+            {
+                return Some("invalid original console evidence");
+            }
+        }
+        if let Some(execution) = &report.execution {
+            if matches!(report.report, AttemptReport::Started)
+                || execution.validate_against(&attempt.request).is_err()
+            {
+                return Some("invalid provider execution observation");
+            }
+        }
+        if let Some(resources) = &report.unsuccessful_resources {
+            if matches!(
+                report.report,
+                AttemptReport::Started | AttemptReport::Succeeded { .. }
+            ) || resources.validate_against(&attempt.request).is_err()
+                || report.execution.as_ref().is_some_and(|execution| {
+                    resources.resources.usage.wall_millis != execution.wall_millis
+                })
+            {
+                return Some("invalid unsuccessful accounting");
+            }
+        }
+        None
     }
 
     fn start_attempt(&mut self, report: &BackendReport) -> RunnerResult<()> {
@@ -199,16 +365,18 @@ impl Driver {
     fn fail_attempt(
         &mut self,
         attempt: &AttemptRecord,
-        task_id: TaskId,
-        attempt_id: runmat_execution::identity::AttemptId,
         kind: AttemptFailureKind,
+        evidence: ProviderEvidence,
+        diagnostic: Option<String>,
     ) -> RunnerResult<()> {
-        let state = if kind == AttemptFailureKind::Rejected {
-            AttemptState::Rejected
-        } else {
-            AttemptState::Completed
-        };
-        self.finish_attempt(attempt, state)?;
+        let task_id = attempt.request.task_id;
+        let attempt_id = attempt.request.id;
+        self.finish_attempt(
+            attempt,
+            AttemptDisposition::Failed { kind },
+            evidence,
+            diagnostic,
+        )?;
         self.emit(DriverEventKind::AttemptFailed {
             task_id,
             attempt_id,
@@ -225,13 +393,28 @@ impl Driver {
     pub(super) fn finish_attempt(
         &mut self,
         attempt: &AttemptRecord,
-        state: AttemptState,
+        disposition: AttemptDisposition,
+        evidence: ProviderEvidence,
+        diagnostic: Option<String>,
     ) -> RunnerResult<()> {
-        self.snapshot
+        let terminal = AttemptTerminal {
+            disposition,
+            closed_at_driver_millis: self.snapshot.now_millis,
+            resources: evidence.resources,
+            execution: evidence.execution,
+            console: evidence.console,
+            diagnostic,
+        };
+        terminal
+            .validate_against(attempt)
+            .map_err(RunnerError::Invalid)?;
+        let record = self
+            .snapshot
             .attempts
             .get_mut(&attempt.request.id)
-            .expect("attempt was validated")
-            .state = state;
+            .expect("attempt was validated");
+        record.state = disposition.state();
+        record.terminal = Some(terminal);
         let pool = self.pool_mut(attempt.request.task.pool_id)?;
         let worker = pool
             .workers
@@ -299,7 +482,7 @@ impl Driver {
         Ok(())
     }
 
-    fn discard_backend_report(
+    pub(super) fn discard_backend_report(
         &mut self,
         report: BackendReport,
         reason: &str,

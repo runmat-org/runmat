@@ -12,6 +12,10 @@ use glam::Vec4;
 pub struct ContourFillPlot {
     pub label: Option<String>,
     pub visible: bool,
+    /// The data range the contour colors span, for the colorbar.
+    pub value_range: Option<(f64, f64)>,
+    /// Each CPU vertex's position in the colormap (0 to 1), so a new colormap can recolor it.
+    colormap_positions: Option<Vec<f32>>,
     vertices: Option<Vec<Vertex>>,
     gpu_vertices: Option<GpuVertexBuffer>,
     vertex_count: usize,
@@ -68,6 +72,8 @@ impl ContourFillPlot {
         Self {
             label: None,
             visible: true,
+            value_range: None,
+            colormap_positions: None,
             vertices: Some(vertices),
             gpu_vertices: None,
             vertex_count,
@@ -83,11 +89,38 @@ impl ContourFillPlot {
         Self {
             label: None,
             visible: true,
+            value_range: None,
+            colormap_positions: None,
             vertices: None,
             gpu_vertices: Some(buffer),
             vertex_count,
             bounds,
         }
+    }
+
+    /// Record each vertex's colormap position (0 to 1) so the colors can follow the colormap.
+    pub fn with_colormap_positions(mut self, positions: Vec<f32>) -> Self {
+        let matches = self.vertices.as_ref().is_some_and(|v| v.len() == positions.len());
+        self.colormap_positions = matches.then_some(positions);
+        self
+    }
+
+    /// Recolor the vertices through `cmap`; plots without recorded positions keep their colors.
+    pub fn recolor_with_colormap(&mut self, cmap: &crate::plots::surface::ColorMap) {
+        let (Some(vertices), Some(positions)) =
+            (self.vertices.as_mut(), self.colormap_positions.as_ref())
+        else {
+            return;
+        };
+        for (vertex, &t) in vertices.iter_mut().zip(positions) {
+            let rgb = cmap.map_value(t);
+            vertex.color = [rgb.x, rgb.y, rgb.z, vertex.color[3]];
+        }
+    }
+
+    pub fn with_value_range(mut self, range: Option<(f64, f64)>) -> Self {
+        self.value_range = range;
+        self
     }
 
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {

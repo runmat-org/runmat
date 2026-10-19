@@ -1,5 +1,6 @@
 mod resolution;
 mod validation;
+pub(crate) use validation::RevisionIndex;
 
 use serde::{Deserialize, Serialize};
 

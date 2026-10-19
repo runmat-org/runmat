@@ -3,9 +3,7 @@ pub(super) mod observation;
 use super::state::HostState;
 use crate::region::RegionPlacement;
 use crate::NativeExecutorResult;
-use runmat_runtime::native::{
-    NativeCancellation, NativeCancellationReason, NativeExit, NativeSiteOutcome,
-};
+use runmat_runtime::native::{NativeExit, NativeSiteOutcome};
 
 pub(super) fn checkpoint(
     state: &mut HostState,
@@ -52,11 +50,7 @@ pub(super) fn checkpoint(
         }
         runmat_runtime::numeric_region::NumericRegionExecution::Ineligible => Ok(None),
         runmat_runtime::numeric_region::NumericRegionExecution::Cancelled => {
-            *exit = NativeExit::cancelled(NativeCancellation {
-                reason: NativeCancellationReason::REQUESTED,
-                reserved: 0,
-                generation: 1,
-            });
+            *exit = super::control::cancelled(&runtime.cancellation());
             Ok(Some(NativeSiteOutcome::exit()))
         }
     }

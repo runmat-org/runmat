@@ -49,6 +49,15 @@ impl RemoteTaskCompletion {
         Self { receiver, progress }
     }
 
+    pub(super) fn resolved(result: Result<AttemptSuccess, crate::NativeProgramFailure>) -> Self {
+        let (sender, receiver) = oneshot::channel();
+        let _ = sender.send((0, result));
+        Self {
+            receiver,
+            progress: std::sync::Arc::new(RemoteProgressBuffer::default()),
+        }
+    }
+
     pub async fn wait(self) -> Result<AttemptSuccess, crate::NativeProgramFailure> {
         self.wait_ordered().await.1
     }
@@ -64,6 +73,17 @@ impl RemoteTaskCompletion {
                 )),
             )
         })
+    }
+
+    pub async fn wait_with_progress(
+        self,
+    ) -> (
+        Result<AttemptSuccess, crate::NativeProgramFailure>,
+        Vec<ProgramProgress>,
+    ) {
+        let progress = std::sync::Arc::clone(&self.progress);
+        let (_, result) = self.wait_ordered().await;
+        (result, progress.drain())
     }
 
     pub fn drain_progress(&self) -> Vec<ProgramProgress> {

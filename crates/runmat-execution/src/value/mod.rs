@@ -3,11 +3,14 @@ use serde::{Deserialize, Serialize};
 use crate::identity::{Digest, NodeLeaseId, ValueId, WorkerId};
 use crate::ContractError;
 
+mod admission;
+mod catalog;
 mod durable_aggregate;
 mod exception;
 mod graph;
 mod identity;
 mod origins;
+mod storage;
 mod validation;
 pub use exception::{DetachedDiagnosticFrame, ExceptionCallFrame, ExceptionFrameSource};
 pub use graph::{
@@ -27,6 +30,16 @@ pub use durable_aggregate::{
     DurableDynamicProperty, DurableObjectArray, DurablePlainObject, DurableStructArray,
     DurableStructArrayField,
 };
+
+pub use admission::{
+    ValueAdmissionOwnership, ValueAdmissionReceipt, ValueAdmissionTransfer,
+    ValueConversionFidelity, ValueCopyAccounting, ValueNumericConversion,
+    VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
+};
+pub use catalog::{artifact_object_value_id, PublishedObjectCatalog, PublishedObjectSource};
+
+pub const EXTERNALIZED_VALUE_MEDIA_TYPE: &str = "application/vnd.runmat.value+json";
+pub const EXTERNALIZED_VALUE_SCHEMA: &str = "runmat-value-payload-v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ValueLimits {
@@ -489,6 +502,13 @@ pub struct ValueRef {
     pub kind: ValueRefKind,
     pub authorization_scope: String,
     pub resident_fence: Option<ResidentFence>,
+}
+
+impl ValueRef {
+    /// Validate reference fields through the shared payload validation cursor.
+    pub fn validate(&self, limits: ValueLimits) -> Result<(), crate::ContractError> {
+        validation::validate_reference(self, limits)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

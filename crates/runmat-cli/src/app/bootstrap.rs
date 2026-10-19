@@ -43,13 +43,14 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         .filter_level(log_level)
         .format(format_log_record)
         .init();
+    let _otel = crate::observability::init_from_env();
 
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
 
     let compilation_only = matches!(
         cli.command,
-        Some(Commands::Compile { .. } | Commands::NativeInterface { .. })
+        Some(Commands::Compile { .. } | Commands::Mesh { .. } | Commands::NativeInterface { .. })
     );
     let wants_gui = match config.plotting.mode {
         PlotMode::Gui => !compilation_only && !config.plotting.force_headless,
@@ -103,6 +104,11 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     } else {
         false
     };
+
+    let _meshing_execution_provider = runmat_runtime::meshing::replace_meshing_execution_provider(
+        Some(crate::commands::mesh::meshing_execution_provider()),
+    )
+    .map_err(|error| anyhow::anyhow!("failed to install native meshing execution: {error}"))?;
 
     dispatch::dispatch(&cli, &config).await
 }
@@ -302,7 +308,6 @@ fn configure_plotting_from_config(config: &RunMatRuntimeConfig) {
 
 fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
     use runmat_runtime::analysis::{self, storage};
-    use runmat_runtime::geometry;
 
     let artifact_root = config
         .fea
@@ -331,25 +336,9 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .study_artifact_root
             .clone()
             .or_else(|| Some(artifact_root.join("studies"))),
-        thermo_field_artifact_root: config
-            .fea
-            .thermo_field_artifact_root
-            .clone()
-            .or_else(|| Some(artifact_root.join("thermo-fields"))),
+        publication_staging_bytes: analysis::FeaRuntimeConfig::default().publication_staging_bytes,
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
-    geometry::configure_prep_artifacts(geometry::GeometryPrepArtifactConfig {
-        artifact_root: config
-            .fea
-            .geometry_prep_artifact_root
-            .clone()
-            .or_else(|| Some(artifact_root.join("geometry-prep"))),
-        max_artifacts: config.fea.geometry_prep_max_artifacts,
-        max_artifacts_per_geometry: config.fea.geometry_prep_max_artifacts_per_geometry,
-        max_age_seconds: config.fea.geometry_prep_max_age_seconds,
-        require_latest_revision: config.fea.geometry_prep_require_latest_revision,
-    })
-    .map_err(|err| anyhow::anyhow!("Failed to configure geometry prep artifacts: {err}"))?;
     Ok(())
 }
 

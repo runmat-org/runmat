@@ -128,6 +128,16 @@ pub trait DriverControlPlane: Send + Sync {
         source_sequence: u64,
     ) -> TransportResult<bool>;
     async fn download(&self, artifact: &DriverArtifactDownload) -> TransportResult<Vec<u8>>;
+    async fn execution_artifact(
+        &self,
+        authority: &DriverAuthority,
+        artifact_id: &str,
+    ) -> TransportResult<DriverArtifactDownload> {
+        let _ = (authority, artifact_id);
+        Err(TransportError::Unavailable(
+            "run-scoped execution artifact retrieval is not implemented".into(),
+        ))
+    }
     /// Stream a bounded Graph Program chunk into caller-owned private staging.
     /// The destination is not admitted until the exact ciphertext size/digest
     /// have been verified. Direct artifacts continue to use `download`.

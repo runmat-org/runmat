@@ -186,6 +186,8 @@ impl WorkerBackend for RemoteTestBackend {
                 .cloned()
                 .ok_or_else(|| protocol("remote test bundle has no program artifact"))?;
             let selected_descriptor = ProgramExecutionDescriptor {
+                console: None,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe: bundled_recipe.clone(),
                 artifact: bundled_artifact,
@@ -199,9 +201,10 @@ impl WorkerBackend for RemoteTestBackend {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 context: runmat_execution::ProgramInvocationContext::Direct,
                 arguments: Vec::new(),
+                objects: Vec::new(),
             };
             let descriptor = serde_json::to_vec(&selected_descriptor).map_err(protocol)?;
-            let inputs = serde_json::to_vec(&selected_inputs).map_err(protocol)?;
+            let inputs = selected_inputs.clone();
             let response_contract = runmat_execution_artifact::ProgramExecutionRequest::from_parts(
                 selected_descriptor,
                 selected_inputs,
@@ -214,6 +217,7 @@ impl WorkerBackend for RemoteTestBackend {
                     bundle_archive,
                     descriptor,
                     inputs,
+                    objects: Vec::new(),
                 },
                 RemoteSubmissionOptions {
                     project: self.config.project,
@@ -227,9 +231,11 @@ impl WorkerBackend for RemoteTestBackend {
                         request.attempt
                     )),
                     workers: 1,
+                    accelerator: None,
                     on_run_created: Some(Arc::new(move |run_id| {
                         *active_run.lock().expect("remote test session poisoned") = Some(run_id);
                     })),
+                    output_intent: crate::commands::job::secret::SavedOutputIntent::Generic,
                 },
             )
             .await

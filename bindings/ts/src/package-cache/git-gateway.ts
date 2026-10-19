@@ -69,6 +69,14 @@ export interface ServerGitGatewayOptions {
   signal?: AbortSignal;
 }
 
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
+}
+
 export async function fetchGitTreeInventoryWire(
   request: GitGatewayRequest,
   options: ServerGitGatewayOptions
@@ -80,7 +88,7 @@ export async function fetchGitTreeInventoryWire(
   const token =
     typeof options.authToken === "function" ? await options.authToken() : options.authToken;
   const response = await fetcher(
-    `${options.baseUrl.replace(/\/+$/, "")}/v1/packages/git/snapshot`,
+    `${trimTrailingSlashes(options.baseUrl)}/v1/packages/git/snapshot`,
     {
       method: "POST",
       headers: {

@@ -4530,6 +4530,8 @@ pub fn close_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
     Ok(handle)
 }
 
+/// Axes state a plotting builtin sets as it draws. Plotting builtins leave the title and labels
+/// empty, as in MATLAB: a replacing plot clears them and a held plot keeps the user's.
 #[derive(Clone)]
 pub struct PlotRenderOptions<'a> {
     pub title: &'a str,
@@ -4829,6 +4831,19 @@ pub fn next_line_color_for_axes(axes_index: usize) -> Vec4 {
     let handle = reg.current;
     let state = get_state_for_future_plot_style(&mut reg, handle);
     state.color_cycle_for_axes_mut(axes_index).next()
+}
+
+/// After a plot that replaced the axes' contents, continue the color order
+/// past the `series_count` series it drew, so a later `hold on` plot takes the
+/// next color instead of repeating the first one.
+pub fn continue_line_color_cycle_after(axes_index: usize, series_count: usize) {
+    if with_active_color_cycle(axes_index, |cycle| cycle.cursor = series_count).is_some() {
+        return;
+    }
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    state.color_cycle_for_axes_mut(axes_index).cursor = series_count;
 }
 
 #[cfg(test)]

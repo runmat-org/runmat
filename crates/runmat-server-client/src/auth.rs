@@ -178,7 +178,7 @@ pub fn resolve_org_id(config: &RemoteConfig, override_value: Option<Uuid>) -> Re
     }
     if let Ok(value) = env::var("RUNMAT_ORG_ID") {
         if !value.is_empty() {
-            return Uuid::parse_str(&value).context("RUNMAT_ORG_ID must be a UUID");
+            return parse_org_id_input(&value).context("Invalid RUNMAT_ORG_ID");
         }
     }
     config.org_id.context(
@@ -192,12 +192,69 @@ pub fn resolve_project_id(config: &RemoteConfig, override_value: Option<Uuid>) -
     }
     if let Ok(value) = env::var("RUNMAT_PROJECT_ID") {
         if !value.is_empty() {
-            return Uuid::parse_str(&value).context("RUNMAT_PROJECT_ID must be a UUID");
+            return parse_project_id_input(&value).context("Invalid RUNMAT_PROJECT_ID");
         }
     }
     config.project_id.context(
         "Project id not configured. Use --project, set RUNMAT_PROJECT_ID, or run `runmat login --project <id>`."
     )
+}
+
+/// Accept canonical public IDs and the existing UUID CLI/config shorthand.
+pub fn parse_org_id_input(value: &str) -> Result<Uuid> {
+    if let Ok(value) = Uuid::parse_str(value) {
+        return Ok(value);
+    }
+    crate::ids::OrgId::parse(value)?
+        .as_uuid()
+        .map_err(Into::into)
+}
+
+pub fn parse_project_id_input(value: &str) -> Result<Uuid> {
+    if let Ok(value) = Uuid::parse_str(value) {
+        return Ok(value);
+    }
+    crate::ids::ProjectId::parse(value)?
+        .as_uuid()
+        .map_err(Into::into)
+}
+
+pub fn parse_fs_version_id_input(value: &str) -> Result<Uuid> {
+    if let Ok(value) = Uuid::parse_str(value) {
+        return Ok(value);
+    }
+    crate::ids::FsVersionId::parse(value)?
+        .as_uuid()
+        .map_err(Into::into)
+}
+
+pub fn parse_snapshot_id_input(value: &str) -> Result<Uuid> {
+    if let Ok(value) = Uuid::parse_str(value) {
+        return Ok(value);
+    }
+    crate::ids::SnapshotId::parse(value)?
+        .as_uuid()
+        .map_err(Into::into)
+}
+
+pub fn resolve_public_org_id(
+    config: &RemoteConfig,
+    override_value: Option<Uuid>,
+) -> Result<crate::ids::OrgId> {
+    Ok(crate::ids::OrgId::from_uuid(resolve_org_id(
+        config,
+        override_value,
+    )?))
+}
+
+pub fn resolve_public_project_id(
+    config: &RemoteConfig,
+    override_value: Option<Uuid>,
+) -> Result<crate::ids::ProjectId> {
+    Ok(crate::ids::ProjectId::from_uuid(resolve_project_id(
+        config,
+        override_value,
+    )?))
 }
 
 pub async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> Result<String> {
@@ -543,6 +600,15 @@ async fn interactive_login(server_url: &str, email: Option<String>) -> Result<Au
         .await
         .map_err(map_public_error)?
         .into_inner();
+    if response.mode == "workos" {
+        return workos_device_login(
+            response
+                .client_id
+                .as_deref()
+                .context("Missing WorkOS client ID")?,
+        )
+        .await;
+    }
     let pkce = generate_pkce();
     let redirect_uri = default_loopback_redirect_uri();
     let client_id = response
@@ -573,15 +639,106 @@ async fn interactive_login(server_url: &str, email: Option<String>) -> Result<Au
         &pkce.verifier,
     )
     .await?;
+    let expires_at = token_expiry(&token);
     Ok(AuthToken {
         access_token: token.access_token,
         refresh_token: token.refresh_token,
-        expires_at: token
-            .expires_in
-            .map(|value| Utc::now() + chrono::Duration::seconds(value)),
+        expires_at,
         token_endpoint: Some(token_endpoint),
         client_id: Some(client_id),
     })
+}
+
+/// WorkOS's public CLI flow never embeds a server API key. Refresh credentials
+/// reuse the existing credential-store implementation and rotation handling.
+/// https://workos.com/docs/authkit/cli-auth
+async fn workos_device_login(client_id: &str) -> Result<AuthToken> {
+    #[derive(Deserialize)]
+    struct DeviceAuthorization {
+        device_code: String,
+        user_code: String,
+        verification_uri: String,
+        verification_uri_complete: Option<String>,
+        expires_in: u64,
+        interval: Option<u64>,
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    let response = client
+        .post("https://api.workos.com/user_management/authorize/device")
+        .form(&[("client_id", client_id)])
+        .send()
+        .await?
+        .error_for_status()?;
+    let device = response.json::<DeviceAuthorization>().await?;
+    let uri = device
+        .verification_uri_complete
+        .as_deref()
+        .unwrap_or(&device.verification_uri);
+    let url = Url::parse(uri)?;
+    anyhow::ensure!(url.scheme() == "https", "Invalid verification URL");
+    println!(
+        "Open {} and enter code {}",
+        device.verification_uri, device.user_code
+    );
+    let _ = webbrowser::open(url.as_str());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(device.expires_in.min(900));
+    let mut interval = device.interval.unwrap_or(5).clamp(1, 30);
+    let token_endpoint = "https://api.workos.com/user_management/authenticate";
+    loop {
+        anyhow::ensure!(
+            tokio::time::Instant::now() < deadline,
+            "Login code expired. Please run login again."
+        );
+        tokio::time::sleep(Duration::from_secs(interval)).await;
+        let response = client
+            .post(token_endpoint)
+            .form(&[
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ("client_id", client_id),
+                ("device_code", device.device_code.as_str()),
+            ])
+            .send()
+            .await?;
+        if response.status().is_success() {
+            let token = response.json::<TokenResponse>().await?;
+            let expires_at = token_expiry(&token);
+            return Ok(AuthToken {
+                access_token: token.access_token,
+                refresh_token: token.refresh_token,
+                expires_at,
+                token_endpoint: Some(token_endpoint.to_owned()),
+                client_id: Some(client_id.to_owned()),
+            });
+        }
+        let error = response.json::<serde_json::Value>().await?;
+        match error
+            .get("error")
+            .or_else(|| error.get("code"))
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("authorization_pending") => continue,
+            Some("slow_down") => {
+                interval = (interval + 5).min(30);
+            }
+            _ => anyhow::bail!("Login was declined or expired. Please run login again."),
+        }
+    }
+}
+
+// JWT payload is used only to schedule refresh, never to authorize a request.
+// RunMat's backend still verifies signature, issuer and recipient independently.
+fn token_expiry(token: &TokenResponse) -> Option<DateTime<Utc>> {
+    if let Some(seconds) = token.expires_in {
+        return Some(Utc::now() + chrono::Duration::seconds(seconds));
+    }
+    let payload = URL_SAFE_NO_PAD
+        .decode(token.access_token.split('.').nth(1)?)
+        .ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    DateTime::from_timestamp(claims.get("exp")?.as_i64()?, 0)
 }
 
 #[derive(Debug)]
@@ -749,8 +906,7 @@ async fn exchange_code_for_token(
         .context("Failed to request access token")?;
     if !response.status().is_success() {
         let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        anyhow::bail!("Token exchange failed ({status}): {text}")
+        anyhow::bail!("Token exchange failed ({status})")
     }
     let token = response
         .json::<TokenResponse>()
@@ -777,20 +933,46 @@ async fn refresh_access_token(
         .context("Failed to refresh access token")?;
     if !response.status().is_success() {
         let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        anyhow::bail!("Token refresh failed ({status}): {text}")
+        anyhow::bail!("Token refresh failed ({status})")
     }
     let token = response
         .json::<TokenResponse>()
         .await
         .context("Failed to parse refresh response")?;
+    let expires_at = token_expiry(&token);
     Ok(AuthToken {
         access_token: token.access_token,
         refresh_token: token.refresh_token,
-        expires_at: token
-            .expires_in
-            .map(|value| Utc::now() + chrono::Duration::seconds(value)),
+        expires_at,
         token_endpoint: Some(token_endpoint.to_string()),
         client_id: Some(client_id.to_string()),
     })
+}
+
+#[cfg(test)]
+mod public_id_tests {
+    use super::*;
+    #[test]
+    fn canonical_namespace_and_legacy_config_have_one_wire_identity() {
+        let uuid = Uuid::from_u128(42);
+        let org = crate::ids::OrgId::from_uuid(uuid);
+        let project = crate::ids::ProjectId::from_uuid(uuid);
+        assert_eq!(parse_org_id_input(org.as_str()).unwrap(), uuid);
+        assert_eq!(parse_project_id_input(project.as_str()).unwrap(), uuid);
+        assert_eq!(parse_project_id_input(&uuid.to_string()).unwrap(), uuid);
+        assert!(parse_project_id_input(org.as_str()).is_err());
+        assert!(parse_org_id_input(project.as_str()).is_err());
+        let version = crate::ids::FsVersionId::from_uuid(uuid);
+        let snapshot = crate::ids::SnapshotId::from_uuid(uuid);
+        assert_eq!(parse_fs_version_id_input(version.as_str()).unwrap(), uuid);
+        assert_eq!(parse_snapshot_id_input(snapshot.as_str()).unwrap(), uuid);
+        assert!(parse_snapshot_id_input(version.as_str()).is_err());
+        assert!(parse_fs_version_id_input(snapshot.as_str()).is_err());
+        let config = RemoteConfig::default();
+        assert_eq!(resolve_public_org_id(&config, Some(uuid)).unwrap(), org);
+        assert_eq!(
+            resolve_public_project_id(&config, Some(uuid)).unwrap(),
+            project
+        );
+    }
 }

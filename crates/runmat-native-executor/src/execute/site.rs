@@ -65,12 +65,8 @@ fn execute_inner(
     if state.skip_before_resume(request)? {
         return Ok(NativeSiteOutcome::continue_execution());
     }
-    if state.runtime.is_cancelled() {
-        *exit = NativeExit::cancelled(runmat_runtime::native::NativeCancellation {
-            reason: runmat_runtime::native::NativeCancellationReason::REQUESTED,
-            reserved: 0,
-            generation: 1,
-        });
+    if let Some(cancelled) = super::control::poll(&state.runtime.cancellation()) {
+        *exit = cancelled;
         return Ok(NativeSiteOutcome::exit());
     }
     if state.skip_optimized_site(request) {

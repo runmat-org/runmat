@@ -33,4 +33,5 @@ hpke = { workspace = true }
 
 [dev-dependencies]
 hex = "0.4"
+runmat-types = { workspace = true }
 tempfile = "3.12"

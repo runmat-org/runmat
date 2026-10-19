@@ -34,6 +34,20 @@ impl StructuralDofKind {
             StructuralDofKind::Rx | StructuralDofKind::Ry | StructuralDofKind::Rz
         )
     }
+
+    pub(crate) const fn from_constraint(dof: crate::constraints::CanonicalStructuralDof) -> Self {
+        use crate::constraints::CanonicalStructuralDof;
+        use runmat_analysis_core::{StructuralRotationDof, StructuralTranslationDof};
+
+        match dof {
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => Self::Ux,
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => Self::Uy,
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => Self::Uz,
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Rx) => Self::Rx,
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Ry) => Self::Ry,
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz) => Self::Rz,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +97,7 @@ pub struct StructuralDofAddress {
 pub struct StructuralDofLayout {
     node_sets: Vec<StructuralNodeDofSet>,
     rows: Vec<StructuralDofAddress>,
+    reference_point_count: usize,
 }
 
 impl Default for StructuralDofLayout {
@@ -103,10 +118,19 @@ impl StructuralDofLayout {
                     .map(move |kind| StructuralDofAddress { node_index, kind })
             })
             .collect();
-        Self { node_sets, rows }
+        Self {
+            node_sets,
+            rows,
+            reference_point_count: 0,
+        }
     }
 
-    pub fn legacy_translational_rows(dof_count: usize) -> Self {
+    pub fn with_reference_points(mut self, reference_point_count: usize) -> Self {
+        self.reference_point_count = reference_point_count;
+        self
+    }
+
+    pub fn reduced_translational_rows(dof_count: usize) -> Self {
         if dof_count == 0 {
             return Self::from_node_sets(Vec::new());
         }
@@ -136,6 +160,10 @@ impl StructuralDofLayout {
     }
 
     pub fn total_dof_count(&self) -> usize {
+        self.rows.len() + self.reference_point_count * StructuralDofKind::ORDER.len()
+    }
+
+    pub fn node_dof_count(&self) -> usize {
         self.rows.len()
     }
 
@@ -148,6 +176,7 @@ impl StructuralDofLayout {
             .iter()
             .filter(|set| set.active().iter().any(|kind| kind.is_rotational()))
             .count()
+            + self.reference_point_count
     }
 
     pub fn translational_dof_count(&self) -> usize {
@@ -155,6 +184,7 @@ impl StructuralDofLayout {
             .iter()
             .filter(|address| address.kind.is_translational())
             .count()
+            + self.reference_point_count * 3
     }
 
     pub fn rotational_dof_count(&self) -> usize {
@@ -162,12 +192,33 @@ impl StructuralDofLayout {
             .iter()
             .filter(|address| address.kind.is_rotational())
             .count()
+            + self.reference_point_count * 3
     }
 
     pub fn index(&self, node_index: usize, kind: StructuralDofKind) -> Option<usize> {
         self.rows
             .iter()
             .position(|address| address.node_index == node_index && address.kind == kind)
+    }
+
+    pub fn reference_point_index(
+        &self,
+        reference_point_index: usize,
+        kind: StructuralDofKind,
+    ) -> Option<usize> {
+        if reference_point_index >= self.reference_point_count {
+            return None;
+        }
+        StructuralDofKind::ORDER
+            .iter()
+            .position(|candidate| *candidate == kind)
+            .map(|component| {
+                self.rows.len() + reference_point_index * StructuralDofKind::ORDER.len() + component
+            })
+    }
+
+    pub fn reference_point_count(&self) -> usize {
+        self.reference_point_count
     }
 
     pub fn address(&self, row: usize) -> Option<StructuralDofAddress> {
@@ -213,8 +264,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_translational_layout_preserves_existing_row_count() {
-        let layout = StructuralDofLayout::legacy_translational_rows(5);
+    fn reduced_translational_layout_preserves_requested_row_count() {
+        let layout = StructuralDofLayout::reduced_translational_rows(5);
 
         assert_eq!(layout.total_dof_count(), 5);
         assert_eq!(layout.node_count(), 2);

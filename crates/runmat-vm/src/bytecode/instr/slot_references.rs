@@ -131,6 +131,7 @@ impl Instr {
             }
             Instr::CallFevalExpandMultiOutput(specs, _)
             | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
+            | Instr::CreateExternalFuture(_, specs, _)
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
             | Instr::CallSuperConstructorExpandMultiOutput { specs, .. }

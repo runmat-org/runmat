@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod file_lock;
 mod dialog;
 mod mapped_backing;
 mod memory;
@@ -20,11 +22,17 @@ mod staged_output;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
+pub use file_lock::ExclusiveFileLock;
+mod publication;
+pub use publication::{AtomicCreateResult, AtomicReplaceOutcome, PublicationDurability};
+#[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sandbox;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
+#[cfg(not(target_arch = "wasm32"))]
+mod workspace_native;
 
 pub use dialog::*;
 pub use mapped_backing::{
@@ -51,12 +59,16 @@ pub use resource::{
     FsResourceRevision,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use sandbox::SandboxFsProvider;
+pub use sandbox::{CapturedIo, SandboxFsProvider};
 pub use staged_output::{FsPublicationDisposition, FsPublicationFailure, FsStagedOutput};
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
 
 pub mod data_contract;
+pub mod execution;
+pub mod pinned;
+pub mod workspace;
+pub mod workspace_access;
 
 use data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
@@ -368,6 +380,18 @@ impl DirEntry {
         }
     }
 
+    /// Requested storage of this response entry, including owned buffer capacities.
+    /// Allocator rounding and OS iterator internals are excluded.
+    pub fn resident_bytes(&self) -> Option<u64> {
+        (std::mem::size_of::<Self>() as u64)
+            .checked_add(self.path.capacity() as u64)?
+            .checked_add(self.file_name.capacity() as u64)
+    }
+
+    pub fn into_path(self) -> PathBuf {
+        self.path
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -387,6 +411,77 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Coherent access through this provider's existing publication/recovery authority.
+    fn workspace_access(
+        &self,
+        _root: &Path,
+        _writable: bool,
+        _maximum_resident_bytes: u64,
+    ) -> io::Result<Box<dyn workspace_access::WorkspaceAccess>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "provider coherent workspace access is unsupported",
+        ))
+    }
+    /// Capture one coherent project inventory, including immutable file versions.
+    async fn capture_workspace(
+        &self,
+        _request: workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<workspace::WorkspaceSnapshot> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "coherent workspace capture is unsupported",
+        ))
+    }
+
+    /// Recover the result of an exact publication request without replaying edits.
+    /// This supports lost acknowledgements and rename/delete retries after restart.
+    async fn lookup_workspace_publication(
+        &self,
+        _request: &workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<workspace::WorkspacePublicationOutcome>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "workspace publication receipts are unsupported",
+        ))
+    }
+
+    /// Publish against exactly the captured revision. Successful retries return
+    /// the same durable receipt even if later edits have changed the project.
+    async fn publish_workspace(
+        &self,
+        _request: workspace::WorkspacePublicationRequest,
+    ) -> io::Result<workspace::WorkspacePublicationOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional workspace publication is unsupported",
+        ))
+    }
+    /// Arbitrate execution ownership inside this provider's existing project
+    /// scope. The authority supplies time and stores the transition atomically.
+    /// A remote client must never emulate this with reads or a local clock.
+    async fn transition_execution(
+        &self,
+        _work: &execution::ExecutionWorkId,
+        _command: execution::ExecutionLeaseCommand,
+    ) -> io::Result<execution::ExecutionLeaseOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "provider execution authority is unsupported",
+        ))
+    }
+    /// Validate ownership at the publication commit boundary under the same
+    /// provider lock as the files and receipt. A separate lease check is unsafe.
+    async fn publish_workspace_fenced(
+        &self,
+        _request: workspace::WorkspacePublicationRequest,
+        _lease: &execution::ExecutionLease,
+    ) -> io::Result<execution::FencedWorkspacePublicationOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "fenced workspace publication is unsupported",
+        ))
+    }
     /// Path syntax owned by this provider. The default preserves native OS
     /// qualification for existing native embedders; a provider exposing a
     /// virtual rooted namespace must opt in even when hosted on Windows.
@@ -483,7 +578,40 @@ pub trait FsProvider: Send + Sync + 'static {
         self.open(path, flags)
     }
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
+    /// Read an immutable version through the provider's normal authorization.
+    /// Never fall back to a live head when the version is unavailable.
+    async fn read_version(
+        &self,
+        _path: &Path,
+        _version: &str,
+        _size: u64,
+        _snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "immutable version reads are unsupported by this provider",
+        ))
+    }
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
+    /// Atomically create (None) or replace the exact previously published version.
+    /// Implementations must never emulate this with a read followed by a write.
+    async fn publish_output(
+        &self,
+        _path: &Path,
+        _data: &[u8],
+        _expected: Option<&str>,
+    ) -> io::Result<String> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional output publication is unsupported",
+        ))
+    }
+    async fn remove_output(&self, _path: &Path, _expected: &str) -> io::Result<()> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional output removal is unsupported",
+        ))
+    }
     async fn remove_file(&self, path: &Path) -> io::Result<()>;
     async fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;
     async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata>;
@@ -507,6 +635,40 @@ pub trait FsProvider: Send + Sync + 'static {
         ))
     }
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
+
+    /// Atomically publishes `bytes` if `path` does not exist.
+    ///
+    /// Implementations must provide a linearizable no-replace operation: exactly one competing
+    /// publisher may return `Published`, and readers must observe either no entry or the complete
+    /// winning payload, never a partially written destination. `Existing` contains a complete
+    /// snapshot of the payload which won publication. The default deliberately fails instead of
+    /// emulating these semantics with a racy existence check followed by a write.
+    async fn atomic_create_new(
+        &self,
+        _path: &Path,
+        _bytes: &[u8],
+    ) -> io::Result<AtomicCreateResult> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "atomic create-if-absent is unsupported by this provider",
+        ))
+    }
+
+    /// Atomically replaces a path with one complete payload. Concurrent callers
+    /// are linearized at publication; ordering/fencing belongs to the caller.
+    /// Err guarantees this invocation did not publish its replacement. After
+    /// publication, uncertain crash durability is returned explicitly with its
+    /// original diagnostic. Unsupported providers must not emulate this by write.
+    async fn atomic_replace(
+        &self,
+        _path: &Path,
+        _bytes: &[u8],
+    ) -> io::Result<AtomicReplaceOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "atomic replacement is unsupported by this provider",
+        ))
+    }
 
     async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
         let mut entries = Vec::with_capacity(paths.len());
@@ -914,6 +1076,23 @@ pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     wait_for_fs(move || async move { read_async(path).await })
 }
 
+pub async fn atomic_create_new_async(
+    path: impl AsRef<Path>,
+    bytes: impl AsRef<[u8]>,
+) -> io::Result<AtomicCreateResult> {
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
+    provider.atomic_create_new(&resolved, bytes.as_ref()).await
+}
+
+pub fn atomic_create_new(
+    path: impl AsRef<Path>,
+    bytes: impl AsRef<[u8]>,
+) -> io::Result<AtomicCreateResult> {
+    let path = path.as_ref().to_path_buf();
+    let bytes = bytes.as_ref().to_vec();
+    wait_for_fs(move || async move { atomic_create_new_async(path, bytes).await })
+}
+
 pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
     let bytes = read_async(path).await?;
     String::from_utf8(bytes).map_err(|err| io::Error::new(ErrorKind::InvalidData, err.utf8_error()))
@@ -970,6 +1149,11 @@ pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
 pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.symlink_metadata(&resolved).await
+}
+
+pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { symlink_metadata_async(path).await })
 }
 
 pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
@@ -1152,9 +1336,11 @@ mod tests {
     }
 
     fn comparable_path(path: impl AsRef<Path>) -> PathBuf {
+        let path = path.as_ref();
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         #[cfg(windows)]
         {
-            let text = path.as_ref().to_string_lossy();
+            let text = canonical.to_string_lossy();
             if let Some(stripped) = text.strip_prefix(r"\\?\UNC\") {
                 return PathBuf::from(format!(r"\\{stripped}"));
             }
@@ -1165,7 +1351,7 @@ mod tests {
         }
         #[cfg(not(windows))]
         {
-            path.as_ref().to_path_buf()
+            canonical
         }
     }
 
@@ -1924,5 +2110,34 @@ mod tests {
         assert!(result.is_err());
         let final_provider = current_provider();
         assert!(Arc::ptr_eq(&final_provider, &original));
+    }
+
+    #[test]
+    fn atomic_publication_uses_only_the_installed_provider() {
+        let _guard = test_lock();
+        let host = tempfile::tempdir().unwrap();
+        let logical_path = host.path().join("same-logical-path");
+        std::fs::write(&logical_path, b"host").unwrap();
+        let memory = Arc::new(MemoryFsProvider::new());
+        let provider: Arc<dyn FsProvider> = memory.clone();
+        let _provider_guard = replace_provider(provider);
+
+        let outcome = atomic_create_new(&logical_path, b"provider").unwrap();
+
+        assert!(matches!(outcome, AtomicCreateResult::Published { .. }));
+        assert_eq!(
+            memory.read_project_path(&logical_path).unwrap(),
+            b"provider"
+        );
+        assert_eq!(std::fs::read(logical_path).unwrap(), b"host");
+    }
+
+    #[test]
+    fn unsupported_provider_does_not_emulate_atomic_publication() {
+        let error = futures::executor::block_on(
+            UnsupportedProvider.atomic_create_new(Path::new("/artifact"), b"payload"),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Unsupported);
     }
 }

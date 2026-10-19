@@ -1,5 +1,5 @@
 use super::{ActiveInvocation, NativeInvocation};
-use crate::{NativeExecutorError, NativeExecutorResult};
+use crate::NativeExecutorResult;
 
 /// Sole terminal cleanup authority: dropping the active owner releases its
 /// arena, pending work, contextual caches and service references together.
@@ -26,10 +26,9 @@ impl<'a> ExecutionLease<'a> {
     }
 
     pub fn check_cancellation(&self) -> NativeExecutorResult<()> {
-        if self.active().state.runtime.is_cancelled() {
-            Err(NativeExecutorError::Cancelled)
-        } else {
-            Ok(())
+        match self.active().state.runtime.cancellation().stop_reason() {
+            Some(reason) => Err(super::super::control::cancellation_error(reason)),
+            None => Ok(()),
         }
     }
 

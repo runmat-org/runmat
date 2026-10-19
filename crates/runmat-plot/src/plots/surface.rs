@@ -12,6 +12,7 @@ use glam::{Vec3, Vec4};
 use std::fmt::Write;
 use std::sync::Arc;
 
+use super::colormap_tables;
 use super::NumericPlotData;
 #[path = "surface/color_range.rs"]
 mod color_range;
@@ -49,6 +50,9 @@ pub struct SurfacePlot {
 
     /// If true, this flattened surface should behave like a 2D image for camera/UI decisions.
     pub image_mode: bool,
+    /// Heatmap cells: text the overlay prints in each cell (indexed like `z_data`), in a
+    /// color that contrasts with the cell.
+    pub cell_labels: Option<Vec<Vec<String>>>,
 
     /// Optional color limits override for mapping Z -> color (caxis)
     pub color_limits: Option<(f64, f64)>,
@@ -547,6 +551,7 @@ impl SurfacePlot {
             alpha: 1.0,
             flatten_z: false,
             image_mode: false,
+            cell_labels: None,
             color_limits: None,
             color_mapping: SurfaceColorMapping::Scaled,
             colormap_length: 256,
@@ -621,6 +626,7 @@ impl SurfacePlot {
             alpha: 1.0,
             flatten_z: false,
             image_mode: false,
+            cell_labels: None,
             color_limits: None,
             color_mapping: SurfaceColorMapping::Scaled,
             colormap_length: 256,
@@ -672,6 +678,7 @@ impl SurfacePlot {
             alpha: 1.0,
             flatten_z: false,
             image_mode: false,
+            cell_labels: None,
             color_limits: None,
             color_mapping: SurfaceColorMapping::Scaled,
             colormap_length: 256,
@@ -915,6 +922,11 @@ impl SurfacePlot {
         self
     }
 
+    pub fn with_cell_labels(mut self, labels: Vec<Vec<String>>) -> Self {
+        self.cell_labels = Some(labels);
+        self
+    }
+
     pub fn with_image_mode(mut self, enabled: bool) -> Self {
         self.image_mode = enabled;
         self.dirty = true;
@@ -1006,6 +1018,23 @@ impl SurfacePlot {
             for &y in &self.y_data {
                 min_y = min_y.min(y as f32);
                 max_y = max_y.max(y as f32);
+            }
+            if self.image_mode {
+                // Image data positions are pixel centers; the image reaches half a pixel
+                // beyond them, so an n-pixel image spans 0.5 to n + 0.5 as in MATLAB.
+                let half_cell = |min: f32, max: f32, count: usize| {
+                    if count > 1 && max > min {
+                        (max - min) / (count - 1) as f32 * 0.5
+                    } else {
+                        0.5
+                    }
+                };
+                let hx = half_cell(min_x, max_x, self.x_data.len());
+                let hy = half_cell(min_y, max_y, self.y_data.len());
+                min_x -= hx;
+                max_x += hx;
+                min_y -= hy;
+                max_y += hy;
             }
         }
 
@@ -1335,6 +1364,46 @@ impl SurfacePlot {
         }
     }
 
+    /// Color limits for an image-mode surface: the set limits, else the finite data range.
+    /// The color limits image-mode data maps through: CLim when set, else the data range.
+    fn image_color_limits(&self) -> (f64, f64) {
+        self.color_limits
+            .or_else(|| match self.scalar_color_range() {
+                ScalarColorRange::Known(lower, upper) => Some((lower, upper)),
+                ScalarColorRange::NotMapped
+                | ScalarColorRange::Empty
+                | ScalarColorRange::Unavailable => None,
+            })
+            .unwrap_or((0.0, 1.0))
+    }
+
+    /// Heatmap cell labels: each label with its cell center and the cell's drawn color.
+    pub fn cell_label_marks(&self) -> Vec<(Vec3, String, Vec4)> {
+        let (Some(labels), Some(z_rows)) = (self.cell_labels.as_ref(), self.z_data.as_ref()) else {
+            return Vec::new();
+        };
+        let (min_z, max_z) = self.image_color_limits();
+        let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
+        let mut marks = Vec::new();
+        for (x_idx, column) in labels.iter().enumerate() {
+            for (y_idx, label) in column.iter().enumerate() {
+                let (Some(&x), Some(&y)) = (self.x_data.get(x_idx), self.y_data.get(y_idx)) else {
+                    continue;
+                };
+                let color = match &self.color_grid {
+                    Some(grid) => grid[x_idx][y_idx],
+                    None => {
+                        let z = z_rows[x_idx][y_idx];
+                        let t = ((z - min_z) / z_range) as f32;
+                        self.colormap.map_value(t.clamp(0.0, 1.0)).extend(1.0)
+                    }
+                };
+                marks.push((Vec3::new(x as f32, y as f32, 0.0), label.clone(), color));
+            }
+        }
+        marks
+    }
+
     fn image_render_data(&mut self) -> RenderData {
         let bounds = self.bounds();
         let x_min = bounds.min.x;
@@ -1347,15 +1416,7 @@ impl SurfacePlot {
             .expect("image-mode surfaces require host color data");
         let width = self.x_len.max(1);
         let height = self.y_len.max(1);
-        let color_limits = self
-            .color_limits
-            .or_else(|| match self.scalar_color_range() {
-                ScalarColorRange::Known(lower, upper) => Some((lower, upper)),
-                ScalarColorRange::NotMapped
-                | ScalarColorRange::Empty
-                | ScalarColorRange::Unavailable => None,
-            });
-        let (min_z, max_z) = color_limits.unwrap_or((0.0, 1.0));
+        let (min_z, max_z) = self.image_color_limits();
         let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
         let mut data = Vec::with_capacity(width * height * 4);
 
@@ -1585,13 +1646,13 @@ impl ColorMap {
 
     /// Hot colormap (black -> red -> yellow -> white)
     fn hot_colormap(&self, t: f32) -> Vec3 {
-        if t < 1.0 / 3.0 {
-            Vec3::new(3.0 * t, 0.0, 0.0)
-        } else if t < 2.0 / 3.0 {
-            Vec3::new(1.0, 3.0 * t - 1.0, 0.0)
-        } else {
-            Vec3::new(1.0, 1.0, 3.0 * t - 2.0)
-        }
+        // MATLAB `hot`: red over the first 3/8, green over the next 3/8, blue over the last 1/4.
+        let t = t.clamp(0.0, 1.0);
+        Vec3::new(
+            (t / 0.375).min(1.0),
+            ((t - 0.375) / 0.375).clamp(0.0, 1.0),
+            ((t - 0.75) / 0.25).clamp(0.0, 1.0),
+        )
     }
 
     /// Cool colormap (cyan -> magenta)
@@ -1601,20 +1662,12 @@ impl ColorMap {
 
     /// Viridis colormap (perceptually uniform)
     fn viridis_colormap(&self, t: f32) -> Vec3 {
-        // Simplified Viridis approximation
-        let r = (0.267004 + t * (0.993248 - 0.267004)).clamp(0.0, 1.0);
-        let g = (0.004874 + t * (0.906157 - 0.004874)).clamp(0.0, 1.0);
-        let b = (0.329415 + t * (0.143936 - 0.329415) + t * t * 0.5).clamp(0.0, 1.0);
-        Vec3::new(r, g, b)
+        Vec3::from(colormap_tables::sample(&colormap_tables::VIRIDIS, t))
     }
 
     /// Plasma colormap (perceptually uniform)
     fn plasma_colormap(&self, t: f32) -> Vec3 {
-        // Simplified Plasma approximation
-        let r = (0.050383 + t * (0.940015 - 0.050383)).clamp(0.0, 1.0);
-        let g = (0.029803 + t * (0.975158 - 0.029803) * (1.0 - t)).clamp(0.0, 1.0);
-        let b = (0.527975 + t * (0.131326 - 0.527975)).clamp(0.0, 1.0);
-        Vec3::new(r, g, b)
+        Vec3::from(colormap_tables::sample(&colormap_tables::PLASMA, t))
     }
 
     /// Spring colormap (magenta -> yellow)
@@ -1639,15 +1692,10 @@ impl ColorMap {
 
     /// Bone colormap (black -> white with blue tint)
     fn bone_colormap(&self, t: f32) -> Vec3 {
-        if t < 3.0 / 8.0 {
-            Vec3::new(7.0 / 8.0 * t, 7.0 / 8.0 * t, 29.0 / 24.0 * t)
-        } else {
-            Vec3::new(
-                (29.0 + 7.0 * t) / 24.0,
-                (29.0 + 7.0 * t) / 24.0,
-                (29.0 + 7.0 * t) / 24.0,
-            )
-        }
+        // MATLAB `bone`: (7 * gray + fliplr(hot)) / 8.
+        let hot = self.hot_colormap(t);
+        let t = t.clamp(0.0, 1.0);
+        Vec3::new(7.0 * t + hot.z, 7.0 * t + hot.y, 7.0 * t + hot.x) / 8.0
     }
 
     /// Copper colormap (black -> copper)
@@ -1657,16 +1705,10 @@ impl ColorMap {
 
     /// Pink colormap (black -> pink -> white)
     fn pink_colormap(&self, t: f32) -> Vec3 {
-        let sqrt_t = t.sqrt();
-        if t < 3.0 / 8.0 {
-            Vec3::new(14.0 / 9.0 * sqrt_t, 2.0 / 3.0 * sqrt_t, 2.0 / 3.0 * sqrt_t)
-        } else {
-            Vec3::new(
-                2.0 * sqrt_t - 1.0 / 3.0,
-                8.0 / 9.0 * sqrt_t + 1.0 / 3.0,
-                8.0 / 9.0 * sqrt_t + 1.0 / 3.0,
-            )
-        }
+        // MATLAB `pink`: sqrt((2 * gray + hot) / 3).
+        let hot = self.hot_colormap(t);
+        let t = t.clamp(0.0, 1.0);
+        ((Vec3::splat(2.0 * t) + hot) / 3.0).max(Vec3::ZERO).powf(0.5)
     }
 
     /// Lines colormap (cycling through basic colors)
@@ -1686,84 +1728,22 @@ impl ColorMap {
 
     /// Inferno colormap (perceptually uniform)
     fn inferno_colormap(&self, t: f32) -> Vec3 {
-        // Simplified Inferno approximation
-        let r = (0.001462 + t * (0.988362 - 0.001462)).clamp(0.0, 1.0);
-        let g = (0.000466 + t * t * (0.982895 - 0.000466)).clamp(0.0, 1.0);
-        let b = (0.013866 + t * (1.0 - t) * (0.416065 - 0.013866)).clamp(0.0, 1.0);
-        Vec3::new(r, g, b)
+        Vec3::from(colormap_tables::sample(&colormap_tables::INFERNO, t))
     }
 
     /// Magma colormap (perceptually uniform)
     fn magma_colormap(&self, t: f32) -> Vec3 {
-        // Simplified Magma approximation
-        let r = (0.001462 + t * (0.987053 - 0.001462)).clamp(0.0, 1.0);
-        let g = (0.000466 + t * t * (0.991438 - 0.000466)).clamp(0.0, 1.0);
-        let b = (0.013866 + t * (0.644237 - 0.013866) * (1.0 - t)).clamp(0.0, 1.0);
-        Vec3::new(r, g, b)
+        Vec3::from(colormap_tables::sample(&colormap_tables::MAGMA, t))
     }
 
     /// Turbo colormap (improved rainbow)
     fn turbo_colormap(&self, t: f32) -> Vec3 {
-        // Simplified Turbo approximation (Google's improved rainbow)
-        let r = if t < 0.5 {
-            (0.13 + 0.87 * (2.0 * t).powf(0.25)).clamp(0.0, 1.0)
-        } else {
-            (0.8685 + 0.1315 * (2.0 * (1.0 - t)).powf(0.25)).clamp(0.0, 1.0)
-        };
-
-        let g = if t < 0.25 {
-            4.0 * t
-        } else if t < 0.75 {
-            1.0
-        } else {
-            1.0 - 4.0 * (t - 0.75)
-        }
-        .clamp(0.0, 1.0);
-
-        let b = if t < 0.5 {
-            (0.8 * (1.0 - 2.0 * t).powf(0.25)).clamp(0.0, 1.0)
-        } else {
-            (0.1 + 0.9 * (2.0 * t - 1.0).powf(0.25)).clamp(0.0, 1.0)
-        };
-
-        Vec3::new(r, g, b)
+        Vec3::from(colormap_tables::sample(&colormap_tables::TURBO, t))
     }
 
     /// Parula colormap (MATLAB's default)
     fn parula_colormap(&self, t: f32) -> Vec3 {
-        // Simplified Parula approximation
-        let r = if t < 0.25 {
-            0.2081 * (1.0 - t)
-        } else if t < 0.5 {
-            t - 0.25
-        } else if t < 0.75 {
-            1.0
-        } else {
-            1.0 - 0.5 * (t - 0.75)
-        }
-        .clamp(0.0, 1.0);
-
-        let g = if t < 0.125 {
-            0.1663 * t / 0.125
-        } else if t < 0.375 {
-            0.1663 + (0.7079 - 0.1663) * (t - 0.125) / 0.25
-        } else if t < 0.625 {
-            0.7079 + (0.9839 - 0.7079) * (t - 0.375) / 0.25
-        } else {
-            0.9839 * (1.0 - (t - 0.625) / 0.375)
-        }
-        .clamp(0.0, 1.0);
-
-        let b = if t < 0.25 {
-            0.5 + 0.5 * t / 0.25
-        } else if t < 0.5 {
-            1.0
-        } else {
-            1.0 - 2.0 * (t - 0.5)
-        }
-        .clamp(0.0, 1.0);
-
-        Vec3::new(r, g, b)
+        Vec3::from(colormap_tables::sample(&colormap_tables::PARULA, t))
     }
 
     /// Colorcube colormap.

@@ -1,4 +1,5 @@
 mod component;
+mod dependencies;
 mod envelope;
 mod identity;
 mod linked_native_import;
@@ -10,6 +11,9 @@ mod static_import;
 
 pub use component::{
     ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
+};
+pub use dependencies::{
+    ExecutableDependencyDescriptor, ExecutableDependencyProduct, EXECUTABLE_DEPENDENCY_MAX_PRODUCTS,
 };
 pub use envelope::{
     ExecutableUnitAdmission, ExecutableUnitEnvelope, EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,

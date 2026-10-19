@@ -294,6 +294,11 @@ impl LoweringCtx {
         });
         let mut ctx = Self {
             assembly: HirAssembly {
+                bound_function_modifiers: context
+                    .function_modifiers
+                    .iter()
+                    .map(|(id, value)| (*id, value.clone()))
+                    .collect(),
                 primary_source: context.primary_source,
                 ..HirAssembly::default()
             },

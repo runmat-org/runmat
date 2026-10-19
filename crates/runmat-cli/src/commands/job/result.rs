@@ -20,12 +20,14 @@ pub(super) fn format_terminal_result(
             // runtime Values nor grants callable or source authority.
             Ok(serde_json::to_string_pretty(&graph)?)
         }
-        ProgramExecutionResponse::ExternalizedSuccess { .. } => match origin {
-            ResultOrigin::Attached => bail!("remote result requires an artifact-aware consumer"),
-            ResultOrigin::Recovered => {
-                bail!("recovered result requires an artifact-aware consumer")
-            }
-        },
+        ProgramExecutionResponse::ExternalizedSuccess {
+            outputs,
+            result_objects,
+        } => Ok(format!(
+            "{} externalized output(s), {} verified result object(s)",
+            outputs.len(),
+            result_objects.len()
+        )),
         ProgramExecutionResponse::SpmdSuccess { .. } => match origin {
             ResultOrigin::Attached => {
                 bail!("per-rank SPMD results require the gang execution consumer")

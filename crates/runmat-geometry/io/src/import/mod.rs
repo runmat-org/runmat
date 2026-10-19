@@ -225,6 +225,7 @@ pub(crate) fn build_asset(input: BuildAssetInput<'_>) -> GeometryAsset {
             kind: SourceGeometryKind::Mesh,
             assembly: None,
             material_evidence: Vec::new(),
+            exchange: None,
             cad_evaluators: Vec::new(),
         },
         tessellation_profile,
@@ -382,4 +383,20 @@ pub(crate) fn parse_f64(value: &str) -> Result<f64, GeometryImportError> {
 
 pub(crate) fn is_degenerate_triangle(vertices: &[[f64; 3]; 3]) -> bool {
     vertices[0] == vertices[1] || vertices[1] == vertices[2] || vertices[0] == vertices[2]
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::*;
+    #[test]
+    fn import_control_follows_its_live_caller_probe() {
+        let caller = Arc::new(AtomicBool::new(false));
+        let context = GeometryImportContext::with_cancellation(caller.clone());
+        assert!(!context.is_cancelled());
+        caller.store(true, Ordering::Release);
+        assert!(matches!(
+            context.check_cancelled(),
+            Err(GeometryImportError::Cancelled)
+        ));
+    }
 }

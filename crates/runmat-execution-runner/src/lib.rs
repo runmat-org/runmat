@@ -20,4 +20,9 @@ pub use driver::{Driver, DriverAction, DriverCommand, DriverConfig, DriverEvent,
 pub use error::{RunnerError, RunnerResult};
 pub use gang::GangCoordinator;
 pub use pool::{PoolSpec, WorkerSpec};
-pub use task::{AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, TaskSubmission};
+pub use task::{
+    AttemptDisposition, AttemptExecutionObservation, AttemptExecutionTermination,
+    AttemptFailureKind, AttemptReport, AttemptRequest, AttemptResourceAccounting,
+    AttemptResourceAggregate, AttemptSuccess, AttemptTerminal, TaskCancellation,
+    TaskCancellationCause, TaskExecutionEvidence, TaskSubmission,
+};

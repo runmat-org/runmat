@@ -1,4 +1,5 @@
 use runmat_execution::cancellation::{CancellationSource, CancellationToken};
+use runmat_execution::CancellationReason;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 
@@ -46,6 +47,12 @@ impl Drop for InterruptGuard {
 
 pub fn replace_interrupt(handle: Option<CancellationToken>) -> InterruptGuard {
     InterruptGuard::install(handle)
+}
+
+/// Why the active execution must stop: a cancelled generation or raised
+/// interrupt (`User`), otherwise an elapsed inherited deadline.
+pub fn stop_reason() -> Option<CancellationReason> {
+    current_interrupt().and_then(|token| token.stop_reason())
 }
 
 pub fn is_cancelled() -> bool {

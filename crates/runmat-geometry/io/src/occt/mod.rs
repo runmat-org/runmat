@@ -43,6 +43,14 @@ mod exact_projection_interfaces;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod exact_projection_occurrence;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) mod feature;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+mod feature_history;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "occt-native"))]
+mod feature_profile_tests;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "occt-native"))]
+mod feature_tests;
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod ffi;
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
 mod import_validation;
@@ -50,6 +58,11 @@ mod import_validation;
 mod native;
 #[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
 mod wasm;
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn exact_kernel_abi() -> String {
+    ffi::bridge::exact_kernel_abi()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OcctCadFormat {

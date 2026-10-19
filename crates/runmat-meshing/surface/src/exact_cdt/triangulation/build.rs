@@ -1,7 +1,10 @@
+#[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
 
+mod working;
+
 use runmat_meshing_core::{
-    predicate::{incircle2d_symbolic, orient2d_symbolic},
+    predicate::{incircle2d, orient2d_symbolic},
     MeshingCancellationSignal, PlanarPredicatePoint, PredicateSign, StableDigest,
 };
 
@@ -47,69 +50,7 @@ pub(crate) fn triangulate_validated_face_pslg(
     let super_points = super_triangle(&points, &pslg.source_face_id)?;
     let source_count = points.len();
     points.extend(super_points);
-    let mut triangles = vec![[
-        source_count as u32,
-        source_count as u32 + 1,
-        source_count as u32 + 2,
-    ]];
-
-    for point_index in 0..source_count as u32 {
-        budget.checkpoint()?;
-        let mut bad = BTreeSet::new();
-        for (triangle_index, triangle) in triangles.iter().enumerate() {
-            budget.consume(1)?;
-            if incircle2d_symbolic([
-                point(&points, triangle[0]),
-                point(&points, triangle[1]),
-                point(&points, triangle[2]),
-                point(&points, point_index),
-            ])
-            .map_err(|error| predicate_error(pslg, error))?
-                == PredicateSign::Positive
-            {
-                bad.insert(triangle_index);
-            }
-        }
-        if bad.is_empty() {
-            return Err(ExactFaceDelaunayError::new(
-                ExactFaceDelaunayErrorKind::InvalidTopology,
-                &pslg.source_face_id,
-                "point insertion found no containing Delaunay cavity",
-            ));
-        }
-        let mut edge_counts = BTreeMap::<[u32; 2], usize>::new();
-        for triangle_index in &bad {
-            for edge in triangle_edges(triangles[*triangle_index]) {
-                *edge_counts.entry(sorted_edge(edge)).or_default() += 1;
-            }
-        }
-        triangles = triangles
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, triangle)| (!bad.contains(&index)).then_some(triangle))
-            .collect();
-        for (edge, count) in edge_counts {
-            if count != 1 {
-                continue;
-            }
-            budget.consume(1)?;
-            let mut triangle = [edge[0], edge[1], point_index];
-            if orient2d_symbolic(triangle.map(|index| point(&points, index)))
-                .map_err(|error| predicate_error(pslg, error))?
-                == PredicateSign::Negative
-            {
-                triangle.swap(0, 1);
-            }
-            triangles.push(triangle);
-            if triangles.len() > options.maximum_triangles {
-                return Err(resource_error(
-                    pslg,
-                    ExactFaceDelaunayErrorKind::ElementLimit,
-                    "triangle hard limit exceeded",
-                ));
-            }
-        }
-    }
+    let triangles = working::triangulate(&points, source_count, &mut budget, options)?;
 
     let mut triangles = triangles
         .into_iter()
@@ -190,6 +131,7 @@ fn super_triangle(
     }))
 }
 
+#[cfg(test)]
 fn point(points: &[PlanarPredicatePoint], index: u32) -> PlanarPredicatePoint {
     points[index as usize]
 }
@@ -278,6 +220,7 @@ impl<'a> PredicateBudget<'a> {
         Ok(())
     }
 
+    #[track_caller]
     fn checkpoint(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.since_check = 0;
         if self.cancellation.is_cancelled() {
@@ -290,4 +233,83 @@ impl<'a> PredicateBudget<'a> {
             Ok(())
         }
     }
+}
+
+#[cfg(test)]
+fn exhaustive(
+    points: &[PlanarPredicatePoint],
+    source_count: usize,
+    budget: &mut PredicateBudget<'_>,
+    options: ExactFaceDelaunayOptions,
+) -> Result<Vec<[u32; 3]>, ExactFaceDelaunayError> {
+    let pslg = budget.pslg;
+    let mut triangles = vec![[
+        source_count as u32,
+        source_count as u32 + 1,
+        source_count as u32 + 2,
+    ]];
+
+    for point_index in 0..source_count as u32 {
+        budget.checkpoint()?;
+        let mut bad = BTreeSet::new();
+        for (triangle_index, triangle) in triangles.iter().enumerate() {
+            budget.consume(1)?;
+            if matches!(
+                incircle2d(
+                    [
+                        point(points, triangle[0]),
+                        point(points, triangle[1]),
+                        point(points, triangle[2]),
+                        point(points, point_index),
+                    ]
+                    .map(|point| point.coordinates)
+                )
+                .map_err(|error| predicate_error(pslg, error))?,
+                PredicateSign::Positive | PredicateSign::Zero
+            ) {
+                bad.insert(triangle_index);
+            }
+        }
+        if bad.is_empty() {
+            return Err(ExactFaceDelaunayError::new(
+                ExactFaceDelaunayErrorKind::InvalidTopology,
+                &pslg.source_face_id,
+                "point insertion found no containing Delaunay cavity",
+            ));
+        }
+        let mut edge_counts = BTreeMap::<[u32; 2], usize>::new();
+        for triangle_index in &bad {
+            for edge in triangle_edges(triangles[*triangle_index]) {
+                *edge_counts.entry(sorted_edge(edge)).or_default() += 1;
+            }
+        }
+        triangles = triangles
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, triangle)| (!bad.contains(&index)).then_some(triangle))
+            .collect();
+        for (edge, count) in edge_counts {
+            if count != 1 {
+                continue;
+            }
+            budget.consume(1)?;
+            let mut triangle = [edge[0], edge[1], point_index];
+            if orient2d_symbolic(triangle.map(|index| point(points, index)))
+                .map_err(|error| predicate_error(pslg, error))?
+                == PredicateSign::Negative
+            {
+                triangle.swap(0, 1);
+            }
+            triangles.push(triangle);
+            if triangles.len() > options.maximum_triangles {
+                return Err(resource_error(
+                    pslg,
+                    ExactFaceDelaunayErrorKind::ElementLimit,
+                    "triangle hard limit exceeded",
+                ));
+            }
+        }
+    }
+
+    Ok(triangles)
 }

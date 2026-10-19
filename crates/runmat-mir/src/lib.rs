@@ -48,4 +48,5 @@ pub use terminator::*;
 /// Portable schema for [`MirAssembly`] payloads retained in executable units.
 /// Version 14 identifies admitted incoming-workspace locals separately from
 /// newly declared locals so their entry initialization survives serialization.
-pub const MIR_SCHEMA_VERSION: u16 = 15;
+/// Version 16 adds external deferred targets (`MirRvalue::ExternalFuture`).
+pub const MIR_SCHEMA_VERSION: u16 = 16;

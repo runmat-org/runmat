@@ -4,12 +4,14 @@
 //! providers continue to own kernel placement within an assigned device.
 
 mod accelerator;
+mod accounting;
 mod capability;
 mod exact_shared;
 mod matching;
 mod request;
-mod usage;
 mod registration_slots;
+mod reservation;
+mod usage;
 pub use registration_slots::{ProviderRegistrationSlot, ProviderRegistrationSlotPool};
 
 /// Opaque lifetime claim for host metadata retained by an executable value.
@@ -130,4 +132,5 @@ pub use matching::{
     accelerator_requests_satisfy_requirements, select_accelerator_devices,
 };
 pub use request::{ResourceAssignment, ResourceInventory, ResourceRequest};
+pub use accounting::{ResourceAccounting, ResourceAccountingSummary};
 pub use usage::{AcceleratorUsage, ResourceUsage};

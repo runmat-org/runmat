@@ -21,6 +21,7 @@ mod introspection;
 pub(in crate::catalog) mod io;
 mod logical;
 pub(in crate::catalog) mod math;
+mod meshing;
 mod parallel;
 mod plotting;
 mod stats;
@@ -56,6 +57,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     io::extend_entries(values);
     logical::extend_entries(values);
     math::extend_entries(values);
+    meshing::extend_entries(values);
     parallel::extend_entries(values);
     plotting::extend_entries(values);
     stats::extend_entries(values);

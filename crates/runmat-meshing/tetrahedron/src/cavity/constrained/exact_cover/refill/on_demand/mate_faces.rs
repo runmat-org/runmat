@@ -21,6 +21,15 @@ pub(in crate::cavity::constrained) fn on_demand_interior_mate_faces_for_trace(
                 .flatten()
         })
         .collect::<BTreeSet<_>>();
+    let volume_overflow_faces = trace
+        .dead_ends
+        .iter()
+        .filter_map(|dead_end| {
+            (dead_end.reason == "forced_interior_mate_volume_overflow")
+                .then_some(dead_end.face)
+                .flatten()
+        })
+        .collect::<BTreeSet<_>>();
     let open_interior_dead_end_faces = trace
         .dead_ends
         .iter()
@@ -50,6 +59,7 @@ pub(in crate::cavity::constrained) fn on_demand_interior_mate_faces_for_trace(
         .collect::<BTreeSet<_>>();
     if future_mate_dead_ends.is_empty()
         && no_candidate_dead_end_faces.is_empty()
+        && volume_overflow_faces.is_empty()
         && open_interior_dead_end_faces.is_empty()
         && root_blocked_boundary_mate_faces.is_empty()
     {
@@ -60,6 +70,7 @@ pub(in crate::cavity::constrained) fn on_demand_interior_mate_faces_for_trace(
         BoundaryExactCoverSearch::new(cavity, candidates, options.volume_relative_tolerance);
     let mut mate_faces = BTreeSet::<[u32; 3]>::new();
     mate_faces.extend(no_candidate_dead_end_faces);
+    mate_faces.extend(volume_overflow_faces);
     mate_faces.extend(open_interior_dead_end_faces);
     mate_faces.extend(root_blocked_boundary_mate_faces);
     for dead_end in future_mate_dead_ends {

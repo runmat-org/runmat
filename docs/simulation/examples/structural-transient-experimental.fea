@@ -1,0 +1,73 @@
+geometry bracket {
+    file = "./geometry/box.brep"
+    units = m
+
+    region body : solid {
+        select id "solid_000001"
+        expect exactly_one
+    }
+    region support : face {
+        select id "face_000001"
+        expect exactly_one
+    }
+    region load_face : face {
+        select id "face_000002"
+        expect exactly_one
+    }
+}
+
+mesh bracket on geometry.bracket {
+    tetrahedra {
+        order = linear
+        target_size = 0.75 m
+        maximum_deviation = 0.05 m
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+
+model impulsive_bracket {
+    assign material.steel to geometry.bracket.region.body
+    constraint fixed_support {
+        structural.fixed { target = geometry.bracket.region.support }
+    }
+    signal pulse : force over time {
+        samples = [
+            { at = 0 s, value = 0 N },
+            { at = 0.01 s, value = 1 kN },
+            { at = 0.02 s, value = 0 N },
+            { at = 0.1 s, value = 0 N },
+        ]
+        interpolation = linear
+        extrapolation = reject
+    }
+    excitation impact {
+        force {
+            target = geometry.bracket.region.load_face
+            signal = signal.pulse
+            direction = global([0, -1, 0])
+        }
+    }
+    load_case impact { include excitation.impact }
+}
+
+study structural_transient_experimental {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.impulsive_bracket
+    formulation = experimental
+    analysis response {
+        structural transient {
+            start_time = 0 s
+            end_time = 0.1 s
+            time_step = 0.001 s
+        }
+    }
+    output displacement = analysis.response.field.node.displacement
+}

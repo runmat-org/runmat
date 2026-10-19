@@ -8,6 +8,7 @@ pub mod config;
 pub mod fea;
 pub mod gc;
 pub mod job;
+pub mod mesh;
 pub mod mex;
 pub mod native_interface;
 pub mod package;

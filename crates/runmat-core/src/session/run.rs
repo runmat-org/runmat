@@ -307,6 +307,7 @@ impl RunMatSession {
             {
                 Ok(response) => response,
                 Err(error) => crate::abi::ExecutionResponse {
+                    dependency_lock: None,
                     source_context: unresolved_source_context(
                         &request
                             .as_ref()
@@ -412,6 +413,7 @@ impl RunMatSession {
         let source_input = request.source.clone();
         if let Err(error) = self.ensure_user_path_hydrated().await {
             return crate::abi::ExecutionResponse {
+                dependency_lock: None,
                 source_context: unresolved_source_context(&source_input),
                 result: Err(error),
             };
@@ -420,6 +422,7 @@ impl RunMatSession {
             Ok(resolved) => resolved,
             Err(err) => {
                 return crate::abi::ExecutionResponse {
+                    dependency_lock: None,
                     source_context: unresolved_source_context(&source_input),
                     result: Err(err),
                 };
@@ -448,6 +451,7 @@ impl RunMatSession {
                     Ok(source) => source,
                     Err(error) => {
                         return crate::abi::ExecutionResponse {
+                            dependency_lock: None,
                             source_context: crate::abi::ExecutionSourceContext {
                                 name: source_name,
                                 text: Some(source_text),
@@ -484,6 +488,7 @@ impl RunMatSession {
         drop(scope);
 
         crate::abi::ExecutionResponse {
+            dependency_lock: None,
             source_context: crate::abi::ExecutionSourceContext {
                 name: source_name,
                 text: Some(source_text),
@@ -706,10 +711,7 @@ impl RunMatSession {
                 .and_then(|source| source.resolve_in(&product.runtime)),
         );
         let preparation::workspace::PreparedInteractiveWorkspace {
-            #[cfg(not(target_arch = "wasm32"))]
-                unit: interactive_unit,
-            #[cfg(target_arch = "wasm32")]
-                unit: _interactive_unit,
+            unit: interactive_unit,
             runtime: execution_runtime,
             bytecode,
             publication: source_registry_publication,
@@ -1240,6 +1242,8 @@ impl RunMatSession {
             self.generic_native_cache
                 .publish_session_registry(&self.function_registry, &function_registry_after_success)
                 .map_err(RunError::Runtime)?;
+            self.program_service
+                .publish(&interactive_unit, &function_registry_after_success);
             self.function_registry = function_registry_after_success;
             self.next_semantic_function_id = next_semantic_function_id_after_success;
             source_registry_publication.finish(self.function_registry.clone());
@@ -1594,7 +1598,7 @@ fn source_text_hash(source_text: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-fn unresolved_source_context(
+pub(super) fn unresolved_source_context(
     source: &crate::abi::SourceInput,
 ) -> crate::abi::ExecutionSourceContext {
     let name = match source {

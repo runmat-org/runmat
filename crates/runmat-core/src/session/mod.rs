@@ -56,12 +56,27 @@ mod dynamic;
 mod dynamic_cache;
 mod error_conversion;
 mod executable;
+mod fea_source;
+pub use fea_source::CheckedFeaSessionSource;
+mod fea_changes;
+mod fea_publication;
+mod fea_workspace;
+pub use fea_publication::PreparedFeaWorkspacePublication;
+mod fea_working;
+pub use fea_working::{FeaWorkingCheckRequest, FeaWorkingSource};
+mod fea_queries;
+pub use fea_workspace::{
+    FeaCapturedDependency, FeaWorkspaceCapture, FeaWorkspaceCheckRequest, FeaWorkspaceCheckResult,
+};
 #[cfg(not(target_arch = "wasm32"))]
 mod host_driver;
 mod host_services;
 pub use host_services::SessionGraphicsHost;
 mod http_host;
 mod init;
+mod pinned;
+mod portable;
+mod program;
 mod input;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod local_tasks_tests;
@@ -139,6 +154,12 @@ pub struct RunMatSession {
     native_tiering_enabled: bool,
     /// Optional host-frozen project snapshot used by every compilation in this session.
     project_handoff: Option<runmat_package::FrozenProjectHandoff>,
+    checked_fea_sources: fea_queries::CheckedSourceCache,
+    captured_project: Option<pinned::CapturedProject>,
+    pinned_inputs: Option<(
+        runmat_filesystem::pinned::InputManifest,
+        std::sync::Arc<runmat_filesystem::pinned::PinnedFsProvider>,
+    )>,
     /// Immutable foreign bytes whose rebased paths are published by the project handoff.
     #[cfg(not(target_arch = "wasm32"))]
     private_project_root: Option<crate::foreign_artifacts::PrivateArtifactRoot>,
@@ -158,6 +179,7 @@ pub struct RunMatSession {
     cancellation: cancellation::SessionCancellation,
     /// Root-scoped execution authority inherited by every invocation.
     runtime_context: runmat_runtime::context::RuntimeContext,
+    program_service: std::rc::Rc<program::SessionProgramService>,
     /// Exact Core-installed effect ports. Workspace-only invocation overlays
     /// may change without conferring a new call/acceleration/foreign owner.
     canonical_device_route_ports: runmat_runtime::context::RuntimeServicePorts,

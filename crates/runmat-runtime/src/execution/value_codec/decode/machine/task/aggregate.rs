@@ -278,8 +278,13 @@ impl<'a> ImmutableTask<'a> {
             return Ok((completed, None));
         }
         let object = self.object.take().expect("class identity was prepared");
-        crate::parallel::codistributor::validate_definition(&object)
-            .map_err(|error| ValueCodecError::invalid(&self.path, error.to_string()))?;
+        match crate::execution::value_codec::immutable_class::schema_for_class(
+            object.class_name.display_name(),
+        )? {
+            Some(schema) => schema.validate_object(&object, &self.path)?,
+            None => crate::parallel::codistributor::validate_definition(&object)
+                .map_err(|error| ValueCodecError::invalid(&self.path, error.to_string()))?,
+        }
         Ok((1, Some(Value::Object(object))))
     }
 

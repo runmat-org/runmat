@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::{
     ExactBRepTopology, ExactCoedge, ExactEdge, PersistentEntityId, PersistentEntityKind,
 };
-use runmat_meshing_core::MetricSourceKind;
+use runmat_meshing_core::{MeshingCancellationSignal, MetricSourceKind};
 
 use super::{
     shared_curve_interior_node_id, shared_curve_vertex_node_id, CurveMetricResolutionEvidence,
@@ -19,27 +19,41 @@ pub(super) fn validate_shared_curve_mesh(
     mesh: &SharedCurveMesh,
     topology: &ExactBRepTopology,
 ) -> Result<(), SharedCurveError> {
+    validate_shared_curve_mesh_with_cancellation(mesh, topology, None)
+}
+
+pub(super) fn validate_shared_curve_mesh_with_cancellation(
+    mesh: &SharedCurveMesh,
+    topology: &ExactBRepTopology,
+    cancellation: Option<&dyn MeshingCancellationSignal>,
+) -> Result<(), SharedCurveError> {
+    checkpoint(cancellation)?;
     if mesh.schema_version != SHARED_CURVE_MESH_SCHEMA_VERSION {
         return Err(invalid("shared curve schema", "unsupported version"));
     }
     let edge_by_id = topology
         .edges
         .iter()
-        .map(|edge| (&edge.id, edge))
-        .collect::<BTreeMap<_, _>>();
-    let coedges_by_edge = topology.coedges.iter().fold(
-        BTreeMap::<&PersistentEntityId, Vec<&ExactCoedge>>::new(),
-        |mut index, coedge| {
-            index.entry(&coedge.edge_id).or_default().push(coedge);
-            index
-        },
-    );
+        .map(|edge| {
+            checkpoint(cancellation)?;
+            Ok((&edge.id, edge))
+        })
+        .collect::<Result<BTreeMap<_, _>, SharedCurveError>>()?;
+    let mut coedges_by_edge = BTreeMap::<&PersistentEntityId, Vec<&ExactCoedge>>::new();
+    for coedge in &topology.coedges {
+        checkpoint(cancellation)?;
+        coedges_by_edge
+            .entry(&coedge.edge_id)
+            .or_default()
+            .push(coedge);
+    }
     let mut previous_edge = None;
     let mut node_count = 0usize;
     let mut face_use_count = 0usize;
     let mut uv_sample_count = 0usize;
     let mut coordinates_by_node = BTreeMap::new();
     for curve in &mesh.edges {
+        checkpoint(cancellation)?;
         if previous_edge.is_some_and(|previous| previous >= &curve.source_edge_id) {
             return Err(invalid(
                 "shared curve edges",
@@ -58,8 +72,10 @@ pub(super) fn validate_shared_curve_mesh(
             edge,
             coedges_by_edge.get(&curve.source_edge_id),
             topology,
+            cancellation,
         )?;
         for node in &curve.nodes {
+            checkpoint(cancellation)?;
             if coordinates_by_node
                 .insert(node.node_id, node.coordinates_m.map(f64::to_bits))
                 .is_some_and(|previous| previous != node.coordinates_m.map(f64::to_bits))
@@ -97,6 +113,7 @@ fn validate_curve(
     edge: &ExactEdge,
     expected_coedges: Option<&Vec<&ExactCoedge>>,
     topology: &ExactBRepTopology,
+    cancellation: Option<&dyn MeshingCancellationSignal>,
 ) -> Result<(), SharedCurveError> {
     if curve.source_edge_id.kind != PersistentEntityKind::Edge
         || !finite_range(curve.parameter_range.start, curve.parameter_range.end)
@@ -111,6 +128,7 @@ fn validate_curve(
     validate_metric_resolution(curve, edge.is_degenerate)?;
     let mut node_ids = BTreeSet::new();
     for (index, node) in curve.nodes.iter().enumerate() {
+        checkpoint(cancellation)?;
         let expected_node_id = if let Some(vertex_id) = &node.source_vertex_id {
             shared_curve_vertex_node_id(vertex_id)
         } else {
@@ -162,20 +180,24 @@ fn validate_curve(
             ));
         }
     }
-    if edge.is_degenerate
-        && curve.nodes.iter().any(|node| {
-            node.arc_length_m.to_bits() != 0
-                || node
-                    .coordinates_m
-                    .iter()
-                    .zip(curve.nodes[0].coordinates_m)
-                    .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
-        })
-    {
-        return Err(invalid(
-            "degenerate shared curve",
-            "all parameter samples must identify one coordinate with zero arc length",
-        ));
+    if edge.is_degenerate {
+        for node in &curve.nodes {
+            checkpoint(cancellation)?;
+            if node.arc_length_m.to_bits() != 0
+                || node.coordinates_m.map(f64::to_bits)
+                    != curve.nodes[0].coordinates_m.map(f64::to_bits)
+            {
+                return Err(invalid(
+                    "degenerate shared curve",
+                    "all parameter samples must identify one coordinate with zero arc length",
+                ));
+            }
+        }
+    }
+    let mut interior_vertex = false;
+    for node in &curve.nodes[1..curve.nodes.len() - 1] {
+        checkpoint(cancellation)?;
+        interior_vertex |= node.source_vertex_id.is_some();
     }
     let first = &curve.nodes[0];
     let last = curve.nodes.last().expect("node count checked");
@@ -184,9 +206,7 @@ fn validate_curve(
         || first.arc_length_m != 0.0
         || first.source_vertex_id != edge.start_vertex_id
         || last.source_vertex_id != edge.end_vertex_id
-        || curve.nodes[1..curve.nodes.len() - 1]
-            .iter()
-            .any(|node| node.source_vertex_id.is_some())
+        || interior_vertex
     {
         return Err(invalid(
             "shared curve endpoints",
@@ -203,16 +223,18 @@ fn validate_curve(
         ));
     }
     for (actual, expected) in curve.face_uses.iter().zip(expected) {
+        checkpoint(cancellation)?;
+        let mut finite_uv = true;
+        for uv in &actual.node_uv {
+            checkpoint(cancellation)?;
+            finite_uv &= uv.iter().all(|value| value.is_finite());
+        }
         if actual.coedge_id != expected.id
             || actual.face_id != expected.face_id
             || actual.orientation != expected.orientation
             || actual.seam_image != expected.seam_image
             || actual.node_uv.len() != curve.nodes.len()
-            || actual
-                .node_uv
-                .iter()
-                .flatten()
-                .any(|value| !value.is_finite())
+            || !finite_uv
         {
             return Err(invalid(
                 "shared curve face use",
@@ -223,10 +245,12 @@ fn validate_curve(
     Ok(())
 }
 
-pub(super) fn validate_curve_against_topology(
+pub(super) fn validate_curve_against_topology_with_cancellation(
     curve: &SharedCurve,
     topology: &ExactBRepTopology,
+    cancellation: Option<&dyn MeshingCancellationSignal>,
 ) -> Result<(), SharedCurveError> {
+    checkpoint(cancellation)?;
     let edge = topology
         .edges
         .binary_search_by(|edge| edge.id.cmp(&curve.source_edge_id))
@@ -241,9 +265,17 @@ pub(super) fn validate_curve_against_topology(
     let coedges = topology
         .coedges
         .iter()
-        .filter(|coedge| coedge.edge_id == curve.source_edge_id)
-        .collect::<Vec<_>>();
-    validate_curve(curve, edge, Some(&coedges), topology)
+        .map(|coedge| {
+            checkpoint(cancellation)?;
+            Ok(coedge)
+        })
+        .filter(|coedge| {
+            coedge
+                .as_ref()
+                .map_or(true, |coedge| coedge.edge_id == curve.source_edge_id)
+        })
+        .collect::<Result<Vec<_>, SharedCurveError>>()?;
+    validate_curve(curve, edge, Some(&coedges), topology, cancellation)
 }
 
 fn validate_metric_resolution(
@@ -353,4 +385,19 @@ fn finite_range(start: f64, end: f64) -> bool {
 
 pub(super) fn invalid(field: impl Into<String>, reason: impl Into<String>) -> SharedCurveError {
     SharedCurveError::invalid_contract(field, reason)
+}
+
+pub(super) fn checkpoint(
+    cancellation: Option<&dyn MeshingCancellationSignal>,
+) -> Result<(), SharedCurveError> {
+    if cancellation.is_some_and(MeshingCancellationSignal::is_cancelled) {
+        return Err(SharedCurveError::new(
+            super::SharedCurveErrorKind::GeometryEvaluation(
+                runmat_geometry_core::GeometryEvaluationErrorKind::Cancelled,
+            ),
+            "shared curve validation",
+            "operation was cancelled",
+        ));
+    }
+    Ok(())
 }

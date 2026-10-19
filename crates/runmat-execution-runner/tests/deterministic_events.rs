@@ -26,7 +26,7 @@ fn scenario() -> runmat_execution_runner::DriverSnapshot {
         .driver
         .handle(DriverCommand::BackendReport(BackendReport::for_request(
             &request,
-            common::success(),
+            common::success(&request),
         )))
         .unwrap();
     fixture.driver.snapshot()

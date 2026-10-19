@@ -1,12 +1,26 @@
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::fs;
+use std::path::PathBuf;
 use std::process::{Command, Output};
 use tempfile::TempDir;
+
+use runmat_analysis_core::{AnalysisModel, ExcitationTarget, PropertyRegionScope};
+use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshArtifact};
 
 fn runmat(temp: &TempDir, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
     command.current_dir(temp.path()).args(args);
-    command.env_remove("RUNMAT_CONFIG");
+    command
+        .env_remove("RUNMAT_CONFIG")
+        .env(
+            "RUNMAT_PACKAGE_CACHE_DIR",
+            temp.path().join("package-cache"),
+        )
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp.path().join("execution-state"),
+        );
     command.output().expect("run runmat check")
 }
 
@@ -24,6 +38,596 @@ fn runmat_with_env(temp: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Outpu
         command.env(key, value);
     }
     command.output().expect("run runmat check")
+}
+
+fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let config = temp.path().join("runmat.toml");
+    let artifact_root =
+        toml::Value::String(temp.path().join("artifacts").to_string_lossy().into_owned());
+    let study_artifact_root = toml::Value::String(
+        temp.path()
+            .join("study-artifacts")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    fs::write(
+        &config,
+        format!(
+            "[runtime.accelerate]\nenabled = false\nprovider = \"inprocess\"\n\n[runtime.fea]\nartifact_store = \"filesystem\"\nartifact_root = {artifact_root}\nstudy_artifact_root = {study_artifact_root}\n"
+        ),
+    )
+    .unwrap();
+    Command::new(env!("CARGO_BIN_EXE_runmat"))
+        .current_dir(repository)
+        .args(args)
+        .env("RUNMAT_CONFIG", config)
+        .env(
+            "RUNMAT_PACKAGE_CACHE_DIR",
+            temp.path().join("package-cache"),
+        )
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp.path().join("execution-state"),
+        )
+        .output()
+        .expect("run repository FEA example")
+}
+
+fn assert_fea_checks(temp: &TempDir, path: &str) {
+    let output = runmat_from_repository(temp, &["check", path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed check:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["kind"], "fea", "{path}");
+    assert_eq!(payload["status"], "valid", "{path}");
+    assert_eq!(payload["diagnostics"], serde_json::json!([]), "{path}");
+}
+
+fn fea_plan(temp: &TempDir, path: &str) -> Value {
+    let output = runmat_from_repository(temp, &["fea", "plan", path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed plan:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn assert_repeated_result_identity(temp: &TempDir, path: &str, first: &Value) {
+    let repeated = runmat_from_repository(temp, &["run", path, "--json"]);
+    assert!(
+        repeated.status.success(),
+        "{path} failed repeated run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&repeated.stdout),
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    let repeated: Value = serde_json::from_slice(&repeated.stdout).unwrap();
+    for field in [
+        "study_definition_digest",
+        "mesh_digest",
+        "nodes",
+        "elements",
+        "boundary_faces",
+        "step_run_ids",
+    ] {
+        assert_eq!(
+            repeated[field], first[field],
+            "{path} changed verified result field `{field}` on repeat"
+        );
+    }
+}
+
+#[test]
+fn canonical_fea_documentation_examples_check_cleanly() {
+    let temp = TempDir::new().unwrap();
+    for name in [
+        "structural-static-experimental.fea",
+        "structural-transient-experimental.fea",
+        "modal-response-spectrum-experimental.fea",
+        "modal-random-response-experimental.fea",
+        "acoustic-production-rejected.fea",
+    ] {
+        let path = format!("docs/simulation/examples/{name}");
+        assert_fea_checks(&temp, &path);
+    }
+}
+
+#[test]
+fn representative_documentation_plans_expose_the_complete_resolved_contract() {
+    struct Expected<'a> {
+        file: &'a str,
+        root: &'a str,
+        model: &'a str,
+        steps: &'a [(&'a str, &'a str)],
+        outputs: &'a [&'a str],
+        material_assignments: usize,
+        response_spectra: usize,
+        random_excitations: usize,
+    }
+
+    let cases = [
+        Expected {
+            file: "structural-static-experimental.fea",
+            root: "structural_static_experimental",
+            model: "loaded_bracket",
+            steps: &[("static", "static")],
+            outputs: &["displacement", "von_mises"],
+            material_assignments: 2,
+            response_spectra: 0,
+            random_excitations: 0,
+        },
+        Expected {
+            file: "structural-transient-experimental.fea",
+            root: "structural_transient_experimental",
+            model: "impulsive_bracket",
+            steps: &[("response", "transient_response")],
+            outputs: &["displacement"],
+            material_assignments: 1,
+            response_spectra: 0,
+            random_excitations: 0,
+        },
+        Expected {
+            file: "modal-response-spectrum-experimental.fea",
+            root: "modal_response_spectrum_experimental",
+            model: "launch_bracket",
+            steps: &[
+                ("modes", "modal_extraction"),
+                ("response_spectrum", "modal_response_spectrum"),
+            ],
+            outputs: &["displacement"],
+            material_assignments: 1,
+            response_spectra: 1,
+            random_excitations: 0,
+        },
+        Expected {
+            file: "modal-random-response-experimental.fea",
+            root: "modal_random_response_experimental",
+            model: "random_environment",
+            steps: &[
+                ("modes", "modal_extraction"),
+                ("random_response", "random_response"),
+            ],
+            outputs: &["displacement"],
+            material_assignments: 1,
+            response_spectra: 0,
+            random_excitations: 1,
+        },
+        Expected {
+            file: "acoustic-production-rejected.fea",
+            root: "acoustic_production_rejected",
+            model: "cavity",
+            steps: &[("harmonic", "harmonic_response")],
+            outputs: &["pressure"],
+            material_assignments: 1,
+            response_spectra: 0,
+            random_excitations: 0,
+        },
+    ];
+    let temp = TempDir::new().unwrap();
+    for expected in cases {
+        let path = format!("docs/simulation/examples/{}", expected.file);
+        let plan = fea_plan(&temp, &path);
+        assert_eq!(plan["schema_version"], 1, "{path}");
+        assert_eq!(plan["root_kind"], "study", "{path}");
+        assert_eq!(plan["root_id"], expected.root, "{path}");
+        assert!(plan["geometry_dependencies"].as_array().is_some(), "{path}");
+
+        let models = plan["model_closure"].as_array().expect("model closure");
+        assert_eq!(models.len(), 1, "{path}");
+        let model = &models[0];
+        assert_eq!(model["model_id"], expected.model, "{path}");
+        assert_eq!(
+            model["response_spectra"].as_array().unwrap().len(),
+            expected.response_spectra,
+            "{path}"
+        );
+        assert_eq!(
+            model["random_excitations"].as_array().unwrap().len(),
+            expected.random_excitations,
+            "{path}"
+        );
+        assert_eq!(
+            plan["material_catalog"].as_array().unwrap().len(),
+            1,
+            "{path}"
+        );
+        assert_eq!(
+            model["material_assignments"].as_array().unwrap().len(),
+            expected.material_assignments,
+            "{path}"
+        );
+
+        let steps = plan["study"]["sequence"]["steps"]
+            .as_array()
+            .expect("procedure steps");
+        assert_eq!(steps.len(), expected.steps.len(), "{path}");
+        for (step, (step_id, procedure)) in steps.iter().zip(expected.steps) {
+            assert_eq!(step["step_id"], *step_id, "{path}");
+            assert_eq!(step["procedure"], *procedure, "{path}");
+        }
+        let outputs = plan["study"]["outputs"]
+            .as_array()
+            .expect("authored outputs")
+            .iter()
+            .map(|output| output["output_id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(outputs, expected.outputs, "{path}");
+        assert_eq!(
+            plan["mesh"]["geometry"], plan["study"]["geometry"]["definition"],
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn structural_static_step_documentation_example_runs_and_publishes_fields() {
+    let temp = TempDir::new().unwrap();
+    let path = "docs/simulation/examples/structural-static-experimental.fea";
+    let output = runmat_from_repository(&temp, &["run", path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["root_id"], "structural_static_experimental");
+    assert_eq!(payload["procedure"], "structural_linear_sequence");
+    let manifest_path = payload["result_manifest_artifact_path"]
+        .as_str()
+        .expect("STEP study manifest path");
+    let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["public_run"]["run_status"], "completed");
+    assert_eq!(manifest["public_run"]["numerically_acceptable"], true);
+    assert_eq!(
+        manifest["public_run"]["steps"][0]["quality_reasons"],
+        serde_json::json!([])
+    );
+    let mesh_path = temp.path().join("standalone-two-box.mesh.cbor");
+    let evidence_path = temp.path().join("standalone-two-box.evidence.cbor");
+    let standalone = runmat_from_repository(
+        &temp,
+        &[
+            "mesh",
+            "docs/simulation/examples/geometry/two-box-assembly.step",
+            "--source-units",
+            "meter",
+            "--target-size",
+            "1.5",
+            "--deviation",
+            "0.05",
+            "--max-elements",
+            "10000000",
+            "--seed",
+            "0",
+            "--output",
+            mesh_path.to_str().expect("UTF-8 mesh path"),
+            "--evidence",
+            evidence_path.to_str().expect("UTF-8 evidence path"),
+            "--json",
+        ],
+    );
+    assert!(
+        standalone.status.success(),
+        "standalone STEP mesh failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&standalone.stdout),
+        String::from_utf8_lossy(&standalone.stderr)
+    );
+    let mesh = SolverMeshArtifact::canonical_decode(&fs::read(&mesh_path).unwrap()).unwrap();
+    let evidence = MeshingEvidence::canonical_decode(&fs::read(&evidence_path).unwrap()).unwrap();
+    evidence.validate(&mesh).expect("standalone mesh evidence");
+    let manifest_digest = manifest["solver_mesh_digest"]
+        .as_array()
+        .expect("study solver mesh digest")
+        .iter()
+        .map(|byte| u8::try_from(byte.as_u64().expect("digest byte")).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(manifest_digest, mesh.canonical_digest.bytes().to_vec());
+    assert_eq!(
+        manifest["meshing_evidence"]["artifact_digest"],
+        manifest["solver_mesh_digest"]
+    );
+    assert_eq!(evidence.artifact_digest, mesh.canonical_digest);
+    assert_eq!(mesh.topology.nodes.len(), 168);
+    assert_eq!(mesh.topology.volume_elements.len(), 292);
+    assert_eq!(mesh.topology.boundary_faces.len(), 320);
+
+    let model: AnalysisModel =
+        serde_json::from_value(manifest["compiled"]["model"].clone()).unwrap();
+    let resolved_solids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| {
+            let PropertyRegionScope::Region(selection) = assignment.target.scope() else {
+                panic!("two-box material must select one resolved solid");
+            };
+            let [solid] = selection.resolved_entities() else {
+                panic!("two-box material must resolve one solid occurrence");
+            };
+            assert!(mesh
+                .topology
+                .volume_elements
+                .iter()
+                .any(|element| element.provenance.contains(solid)));
+            solid.clone()
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(resolved_solids.len(), 2);
+    let boundary_targets = model
+        .constraints
+        .iter()
+        .filter_map(|constraint| constraint.target())
+        .chain(model.excitations.iter().filter_map(|action| {
+            let ExcitationTarget::Region(target) = &action.excitation().target else {
+                return None;
+            };
+            Some(target)
+        }))
+        .collect::<Vec<_>>();
+    assert_eq!(boundary_targets.len(), 3);
+    for target in boundary_targets {
+        let [face] = target.resolved_entities() else {
+            panic!("two-box boundary target must resolve one face occurrence");
+        };
+        assert!(mesh
+            .topology
+            .boundary_faces
+            .iter()
+            .any(|boundary| boundary.provenance.contains(face)));
+    }
+    let step_run_id = payload["step_run_ids"]
+        .as_array()
+        .and_then(|steps| steps.first())
+        .and_then(Value::as_str)
+        .expect("static step run id");
+    assert_repeated_result_identity(&temp, path, &payload);
+
+    let script_path = temp.path().join("static-fields.m");
+    fs::write(
+        &script_path,
+        format!(
+            "results = fea.results(\"{step_run_id}\");\ndisplacement = fea.field(results, fea.OutputField.named(\"displacement\"));\ndisplacementPage = fea.fieldPage(displacement, 1, 3);\nstress = fea.field(results, fea.OutputField.named(\"von_mises\"));\nstressPage = fea.fieldPage(stress, 1, 3);\ndisp(displacement.field_id);\ndisp(displacementPage.count);\ndisp(stress.field_id);\ndisp(stressPage.count);\n"
+        ),
+    )
+    .unwrap();
+    let fields = runmat_from_repository(
+        &temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        fields.status.success(),
+        "STEP-backed result field smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&fields.stdout),
+        String::from_utf8_lossy(&fields.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&fields.stdout);
+    assert!(stdout.contains("displacement"));
+    assert!(stdout.contains("von_mises"));
+}
+
+#[test]
+fn response_spectrum_documentation_example_runs_its_two_step_study() {
+    let temp = TempDir::new().unwrap();
+    let path = "docs/simulation/examples/modal-response-spectrum-experimental.fea";
+    let output = runmat_from_repository(&temp, &["run", path, "--json"]);
+    assert!(
+        output.status.success(),
+        "{path} failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["root_id"], "modal_response_spectrum_experimental");
+    assert_eq!(payload["procedure"], "structural_modal_response_spectrum");
+    let step_run_ids = payload["step_run_ids"]
+        .as_array()
+        .expect("study step run ids");
+    assert_eq!(step_run_ids.len(), 2);
+    let response_run_id = step_run_ids[1]
+        .as_str()
+        .expect("response-spectrum step run id");
+
+    let script_path = temp.path().join("response-spectrum-field.m");
+    fs::write(
+        &script_path,
+        format!(
+            "response = fea.results(\"{response_run_id}\");\nfield = fea.field(response, fea.ResponseSpectrumField.pseudoAcceleration());\npage = fea.fieldPage(field, 1, 3);\ndisp(field.field_id);\ndisp(field.statistic);\ndisp(page.count);\n"
+        ),
+    )
+    .unwrap();
+    let output = runmat_from_repository(
+        &temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        output.status.success(),
+        "response-spectrum language field smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("structural.response_spectrum.nodal.pseudo_acceleration"));
+    assert!(stdout.contains("component_magnitude_envelope"));
+    assert!(stdout.contains("3"));
+}
+
+#[test]
+fn named_response_spectrum_generator_materializes_before_the_solve() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    fs::write(
+        temp.path().join("runmat.toml"),
+        "[package]\nname = \"fea-spectrum-generator\"\n\n[sources]\nroots = [\".\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("design_input.m"),
+        "function y = design_input(frequency, scale)\narguments\n    frequency (:,1) double\n    scale (1,1) double\nend\ny = scale .* (1 + 0 .* frequency);\nend\n",
+    )
+    .unwrap();
+    let source =
+        repository.join("docs/simulation/examples/modal-response-spectrum-experimental.fea");
+    fs::create_dir_all(temp.path().join("geometry")).unwrap();
+    fs::copy(
+        repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep"),
+        temp.path().join("geometry/box.brep"),
+    )
+    .unwrap();
+    let document = format!(
+        "import function design_input from \"./design_input.m\"\n\n{}",
+        fs::read_to_string(source).unwrap().replace(
+            "        ordinates = [1.2, 1.2, 2.5, 1.8, 0.7] g",
+            "        generated by function.design_input { arguments { scale = 1.5 } }",
+        )
+    );
+    fs::write(temp.path().join("study.fea"), document).unwrap();
+
+    let checked = runmat(&temp, &["check", "study.fea", "--json"]);
+    assert!(
+        checked.status.success(),
+        "generated response spectrum failed check:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&checked.stdout),
+        String::from_utf8_lossy(&checked.stderr)
+    );
+
+    let run = runmat(&temp, &["run", "study.fea", "--json"]);
+    assert!(
+        run.status.success(),
+        "generated response spectrum failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&run.stdout).unwrap()["root_id"],
+        "modal_response_spectrum_experimental"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&run.stdout).unwrap()["procedure"],
+        "structural_modal_response_spectrum"
+    );
+}
+
+#[test]
+fn random_response_documentation_example_exposes_paged_statistical_fields() {
+    let temp = TempDir::new().unwrap();
+    let path = "docs/simulation/examples/modal-random-response-experimental.fea";
+    let run = runmat_from_repository(&temp, &["run", path, "--json"]);
+    assert!(
+        run.status.success(),
+        "{path} failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&run.stdout).unwrap();
+    assert_eq!(payload["procedure"], "structural_random_response");
+    let response_run_id = payload["step_run_ids"]
+        .as_array()
+        .and_then(|steps| steps.get(1))
+        .and_then(Value::as_str)
+        .expect("random-response step run id");
+    let script_path = temp.path().join("random-response-fields.m");
+    fs::write(
+        &script_path,
+        format!(
+            "response = fea.results(\"{response_run_id}\");\nrms = fea.field(response, fea.RandomResponseField.rms(fea.StructuralField.displacement()));\nrmsPage = fea.fieldPage(rms, 1, 3);\nvariance = fea.field(response, fea.RandomResponseField.variance(fea.StructuralField.stress()));\nvariancePage = fea.fieldPage(variance, 1, 3);\ndisp(rms.field_id);\ndisp(rms.statistic);\ndisp(rmsPage.count);\ndisp(variance.field_id);\ndisp(variance.statistic);\ndisp(variancePage.count);\n"
+        ),
+    )
+    .unwrap();
+    let output = runmat_from_repository(
+        &temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        output.status.success(),
+        "random-response language field smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("structural.random_response.rms.displacement"));
+    assert!(stdout.contains("root_mean_square"));
+    assert!(stdout.contains("structural.random_response.variance.stress"));
+    assert!(stdout.contains("variance"));
+}
+
+#[test]
+fn fea_check_and_run_materialize_a_named_project_signal_generator() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    fs::write(
+        temp.path().join("runmat.toml"),
+        "[package]\nname = \"fea-callable-check\"\n\n[sources]\nroots = [\".\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("pulse.m"),
+        "function y = pulse(t, magnitude)\narguments\n    t (:,1) double\n    magnitude (1,1) double\nend\ny = magnitude .* (1 + 0 .* t);\nend\n",
+    )
+    .unwrap();
+    let fixture = repository.join("docs/simulation/examples/structural-transient-experimental.fea");
+    fs::create_dir_all(temp.path().join("geometry")).unwrap();
+    fs::copy(
+        repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep"),
+        temp.path().join("geometry/box.brep"),
+    )
+    .unwrap();
+    let document = format!(
+        "import function pulse from \"./pulse.m\"\n\n{}",
+        fs::read_to_string(fixture)
+            .unwrap()
+        .replace("            end_time = 0.1 s", "            end_time = 0.003 s")
+        .replace(
+            "        samples = [\n            { at = 0 s, value = 0 N },\n            { at = 0.01 s, value = 1 kN },\n            { at = 0.02 s, value = 0 N },\n            { at = 0.1 s, value = 0 N },\n        ]\n        interpolation = linear\n        extrapolation = reject",
+            "        generated by function.pulse {\n            arguments { magnitude = 1000 }\n            sample from 0 s to 0.003 s at 1 kHz\n            interpolation = linear\n            extrapolation = reject\n            tolerance = 1e-6 N\n        }",
+        )
+    );
+    fs::write(temp.path().join("study.fea"), document).unwrap();
+
+    let output = runmat(&temp, &["check", "study.fea", "--json"]);
+    assert!(
+        output.status.success(),
+        "callable-backed study failed check:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["status"], "valid");
+
+    let output = runmat(&temp, &["run", "study.fea", "--json"]);
+    assert!(
+        output.status.success(),
+        "callable-backed study failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["root_id"], "structural_transient_experimental");
+    assert_eq!(payload["procedure"], "structural_transient");
+    assert!(payload["study_definition_digest"].as_str().is_some());
+}
+
+#[test]
+fn production_example_rejects_an_unqualified_formulation() {
+    let temp = TempDir::new().unwrap();
+    let path = "docs/simulation/examples/acoustic-production-rejected.fea";
+    let output = runmat_from_repository(&temp, &["run", path, "--json"]);
+
+    assert!(
+        !output.status.success(),
+        "{path} must reject its explicit Production requirement"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY"),
+        "unexpected rejection for {path}:\nstdout={}\nstderr={stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 #[test]

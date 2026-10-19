@@ -1,14 +1,14 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_identity.hxx"
-#include "runmat-geometry-io/src/occt/exact_nesting.hxx"
-#include "runmat-geometry-io/src/occt/exact_topology.hxx"
+#include "exact_identity.hxx"
+#include "exact_nesting.hxx"
+#include "exact_topology.hxx"
+#include "exact_wire.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepClass3d.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_ShapeSet.hxx>
-#include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
 #include <Geom2d_Curve.hxx>
 #include <TopAbs_Orientation.hxx>
@@ -119,6 +119,7 @@ void append_exact_topology(OcctExactShapePayload& result,
     identity_context.append(payload.identity_digest, edge, payload.shape_key, options);
     payload.start_vertex_key = start.IsNull() ? 0 : shape_key(shape_set, start, "edge vertex");
     payload.end_vertex_key = end.IsNull() ? 0 : shape_key(shape_set, end, "edge vertex");
+    payload.tolerance = BRep_Tool::Tolerance(edge);
     payload.closed = closed;
     payload.periodic = closed && curve.IsPeriodic();
     payload.degenerate = BRep_Tool::Degenerated(edge);
@@ -128,8 +129,10 @@ void append_exact_topology(OcctExactShapePayload& result,
             [](const auto& left, const auto& right) { return left.shape_key < right.shape_key; });
 
   std::set<std::uint64_t> face_keys;
+  std::uint64_t source_face_index = static_cast<std::uint64_t>(result.faces.size());
   for (TopExp_Explorer explorer(root, TopAbs_FACE); explorer.More(); explorer.Next()) {
     check_cancelled(options);
+    const std::uint64_t current_source_face_index = source_face_index++;
     const TopoDS_Face face = TopoDS::Face(explorer.Current());
     const std::uint64_t face_key = shape_key(shape_set, face, "face");
     if (!face_keys.insert(face_key).second) {
@@ -145,6 +148,7 @@ void append_exact_topology(OcctExactShapePayload& result,
 
     OcctExactFacePayload face_payload;
     face_payload.occurrence_index = occurrence_index;
+    face_payload.source_face_index = current_source_face_index;
     face_payload.shape_key = face_key;
     identity_context.append(face_payload.identity_digest,
                             shape_set.Shape(static_cast<Standard_Integer>(face_key)),
@@ -176,9 +180,7 @@ void append_exact_topology(OcctExactShapePayload& result,
       wire_payload.face_key = face_key;
       wire_payload.reversed = reversed_orientation(wire, "wire");
       std::unordered_map<std::uint64_t, std::uint8_t> seam_occurrences;
-      BRepTools_WireExplorer edge_uses(wire, face);
-      for (; edge_uses.More(); edge_uses.Next()) {
-        const TopoDS_Edge edge = edge_uses.Current();
+      for (const TopoDS_Edge& edge : exact_wire_edge_uses(wire, face)) {
         const std::uint64_t edge_key = shape_key(shape_set, edge, "coedge edge");
         Standard_Real first = 0.0;
         Standard_Real last = 0.0;

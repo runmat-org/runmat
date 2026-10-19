@@ -10,8 +10,8 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         let mut forced_indices = Vec::<usize>::new();
         let mut forced_volume_m3 = 0.0;
         loop {
-            let forced_candidate = self.forced_interior_mate(face_counts, selected)?;
-            let Some(candidate_index) = forced_candidate else {
+            let forced_candidate = self.forced_interior_mate_with_face(face_counts, selected)?;
+            let Some((candidate_index, _)) = forced_candidate else {
                 return Some((forced_volume_m3, forced_indices));
             };
             let next_volume_m3 =
@@ -38,13 +38,13 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         let mut forced_volume_m3 = 0.0;
         loop {
             let forced_candidate = self
-                .forced_interior_mate_traced(face_counts, selected)
+                .forced_interior_mate_with_face(face_counts, selected)
                 .ok_or_else(|| {
                     let (face, reason) =
                         self.forced_interior_mate_no_addable_reason(face_counts, selected);
                     ForcedInteriorMateFailure::NoAddableMate { face, reason }
                 })?;
-            let Some(candidate_index) = forced_candidate else {
+            let Some((candidate_index, face)) = forced_candidate else {
                 return Ok((forced_volume_m3, forced_indices));
             };
             let next_volume_m3 =
@@ -57,6 +57,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
                     selected_roles,
                 );
                 return Err(ForcedInteriorMateFailure::VolumeOverflow {
+                    face,
                     current_volume_m3: current_volume_m3 + forced_volume_m3,
                     candidate_volume_m3: self.candidates[candidate_index].volume_m3,
                     target_volume_m3: self.target_volume_m3,
@@ -70,20 +71,12 @@ impl<'a> BoundaryExactCoverSearch<'a> {
         }
     }
 
-    pub(in super::super::super) fn forced_interior_mate(
+    fn forced_interior_mate_with_face(
         &self,
         face_counts: &BTreeMap<[u32; 3], usize>,
         selected: &[usize],
-    ) -> Option<Option<usize>> {
-        self.forced_interior_mate_traced(face_counts, selected)
-    }
-
-    pub(in super::super::super) fn forced_interior_mate_traced(
-        &self,
-        face_counts: &BTreeMap<[u32; 3], usize>,
-        selected: &[usize],
-    ) -> Option<Option<usize>> {
-        let mut forced = None::<usize>;
+    ) -> Option<Option<(usize, [u32; 3])>> {
+        let mut forced = None::<(usize, [u32; 3])>;
         for face in face_counts.iter().filter_map(|(face, count)| {
             (!self.boundary_faces.contains(face) && *count == 1).then_some(*face)
         }) {
@@ -102,7 +95,7 @@ impl<'a> BoundaryExactCoverSearch<'a> {
                 [] => return None,
                 [candidate] => {
                     if forced.is_none() {
-                        forced = Some(*candidate);
+                        forced = Some((*candidate, face));
                     }
                 }
                 _ => {}

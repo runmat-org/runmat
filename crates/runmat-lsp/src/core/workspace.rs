@@ -37,6 +37,16 @@ pub fn workspace_symbols_from_documents(
     filter_symbols(out, query)
 }
 
+pub fn merge_workspace_symbols(
+    mut primary: Vec<SymbolInformation>,
+    additional: impl IntoIterator<Item = SymbolInformation>,
+    query: Option<&str>,
+) -> Vec<SymbolInformation> {
+    primary.extend(additional);
+    dedupe_symbol_info(&mut primary);
+    filter_symbols(primary, query)
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub async fn workspace_symbols_with_project_async(
     docs: &[(Url, String, DocumentAnalysis)],

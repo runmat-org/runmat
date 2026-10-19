@@ -10,10 +10,7 @@ use crate::cdt::{
 };
 
 fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-    DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([identity; 32]),
-        coordinates_m,
-    }
+    DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
 }
 
 fn region(id: &str) -> PersistentEntityId {
@@ -197,5 +194,35 @@ fn region_assignment_honors_cancellation_before_mutation() {
         .unwrap_err()
         .kind,
         DelaunayTopologyErrorKind::Cancelled
+    );
+}
+
+#[test]
+fn distinct_region_validation_preserves_grouping_and_rejects_later_invalid_identity() {
+    let mut topology = bipyramid();
+    for cell in &mut topology.tetrahedra {
+        cell.region_id = Some(region("same-region"));
+    }
+    let incidence = build_volume_incidence(
+        &topology.nodes,
+        &topology.tetrahedra,
+        &NeverCancelled,
+        DelaunayTopologyOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(incidence.regions.len(), 1);
+    assert_eq!(incidence.regions[0].region_id, region("same-region"));
+    assert_eq!(incidence.regions[0].tetrahedron_indices, vec![0, 1]);
+    topology.tetrahedra[1].region_id = Some(region(" "));
+    assert_eq!(
+        build_volume_incidence(
+            &topology.nodes,
+            &topology.tetrahedra,
+            &NeverCancelled,
+            DelaunayTopologyOptions::default()
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayTopologyErrorKind::InvalidRegion
     );
 }

@@ -48,6 +48,10 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         self.protocol.worker()
     }
 
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        self.protocol.describe_worker().await
+    }
+
     fn verified_software_capabilities(
         &self,
     ) -> Option<std::collections::BTreeSet<runmat_execution::resource::Capability>> {

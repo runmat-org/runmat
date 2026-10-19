@@ -1,6 +1,7 @@
 mod digest;
 mod foreign_policy;
 mod function;
+mod hex;
 mod program;
 mod typed;
 

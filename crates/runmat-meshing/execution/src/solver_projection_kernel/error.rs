@@ -1,0 +1,191 @@
+use super::*;
+use crate::codec_control::CodecControl;
+use runmat_meshing_tetrahedron::cdt::{
+    DelaunayVolumeMeshCodecError, DelaunayVolumeMeshCodecErrorKind,
+};
+
+pub(super) fn map_record_error(
+    original: Box<MeshingFailure>,
+    control: &CodecControl<'_>,
+) -> Box<MeshingFailure> {
+    match control.take_failure() {
+        Some(error) => failure(crate::geometry_failure::category(error.kind), &error.reason),
+        None => original,
+    }
+}
+pub(super) fn map_volume_codec_error(
+    error: DelaunayVolumeMeshCodecError,
+    control: &CodecControl<'_>,
+) -> Box<MeshingFailure> {
+    if let Some(original) = control.take_failure() {
+        return failure(
+            crate::geometry_failure::category(original.kind),
+            &original.reason,
+        );
+    }
+    let category = match error.kind {
+        DelaunayVolumeMeshCodecErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
+        DelaunayVolumeMeshCodecErrorKind::ResourceLimit => {
+            MeshingFailureCategory::ArtifactBudgetExceeded
+        }
+        DelaunayVolumeMeshCodecErrorKind::InvalidMesh
+        | DelaunayVolumeMeshCodecErrorKind::InvalidEncoding => {
+            MeshingFailureCategory::InvalidGeometry
+        }
+    };
+    failure(category, &error.to_string())
+}
+
+pub(super) fn map_solver_error(error: DelaunaySolverTopologyError) -> Box<MeshingFailure> {
+    let category = match error.kind {
+        DelaunaySolverTopologyErrorKind::InvalidOptions => {
+            MeshingFailureCategory::InternalInvariantViolation
+        }
+        DelaunaySolverTopologyErrorKind::InvalidGeometry => MeshingFailureCategory::InvalidGeometry,
+        DelaunaySolverTopologyErrorKind::InvalidMesh => {
+            MeshingFailureCategory::QualityTargetUnreachable
+        }
+        DelaunaySolverTopologyErrorKind::ResourceLimit => resource_category(&error.reason),
+        DelaunaySolverTopologyErrorKind::MemoryBudgetExceeded => {
+            MeshingFailureCategory::MemoryBudgetExceeded
+        }
+        DelaunaySolverTopologyErrorKind::TimeBudgetExceeded => {
+            MeshingFailureCategory::TimeBudgetExceeded
+        }
+        DelaunaySolverTopologyErrorKind::SearchWorkBudgetExceeded => {
+            MeshingFailureCategory::SearchWorkBudgetExceeded
+        }
+        DelaunaySolverTopologyErrorKind::IterationBudgetExceeded => {
+            MeshingFailureCategory::IterationBudgetExceeded
+        }
+        DelaunaySolverTopologyErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
+    };
+    failure(category, &error.to_string())
+}
+
+pub(super) fn resource_category(reason: &str) -> MeshingFailureCategory {
+    if reason.contains("IterationBudgetExceeded") || reason.contains("round limit") {
+        MeshingFailureCategory::IterationBudgetExceeded
+    } else if reason.contains("TimeBudgetExceeded") {
+        MeshingFailureCategory::TimeBudgetExceeded
+    } else if reason.contains("AllocationBudgetExceeded") {
+        MeshingFailureCategory::MemoryBudgetExceeded
+    } else if reason.contains("node inventory") {
+        MeshingFailureCategory::NodeBudgetExceeded
+    } else if reason.contains("boundary face") || reason.contains("boundary edge") {
+        MeshingFailureCategory::ElementBudgetExceeded
+    } else {
+        MeshingFailureCategory::SearchWorkBudgetExceeded
+    }
+}
+
+pub(super) fn invalid_inputs() -> Box<MeshingFailure> {
+    failure(
+        MeshingFailureCategory::InvalidGeometry,
+        "solver projection requires one exact geometry, final surface, and final volume",
+    )
+}
+
+pub(super) fn failure(category: MeshingFailureCategory, detail: &str) -> Box<MeshingFailure> {
+    let detail = crate::diagnostic::bounded_diagnostic_text(detail, "solver projection failed");
+    Box::new(MeshingFailure {
+        schema_version: MESHING_FAILURE_SCHEMA_VERSION,
+        category,
+        stage: MeshingStageKind::OrderElevation,
+        operation: MeshingStageKind::OrderElevation.operation(),
+        entity_ids: Vec::new(),
+        witnesses: Vec::new(),
+        request_values: Vec::new(),
+        achieved_values: vec![MeshingDiagnosticEntry {
+            name: "solver_projection_failure".into(),
+            value: MeshingDiagnosticValue::Text(detail),
+            unit: None,
+        }],
+        remediation:
+            "regenerate terminal inputs, increase the exhausted budget, or repair exact geometry"
+                .into(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_geometry_core::{
+        GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind,
+    };
+    struct Control(Option<GeometryEvaluationErrorKind>);
+    impl GeometryEvaluationControl for Control {
+        fn checkpoint(&self) -> Result<(), GeometryEvaluationError> {
+            match self.0 {
+                Some(kind) => Err(GeometryEvaluationError::new(
+                    kind,
+                    "original control failure",
+                )),
+                None => Ok(()),
+            }
+        }
+        fn consume_allocation_bytes(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+            self.checkpoint()
+        }
+        fn consume_search_work(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+            self.checkpoint()
+        }
+        fn consume_iterations(&self, _: u64) -> Result<(), GeometryEvaluationError> {
+            self.checkpoint()
+        }
+    }
+    #[test]
+    fn volume_decode_preserves_original_budget_and_failure_categories() {
+        for (kind, expected) in [
+            (
+                GeometryEvaluationErrorKind::TimeBudgetExceeded,
+                MeshingFailureCategory::TimeBudgetExceeded,
+            ),
+            (
+                GeometryEvaluationErrorKind::AllocationBudgetExceeded,
+                MeshingFailureCategory::MemoryBudgetExceeded,
+            ),
+            (
+                GeometryEvaluationErrorKind::Cancelled,
+                MeshingFailureCategory::Cancelled,
+            ),
+        ] {
+            let source = Control(Some(kind));
+            let codec = CodecControl::new(&source);
+            assert!(MeshingCancellationSignal::is_cancelled(&codec));
+            let mapped = map_volume_codec_error(
+                DelaunayVolumeMeshCodecError {
+                    kind: DelaunayVolumeMeshCodecErrorKind::Cancelled,
+                    reason: "codec interrupted".into(),
+                },
+                &codec,
+            );
+            assert_eq!(mapped.category, expected);
+            assert_eq!(mapped.stage, MeshingStageKind::OrderElevation);
+        }
+        let source = Control(None);
+        let codec = CodecControl::new(&source);
+        for (kind, expected) in [
+            (
+                DelaunayVolumeMeshCodecErrorKind::ResourceLimit,
+                MeshingFailureCategory::ArtifactBudgetExceeded,
+            ),
+            (
+                DelaunayVolumeMeshCodecErrorKind::InvalidMesh,
+                MeshingFailureCategory::InvalidGeometry,
+            ),
+        ] {
+            assert_eq!(
+                map_volume_codec_error(
+                    DelaunayVolumeMeshCodecError {
+                        kind,
+                        reason: "original artifact failure".into()
+                    },
+                    &codec
+                )
+                .category,
+                expected
+            );
+        }
+    }
+}

@@ -272,7 +272,7 @@ pub use self::engine::{
     render_figure_png_bytes_with_camera, render_figure_rgba_bytes,
     render_figure_rgba_bytes_with_axes_cameras, render_figure_rgba_bytes_with_camera,
     render_figure_snapshot, render_figure_snapshot_with_camera_state,
-    render_geometry_scene_snapshot,
+    render_geometry_scene_snapshot, render_geometry_scene_snapshot_with_camera_state,
 };
 pub(crate) use self::error::{plotting_error, plotting_error_with_source};
 pub use self::figure_scene::present_figure_on_surface;
@@ -285,7 +285,7 @@ pub use self::figure_scene::{
 pub use self::geometry_scene::{
     append_geometry_scene_chunks, clone_geometry_scene, close_geometry_scene,
     export_geometry_scene, import_geometry_scene, import_geometry_scene_payload,
-    present_geometry_scene_on_surface,
+    present_geometry_scene_on_surface, replace_geometry_scene,
 };
 #[cfg(feature = "plot-core")]
 pub use self::import_registry::register_imported_geometry_scene;
@@ -308,12 +308,12 @@ pub use self::state::{
 #[doc(hidden)]
 pub use self::test_support::{lock_plot_test_context, PlotTestLockGuard};
 pub use self::web::{
-    bind_surface_to_figure, clear_closed_figure_surfaces, detach_surface, fit_surface_extents,
-    get_surface_camera_state, install_surface, invalidate_surface_revisions,
+    bind_surface_to_figure, capture_surface_pointer, clear_closed_figure_surfaces, detach_surface,
+    fit_surface_extents, get_surface_camera_state, install_surface, invalidate_surface_revisions,
     pick_geometry_scene_region, present_surface, render_current_scene, reset_surface_camera,
     resize_surface, set_geometry_scene_presentation, set_plot_theme_config,
-    set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
-    PlotSurfaceCameraState,
+    set_surface_camera_state, set_surface_presence, web_renderer_ready, PlotCameraProjection,
+    PlotCameraState, PlotSurfaceCameraState,
 };
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 pub use self::web::{handle_plot_surface_event, take_surface_host_actions, PlotSurfaceHostAction};

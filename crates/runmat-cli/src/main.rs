@@ -7,6 +7,7 @@ async fn main() -> ExitCode {
     let args = std::env::args_os().collect::<Vec<_>>();
     match runmat_process_host::HiddenModeRegistry::standard().detect(args.clone()) {
         Ok(Some(runmat_process_host::HiddenMode::TestWorker)) => {
+            let _otel = runmat::observability::init_from_env();
             return match runmat::commands::test::worker::run_stdio().await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
@@ -16,7 +17,9 @@ async fn main() -> ExitCode {
             };
         }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionWorker)) => {
-            let result = if std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some() {
+            let _otel = runmat::observability::init_from_env();
+            let remote = std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some();
+            let result = if remote {
                 runmat_execution_runner_native::run_remote_worker_from_env().await
             } else {
                 runmat_execution_runner_native::run_worker_stdio().await
@@ -29,7 +32,37 @@ async fn main() -> ExitCode {
                 }
             };
         }
+        Ok(Some(runmat_process_host::HiddenMode::MeshingWorker)) => {
+            let _otel = runmat::observability::init_from_env();
+            let result = match std::env::var_os(
+                runmat_execution_runner_native::NATIVE_OBJECT_STORE_ROOT_ENV,
+            ) {
+                Some(root) => {
+                    runmat_execution_runner_native::run_meshing_worker_stdio(
+                        std::sync::Arc::new(
+                            runmat_execution_runner_native::native_meshing_kernel_dispatcher(),
+                        ),
+                        std::path::Path::new(&root),
+                        runmat_execution_runner_native::NativeMeshingHostLimits::default(),
+                    )
+                    .await
+                }
+                None => Err(
+                    runmat_execution_runner_native::NativeExecutionError::Configuration(
+                        "meshing worker object-store root is missing".into(),
+                    ),
+                ),
+            };
+            return match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runmat meshing worker failed: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionDriver)) => {
+            let _otel = runmat::observability::init_from_env();
             if std::env::var_os("RUNMAT_EXECUTION_DRIVER_LEASE_ID").is_some() {
                 return match runmat_execution_runner_native::run_remote_driver_from_env().await {
                     Ok(()) => ExitCode::SUCCESS,
@@ -42,6 +75,7 @@ async fn main() -> ExitCode {
             return runmat::commands::batch::run_driver().await;
         }
         Ok(Some(runmat_process_host::HiddenMode::LocalSupervisor)) => {
+            let _otel = runmat::observability::init_from_env();
             return match runmat_execution_runner_native::supervisor::LocalSupervisorConfig::for_current_executable(
             ) {
                 Ok(config) => {

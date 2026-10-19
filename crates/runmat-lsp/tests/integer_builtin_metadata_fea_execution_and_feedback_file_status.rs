@@ -7,12 +7,11 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, signature_help_at, CompatMode,
 };
 
-const PACKET: [&str; 10] = [
+const PACKET: [&str; 9] = [
     "feedback",
     "fea.results",
     "fea.run",
-    "fea.runOptions",
-    "fea.step",
+    "fea.StructuralStep.modal",
     "fea.study",
     "fea.sweep",
     "fea.trends",
@@ -22,7 +21,7 @@ const PACKET: [&str; 10] = [
 
 const FEA_INTEGER_INAPPLICABLE: [&str; 5] = [
     "fea.run",
-    "fea.step",
+    "fea.StructuralStep.modal",
     "fea.study",
     "fea.sweep",
     "fea.validate",
@@ -64,23 +63,18 @@ fn fea_execution_and_feedback_file_status_signatures_are_exact_and_visible() {
         ),
         (
             "run",
-            "out = fea.run(\"study.fea\");",
-            "run = fea.run(studyOrSweepOrPath)",
+            "out = fea.run(struct());",
+            "run = fea.run(studyOrSweep)",
         ),
         (
-            "runOptions",
-            "out = fea.runOptions(\"modal\");",
-            "options = fea.runOptions(solver, Name, Value, ...)",
-        ),
-        (
-            "step",
-            "out = fea.step(\"s\", \"modal\");",
-            "step = fea.step(id, kind)",
+            "modal",
+            "out = fea.StructuralStep.modal(\"s\");",
+            "step = fea.StructuralStep.modal(id)",
         ),
         (
             "study",
-            "out = fea.study(\"study.fea\");",
-            "study = fea.study(path)",
+            "out = fea.study(\"bracket\", struct(), struct());",
+            "study = fea.study(id, geometry, model, Name, Value, ...)",
         ),
         (
             "sweep",
@@ -94,8 +88,8 @@ fn fea_execution_and_feedback_file_status_signatures_are_exact_and_visible() {
         ),
         (
             "validate",
-            "out = fea.validate(\"study.fea\");",
-            "result = fea.validate(studyOrSweepOrPath)",
+            "out = fea.validate(struct());",
+            "result = fea.validate(studyOrSweep)",
         ),
         ("feof", "out = feof(1);", "tf = feof(fid)"),
     ] {
@@ -136,11 +130,7 @@ fn packet_is_public_complete_and_visible_to_completion() {
 
 #[test]
 fn fea_capability_metadata_matches_exact_and_binary64_contracts() {
-    for (name, expected_forms) in [
-        ("fea.results", 3usize),
-        ("fea.runOptions", 18usize),
-        ("fea.trends", 1usize),
-    ] {
+    for (name, expected_forms) in [("fea.results", 3usize), ("fea.trends", 1usize)] {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(
             builtin.integer_audit.is_none(),

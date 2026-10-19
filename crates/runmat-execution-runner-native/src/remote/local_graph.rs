@@ -16,7 +16,7 @@ use runmat_execution_artifact::{GraphExecutionRequest, ProgramExecutionResponse}
 use runmat_execution_runner::AttemptSuccess;
 use runmat_execution_transport_native::control::ResourceRequest as AllocationResources;
 
-use super::super::pool_execution::RemotePoolExecutionOutcome;
+use super::super::pool_execution::{RemotePoolExecutionOutcome, RemotePoolExecutionResult};
 use super::super::program_staging::StagedGraphProgram;
 use crate::driver::{LocalDriver, LocalGraphSubmission, TransferFailure};
 use crate::{NativeExecutionConfig, NativeExecutionError, NativeExecutionResult};
@@ -233,11 +233,11 @@ async fn run_owned_attempt(
     loop {
         if let Some(result) = completion.try_value() {
             return Ok(match result {
-                Ok(AttemptSuccess::Graph { graph }) => {
-                    RemotePoolExecutionOutcome::Completed(ProgramExecutionResponse::GraphSuccess {
-                        graph,
-                    })
-                }
+                Ok(AttemptSuccess::Graph { graph }) => RemotePoolExecutionOutcome::Completed(
+                    RemotePoolExecutionResult::without_objects(
+                        ProgramExecutionResponse::GraphSuccess { graph },
+                    ),
+                ),
                 Ok(_) => RemotePoolExecutionOutcome::Indeterminate(
                     "isolated Graph attempt returned a non-Graph result".into(),
                 ),
@@ -247,24 +247,28 @@ async fn run_owned_attempt(
                     RemotePoolExecutionOutcome::Indeterminate(message)
                 }
                 Err(TransferFailure::Runtime(failure)) => RemotePoolExecutionOutcome::Completed(
-                    ProgramExecutionResponse::RuntimeFailure { failure: *failure },
+                    RemotePoolExecutionResult::without_objects(
+                        ProgramExecutionResponse::RuntimeFailure { failure: *failure },
+                    ),
                 ),
                 Err(TransferFailure::Execution(message))
                 | Err(TransferFailure::Infrastructure(message)) => {
-                    RemotePoolExecutionOutcome::Completed(ProgramExecutionResponse::Failure {
-                        message,
-                    })
+                    RemotePoolExecutionOutcome::Completed(
+                        RemotePoolExecutionResult::without_objects(
+                            ProgramExecutionResponse::Failure { message },
+                        ),
+                    )
                 }
             });
         }
         if !cancel_sent && cancellation.is_cancelled() {
-            driver.cancel_task(task_id)?;
+            driver.cancel_task(task_id, runmat_execution::CancellationReason::User)?;
             cancel_sent = true;
         }
         tokio::select! {
             _ = cancellation.changed(), if !cancel_sent => {
                 if cancellation.is_cancelled() {
-                    driver.cancel_task(task_id)?;
+                    driver.cancel_task(task_id, runmat_execution::CancellationReason::User)?;
                     cancel_sent = true;
                 }
             }

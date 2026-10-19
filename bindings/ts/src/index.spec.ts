@@ -21,21 +21,17 @@ import {
   decodePackageLock,
   encodePackageLock,
   handoffFromFrozenProject,
-  FEA_ANALYSIS_PROFILES,
-  FEA_ANALYSIS_RUN_KINDS,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_SCHEMA_VERSION,
   FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
   FEA_FIELD_DEFAULT_PAGE_SIZE,
-  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
-  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_FIELD_BINDINGS_ARTIFACT_KIND,
+  FEA_FIELD_BINDINGS_SCHEMA_VERSION,
   FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
-  FEA_STUDY_DOCUMENT_OPERATIONS,
-  FEA_SUPPORTED_PHYSICS_PROFILES,
   type RunMatSessionHandle,
   type RunMatFilesystemProvider,
   type ExecuteRequest,
@@ -43,6 +39,7 @@ import {
   type GpuStatus,
   type SessionStats,
   type InputRequest,
+  type FeaSourceCheckResult,
   setSignalTraceHandler,
   withSignalTrace
 } from "./index.js";
@@ -55,96 +52,21 @@ const defaultStats: SessionStats = {
   averageExecutionTimeMs: 0
 };
 
-describe("FEA study document contracts", () => {
+describe("FEA runtime contracts", () => {
   it("exports Rust-generated analysis artifact constants", () => {
     expect(FEA_RUN_DATASET_SCHEMA_VERSION).toBe(1);
-    expect(FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION).toBe(1);
+    expect(FEA_FIELD_BINDINGS_SCHEMA_VERSION).toBe(1);
     expect(FEA_DIAGNOSTICS_SCHEMA_VERSION).toBe(1);
     expect(FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION).toBe(1);
     expect(FEA_RUN_DATASET_KIND).toBe("finite_element_run_dataset");
     expect(FEA_DATASET_ARTIFACT_KIND).toBe("finite_element_dataset");
-    expect(FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND).toBe("finite_element_field_descriptors");
+    expect(FEA_FIELD_BINDINGS_ARTIFACT_KIND).toBe("finite_element_field_bindings");
     expect(FEA_DIAGNOSTICS_ARTIFACT_KIND).toBe("finite_element_diagnostics");
     expect(FEA_ARTIFACT_MANIFEST_KIND).toBe("finite_element_artifact_manifest");
     expect(FEA_FIELD_DEFAULT_PAGE_SIZE).toBe(4096);
     expect(FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT).toBe(256);
   });
 
-  it("exports Rust-generated study operation names", () => {
-    expect(FEA_STUDY_DOCUMENT_OPERATIONS).toEqual([
-      "get_summary",
-      "create",
-      "add_region",
-      "update_region",
-      "remove_region",
-      "add_material",
-      "update_material",
-      "assign_material",
-      "add_constraint",
-      "update_constraint",
-      "remove_constraint",
-      "add_driving_condition",
-      "update_driving_condition",
-      "remove_driving_condition",
-      "set_mesh",
-      "set_outputs",
-    ]);
-  });
-
-  it("keeps the public FEA physics catalog aligned with Rust-supported profiles", () => {
-    expect(FEA_ANALYSIS_PROFILES).toEqual([
-      "linear_static_structural",
-      "thermo_mechanical_coupled",
-      "electro_thermal_coupled",
-      "thermal_standalone",
-      "modal_structural",
-      "acoustic_harmonic",
-      "transient_structural",
-      "nonlinear_structural",
-      "electromagnetic_static",
-      "cfd_steady_state",
-      "cfd_transient",
-      "cht_coupled",
-      "fsi_coupled",
-    ]);
-    expect(FEA_ANALYSIS_RUN_KINDS).toEqual([
-      "linear_static",
-      "modal",
-      "acoustic",
-      "thermal",
-      "transient",
-      "cfd",
-      "cht",
-      "fsi",
-      "nonlinear",
-      "electromagnetic",
-    ]);
-    const catalogProfiles = FEA_SUPPORTED_PHYSICS_PROFILES.map((profile) => profile.profile);
-    expect(catalogProfiles).toHaveLength(FEA_ANALYSIS_PROFILES.length);
-    expect(new Set(catalogProfiles)).toEqual(new Set(FEA_ANALYSIS_PROFILES));
-    expect(new Set(FEA_SUPPORTED_PHYSICS_PROFILES.map((profile) => profile.family))).toEqual(
-      new Set(["structural", "modal", "coupled physics", "thermal", "acoustic", "electromagnetic", "CFD"]),
-    );
-  });
-
-  it("exposes electro-thermal as a first-class coupled FEA profile", () => {
-    const profile = FEA_SUPPORTED_PHYSICS_PROFILES.find(
-      (entry) => entry.profile === "electro_thermal_coupled"
-    );
-
-    expect(profile).toMatchObject({
-      label: "Electro-thermal",
-      family: "coupled physics",
-      target: "coupled electromagnetics and heat transfer",
-      value: "resistive heating, temperature, and electrical fields",
-    });
-    expect(profile?.defaultOutputs.map((output) => output.field)).toEqual([
-      "electro_thermal.temperature",
-      "electro_thermal.joule_heat",
-      "electro_thermal.electric_potential",
-      "electro_thermal.current_density",
-    ]);
-  });
 });
 
 function createExecuteResult(overrides: Partial<ExecuteResult> = {}): ExecuteResult {
@@ -262,6 +184,7 @@ interface NativeSession {
   installProjectHandoff?: (handoff: unknown) => unknown;
   clearProjectHandoff?: () => void;
   projectRevision?: () => unknown | null;
+  checkFeaSource?: (path: string) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
 }
 
 const baseExecuteResult: ExecuteResult = {
@@ -309,6 +232,49 @@ describe("initRunMat wiring", () => {
   afterEach(() => {
     __internals.setNativeModuleOverride(null);
     vi.restoreAllMocks();
+  });
+
+  it("delegates FEA source checks to the typed WASM API", async () => {
+    const checkResult: FeaSourceCheckResult = {
+      contract: "assessments_v1",
+      revision: Array(32).fill(0), status: "valid", rootModule: "models/bracket.fea",
+      program: { studies: [], sweeps: [], executionPolicies: [], executionBindings: [], materials: [], geometries: [], meshes: [], models: [] },
+      sourceIndex: { entries: [] }, diagnostics: [],
+    };
+    const checkFeaSource = vi.fn(async () => checkResult);
+    __internals.setNativeModuleOverride({
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession({ checkFeaSource }),
+    } as NativeModule);
+
+    const session = await initRunMat({ enableGpu: false });
+
+    await expect(session.checkFeaSource("models/bracket.fea")).resolves.toEqual(checkResult);
+    expect(checkFeaSource).toHaveBeenCalledWith("models/bracket.fea");
+    const inputManifest = { snapshotId: "captured", entries: [] };
+    await expect(session.checkFeaSource("models/bracket.fea", inputManifest)).resolves.toEqual(checkResult);
+    expect(checkFeaSource).toHaveBeenLastCalledWith("models/bracket.fea", inputManifest);
+    const study: FeaSourceCheckResult["program"]["studies"][number] = {
+      module_path: "models/bracket.fea", study_id: "response",
+      geometry: { definition: { module_path: "models/bracket.fea", geometry_id: "part" }, arguments: [] },
+      mesh: { module_path: "models/bracket.fea", mesh_id: "part" },
+      model: { model: { module_path: "models/bracket.fea", model_id: "structure" }, arguments: [] },
+      formulation_requirement: "production", inputs: [], outputs: [], assessments: [],
+      sequence: { sequence_id: "response", steps: [], dependencies: [], transitions: [], branches: [] },
+    };
+    const current = { ...checkResult, program: { ...checkResult.program, studies: [study] } };
+    checkFeaSource.mockResolvedValueOnce(current);
+    await expect(session.checkFeaSource("models/bracket.fea")).resolves.toEqual(current);
+    // Empty inventories may be omitted by canonical serde without weakening admission.
+    const stale = { ...study };
+    Reflect.deleteProperty(stale, "assessments");
+    checkFeaSource.mockResolvedValueOnce({ ...current, program: { ...current.program, studies: [stale] } });
+    await expect(session.checkFeaSource("models/bracket.fea")).resolves.toMatchObject({ contract: "assessments_v1" });
+    // An older binary lacks the contract marker even when its program shape looks valid.
+    const incompatible = { ...current };
+    Reflect.deleteProperty(incompatible, "contract");
+    checkFeaSource.mockResolvedValueOnce(incompatible);
+    await expect(session.checkFeaSource("models/bracket.fea")).rejects.toThrow("incompatible study format");
   });
 
   it("forwards dynamic language policy and error namespace updates", async () => {

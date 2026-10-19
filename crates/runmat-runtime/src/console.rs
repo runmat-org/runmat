@@ -30,13 +30,7 @@ use diary::{write_diary_entry, DiaryState};
 pub use entries::{CapturedConsoleEntries, CapturedConsoleEntriesIter};
 pub use text::ConsoleText;
 
-/// Identifies the console stream that received the text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConsoleStream {
-    Stdout,
-    Stderr,
-    ClearScreen,
-}
+pub use runmat_execution::console::ConsoleStream;
 
 /// Single console write (line or chunk) captured during execution.
 #[derive(Clone, Debug)]
@@ -199,14 +193,20 @@ fn record_console_text(
         capture_projection::CaptureRoute::Uncaptured(entry) => entry,
     };
 
-    append_buffer_entry(entry.clone(), runtime.as_ref())?;
+    // A retaining host (remote execution) owns the console inventory itself.
+    let host = crate::context::legacy::active()
+        .and_then(|context| context.service_ports().host().cloned());
+    if host
+        .as_ref()
+        .is_none_or(|host| !host.owns_console_retention())
+    {
+        append_buffer_entry(entry.clone(), runtime.as_ref())?;
+    }
     write_diary_entry(&entry);
 
-    if let Some(context) = crate::context::legacy::active() {
-        if let Some(host) = context.service_ports().host() {
-            host.console(entry.stream, entry.text.clone());
-            return Ok(());
-        }
+    if let Some(host) = host {
+        host.console(entry.stream, entry.text);
+        return Ok(());
     }
 
     if let Some(forwarder) = FORWARDER

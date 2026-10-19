@@ -1,12 +1,18 @@
 //! Pure geometry operations.
 
+/// Actual package build configuration used for internal artifact reuse.
+#[doc(hidden)]
+pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
+
 pub mod bounds;
+pub mod feature;
 pub mod quality;
 pub mod queries;
 pub mod stats;
 pub mod triangulation;
 
 pub use bounds::{compute_axis_aligned_bounds, AxisAlignedBounds};
+pub use feature::*;
 pub use quality::{evaluate_quality, QualityReport};
 pub use queries::{find_region, QueryError};
 pub use stats::{compute_stats, GeometryStats};
@@ -36,6 +42,7 @@ mod tests {
                 kind: SourceGeometryKind::Mesh,
                 assembly: None,
                 material_evidence: vec![],
+                exchange: None,
                 cad_evaluators: Vec::new(),
             },
             tessellation_profile: TessellationProfile::default(),

@@ -96,6 +96,8 @@ pub fn task(
 ) -> TaskSubmission {
     TaskSubmission {
         request: TaskRequest {
+            console: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: TaskId::derive(&[name.as_bytes()]),
             scope_id: scope,
             pool_id: pool,
@@ -199,12 +201,19 @@ pub fn submit(
         .expect("task should be launched")
 }
 
-pub fn success() -> runmat_execution_runner::AttemptReport {
+pub fn success(
+    request: &runmat_execution_runner::AttemptRequest,
+) -> runmat_execution_runner::AttemptReport {
     runmat_execution_runner::AttemptReport::Succeeded {
-        result: runmat_execution_runner::AttemptSuccess::Values {
-            outputs: vec![ValuePayload::Inline(Box::new(InlineValue::Null))],
-            result_objects: Vec::new(),
-        },
+        result: runmat_execution_runner::AttemptSuccess::new(
+            request,
+            vec![ValuePayload::Inline(Box::new(InlineValue::Null))],
+            Vec::new(),
+            1,
+            0,
+            0,
+        )
+        .unwrap(),
     }
 }
 

@@ -75,7 +75,7 @@ async fn request_for_source(
     };
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::ExecutableUnitV3,
+        ExecutableForm::ExecutableUnitV4,
         envelope.canonical_bytes().unwrap(),
     )
     .unwrap();
@@ -285,7 +285,7 @@ async fn browser_rejects_an_unavailable_accelerator_recipe_before_execution() {
     }];
     request.artifact = ProgramArtifact::materialize(
         &request.recipe,
-        ExecutableForm::ExecutableUnitV3,
+        ExecutableForm::ExecutableUnitV4,
         request.artifact.executable_bytes.clone(),
     )
     .unwrap();

@@ -128,12 +128,14 @@ pub(crate) fn simple_rvalue_inference(
         MirRvalue::Use(operand) => {
             runmat_types::FactInference::exact(simple_operand_fact(operand, facts))
         }
-        MirRvalue::Future { .. } => runmat_types::FactInference::exact(scalar_fact(
-            ValueKindFact::Execution(ExecutionFact::Future {
-                output: runmat_types::ValueSequenceFact::single(dynamic_value()),
-                state: FutureStateFact::Lazy,
-            }),
-        )),
+        MirRvalue::Future { .. } | MirRvalue::ExternalFuture { .. } => {
+            runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Execution(
+                ExecutionFact::Future {
+                    output: runmat_types::ValueSequenceFact::single(dynamic_value()),
+                    state: FutureStateFact::Lazy,
+                },
+            )))
+        }
         MirRvalue::Spawn(_) => runmat_types::FactInference::exact(scalar_fact(
             ValueKindFact::Execution(ExecutionFact::Task {
                 output: runmat_types::ValueSequenceFact::single(dynamic_value()),
@@ -326,10 +328,7 @@ fn simple_operand_fact(operand: &MirOperand, facts: &[Option<ValueFact>]) -> Val
             .and_then(Clone::clone)
             .unwrap_or_else(dynamic_value),
         MirOperand::Constant(constant) => constant_fact(constant),
-        MirOperand::FunctionHandle(
-            CallableIdentity::BoundFunction(function)
-            | CallableIdentity::ExternalFunction { function, .. },
-        )
+        MirOperand::FunctionHandle(CallableIdentity::BoundFunction(function))
         | MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(function)) => {
             scalar_fact(ValueKindFact::Callable(CallableFact {
                 identity: Some(CallableIdentity::BoundFunction(*function)),
@@ -977,7 +976,7 @@ fn diagnose_rvalue_reads(
             diagnose_operand_read(member, state, span, diagnostics);
         }
         MirRvalue::WorkspaceFirstStaticProperty { .. } => {}
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for arg in args {
                 diagnose_call_argument_reads(arg, state, current_bindings, span, diagnostics);
             }

@@ -48,6 +48,12 @@ impl RunMatSession {
         };
         let selected = match invocation.target {
             crate::ProcedureTarget::Entrypoint => {
+                if invocation.requested_outputs > 1 {
+                    return Err(runtime_error(
+                        "RunMat:ExecutableArity",
+                        "scripts do not define multiple output ordinals",
+                    ));
+                }
                 if !invocation.arguments.is_empty() {
                     return Err(runtime_error(
                         "RunMat:ExecutableArity",
@@ -56,6 +62,50 @@ impl RunMatSession {
                 }
                 self.select_entrypoint(
                     context,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    backend,
+                )
+            }
+            crate::ProcedureTarget::SemanticFunction(function) => {
+                let index = usize::try_from(function.0).map_err(|_| {
+                    runtime_error(
+                        "RunMat:UndefinedExecutableProcedure",
+                        "semantic function identity exceeds this host",
+                    )
+                })?;
+                let function = runmat_hir::FunctionId(index);
+                let name = unit
+                    .functions()
+                    .get(function)
+                    .ok_or_else(|| {
+                        runtime_error(
+                            "RunMat:UndefinedExecutableProcedure",
+                            "executable unit does not contain the semantic procedure",
+                        )
+                    })?
+                    .display_name
+                    .clone();
+                #[cfg(not(target_arch = "wasm32"))]
+                if backend == crate::ExecutableBackendPolicy::ForcedGenericNative
+                    && (unit.native_function_id(&name) != Some(function)
+                        || !unit.owns_callable(runmat_types::ProgramFunctionId(function.0 as u32)))
+                {
+                    return Err(runtime_error(
+                        "RunMat:ExecutableBackend",
+                        "semantic function is not owned by this native compiler product",
+                    ));
+                }
+                #[cfg(target_arch = "wasm32")]
+                let _ = name;
+                self.select_procedure(
+                    context,
+                    ResolvedProcedure {
+                        function,
+                        #[cfg(not(target_arch = "wasm32"))]
+                        name,
+                        arguments: invocation.arguments,
+                        requested_outputs: invocation.requested_outputs,
+                    },
                     #[cfg(not(target_arch = "wasm32"))]
                     backend,
                 )

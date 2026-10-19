@@ -1,6 +1,7 @@
 mod admission;
 mod host;
 mod model;
+pub(crate) mod program;
 mod request;
 mod resources;
 mod service;

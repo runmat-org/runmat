@@ -6,6 +6,7 @@ mod call;
 mod call_suspension;
 mod callbacks;
 mod candidate;
+mod control;
 mod deoptimization;
 mod executor;
 mod global_target;

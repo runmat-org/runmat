@@ -2359,6 +2359,36 @@ mod tests {
                 builtin.name
             );
         }
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
+                .expect("builtin metadata catalog");
+        let catalog_names = catalog["builtins"]
+            .as_array()
+            .expect("builtin entries")
+            .iter()
+            .filter(|entry| entry.get("integer_capabilities").is_some())
+            .map(|entry| entry["name"].as_str().expect("builtin name"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let registered_names = registered
+            .iter()
+            .filter(|builtin| {
+                builtin.descriptor.is_some_and(|descriptor| {
+                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
+                }) && !builtin.integer_capabilities.is_empty()
+            })
+            .map(|builtin| builtin.name)
+            .chain(
+                runmat_builtins::builtin_catalog_entries()
+                    .iter()
+                    .filter_map(|entry| {
+                        (!entry.integer_capabilities.is_empty()).then_some(entry.identity.name)
+                    }),
+            )
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            registered_names, catalog_names,
+            "public integer capability census"
+        );
         for name in [
             "DataArray.fill",
             "DataArray.read",
@@ -2534,13 +2564,12 @@ mod tests {
             "fclose",
             "fcontour",
             "feedback",
-            "fea.boundaryCondition",
-            "fea.domain",
-            "fea.interface",
-            "fea.loadCase",
+            "fea.DynamicViscosity.pascalSeconds",
+            "fea.Frequency.hertz",
+            "fea.MassDensity.kilogramsPerCubicMeter",
+            "fea.TurbulenceIntensity.ratio",
             "fea.material",
             "fea.results",
-            "fea.runOptions",
             "fea.trends",
             "feof",
             "fitclinear",
@@ -2949,7 +2978,9 @@ mod tests {
                 })
             })
             .filter(|builtin| {
-                !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some()
+                builtin.descriptor.is_some_and(|descriptor| {
+                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
+                }) && (!builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some())
             })
         {
             let name = registered.name;

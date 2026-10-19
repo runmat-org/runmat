@@ -15,3 +15,6 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 runmat-geometry-fixtures = { workspace = true }
+
+[build-dependencies]
+runmat-build-identity = { workspace = true }

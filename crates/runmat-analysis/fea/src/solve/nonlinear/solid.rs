@@ -1,0 +1,148 @@
+//! Small-strain canonical-solid equilibrium. Trial point histories are never committed
+//! by an iteration or a rejected line-search/cutback candidate.
+use runmat_execution::Digest;
+use thiserror::Error;
+
+use crate::{
+    assembly::{
+        nonlinear_solid::{
+            CanonicalNonlinearSolidBasis, NonlinearSolidError, NonlinearSolidEvaluation,
+            NonlinearSolidState,
+        },
+        AssemblySummary,
+    },
+    constraints::AffineConstraintReduction,
+};
+
+mod advance;
+mod contact;
+#[cfg(test)]
+pub(crate) mod continuum_qualification;
+mod equilibrium;
+mod preparation;
+mod state;
+pub use contact::AcceptedContactEnergy;
+pub(crate) use contact::SolidContactCoupling;
+pub use state::AcceptedSolidState;
+mod linear_correction;
+mod policy;
+#[cfg(test)]
+mod tests;
+
+pub(crate) use policy::SolidNewtonPolicy;
+
+#[derive(Debug, Error)]
+pub(crate) enum SolidNewtonError {
+    #[error("invalid canonical solid Newton input: {0}")]
+    Invalid(String),
+    #[error("canonical solid constitutive/equilibrium evaluation failed: {0}")]
+    Evaluation(String),
+    #[error(transparent)]
+    Contact(#[from] crate::physics::structural::contact::ContactOperatorError),
+    #[error(transparent)]
+    General(#[from] crate::solve::general::GeneralSolveError),
+    #[error("canonical solid Newton cancelled")]
+    Cancelled,
+    #[error(
+        "canonical solid increment at factor {factor} failed after {cutbacks} cutbacks: {reason}"
+    )]
+    NotConverged {
+        factor: f64,
+        cutbacks: usize,
+        reason: String,
+    },
+}
+
+pub(crate) struct AcceptedSolidIncrement {
+    pub state: AcceptedSolidState,
+    pub evaluation: NonlinearSolidEvaluation,
+    pub relative_residual: f64,
+    /// Undamped pending Newton correction, normalized by current/committed free motion.
+    pub relative_increment: f64,
+    pub correction_norm: f64,
+    pub iterations: usize,
+    pub backtracks: usize,
+    pub cutbacks: usize,
+    /// All trial work since the preceding accepted state, including rejected cutbacks.
+    pub attempted_work: SolidAttemptWork,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SolidAttemptWork {
+    pub iterations: usize,
+    /// Includes the unapplied convergence solve; Newton update caps are unchanged.
+    pub linear_solves: usize,
+    pub backtracks: usize,
+    /// Constitutive assembly evaluations during trial iterations and acceptance replay.
+    pub tangent_evaluations: usize,
+}
+
+pub(crate) struct SolidNewtonProblem<'a> {
+    basis: &'a CanonicalNonlinearSolidBasis,
+    reduction: AffineConstraintReduction,
+    physical_force: &'a [f64],
+    scope_identity: Digest,
+    policy: SolidNewtonPolicy,
+    contact: Option<contact::PreparedSolidContact<'a>>,
+    solver_admission: Option<&'a crate::planning::resource::SolverAdmissionResourcePolicy>,
+}
+
+impl SolidNewtonProblem<'_> {
+    fn evaluate(
+        &self,
+        u: &[f64],
+        committed: &NonlinearSolidState,
+    ) -> Result<NonlinearSolidEvaluation, SolidNewtonError> {
+        self.basis.evaluate(u, committed).map_err(|e| match e {
+            NonlinearSolidError::Cancelled => SolidNewtonError::Cancelled,
+            other => SolidNewtonError::Evaluation(other.to_string()),
+        })
+    }
+
+    fn residual(
+        &self,
+        evaluation: &NonlinearSolidEvaluation,
+        factor: f64,
+    ) -> Result<Vec<f64>, SolidNewtonError> {
+        let full = evaluation
+            .internal_force
+            .iter()
+            .zip(self.physical_force)
+            .map(|(internal, force)| internal - factor * force)
+            .collect::<Vec<_>>();
+        if full.iter().any(|v| !v.is_finite()) {
+            return Err(SolidNewtonError::Evaluation(
+                "physical residual overflow".into(),
+            ));
+        }
+        let reduced = self
+            .reduction
+            .transpose_apply(&full)
+            .map_err(constraint_error)?;
+        if reduced.iter().any(|v| !v.is_finite()) {
+            return Err(SolidNewtonError::Evaluation(
+                "reduced residual overflow".into(),
+            ));
+        }
+        Ok(reduced)
+    }
+}
+
+fn constraint_error(error: impl std::fmt::Display) -> SolidNewtonError {
+    SolidNewtonError::Invalid(error.to_string())
+}
+
+// Hypot accumulation avoids norm overflow for otherwise finite inputs.
+fn norm(values: &[f64]) -> f64 {
+    values.iter().fold(0.0, |a, v| a.hypot(*v))
+}
+fn relative_norm(values: &[f64], scale: f64) -> f64 {
+    let value = norm(values);
+    if value == 0.0 {
+        0.0
+    } else if scale > 0.0 {
+        value / scale
+    } else {
+        f64::INFINITY
+    }
+}

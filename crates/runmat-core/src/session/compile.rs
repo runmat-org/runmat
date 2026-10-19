@@ -62,42 +62,8 @@ fn bind_compile_error(
     }
 }
 
-fn entrypoint_target_function(
-    assembly: &runmat_hir::HirAssembly,
-) -> Option<runmat_hir::FunctionId> {
-    assembly
-        .entrypoints
-        .first()
-        .map(|entrypoint| entrypoint.target)
-}
-
-fn mir_local_fact_count_for_entrypoint(
-    analysis: &runmat_mir::analysis::AnalysisStore,
-    assembly: &runmat_hir::HirAssembly,
-) -> usize {
-    let function = entrypoint_target_function(assembly)
-        .and_then(|function| u32::try_from(function.0).ok())
-        .map(runmat_types::ProgramFunctionId);
-    analysis.local_value_count(function)
-}
-
-fn function_output_arities(
-    registry: &runmat_vm::FunctionRegistry,
-) -> HashMap<runmat_hir::FunctionId, runmat_hir::FunctionOutputArity> {
-    registry
-        .functions
-        .iter()
-        .map(|(id, function)| {
-            (
-                *id,
-                runmat_hir::FunctionOutputArity::new(
-                    function.output_slots.len(),
-                    function.varargout_slot.is_some(),
-                ),
-            )
-        })
-        .collect()
-}
+mod facts;
+use facts::{function_output_arities, mir_local_fact_count_for_entrypoint};
 
 fn source_lookup_cwd(source_name: &str) -> Option<PathBuf> {
     let source_path = PathBuf::from(source_name);
@@ -650,11 +616,26 @@ pub(super) fn project_compilation_context_from_handoff(
     })
 }
 
+/// Exact project source bytes captured with a frozen handoff, keyed by access path.
+pub(crate) type CapturedSourceBytes = std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>;
+
 async fn compose_frozen_project_async(
     context: &ProjectCompilationContext,
     frozen: &runmat_package::FrozenProject,
     compat_mode: runmat_parser::CompatMode,
     test_authority: Option<&CapturedTestSourceAuthority<'_>>,
+) -> Result<CompanionSourceDiscovery, String> {
+    compose_frozen_source_view_async(context, frozen, compat_mode, test_authority, None).await
+}
+
+/// Compose graph-declared companions. Test authorities and captured
+/// snapshots supply exact bytes; only an unconstrained view reads providers.
+async fn compose_frozen_source_view_async(
+    context: &ProjectCompilationContext,
+    frozen: &runmat_package::FrozenProject,
+    compat_mode: runmat_parser::CompatMode,
+    test_authority: Option<&CapturedTestSourceAuthority<'_>>,
+    captured: Option<&CapturedSourceBytes>,
 ) -> Result<CompanionSourceDiscovery, String> {
     let options = ParserOptions::new(compat_mode);
     let mut out = CompanionSourceDiscovery::default();
@@ -666,10 +647,28 @@ async fn compose_frozen_project_async(
         if source_paths_equivalent(access_path, &context.primary_source_path) {
             continue;
         }
-        let captured =
+        let test_captured =
             test_authority.and_then(|authority| authority.captured_text_for(access_path));
-        let (file_path, contents, uses_pcode_reader) = if let Some(captured) = captured {
-            (access_path.to_path_buf(), Cow::Borrowed(captured), false)
+        let (file_path, contents, uses_pcode_reader) = if let Some(text) = test_captured {
+            (access_path.to_path_buf(), Cow::Borrowed(text), false)
+        } else if let Some(captured) = captured {
+            let file_path = access_path.to_path_buf();
+            let bytes = captured.get(&file_path).ok_or_else(|| {
+                format!("captured source is unavailable: {}", file_path.display())
+            })?;
+            if runmat_package::ContentDigest::sha256(bytes) != source.id.content_digest {
+                return Err(format!(
+                    "captured source differs from its frozen identity: {}",
+                    file_path.display()
+                ));
+            }
+            let text = std::str::from_utf8(bytes).map_err(|_| {
+                format!(
+                    "captured MATLAB source is not UTF-8: {}",
+                    file_path.display()
+                )
+            })?;
+            (file_path, Cow::Borrowed(text), false)
         } else {
             let file_path =
                 runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(access_path)
@@ -888,7 +887,7 @@ impl RunMatSession {
         source: impl Into<Cow<'a, crate::ExecutableSource>>,
         program_revision: Option<runmat_execution::ProgramRevision>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
-        self.compile_executable_unit_inner(source.into(), program_revision, None)
+        self.compile_executable_unit_inner(source.into(), program_revision, None, None)
             .await
     }
 
@@ -919,6 +918,54 @@ impl RunMatSession {
             Cow::Owned(source),
             Some(snapshot.program_revision.clone()),
             Some(&authority),
+            None,
+        )
+        .await
+    }
+
+    /// Compile against an explicit immutable source inventory. Missing captures
+    /// are errors, never permission to discover live bytes from a provider.
+    pub async fn compile_executable_unit_from_snapshot(
+        &mut self,
+        source: crate::ExecutableSource,
+        program_revision: runmat_execution::ProgramRevision,
+        handoff: &runmat_package::FrozenProjectHandoff,
+        captured: &CapturedSourceBytes,
+    ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        handoff.validate().map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error.to_string())
+                    .with_identifier("RunMat:CapturedSourceIdentity")
+                    .build(),
+            )
+        })?;
+        let captured_bytes = captured.get(Path::new(source.lookup_path()));
+        let descriptor = handoff
+            .project
+            .all_sources()
+            .find(|(_, path)| path.as_path() == Path::new(source.lookup_path()))
+            .map(|(descriptor, _)| descriptor);
+        let project = handoff.project.revision();
+        if !matches!((captured_bytes, descriptor), (Some(bytes), Some(descriptor))
+            if bytes.as_slice() == source.text.as_bytes() && runmat_package::ContentDigest::sha256(bytes) == descriptor.id.content_digest)
+            || *program_revision.graph_digest()
+                != runmat_execution::Digest::from_bytes(*project.graph_digest.bytes())
+            || *program_revision.source_digest()
+                != runmat_execution::Digest::from_bytes(*project.source_revision.bytes())
+        {
+            return Err(RunError::Runtime(
+                build_runtime_error(
+                    "captured executable source does not match its admitted project revision",
+                )
+                .with_identifier("RunMat:CapturedSourceIdentity")
+                .build(),
+            ));
+        }
+        self.compile_executable_unit_inner(
+            Cow::Owned(source),
+            Some(program_revision),
+            None,
+            Some((handoff, captured)),
         )
         .await
     }
@@ -928,8 +975,10 @@ impl RunMatSession {
         source: Cow<'_, crate::ExecutableSource>,
         program_revision: Option<runmat_execution::ProgramRevision>,
         test_authority: Option<&CapturedTestSourceAuthority<'_>>,
+        captured_snapshot: Option<(&runmat_package::FrozenProjectHandoff, &CapturedSourceBytes)>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
         self.ensure_user_path_hydrated().await?;
+        let snapshot = captured_snapshot.map(|(handoff, _)| handoff);
         if let (Some(requested), Some(installed)) =
             (program_revision.as_ref(), self.project_revision())
         {
@@ -949,7 +998,7 @@ impl RunMatSession {
         let primary_access_path = if let Some(authority) = test_authority {
             Ok(authority.primary_access_path().map(str::to_owned))
         } else {
-            executable_primary_access_path(&source, self.project_handoff.as_ref())
+            executable_primary_access_path(&source, snapshot.or(self.project_handoff.as_ref()))
         }
         .map_err(|error| {
             RunError::Runtime(
@@ -966,7 +1015,24 @@ impl RunMatSession {
                 .unwrap_or_else(|| source.relative_path.clone());
             session.active_source_fullpath_name = primary_access_path;
 
-            let companion_result = if let Some(handoff) = session.project_handoff.as_ref() {
+            let companion_result = if let Some((handoff, captured)) = captured_snapshot {
+                match project_compilation_context_from_handoff(
+                    session.active_source_name.as_str(),
+                    handoff,
+                ) {
+                    Ok(context) => {
+                        compose_frozen_source_view_async(
+                            &context,
+                            &handoff.project,
+                            session.compat_mode,
+                            None,
+                            Some(captured),
+                        )
+                        .await
+                    }
+                    Err(error) => Err(error),
+                }
+            } else if let Some(handoff) = session.project_handoff.as_ref() {
                 companion_source_statements_from_handoff_async(
                     session.active_source_name.as_str(),
                     session.compat_mode,
@@ -1073,7 +1139,16 @@ impl RunMatSession {
                 .map(|id| remap.get(&id).copied().unwrap_or(id))
                 .collect();
         }
-        let unit = draft.seal();
+        let unit = self
+            .program_service
+            .bind_original_dependencies(draft.seal())
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableProduct")
+                        .build(),
+                )
+            })?;
         // The prepared product, not parser membership, decides which bodies
         // this immutable program actually owns after unchanged-body reuse.
         let current = unit.compiled_current_body_ids().map_err(|error| {
@@ -1411,7 +1486,7 @@ impl RunMatSession {
                 project_symbol_aliases,
             )
         };
-        let (lowering, mut mir, mut analysis, mut bytecode) = {
+        let (lowering, mut mir, mut bytecode) = {
             let _span = info_span!("runtime.lower").entered();
             // WASM registrations are explicit rather than inventory-backed. Install
             // them before analysis so the retained catalog revision is identical to
@@ -1419,6 +1494,7 @@ impl RunMatSession {
             runmat_runtime::builtins::wasm_registry::register_all();
             let function_names = self.function_registry.names.clone();
             let function_output_arities = function_output_arities(&self.function_registry);
+            let function_modifiers = self.program_service.function_modifiers();
             let workspace_bindings = self.lowering_workspace_bindings();
             let known_project_symbols = source_catalog
                 .as_ref()
@@ -1431,6 +1507,7 @@ impl RunMatSession {
                 &LoweringContext::new(&workspace_bindings)
                     .with_bound_functions(&function_names)
                     .with_function_output_arities(&function_output_arities)
+                    .with_function_modifiers(&function_modifiers)
                     .with_known_project_symbols(&known_project_symbols)
                     .with_project_symbol_aliases(&project_symbol_aliases)
                     .with_top_level_sources(&source_table.statement_sources)
@@ -1459,9 +1536,6 @@ impl RunMatSession {
                 frontend
                     .mir
                     .expect("canonical frontend returned no MIR without an error"),
-                frontend
-                    .facts
-                    .expect("canonical frontend returned no facts without an error"),
                 frontend
                     .bytecode
                     .expect("canonical frontend returned no bytecode without an error"),
@@ -1521,7 +1595,6 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
-            analysis = runmat_mir::analysis::analyze_assembly(&mir);
             if let Some(layout) = &mut bytecode.layout {
                 runmat_vm::remap_layout_function_ids(layout, &function_id_remap).map_err(
                     |error| {
@@ -1536,6 +1609,7 @@ impl RunMatSession {
                 )?;
             }
         }
+        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
         Ok(PreparedExecution {
             ast,
             lowering,
@@ -1906,6 +1980,77 @@ fn semantic_function_bindings(
 mod source_discovery_tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn successive_primary_functions_and_nested_companions_keep_source_ownership() {
+        let _provider_guard = runmat_filesystem::provider_override_lock();
+        let temp = tempfile::TempDir::new().unwrap();
+        fs::write(
+            temp.path().join("helper.m"),
+            "function y = helper(x)\ny = inner(x);\nfunction z = inner(v)\nz = v + 1;\nend\nend\n",
+        )
+        .unwrap();
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        for name in ["alpha", "beta"] {
+            let path = temp.path().join(format!("{name}.m"));
+            let text =
+                format!("function y = {name}(x)\narguments\nx double\nend\ny = helper(x);\nend\n");
+            fs::write(&path, &text).unwrap();
+            let unit = futures::executor::block_on(session.compile_executable_unit(
+                crate::ExecutableSource::new("source-attribution", path.to_str().unwrap(), text),
+                None,
+            ))
+            .unwrap();
+            unit.primary_function_interface(name).unwrap();
+            assert!(
+                unit.primary_function_interface("helper").is_err(),
+                "companion must not qualify as a primary-file function"
+            );
+            let primary = unit
+                .source_map()
+                .entries()
+                .iter()
+                .find(|entry| entry.relative_path == path.to_str().unwrap())
+                .unwrap();
+            let helper = unit
+                .mir()
+                .functions
+                .values()
+                .find(|metadata| metadata.name.0 == "helper")
+                .unwrap();
+            assert_ne!(helper.source.0 as usize, primary.source_id);
+            let helper_source = unit
+                .source_map()
+                .entries()
+                .iter()
+                .find(|entry| entry.source_id == helper.source.0 as usize)
+                .unwrap();
+            assert!(helper_source.relative_path.ends_with("helper.m"));
+            assert!(unit
+                .mir()
+                .functions
+                .values()
+                .any(|metadata| metadata.parent.is_some()));
+            for (id, metadata) in &unit.mir().functions {
+                if let Some(parent) = metadata.parent {
+                    assert_eq!(metadata.source, unit.mir().functions[&parent].source);
+                }
+                if metadata.name.0 == name {
+                    assert_eq!(metadata.source.0 as usize, primary.source_id);
+                }
+                if let Some(function) = unit.bytecode().function_registry.get(*id) {
+                    assert_eq!(function.source_id.unwrap().0, metadata.source.0 as usize);
+                }
+            }
+            for region in &unit.analysis().regions {
+                let function = runmat_hir::FunctionId(region.contract.id.function.0 as usize);
+                assert_eq!(
+                    region.contract.source,
+                    unit.mir().functions[&function].source
+                );
+            }
+        }
+    }
 
     fn discovered_function_names(discovery: &CompanionSourceDiscovery) -> HashSet<String> {
         discovery

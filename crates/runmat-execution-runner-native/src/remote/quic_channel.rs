@@ -11,7 +11,7 @@ use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind, FrameLimits};
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayConnection};
 use runmat_execution_transport_native::transfer::ObjectChunk;
-use tokio::sync::{oneshot, Mutex as AsyncMutex};
+use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 use uuid::Uuid;
 
 use super::protocol::{
@@ -28,11 +28,9 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_OBJECT_CHUNK_BYTES: usize = 256 * 1024;
 const MAX_BUFFERED_PROGRESS: usize = 256;
-struct PendingReply {
-    frame_kind: FrameKind,
-    attempt_id: Option<runmat_execution::identity::AttemptId>,
-    sender: oneshot::Sender<RemoteWorkerReply>,
-}
+mod receive;
+mod replies;
+use replies::{PendingReply, ReplyRegistry};
 
 pub struct QuicRemoteWorkerChannel {
     node_identity: String,
@@ -41,7 +39,7 @@ pub struct QuicRemoteWorkerChannel {
     limits: FrameLimits,
     route: Arc<dyn RemoteFrameRoute>,
     sender: AsyncMutex<EncryptedFrameSession>,
-    pending: Arc<Mutex<HashMap<String, PendingReply>>>,
+    pending: Arc<Mutex<ReplyRegistry>>,
     progress: Arc<
         Mutex<HashMap<runmat_execution::identity::AttemptId, VecDeque<crate::ProgramProgress>>>,
     >,
@@ -106,7 +104,7 @@ impl QuicRemoteWorkerChannel {
         let expected_worker = worker.id;
         let expected_pool = worker.pool_id;
         let expected_run = run_identity.clone();
-        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let pending = Arc::new(Mutex::new(ReplyRegistry::default()));
         let progress = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
         let collectives = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
         let verified_ready = Arc::new(Mutex::new(None));
@@ -136,102 +134,27 @@ impl QuicRemoteWorkerChannel {
             EncryptedFrameSession::new(run_identity, session_id, "worker-to-driver", 1, run_key)
                 .map_err(protocol)?;
         tokio::spawn(async move {
-            let mut progress_sequences = HashMap::new();
-            loop {
-                let frame = match route.receive().await {
-                    Ok(frame) => frame,
-                    Err(_) => break,
-                };
-                let plaintext = match receiver.open(&frame, limits) {
-                    Ok(plaintext) => plaintext,
-                    Err(_) => break,
-                };
-                if super::protocol_schema::admit_remote_worker_bytes(&plaintext).is_err() {
-                    continue;
-                }
-                let reply: RemoteWorkerReply =
-                    match serde_json::from_slice::<RemoteWorkerReply>(&plaintext) {
-                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_VERSION => {
-                            reply
-                        }
-                        _ => break,
-                    };
-                if let RemoteWorkerOutcome::WorkerReady { ready } = &reply.outcome {
-                    if frame.kind != FrameKind::Control
-                        || reply.correlation_id != "worker-ready-v1"
-                        || ready.run_identity != expected_run
-                        || ready.session_id != session_id
-                        || ready.driver_fence != driver_fence
-                        || ready.worker_id != expected_worker
-                        || ready.pool_id != expected_pool
-                    {
-                        break;
-                    }
-                    let mut state = ready_state.lock().expect("worker readiness poisoned");
-                    if state.is_some() {
-                        break;
-                    }
-                    *state = Some(ready.capabilities.clone());
-                    continue;
-                }
-                if let RemoteWorkerOutcome::Progress {
-                    attempt_id,
-                    progress: event,
-                } = &reply.outcome
-                {
-                    if event.validate().is_err()
-                        || progress_sequences
-                            .insert(*attempt_id, event.sequence)
-                            .is_some_and(|previous| event.sequence <= previous)
-                    {
-                        break;
-                    }
-                    let mut queues = progress.lock().expect("remote progress registry poisoned");
-                    let queue = queues.entry(*attempt_id).or_default();
-                    if queue.len() == MAX_BUFFERED_PROGRESS {
-                        queue.pop_front();
-                    }
-                    queue.push_back(event.clone());
-                    continue;
-                }
-                if let RemoteWorkerOutcome::CollectiveRequest {
-                    attempt_id,
-                    request,
-                } = &reply.outcome
-                {
-                    if request.validate().is_err() {
-                        break;
-                    }
-                    collectives
-                        .lock()
-                        .expect("remote collective registry poisoned")
-                        .entry(*attempt_id)
-                        .or_default()
-                        .push_back(request.clone());
-                    continue;
-                }
-                if let Some(pending) = pending
+            let ready = receive::ReadyExpectation {
+                run_identity: expected_run,
+                session_id,
+                driver_fence,
+                worker_id: expected_worker,
+                pool_id: expected_pool,
+                capabilities: ready_state,
+            };
+            let registries = receive::Registries {
+                pending: &pending,
+                progress: &progress,
+                collectives: &collectives,
+            };
+            if let Err(error) =
+                receive::run(route.as_ref(), &mut receiver, limits, &ready, registries).await
+            {
+                pending
                     .lock()
                     .expect("remote reply registry poisoned")
-                    .remove(&reply.correlation_id)
-                {
-                    if frame.kind != pending.frame_kind {
-                        break;
-                    }
-                    if let Some(attempt_id) = pending.attempt_id {
-                        progress_sequences.remove(&attempt_id);
-                        collectives
-                            .lock()
-                            .expect("remote collective registry poisoned")
-                            .remove(&attempt_id);
-                    }
-                    let _ = pending.sender.send(reply);
-                }
+                    .fail(error);
             }
-            pending
-                .lock()
-                .expect("remote reply registry poisoned")
-                .clear();
             collectives
                 .lock()
                 .expect("remote collective registry poisoned")
@@ -258,18 +181,6 @@ impl QuicRemoteWorkerChannel {
             driver_fence: self.driver_fence,
             command,
         };
-        let (sender, receiver) = oneshot::channel();
-        self.pending
-            .lock()
-            .expect("remote reply registry poisoned")
-            .insert(
-                correlation_id.clone(),
-                PendingReply {
-                    frame_kind: kind,
-                    attempt_id,
-                    sender,
-                },
-            );
         let plaintext = serde_json::to_vec(&request).map_err(protocol)?;
         let frame = self
             .sender
@@ -277,23 +188,58 @@ impl QuicRemoteWorkerChannel {
             .await
             .seal(kind, &plaintext, self.limits)
             .map_err(protocol)?;
+        let (sender, receiver) = oneshot::channel();
+        // Activity is a coalesced timestamp, not an unbounded queue of notifications.
+        let (activity, mut activity_receiver) = watch::channel(tokio::time::Instant::now());
+        self.pending
+            .lock()
+            .expect("remote reply registry poisoned")
+            .register(
+                correlation_id.clone(),
+                PendingReply {
+                    frame_kind: kind,
+                    attempt_id,
+                    sender,
+                    activity,
+                },
+            )
+            .map_err(|source| NativeExecutionError::RemoteChannel { source })?;
         if let Err(error) = self.route.send(frame).await {
-            self.pending
+            let source = self
+                .pending
                 .lock()
                 .expect("remote reply registry poisoned")
-                .remove(&correlation_id);
-            return Err(protocol(error));
+                .fail(error);
+            return Err(NativeExecutionError::RemoteChannel { source });
         }
-        let reply = tokio::time::timeout(RESPONSE_TIMEOUT, receiver)
-            .await
-            .map_err(|_| {
-                self.pending
-                    .lock()
-                    .expect("remote reply registry poisoned")
-                    .remove(&correlation_id);
-                protocol("remote worker response timed out")
-            })?
-            .map_err(|_| protocol("remote worker route closed"))?;
+        tokio::pin!(receiver);
+        let mut activity_open = true;
+        let mut inactivity_deadline = *activity_receiver.borrow_and_update() + RESPONSE_TIMEOUT;
+        let reply = loop {
+            tokio::select! {
+                reply = &mut receiver => {
+                    break reply.map_err(|_| protocol("remote worker reply dispatcher stopped without a terminal cause"))?
+                        .map_err(|source| NativeExecutionError::RemoteChannel { source })?;
+                }
+                activity = activity_receiver.changed(), if activity_open => {
+                    if activity.is_ok() {
+                        inactivity_deadline = *activity_receiver.borrow_and_update() + RESPONSE_TIMEOUT;
+                    } else {
+                        activity_open = false;
+                    }
+                }
+                _ = tokio::time::sleep_until(inactivity_deadline) => {
+                    let mut pending = self.pending.lock().expect("remote reply registry poisoned");
+                    let refreshed = *activity_receiver.borrow_and_update() + RESPONSE_TIMEOUT;
+                    if refreshed > tokio::time::Instant::now() {
+                        inactivity_deadline = refreshed;
+                        continue;
+                    }
+                    pending.remove(&correlation_id);
+                    return Err(protocol("remote worker response timed out after inactivity"));
+                }
+            }
+        };
         match reply.outcome {
             RemoteWorkerOutcome::Rejected { message } => {
                 Err(NativeExecutionError::Protocol(message))
@@ -311,6 +257,18 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
 
     fn worker(&self) -> &WorkerSpec {
         &self.worker
+    }
+
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        match self
+            .request(FrameKind::Control, RemoteWorkerCommand::Describe)
+            .await?
+        {
+            RemoteWorkerOutcome::WorkerDescription { worker } => Ok(worker),
+            _ => Err(protocol(
+                "remote worker returned the wrong description reply",
+            )),
+        }
     }
 
     fn verified_software_capabilities(&self) -> Option<std::collections::BTreeSet<Capability>> {
@@ -671,3 +629,6 @@ fn validate_object(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

@@ -332,7 +332,7 @@ fn projection_seeds(
 ) -> Result<Vec<[f64; 2]>, GeometryEvaluationError> {
     match definition {
         ExactSurfaceDefinition::Nurbs { definition } => nurbs_seeds(definition, bounds),
-        _ => Ok(uniform_surface_seeds(bounds, 16)),
+        _ => uniform_surface_seeds(bounds, 16),
     }
 }
 
@@ -340,8 +340,8 @@ fn nurbs_seeds(
     definition: &NurbsSurface3,
     bounds: [ParameterRange; 2],
 ) -> Result<Vec<[f64; 2]>, GeometryEvaluationError> {
-    let u = knot_axis_seeds(&definition.u_knots, bounds[0], definition.u_degree);
-    let v = knot_axis_seeds(&definition.v_knots, bounds[1], definition.v_degree);
+    let u = knot_axis_seeds(&definition.u_knots, bounds[0], definition.u_degree)?;
+    let v = knot_axis_seeds(&definition.v_knots, bounds[1], definition.v_degree)?;
     let count = u
         .len()
         .checked_mul(v.len())
@@ -361,7 +361,11 @@ fn nurbs_seeds(
     Ok(seeds)
 }
 
-fn knot_axis_seeds(knots: &[f64], range: ParameterRange, degree: u8) -> Vec<f64> {
+fn knot_axis_seeds(
+    knots: &[f64],
+    range: ParameterRange,
+    degree: u8,
+) -> Result<Vec<f64>, GeometryEvaluationError> {
     let subdivisions = usize::from(degree).saturating_mul(4).max(4);
     let mut values = Vec::new();
     for span in knots.windows(2) {
@@ -371,10 +375,13 @@ fn knot_axis_seeds(knots: &[f64], range: ParameterRange, degree: u8) -> Vec<f64>
             continue;
         }
         for index in 0..=subdivisions {
-            values.push(start + (end - start) * index as f64 / subdivisions as f64);
+            values.push(
+                ParameterRange { start, end }
+                    .parameter_at_fraction(index as f64 / subdivisions as f64)?,
+            );
         }
     }
     values.sort_by(f64::total_cmp);
     values.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    values
+    Ok(values)
 }

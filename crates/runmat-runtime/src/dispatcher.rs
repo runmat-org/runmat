@@ -1457,9 +1457,12 @@ pub async fn call_builtin_async(
     name: &str,
     args: &[Value],
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
-    call_builtin_sequence_async(name, args)
+    crate::context::check_active_host()?;
+    let result = call_builtin_sequence_async(name, args)
         .await
-        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+    crate::context::check_active_host()?;
+    result
 }
 
 /// Session-owned entrypoint. Binding selection, preparation and execution all
@@ -1470,9 +1473,12 @@ pub async fn call_builtin_async_in_context(
     name: &str,
     args: &[Value],
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
-    call_builtin_sequence_async_in_context(context, name, args)
+    crate::context::check_active_host()?;
+    let result = call_builtin_sequence_async_in_context(context, name, args)
         .await
-        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+    crate::context::check_active_host()?;
+    result
 }
 
 /// Direct embedding call with no session binding authority. Use the
@@ -1482,9 +1488,12 @@ pub async fn call_builtin_async_with_outputs(
     args: &[Value],
     output_count: usize,
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
-    call_builtin_sequence_async_with_outputs(name, args, output_count)
+    crate::context::check_active_host()?;
+    let result = call_builtin_sequence_async_with_outputs(name, args, output_count)
         .await
-        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+    crate::context::check_active_host()?;
+    result
 }
 
 pub async fn call_builtin_async_with_outputs_in_context(
@@ -1493,9 +1502,12 @@ pub async fn call_builtin_async_with_outputs_in_context(
     args: &[Value],
     output_count: usize,
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
-    call_builtin_sequence_async_with_outputs_in_context(context, name, args, output_count)
+    crate::context::check_active_host()?;
+    let result = call_builtin_sequence_async_with_outputs_in_context(context, name, args, output_count)
         .await
-        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+    crate::context::check_active_host()?;
+    result
 }
 
 /// Invoke the implementation already selected for this invocation. Re-resolving

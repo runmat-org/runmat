@@ -106,6 +106,7 @@ pub struct ExactSurfaceShellEvidence {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExactSurfaceMeshErrorKind {
+    Cancelled,
     InvalidOptions,
     InvalidInput,
     InvalidEncoding,

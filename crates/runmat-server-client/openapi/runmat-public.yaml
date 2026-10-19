@@ -744,6 +744,21 @@ paths:
       tags:
       - billing::pricing
       operationId: pricing
+      parameters:
+      - name: currency
+        in: query
+        description: Requested ISO 4217 presentment currency
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: country
+        in: query
+        description: ISO 3166-1 alpha-2 location used to select a presentment currency
+        required: false
+        schema:
+          type: string
+          nullable: true
       responses:
         '200':
           description: ''
@@ -751,6 +766,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PublicPricingResponse'
+      security:
+      - {}
+  /v1/billing/pricing/resource:
+    get:
+      tags:
+      - billing::pricing
+      operationId: get_resource_pricing_quote
+      parameters:
+      - name: resource
+        in: query
+        description: Resource catalog key
+        required: true
+        schema:
+          type: string
+      - name: quantity
+        in: query
+        description: Requested resource quantity
+        required: true
+        schema:
+          type: integer
+          format: int32
+      - name: currency
+        in: query
+        description: Requested ISO 4217 presentment currency
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: country
+        in: query
+        description: ISO 3166-1 alpha-2 location used to select a presentment currency
+        required: false
+        schema:
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicResourceQuoteResponse'
       security:
       - {}
   /v1/execution/drivers/{driverLeaseId}/artifacts:
@@ -796,6 +853,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security: []
+  /v1/execution/drivers/{driverLeaseId}/artifacts/{artifactId}:
+    get:
+      tags:
+      - Execution
+      operationId: download_driver_artifact
+      parameters:
+      - name: fencingToken
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: artifactId
+        in: path
+        description: Run-scoped input or intermediate result artifact identifier
+        required: true
+        schema:
+          type: string
+      - name: X-RunMat-Driver-Credential
+        in: header
+        description: Scoped driver credential
+        required: true
+        schema:
+          type: string
+      - name: driverLeaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverArtifactDownloadResponse'
         '401':
           description: ''
           content:
@@ -3822,11 +3935,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
-  /v1/orgs/{orgId}/upgrade-request:
+  /v1/orgs/{orgId}/referrals:
+    get:
+      tags:
+      - orgs::referrals
+      operationId: get_org_referral_state
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferralProgramStateResponse'
+  /v1/orgs/{orgId}/referrals/dismiss:
     post:
       tags:
-      - orgs::usage
-      operationId: create_upgrade_request
+      - orgs::referrals
+      operationId: dismiss_org_referral_prompt
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferralPromptDismissResponse'
+  /v1/orgs/{orgId}/referrals/invitations:
+    post:
+      tags:
+      - orgs::referrals
+      operationId: invite_referrals
       parameters:
       - name: orgId
         in: path
@@ -3837,7 +3986,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpgradeRequestCreateRequest'
+              $ref: '#/components/schemas/ReferralInviteRequest'
         required: true
       responses:
         '200':
@@ -3845,7 +3994,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UpgradeRequestCreateResponse'
+                $ref: '#/components/schemas/ReferralInviteResponse'
+  /v1/orgs/{orgId}/referrals/invitations/accept:
+    post:
+      tags:
+      - orgs::referrals
+      operationId: accept_referral_invite
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReferralInviteAcceptRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReferralInviteAcceptResponse'
   /v1/orgs/{orgId}/usage:
     get:
       tags:
@@ -5483,6 +5656,12 @@ paths:
         required: true
         schema:
           type: string
+      - name: expectedVersionId
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
       - name: projectId
         in: path
         required: true
@@ -5775,6 +5954,13 @@ paths:
           minimum: 0
       - name: versionId
         in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: snapshotId
+        in: query
+        description: Bind file and shard versions to an immutable project inventory.
         required: false
         schema:
           type: string
@@ -6760,16 +6946,16 @@ components:
       type: string
       enum:
       - approve
+      - deny
       - adjust
       - request_information
-      - deny
     AcademicDecisionRequest:
       type: object
       required:
       - action
       - expectedVersion
-      - reasonCode
       - idempotencyKey
+      - reasonCode
       properties:
         action:
           $ref: '#/components/schemas/AcademicDecisionAction'
@@ -7371,6 +7557,9 @@ components:
         academicEmail:
           type: string
           nullable: true
+        applicantName:
+          type: string
+          nullable: true
         applicantNotes:
           type: string
           nullable: true
@@ -7835,8 +8024,11 @@ components:
       - preferences
       - canCreateStandardOrg
       - canCreateCourse
+      - academicProgramEnabled
       - feedback
       properties:
+        academicProgramEnabled:
+          type: boolean
         canCreateCourse:
           type: boolean
         canCreateStandardOrg:
@@ -8229,10 +8421,10 @@ components:
       - term
       - startsAt
       - endsAt
-      - accessStartsAt
-      - accessEndsAt
       - expectedEnrollment
       - idempotencyKey
+      - accessStartsAt
+      - accessEndsAt
       properties:
         accessEndsAt:
           type: string
@@ -9203,6 +9395,7 @@ components:
     FsCommitResponse:
       type: object
       required:
+      - version_id
       - entry
       - version
       properties:
@@ -9210,6 +9403,9 @@ components:
           $ref: '#/components/schemas/server_filesystem.FsEntry'
         version:
           $ref: '#/components/schemas/server_filesystem.FsVersion'
+        version_id:
+          type: string
+          description: Canonical public version identifier for subsequent conditional mutations.
     FsDirEntry:
       type: object
       required:
@@ -9329,9 +9525,12 @@ components:
       - blobKey
       - size
       - createdAt
+      - contentAvailable
       properties:
         blobKey:
           type: string
+        contentAvailable:
+          type: boolean
         createdAt:
           type: string
           format: date-time
@@ -9451,6 +9650,10 @@ components:
       - len
       - readonly
       properties:
+        currentVersionId:
+          type: string
+          description: Immutable content observed by this metadata read, for conditional replacement.
+          nullable: true
         etag:
           type: string
           nullable: true
@@ -10034,6 +10237,10 @@ components:
       - contentSha256
       - chunkCount
       properties:
+        baseVersionId:
+          type: string
+          description: Verified base of an external full-file replacement, including shared source.
+          nullable: true
         blobKey:
           type: string
         chunkCount:
@@ -10041,6 +10248,12 @@ components:
           minimum: 0
         contentSha256:
           type: string
+        createNew:
+          type: boolean
+        expectedVersionId:
+          type: string
+          description: Conditional publication against the exact last observed version.
+          nullable: true
         hash:
           type: string
           nullable: true
@@ -10109,6 +10322,8 @@ components:
         contentType:
           type: string
           nullable: true
+        createNew:
+          type: boolean
         path:
           type: string
         sizeBytes:
@@ -10336,6 +10551,31 @@ components:
           format: date-time
         status:
           $ref: '#/components/schemas/AcademicGrantStatusResponse'
+    HistoryAccessResponse:
+      oneOf:
+      - type: object
+        required:
+        - days
+        - kind
+        properties:
+          days:
+            type: integer
+            format: int32
+            minimum: 0
+          kind:
+            type: string
+            enum:
+            - rolling
+      - type: object
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - extended
+      discriminator:
+        propertyName: kind
     InviteCourseStudentsRequest:
       type: object
       required:
@@ -10979,13 +11219,25 @@ components:
       type: object
       required:
       - canEditPersistentProjects
+      - canWritePersistentProjects
+      - canImportExternalFiles
+      - historyAccess
       - canOpenLocalFolders
       - canUseProjectAgents
+      - includedAgentCreditsPerMember
+      - canUseFullDesktopMcp
       - canConfigureOnDemandCreditLimit
       - canConfigureStorageAddons
+      - canPurchaseAgentCredits
       - canManageIdentity
+      - canManageIdentitySso
+      - canManageIdentityScim
+      - canViewAuditLogs
+      - canUseManagedFea
+      - canUsePrivateDeployment
       - canPublishPublicPackages
       - canPublishPrivatePackages
+      - canUseRemoteExecution
       properties:
         canConfigureOnDemandCreditLimit:
           type: boolean
@@ -10993,7 +11245,13 @@ components:
           type: boolean
         canEditPersistentProjects:
           type: boolean
+        canImportExternalFiles:
+          type: boolean
         canManageIdentity:
+          type: boolean
+        canManageIdentityScim:
+          type: boolean
+        canManageIdentitySso:
           type: boolean
         canOpenLocalFolders:
           type: boolean
@@ -11001,8 +11259,40 @@ components:
           type: boolean
         canPublishPublicPackages:
           type: boolean
+        canPurchaseAgentCredits:
+          type: boolean
+        canUseFullDesktopMcp:
+          type: boolean
+        canUseManagedFea:
+          type: boolean
+        canUsePrivateDeployment:
+          type: boolean
         canUseProjectAgents:
           type: boolean
+        canUseRemoteExecution:
+          type: boolean
+        canViewAuditLogs:
+          type: boolean
+        canWritePersistentProjects:
+          type: boolean
+        embeddedAgentExecutionsPerMember:
+          type: integer
+          format: int32
+          nullable: true
+        historyAccess:
+          $ref: '#/components/schemas/HistoryAccessResponse'
+        includedAgentCreditsPerMember:
+          type: number
+          format: double
+        maxProjects:
+          type: integer
+          format: int32
+          nullable: true
+        projectFileLimit:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
     PlanLifecycleResponse:
       oneOf:
       - type: object
@@ -11122,6 +11412,7 @@ components:
       - lifecycle
       - entitlements
       - source
+      - provenance
       - updatedAt
       properties:
         allowlist:
@@ -11147,6 +11438,10 @@ components:
           type: string
         planTier:
           type: string
+        provenance:
+          type: object
+          additionalProperties:
+            type: string
         seatLimit:
           type: integer
           format: int32
@@ -11395,6 +11690,22 @@ components:
           format: int64
         status:
           $ref: '#/components/schemas/AcademicProofStatusResponse'
+    PublicMoneyResponse:
+      type: object
+      required:
+      - amountMinor
+      - currency
+      - minorUnitExponent
+      properties:
+        amountMinor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        minorUnitExponent:
+          type: integer
+          format: int32
+          minimum: 0
     PublicPricingPlanResponse:
       type: object
       required:
@@ -11414,57 +11725,159 @@ components:
         ctaType:
           type: string
           nullable: true
-        defaultCurrency:
-          type: string
-          nullable: true
         displayName:
           type: string
         features:
           type: array
           items:
             type: string
-        includedLlmCredits:
+        includedAgentCredits:
           type: number
           format: double
           nullable: true
+        includedHistoryDays:
+          type: integer
+          format: int32
+          nullable: true
+          minimum: 0
         includedStorageGb:
           type: number
           format: double
           nullable: true
-        llmCreditUnitPriceAmount:
-          type: number
-          format: double
-          nullable: true
-        llmCreditUnitPriceCurrency:
-          type: string
-          nullable: true
         planKey:
           type: string
+        planVersion:
+          type: integer
+          format: int32
+          nullable: true
         priceLabel:
           type: string
           nullable: true
-        storageLimitAddonAmountPerGb:
-          type: number
-          format: double
+        pricing:
+          allOf:
+          - $ref: '#/components/schemas/PublicPricingQuoteResponse'
           nullable: true
         trialDays:
           type: integer
           format: int32
           nullable: true
+    PublicPricingQuoteResponse:
+      type: object
+      required:
+      - interval
+      - unit
+      - quoteKind
+      - monthly
+      - quotedAt
+      - freshUntil
+      - staleUntil
+      properties:
+        freshUntil:
+          type: string
+          format: date-time
+        interval:
+          type: string
+        monthly:
+          $ref: '#/components/schemas/PublicMoneyResponse'
+        quoteKind:
+          type: string
+        quotedAt:
+          type: string
+          format: date-time
+        staleUntil:
+          type: string
+          format: date-time
+        stripePriceId:
+          type: string
+          nullable: true
+        unit:
+          type: string
     PublicPricingResponse:
       type: object
       required:
+      - requestedCurrency
+      - academicProgramEnabled
       - free
+      - selfServeOffers
       - enterprise
+      - agentCreditPack
+      - storageAddon
       properties:
+        academicProgramEnabled:
+          type: boolean
+        agentCreditPack:
+          $ref: '#/components/schemas/PublicResourcePricingResponse'
         enterprise:
           $ref: '#/components/schemas/PublicPricingPlanResponse'
         free:
           $ref: '#/components/schemas/PublicPricingPlanResponse'
-        pro:
-          allOf:
-          - $ref: '#/components/schemas/PublicPricingPlanResponse'
+        requestedCurrency:
+          type: string
+        selfServeOffers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicPricingPlanResponse'
+        storageAddon:
+          $ref: '#/components/schemas/PublicResourcePricingResponse'
+    PublicResourcePricingResponse:
+      type: object
+      required:
+      - resourceKey
+      - quantityIncrement
+      - minimumQuantity
+      - unitPrice
+      - quoteKind
+      - quotedAt
+      - freshUntil
+      - staleUntil
+      properties:
+        expirationDays:
+          type: integer
+          format: int32
           nullable: true
+          minimum: 0
+        freshUntil:
+          type: string
+          format: date-time
+        interval:
+          type: string
+          nullable: true
+        maximumQuantity:
+          type: integer
+          format: int32
+          nullable: true
+        minimumQuantity:
+          type: integer
+          format: int32
+        quantityIncrement:
+          type: integer
+          format: int32
+        quoteKind:
+          type: string
+        quotedAt:
+          type: string
+          format: date-time
+        resourceKey:
+          type: string
+        staleUntil:
+          type: string
+          format: date-time
+        unitPrice:
+          $ref: '#/components/schemas/PublicMoneyResponse'
+    PublicResourceQuoteResponse:
+      type: object
+      required:
+      - resourceKey
+      - quantity
+      - total
+      properties:
+        quantity:
+          type: integer
+          format: int32
+        resourceKey:
+          type: string
+        total:
+          $ref: '#/components/schemas/PublicMoneyResponse'
     PublicationContentCipherRequest:
       type: string
       enum:
@@ -11709,6 +12122,102 @@ components:
           type: string
           format: date-time
           nullable: true
+    ReferralInviteAcceptRequest:
+      type: object
+      required:
+      - token
+      properties:
+        token:
+          type: string
+    ReferralInviteAcceptResponse:
+      type: object
+      required:
+      - status
+      properties:
+        rewardCredits:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          type: string
+    ReferralInviteItemResponse:
+      type: object
+      required:
+      - email
+      - status
+      properties:
+        email:
+          type: string
+        status:
+          $ref: '#/components/schemas/ReferralInviteStatusResponse'
+    ReferralInviteRequest:
+      type: object
+      required:
+      - emails
+      properties:
+        emails:
+          type: array
+          items:
+            type: string
+    ReferralInviteResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferralInviteItemResponse'
+    ReferralInviteStatusResponse:
+      type: string
+      enum:
+      - processed
+      - duplicate
+      - invalid
+      - self
+    ReferralProgramStateResponse:
+      type: object
+      required:
+      - enabled
+      - qualifiedReferrals
+      - maxQualifiedReferrals
+      - rewardCredits
+      - rewardExpirationDays
+      properties:
+        enabled:
+          type: boolean
+        maxQualifiedReferrals:
+          type: integer
+          format: int64
+        notificationCtaHref:
+          type: string
+          nullable: true
+        notificationCtaLabel:
+          type: string
+          nullable: true
+        notificationKind:
+          type: string
+          nullable: true
+        notificationMessage:
+          type: string
+          nullable: true
+        qualifiedReferrals:
+          type: integer
+          format: int64
+        rewardCredits:
+          type: integer
+          format: int64
+        rewardExpirationDays:
+          type: integer
+          format: int64
+    ReferralPromptDismissResponse:
+      type: object
+      required:
+      - dismissedAt
+      properties:
+        dismissedAt:
+          type: string
+          format: date-time
     RegisterArtifactRequest:
       type: object
       required:
@@ -13798,41 +14307,6 @@ components:
         visibility:
           $ref: '#/components/schemas/PackageVisibilityRequest'
       additionalProperties: false
-    UpgradeRequestCreateRequest:
-      type: object
-      required:
-      - noticeChannel
-      - noticeCode
-      properties:
-        noticeChannel:
-          type: string
-        noticeCode:
-          type: string
-        usageCurrent:
-          type: number
-          format: double
-          nullable: true
-        usageLimit:
-          type: number
-          format: double
-          nullable: true
-        usageUnit:
-          type: string
-          nullable: true
-    UpgradeRequestCreateResponse:
-      type: object
-      required:
-      - status
-      - deduped
-      - notifiedAdminCount
-      properties:
-        deduped:
-          type: boolean
-        notifiedAdminCount:
-          type: integer
-          minimum: 0
-        status:
-          type: string
     UploadChunkRequestBody:
       type: object
       required:

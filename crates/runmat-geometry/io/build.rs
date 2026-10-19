@@ -2,6 +2,7 @@
 use std::{env, path::PathBuf};
 
 fn main() {
+    runmat_build_identity::emit_configuration();
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_ROOT");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_LIB_DIR");
@@ -43,8 +44,12 @@ fn build_occt_backend() {
         .file("src/occt/exact_xcaf_subshape_remap.cc")
         .file("src/occt/exact_nesting.cc")
         .file("src/occt/exact_topology.cc")
+        .file("src/occt/exact_wire.cc")
         .file("src/occt/exact_evaluator.cc")
+        .file("src/occt/exact_feature.cc")
+        .file("src/occt/exact_feature_operations.cc")
         .file("src/occt/exact_surface_evaluator.cc")
+        .include(".")
         .include(&occt_include)
         .std("c++17")
         .flag_if_supported("-Wno-deprecated-declarations")
@@ -103,8 +108,14 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/exact_nesting.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_topology.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_wire.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_wire.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_feature.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_feature_internal.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_feature_operations.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator_internal.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_surface_bounds.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_surface_evaluator.cc");
 }
 

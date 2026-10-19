@@ -805,7 +805,10 @@ impl RunMatSession {
                 Rc::new(selected),
                 &self.source_evaluator,
             ));
-        runtime
+        if let Some(host) = runtime.service_ports().host() {
+            host.check_execution()?;
+        }
+        let result = runtime
             .scope(self.invoke_executable_in_context(
                 unit,
                 invocation,
@@ -813,7 +816,12 @@ impl RunMatSession {
                 &runtime,
                 &runtime_bytecode,
             ))
-            .await
+            .await;
+        // Sticky host rejection cannot become successful execution through a language catch.
+        if let Some(host) = runtime.service_ports().host() {
+            host.check_execution()?;
+        }
+        result
     }
 
     async fn invoke_executable_in_context(
@@ -825,6 +833,10 @@ impl RunMatSession {
         runtime_bytecode: &runmat_vm::Bytecode,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
         let (_input_guard, _input_events) = self.install_execution_input();
+        let _program_guard = self.program_service.enter(unit);
+        let _dependency_guard = self
+            .program_service
+            .install_dependency_invoker(unit, runtime.clone());
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,
@@ -946,7 +958,12 @@ fn ensure_invocation_allowed(
             "executable invocation was cancelled",
         ));
     }
-    if control.deadline_elapsed() {
+    if control.deadline_elapsed()
+        || matches!(
+            runmat_runtime::interrupt::stop_reason(),
+            Some(runmat_execution::CancellationReason::Deadline)
+        )
+    {
         return Err(runtime_error(
             "RunMat:ExecutionDeadline",
             "executable invocation deadline elapsed",

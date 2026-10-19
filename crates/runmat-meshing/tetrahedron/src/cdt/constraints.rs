@@ -9,7 +9,8 @@ mod validation;
 pub use exact::build_delaunay_constraints;
 pub use validation::validate_delaunay_constraints;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayConstraintOptions {
     pub maximum_nodes: u64,
     pub maximum_segments: u64,
@@ -76,10 +77,7 @@ impl DelaunayConstraints {
     pub fn volume_nodes(&self) -> Vec<DelaunayVolumeNode> {
         self.nodes
             .iter()
-            .map(|node| DelaunayVolumeNode {
-                identity: node.identity,
-                coordinates_m: node.coordinates_m,
-            })
+            .map(|node| DelaunayVolumeNode::explicit(node.identity, node.coordinates_m))
             .collect()
     }
 }

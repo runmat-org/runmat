@@ -1,0 +1,27 @@
+// Strength/deformation study setup for bracket.stp.
+// Proposed first analysis: structural static; confirm loading is quasi-static.
+// Unresolved: physical scale (preview reports meter with spans 40 x 50 x 35),
+// material/grade and properties, support behavior and regions, load magnitude,
+// direction and application region, and acceptance limits.
+// No material, support, load, or mesh dimensions have been assumed.
+geometry bracket {
+    file = "./bracket.stp"
+    // Source units require confirmation before adding an explicit units setting.
+    // Named physical regions will be added from checked CAD selections.
+}
+
+mesh bracket on geometry.bracket {
+    // Meshing request pending confirmed physical scale and feature sizing.
+}
+
+model loaded_bracket {
+    // Material assignment, constraints, and static loads pending user decisions.
+}
+
+study bracket_strength {
+    geometry = geometry.bracket
+    mesh = mesh.bracket
+    model = model.loaded_bracket
+    analysis solve { structural static {} }
+    // Stress/deformation observations and acceptance criteria pending setup.
+}

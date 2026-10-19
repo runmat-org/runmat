@@ -30,7 +30,7 @@ impl ExecutionBundle {
             .artifacts
             .iter()
             .filter(|artifact| {
-                artifact.form == ExecutableForm::ExecutableUnitV3
+                artifact.form == ExecutableForm::ExecutableUnitV4
                     && artifact.recipe_id == recipe_id
                     && artifact.executable_bytes == canonical_v3
             })
@@ -118,7 +118,7 @@ impl ExecutionBundle {
         package_instances.dedup();
         let artifact = ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::ExecutableUnitV3,
+            ExecutableForm::ExecutableUnitV4,
             canonical_v3.to_vec(),
         )?;
         let revision = unit.manifest.identity.program;

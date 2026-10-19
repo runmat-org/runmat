@@ -32,6 +32,10 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
         self.inner.worker()
     }
 
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        self.inner.describe_worker().await
+    }
+
     async fn install_bundle(
         &self,
         bundle_digest: Digest,
@@ -179,6 +183,7 @@ async fn run_inner() {
     let prerequisite = execution_object_reference(RUN_ID, prerequisite_bytes.as_ref());
     pool.register_execution_object(prerequisite.clone(), Arc::clone(&prerequisite_bytes))
         .unwrap();
+    register_host_invocation(&pool, &host, &request);
     let retry_submission = submission_for(scope_id, pool_id, &host, &request);
     let task_id = retry_submission.request.id;
     let completion = pool.submit(retry_submission, request.clone()).unwrap();
@@ -246,8 +251,8 @@ async fn run_inner() {
     );
     assert_eq!(first.executions.load(Ordering::Acquire), 1);
     assert_eq!(second.executions.load(Ordering::Acquire), 1);
-    assert_eq!(first.transferred_objects.load(Ordering::Acquire), 1);
-    assert_eq!(second.transferred_objects.load(Ordering::Acquire), 1);
+    assert_eq!(first.transferred_objects.load(Ordering::Acquire), 2);
+    assert_eq!(second.transferred_objects.load(Ordering::Acquire), 2);
     assert_eq!(
         pool.execution_object(&prerequisite)
             .unwrap()
@@ -285,15 +290,19 @@ async fn start_remote_worker(
     .unwrap();
     let authority = listener.local_addr().unwrap();
     let server = tokio::task::spawn_local(run_remote_meshing_worker_quic(
-        listener,
-        run_id.to_string(),
-        worker.clone(),
-        driver_fence,
-        session_id,
-        run_key.clone(),
-        FrameLimits::default(),
-        Arc::new(AdmissionKernel),
-        limits(),
+        RemoteMeshingWorkerQuicRequest {
+            worker: RemoteWorkerQuicRequest {
+                listener,
+                run_identity: run_id.to_string(),
+                worker: worker.clone(),
+                driver_fence,
+                session_id,
+                run_key: run_key.clone(),
+                limits: FrameLimits::default(),
+            },
+            kernel: Arc::new(AdmissionKernel),
+            meshing_limits: limits(),
+        },
     ));
     let channel = QuicRemoteWorkerChannel::connect(
         RemoteWorkerChannelConfig {

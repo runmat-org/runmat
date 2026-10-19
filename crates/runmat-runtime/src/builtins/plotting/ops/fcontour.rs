@@ -1047,7 +1047,8 @@ fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> Builtin
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            axis_equal: true,
+            // MATLAB leaves the data aspect free; `axis equal` sets it.
+            axis_equal: false,
             ..Default::default()
         },
         move |figure, axes| {

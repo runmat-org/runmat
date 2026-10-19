@@ -44,7 +44,9 @@ pub(super) async fn dispatch(
                 function_registry,
             )?))?;
         }
-        Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
+        // External futures keep the retained target's original function ID.
+        Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count)
+        | Instr::CreateExternalFuture(function, specs, out_count) => {
             let arguments = build_user_function_expand_multi_args(
                 stack,
                 specs,

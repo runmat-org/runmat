@@ -1,48 +1,67 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::AttemptId;
-use runmat_execution::resource::ResourceInventory;
+use runmat_execution::resource::{ResourceInventory, ResourceRequest};
 use runmat_execution_artifact::{ExecutableForm, ProgramExecutionResponse, WorkerProgramRequest};
-use runmat_execution_runner::{AttemptFailureKind, AttemptReport, AttemptSuccess};
+use runmat_execution_runner::{AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess};
 use runmat_meshing_core::{MeshingCancellationSignal, MeshingProgress};
 use runmat_meshing_execution::{MeshingProgressSink, MeshingStageKernel};
 
 use super::object_transfer::RemoteObjectStore;
 
+/// One attempt-scoped cancellation authority. The typed source wakes runtime
+/// and Graph listeners; the shared flag reaches synchronous physics kernels.
 #[derive(Default)]
-pub(super) struct AttemptCancellation(runmat_execution::cancellation::CancellationSource);
+pub(super) struct AttemptCancellation {
+    source: runmat_execution::cancellation::CancellationSource,
+    flag: Arc<AtomicBool>,
+}
 
 impl AttemptCancellation {
     pub(super) fn cancel(&self) {
-        self.0.cancel(runmat_execution::CancellationReason::User);
+        self.flag.store(true, Ordering::Release);
+        self.source
+            .cancel(runmat_execution::CancellationReason::User);
     }
 
     pub(super) fn token(&self) -> runmat_execution::cancellation::CancellationToken {
-        self.0.token()
+        self.source.token()
+    }
+
+    pub(super) fn flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.flag)
+    }
+
+    pub(super) fn was_cancelled(&self) -> bool {
+        self.flag.load(Ordering::Acquire) || self.source.token().is_cancelled()
     }
 }
 
 impl MeshingCancellationSignal for AttemptCancellation {
     fn is_cancelled(&self) -> bool {
-        self.0.token().is_cancelled()
+        self.was_cancelled()
     }
 }
 
 pub(super) struct GraphAttemptContext {
     pub(super) run_identity: String,
-    pub(super) attempt_id: AttemptId,
     pub(super) resources: ResourceInventory,
-    pub(super) task_resources: runmat_execution::resource::ResourceRequest,
     pub(super) host: runmat_execution::host::ExecutionHostInventory,
 }
 
 /// The admitted program and its exact materialized/assigned authority move
 /// together into one worker execution.
 pub(super) struct WorkerExecutionInput {
+    pub attempt_id: AttemptId,
     pub program: WorkerProgramRequest,
     pub graph_attempt: Option<GraphAttemptContext>,
     pub project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     pub bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+    /// Frozen portable environment of the installed bundle.
+    pub environment: Vec<(String, String)>,
+    /// Scheduler reservation this attempt executes under.
+    pub resources: ResourceRequest,
 }
 
 /// Request-local effect ports and cancellation, separate from program proof.
@@ -63,6 +82,30 @@ pub(super) enum WorkerExecutionOutcome {
 pub(super) struct RemoteMeshingHost {
     kernel: Arc<dyn MeshingStageKernel>,
     limits: crate::NativeMeshingHostLimits,
+    #[cfg(all(test, feature = "occt-native"))]
+    held_attempt: Option<HeldWorkloadAttempt>,
+}
+
+#[cfg(all(test, feature = "occt-native"))]
+#[derive(Clone, Copy)]
+pub(super) enum HeldAttemptUntil {
+    UntilWorkerLoss,
+    UntilCancellation,
+}
+
+#[cfg(all(test, feature = "occt-native"))]
+#[derive(Clone, Copy)]
+pub(super) enum HeldAttemptTarget {
+    Analysis(runmat_analysis_fea::execution::AnalysisWorkKind),
+    ExactMeshingAdmission,
+}
+
+#[cfg(all(test, feature = "occt-native"))]
+#[derive(Clone, Copy)]
+pub(super) struct HeldWorkloadAttempt {
+    pub(super) target: HeldAttemptTarget,
+    pub(super) input_object_id: Option<runmat_execution::identity::ValueId>,
+    pub(super) until: HeldAttemptUntil,
 }
 
 impl RemoteMeshingHost {
@@ -70,7 +113,18 @@ impl RemoteMeshingHost {
         kernel: Arc<dyn MeshingStageKernel>,
         limits: crate::NativeMeshingHostLimits,
     ) -> Self {
-        Self { kernel, limits }
+        Self {
+            kernel,
+            limits,
+            #[cfg(all(test, feature = "occt-native"))]
+            held_attempt: None,
+        }
+    }
+
+    #[cfg(all(test, feature = "occt-native"))]
+    pub(super) fn hold_attempt(mut self, attempt: HeldWorkloadAttempt) -> Self {
+        self.held_attempt = Some(attempt);
+        self
     }
 }
 
@@ -79,15 +133,18 @@ pub(super) async fn execute(
     ports: WorkerExecutionPorts,
 ) -> WorkerExecutionOutcome {
     let WorkerExecutionInput {
+        attempt_id,
         program,
         graph_attempt,
         project,
         bundle,
+        environment,
+        resources,
     } = input;
     let WorkerExecutionPorts {
         collective,
         meshing_host,
-        mut objects,
+        objects,
         cancellation,
         progress_sender,
     } = ports;
@@ -102,17 +159,17 @@ pub(super) async fn execute(
             };
             return match super::driver::local_graph::execute_remote_attempt(
                 &graph_attempt.run_identity,
-                graph_attempt.attempt_id,
+                attempt_id,
                 graph,
                 graph_attempt.resources,
-                graph_attempt.task_resources,
+                resources,
                 graph_attempt.host,
                 cancellation.token(),
             )
             .await
             {
-                Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(response)) => {
-                    WorkerExecutionOutcome::Response(response)
+                Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(result)) => {
+                    WorkerExecutionOutcome::Response(result.response)
                 }
                 Ok(super::pool_execution::RemotePoolExecutionOutcome::Cancelled) => {
                     WorkerExecutionOutcome::Response(failure("remote Graph attempt was cancelled"))
@@ -124,93 +181,227 @@ pub(super) async fn execute(
             };
         }
     };
-    if program.artifact.form == ExecutableForm::MeshingWorkload {
-        let Some(host) = meshing_host else {
-            return WorkerExecutionOutcome::Response(failure(
-                "remote worker has no meshing host capability",
-            ));
-        };
-        return WorkerExecutionOutcome::Response(
-            tokio::task::spawn_blocking(move || {
-                let progress_error = Arc::new(Mutex::new(None));
-                let mut progress = ChannelProgress {
-                    sender: progress_sender,
-                    error: Arc::clone(&progress_error),
-                };
-                let response = crate::execute_meshing_program_request(
-                    &program,
-                    &mut objects,
-                    host.kernel.as_ref(),
-                    cancellation.as_ref(),
-                    &mut progress,
-                    host.limits,
-                );
-                let progress_error = progress_error
-                    .lock()
-                    .expect("remote progress error poisoned")
-                    .take();
-                match progress_error {
-                    Some(error) => failure(&error),
-                    None => response,
-                }
-            })
-            .await
-            .unwrap_or_else(|error| failure(&error.to_string())),
-        );
-    }
-    drop(progress_sender);
-    WorkerExecutionOutcome::Response(match collective {
-        Some(collective) => {
-            crate::test_workload::execute_host_program_request_with_validated_bundle(
-                program,
-                project.as_deref(),
-                Some(collective),
+    WorkerExecutionOutcome::Response(
+        execute_direct(
+            attempt_id,
+            program,
+            DirectContext {
+                project,
                 bundle,
-            )
-            .await
-        }
-        None => {
-            crate::test_workload::execute_host_program_request_with_validated_bundle(
-                program,
-                project.as_deref(),
-                None,
-                bundle,
-            )
-            .await
-        }
-    })
+                environment,
+                resources,
+                collective,
+            },
+            meshing_host,
+            objects,
+            cancellation,
+            progress_sender,
+        )
+        .await,
+    )
 }
 
-pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {
-    match response {
-        ProgramExecutionResponse::Success { outputs } => AttemptReport::Succeeded {
-            result: AttemptSuccess::Values {
-                outputs,
-                result_objects: Vec::new(),
-            },
+struct DirectContext {
+    project: Option<Arc<crate::materialized_project::MaterializedProject>>,
+    bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+    environment: Vec<(String, String)>,
+    resources: ResourceRequest,
+    collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+}
+
+async fn execute_direct(
+    attempt_id: AttemptId,
+    program: runmat_execution_artifact::ProgramExecutionRequest,
+    context: DirectContext,
+    meshing_host: Option<RemoteMeshingHost>,
+    mut objects: RemoteObjectStore,
+    cancellation: Arc<AttemptCancellation>,
+    progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
+) -> ProgramExecutionResponse {
+    let DirectContext {
+        project,
+        bundle,
+        environment,
+        resources,
+        collective,
+    } = context;
+    #[cfg(all(test, feature = "occt-native"))]
+    if let Some(held) = meshing_host.as_ref().and_then(|host| host.held_attempt) {
+        let matches_target = match held.target {
+            HeldAttemptTarget::Analysis(kind) => {
+                program.artifact.form == ExecutableForm::AnalysisWorkload
+                    && runmat_analysis_execution::AnalysisHostWorkload::from_program_request(
+                        &program, &objects,
+                    )
+                    .is_ok_and(|host| host.workload.kind == kind)
+            }
+            HeldAttemptTarget::ExactMeshingAdmission => {
+                program.artifact.form == ExecutableForm::MeshingWorkload
+                    && program.recipe.execution_mode == crate::EXACT_MESHING_ROOT_EXECUTION_MODE
+            }
+        };
+        if matches_target
+            && held.input_object_id.is_none_or(|held_id| {
+                matches!(
+                    program.arguments.first(),
+                    Some(runmat_execution::value::ValuePayload::Object(reference))
+                        if reference.id == held_id
+                )
+            })
+        {
+            match held.until {
+                HeldAttemptUntil::UntilWorkerLoss => std::future::pending::<()>().await,
+                HeldAttemptUntil::UntilCancellation => {
+                    while !cancellation.is_cancelled() {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    return failure("held workload attempt observed cancellation");
+                }
+            }
+        }
+    }
+    if program.artifact.form == ExecutableForm::AnalysisWorkload {
+        drop(progress_sender);
+        return tokio::task::spawn_blocking(move || {
+            let _guard = install_analysis_cancellation(attempt_id, &cancellation);
+            crate::execute_reserved_analysis_program_request(
+                &program,
+                &mut objects,
+                &crate::NativeAnalysisKernel,
+                crate::NativeAnalysisHostLimits::default(),
+                &resources,
+            )
+        })
+        .await
+        .unwrap_or_else(|error| failure(&error.to_string()));
+    }
+    if program.artifact.form == ExecutableForm::GeometryWorkload {
+        drop(progress_sender);
+        return tokio::task::spawn_blocking(move || {
+            crate::execute_geometry_materialization_program_request(
+                &program,
+                &mut objects,
+                crate::NativeGeometryMaterializationLimits::default(),
+            )
+        })
+        .await
+        .unwrap_or_else(|error| failure(&error.to_string()));
+    }
+    if program.artifact.form == ExecutableForm::MeshingWorkload {
+        let Some(host) = meshing_host else {
+            return failure("remote worker has no meshing host capability");
+        };
+        if program.recipe.execution_mode == crate::EXACT_MESHING_ROOT_EXECUTION_MODE {
+            drop(progress_sender);
+            return tokio::task::spawn_blocking(move || {
+                crate::exact_meshing_root::execute_exact_meshing_root_admission(
+                    &program,
+                    &mut objects,
+                    cancellation.flag(),
+                    host.limits,
+                )
+            })
+            .await
+            .unwrap_or_else(|error| failure(&error.to_string()));
+        }
+        return tokio::task::spawn_blocking(move || {
+            let progress_error = Arc::new(Mutex::new(None));
+            let mut progress = ChannelProgress {
+                sender: progress_sender,
+                error: Arc::clone(&progress_error),
+            };
+            let response = crate::execute_meshing_program_request(
+                &program,
+                &mut objects,
+                host.kernel.as_ref(),
+                cancellation.as_ref(),
+                &mut progress,
+                host.limits,
+            );
+            let progress_error = progress_error
+                .lock()
+                .expect("remote progress error poisoned")
+                .take();
+            match progress_error {
+                Some(error) => failure(&error),
+                None => response,
+            }
+        })
+        .await
+        .unwrap_or_else(|error| failure(&error.to_string()));
+    }
+    drop(progress_sender);
+    crate::test_workload::execute_host_program_request_in_context(
+        program,
+        crate::test_workload::HostProgramContext {
+            materialized: project.as_deref(),
+            collective,
+            bundle,
+            environment: Some(&environment),
+            cancellation: Some(cancellation.flag()),
+            resources: Some(&resources),
         },
+    )
+    .await
+}
+
+fn install_analysis_cancellation(
+    attempt_id: AttemptId,
+    cancellation: &AttemptCancellation,
+) -> runmat_analysis_fea::FeaProgressContextGuard {
+    crate::analysis_progress::install(
+        runmat_analysis_fea::FeaCancellationToken::from_shared(cancellation.flag()),
+        Some(attempt_id),
+    )
+}
+
+pub(super) fn report(
+    request: &AttemptRequest,
+    response: ProgramExecutionResponse,
+    wall_millis: u64,
+) -> AttemptReport {
+    let success = match response {
+        ProgramExecutionResponse::Success { outputs } => {
+            AttemptSuccess::new(request, outputs, Vec::new(), wall_millis, 0, 0)
+        }
         ProgramExecutionResponse::ExternalizedSuccess {
             outputs,
             result_objects,
-        } => AttemptReport::Succeeded {
-            result: AttemptSuccess::Values {
-                outputs,
-                result_objects,
-            },
-        },
-        ProgramExecutionResponse::GraphSuccess { graph } => AttemptReport::Succeeded {
-            result: AttemptSuccess::Graph { graph },
-        },
-        ProgramExecutionResponse::SpmdSuccess { outputs } => AttemptReport::Succeeded {
-            result: AttemptSuccess::Spmd { outputs },
-        },
-        ProgramExecutionResponse::Failure { message } => AttemptReport::Failed {
-            kind: AttemptFailureKind::Execution,
+        } => {
+            let egress_bytes = result_objects.iter().try_fold(0_u64, |total, reference| {
+                total.checked_add(reference.encoded_length)
+            });
+            match egress_bytes {
+                Some(egress_bytes) => AttemptSuccess::new(
+                    request,
+                    outputs,
+                    result_objects,
+                    wall_millis,
+                    egress_bytes,
+                    0,
+                ),
+                None => Err("remote result egress accounting overflowed".into()),
+            }
+        }
+        // Graph and SPMD results carry no per-attempt scheduler accounting.
+        ProgramExecutionResponse::GraphSuccess { graph } => Ok(AttemptSuccess::Graph { graph }),
+        ProgramExecutionResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
+        ProgramExecutionResponse::Failure { message } => {
+            return AttemptReport::Failed {
+                kind: AttemptFailureKind::Execution,
+                message,
+            }
+        }
+        ProgramExecutionResponse::RuntimeFailure { failure } => {
+            return AttemptReport::RuntimeFailed { failure }
+        }
+    };
+    match success {
+        Ok(result) => AttemptReport::Succeeded { result },
+        Err(message) => AttemptReport::Failed {
+            kind: AttemptFailureKind::Rejected,
             message,
         },
-        ProgramExecutionResponse::RuntimeFailure { failure } => {
-            AttemptReport::RuntimeFailed { failure }
-        }
     }
 }
 
@@ -235,5 +426,100 @@ impl MeshingProgressSink for ChannelProgress {
 fn failure(message: &str) -> ProgramExecutionResponse {
     ProgramExecutionResponse::Failure {
         message: message.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
+    use runmat_execution::resource::ResourceRequest;
+    use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
+    use runmat_execution::{ExecutionScopeId, OutputContract, PoolId, ProgramCallable, TaskId};
+    use runmat_execution_artifact::ProgramExecutionResponse;
+    use runmat_execution_runner::{AttemptReport, AttemptRequest};
+
+    use super::{install_analysis_cancellation, report, AttemptCancellation};
+
+    #[test]
+    fn remote_attempt_cancellation_reaches_analysis_solver_context() {
+        let cancellation = AttemptCancellation::default();
+        let attempt_id = AttemptId::derive(&[b"analysis-cancellation-test"]);
+        let _guard = install_analysis_cancellation(attempt_id, &cancellation);
+        assert!(!runmat_analysis_fea::is_fea_cancelled());
+        cancellation.cancel();
+        assert!(runmat_analysis_fea::is_fea_cancelled());
+    }
+
+    #[test]
+    fn metered_attempt_report_round_trips_over_the_remote_json_contract() {
+        let task_id = TaskId::derive(&[b"task"]);
+        let request = AttemptRequest {
+            id: AttemptId::derive(&[b"attempt"]),
+            task_id,
+            scope_id: ExecutionScopeId::derive(&[b"scope"]),
+            worker_id: WorkerId::derive(&[b"worker"]),
+            ordinal: 0,
+            driver_fence: 1,
+            resource_assignment: Default::default(),
+            task: TaskRequest {
+                schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+                console: None,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                id: task_id,
+                scope_id: ExecutionScopeId::derive(&[b"scope"]),
+                pool_id: PoolId::derive(&[b"pool"]),
+                executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                    ArtifactId::derive(&[b"artifact"]),
+                ),
+                callable: Callable::for_program(
+                    "test",
+                    &ProgramCallable::semantic(runmat_types::ProgramFunctionId(0), None),
+                ),
+                host: runmat_execution::host::ExecutionHostRequirement::portable(
+                    runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+                    runmat_types::CapabilitySet(BTreeSet::from([
+                        runmat_types::CapabilityRequirement::HostRuntime,
+                    ])),
+                    runmat_types::InteropManifest::empty(),
+                    BTreeSet::from([
+                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                    ]),
+                )
+                .unwrap(),
+                invocation_context: runmat_execution::ProgramInvocationContext::Direct,
+                inputs: Vec::new(),
+                outputs: OutputContract {
+                    requested_outputs: 1,
+                    owned_work: None,
+                },
+                resources: ResourceRequest {
+                    cpu_millicores: 1_000,
+                    memory_bytes: 16 * 1024 * 1024,
+                    scratch_bytes: 8 * 1024 * 1024,
+                    max_wall_millis: 1_000,
+                    max_artifact_bytes: 1024,
+                    max_egress_bytes: 1024,
+                    max_relay_bytes: 0,
+                    accelerators: Vec::new(),
+                    required_capabilities: BTreeSet::new(),
+                },
+                retry: RetryPolicy::Never,
+                deadline_unix_millis: None,
+            },
+        };
+        let report = report(
+            &request,
+            ProgramExecutionResponse::Success {
+                outputs: vec![runmat_execution::value::ValuePayload::Inline(Box::new(
+                    runmat_execution::value::InlineValue::Null,
+                ))],
+            },
+            1,
+        );
+        let encoded = serde_json::to_vec(&report).unwrap();
+        let decoded: AttemptReport = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, report);
     }
 }

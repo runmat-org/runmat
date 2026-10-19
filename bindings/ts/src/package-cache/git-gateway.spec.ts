@@ -50,6 +50,33 @@ describe("Git snapshot gateway", () => {
     });
   });
 
+  it("normalizes trailing base URL slashes in linear time", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          commit: "0123456789abcdef0123456789abcdef01234567",
+          entries: []
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    await fetchGitTreeInventoryWire(
+      {
+        repository: "https://github.com/runmat-org/runmat",
+        selector: { kind: "branch", value: "main" }
+      },
+      {
+        baseUrl: `https://api.runmat.com${"/".repeat(10_000)}`,
+        fetch: fetcher
+      }
+    );
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "https://api.runmat.com/v1/packages/git/snapshot"
+    );
+  });
+
   it("surfaces status and server detail without accepting credentials in URLs", async () => {
     const fetcher = vi
       .fn<typeof fetch>()

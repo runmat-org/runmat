@@ -150,7 +150,10 @@ pub fn invoke_installed_async_handler(
 }
 
 pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
-    if let Some(response) = take_queued_response() {
+    if let Some(response) = crate::context::accepts_queued_interaction()
+        .then(take_queued_response)
+        .flatten()
+    {
         return match response
             .map_err(|err| interaction_error("RunMat:interaction:QueuedResponseError", err))?
         {
@@ -202,7 +205,10 @@ pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, Runt
 }
 
 pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
-    if let Some(response) = take_queued_response() {
+    if let Some(response) = crate::context::accepts_queued_interaction()
+        .then(take_queued_response)
+        .flatten()
+    {
         return match response
             .map_err(|err| interaction_error("RunMat:interaction:QueuedResponseError", err))?
         {

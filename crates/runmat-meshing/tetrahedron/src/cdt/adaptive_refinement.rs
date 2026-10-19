@@ -16,7 +16,8 @@ use super::{
     adaptive_lineage::{insertion_lineage, tetrahedron_records, DelaunayAdaptiveInsertionLineage},
     evaluate_delaunay_volume_quality,
     insertion::{
-        insert_delaunay_volume_node_with_barriers, validate_constrained_delaunay_volume_topology,
+        insert_delaunay_volume_node_locally_with_barriers,
+        validate_constrained_delaunay_volume_topology,
     },
     validate_delaunay_volume_provenance, validate_delaunay_volume_quality, DelaunayInsertionError,
     DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunayVolumeNode,
@@ -57,7 +58,7 @@ impl Default for DelaunayAdaptiveRefinementOptions {
 pub enum DelaunayAdaptiveRefinementDecision {
     Inserted {
         mark: DelaunayAdaptiveRefinementMark,
-        lineage: DelaunayAdaptiveInsertionLineage,
+        lineage: Box<DelaunayAdaptiveInsertionLineage>,
     },
     CoveredByPriorInsertion {
         mark: DelaunayAdaptiveRefinementMark,
@@ -240,7 +241,7 @@ fn apply_marks(
         }
         let node = adaptive_node(&topology, tetrahedron.vertex_indices, mark);
         let previous = tetrahedron_records(&topology);
-        topology = insert_delaunay_volume_node_with_barriers(
+        topology = insert_delaunay_volume_node_locally_with_barriers(
             topology,
             node,
             &protected_faces,
@@ -251,7 +252,7 @@ fn apply_marks(
         insertion_count += 1;
         decisions.push(DelaunayAdaptiveRefinementDecision::Inserted {
             mark,
-            lineage: insertion_lineage(previous, &topology, node),
+            lineage: Box::new(insertion_lineage(previous, &topology, node)),
         });
     }
     validate_constrained_delaunay_volume_topology(
@@ -310,10 +311,10 @@ fn adaptive_node(
     for identity in identities {
         hasher.update(identity.bytes());
     }
-    DelaunayVolumeNode {
-        identity: StableDigest::from_bytes(hasher.finalize().into()),
+    DelaunayVolumeNode::explicit(
+        StableDigest::from_bytes(hasher.finalize().into()),
         coordinates_m,
-    }
+    )
 }
 
 pub(super) fn decision_mark(

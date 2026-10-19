@@ -1101,7 +1101,7 @@ fn format_complex(re: f64, im: f64, spec: &FormatSpec, decimal: char) -> String 
     format!("{real_str} {imag_sign} {imag_str}i")
 }
 
-fn format_general(value: f64, digits: usize, uppercase: bool) -> String {
+pub(crate) fn format_general(value: f64, digits: usize, uppercase: bool) -> String {
     if value.is_nan() {
         return "NaN".to_string();
     }

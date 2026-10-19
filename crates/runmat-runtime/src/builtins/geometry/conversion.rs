@@ -36,7 +36,7 @@ pub(super) fn geometry_asset_from_value(value: &Value) -> BuiltinResult<Geometry
     geometry_asset_from_value_with_builtin(value, GEOMETRY_LIST_REGIONS_NAME)
 }
 
-pub(super) fn geometry_asset_from_value_with_builtin(
+pub(crate) fn geometry_asset_from_value_with_builtin(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<GeometryAsset> {

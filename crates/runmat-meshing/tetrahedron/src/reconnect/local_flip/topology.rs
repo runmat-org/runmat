@@ -1,5 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use runmat_meshing_core::quality::predicate::{
+    orient3d_constructed, PredicateSign, SpatialPredicateError, SpatialPredicatePoint,
+};
+
 pub fn local_tetrahedron_boundary_faces(tetrahedra: &[[u32; 4]]) -> BTreeSet<[u32; 3]> {
     let mut face_counts = BTreeMap::<[u32; 3], usize>::new();
     for tetrahedron in tetrahedra {
@@ -11,6 +15,37 @@ pub fn local_tetrahedron_boundary_faces(tetrahedra: &[[u32; 4]]) -> BTreeSet<[u3
         .into_iter()
         .filter_map(|(face, count)| (count == 1).then_some(face))
         .collect()
+}
+
+/// Returns whether the two tetrahedra form a convex bipyramid that admits a
+/// nondegenerate 2-to-3 reconnection. An empty-circumsphere violation only
+/// makes their shared face locally illegal when this geometric alternative
+/// exists.
+pub fn two_to_three_geometry_is_admissible(
+    left: [u32; 4],
+    right: [u32; 4],
+    point: impl Fn(u32) -> SpatialPredicatePoint,
+) -> Result<bool, SpatialPredicateError> {
+    let Some(face) = shared_face(left, right) else {
+        return Ok(false);
+    };
+    let Some(left_apex) = opposite_node(left, &face) else {
+        return Ok(false);
+    };
+    let Some(right_apex) = opposite_node(right, &face) else {
+        return Ok(false);
+    };
+    let signs = [[face[0], face[1]], [face[1], face[2]], [face[2], face[0]]].map(|edge| {
+        orient3d_constructed([
+            point(left_apex),
+            point(right_apex),
+            point(edge[0]),
+            point(edge[1]),
+        ])
+    });
+    let [first, second, third] = signs;
+    let [first, second, third] = [first?, second?, third?];
+    Ok(first != PredicateSign::Zero && first == second && second == third)
 }
 
 pub(super) fn shared_face(left: [u32; 4], right: [u32; 4]) -> Option<[u32; 3]> {

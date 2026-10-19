@@ -1,3 +1,9 @@
+mod global_validation;
+mod cooperative_codec;
+mod cooperative_join;
+mod prepared_metric;
+mod publication_scale;
+
 use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryModel, PortableExactEvaluator,
 };
@@ -62,6 +68,77 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         panic!("permissive planar face must converge without a curve restart")
     };
 
+    let mut streamed = Vec::new();
+    let completion = crate::visit_exact_face_partition(
+        partitions[0].clone(),
+        context,
+        ExactFacePartitionOptions::default(),
+        &mut |accepted| {
+            streamed.push(accepted.encode(&NeverCancelled)?);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(completion.accepted_face_count, faces.len());
+    assert!(completion.curve_splits.is_empty());
+    assert_eq!(completion.partition, partitions[0]);
+    assert_eq!(
+        streamed,
+        vec![crate::surface_mesh::encode_accepted_face(
+            &faces[0],
+            256 * 1024 * 1024,
+            &NeverCancelled
+        )
+        .unwrap()]
+    );
+
+    let borrowed =
+        crate::surface_mesh::encode_accepted_face(&faces[0], 256 * 1024 * 1024, &NeverCancelled)
+            .unwrap();
+    assert_eq!(
+        borrowed,
+        encode_exact_face_partition_result(&outcome, &topology, &curves).unwrap(),
+        "borrowed single-face encoding preserves the complete existing canonical record"
+    );
+    assert!(
+        crate::surface_mesh::profile_accepted_face(&faces[0], 16, &NeverCancelled)
+            .unwrap()
+            .is_none()
+    );
+    let boundary = build_exact_surface_boundary(&topology, &curves).unwrap();
+    assert_eq!(
+        crate::decode_exact_face_reuse_record_with_cancellation(
+            &borrowed,
+            &topology,
+            &curves,
+            &boundary.faces[0],
+            &NeverCancelled,
+        )
+        .unwrap(),
+        faces[0]
+    );
+    let mut changed = faces[0].clone();
+    let boundary_node = boundary.faces[0].outer_loop.segments[0].node_ids[0];
+    let node = changed
+        .nodes
+        .iter_mut()
+        .find(|node| node.node_id == boundary_node)
+        .unwrap();
+    node.point_m[0] = f64::from_bits(node.point_m[0].to_bits() + 1);
+    let foreign =
+        crate::surface_mesh::encode_accepted_face(&changed, 256 * 1024 * 1024, &NeverCancelled)
+            .unwrap();
+    assert!(
+        crate::decode_exact_face_reuse_record_with_cancellation(
+            &foreign,
+            &topology,
+            &curves,
+            &boundary.faces[0],
+            &NeverCancelled,
+        )
+        .is_err(),
+        "local cold admission rejects a one-ULP original-coordinate substitution"
+    );
     assert_eq!(outcome.partition, partitions[0]);
     assert_eq!(faces.len(), 1);
     assert_eq!(faces[0].source_face_id, topology.faces[0].id);
@@ -85,6 +162,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         &pass.outcome,
         ExactSurfacePassOutcome::Converged { .. }
     ));
+    cooperative_join::verify(&pass, &sheet_topology, &curves, &converged_results);
     let pass_bytes = encode_exact_surface_pass_result(
         &pass,
         &sheet_topology,
@@ -149,6 +227,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
     };
     assert_eq!(surface.face_ids, vec![topology.faces[0].id.clone()]);
     assert_eq!(surface.shells[0].open_edge_count, 1);
+    cooperative_codec::verify(&outcome, &topology, &curves);
     let encoded = encode_exact_face_partition_result(&outcome, &topology, &curves).unwrap();
     assert_eq!(
         crate::decode_exact_face_partition_result(&encoded, &topology, &curves).unwrap(),
@@ -182,6 +261,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         },
     )
     .unwrap();
+    cooperative_codec::verify(&restart, &topology, &curves);
     let restart_bytes = encode_exact_face_partition_result(&restart, &topology, &curves).unwrap();
     assert_eq!(
         crate::decode_exact_face_partition_result(&restart_bytes, &topology, &curves).unwrap(),
@@ -207,6 +287,7 @@ fn complete_face_partition_runs_the_exact_surface_pipeline() {
         ExactSurfaceJoinOptions::default(),
     )
     .is_err());
+    cooperative_join::verify(&restart_pass, &sheet_topology, &curves, &restart_results);
     let restart_pass_bytes = encode_exact_surface_pass_result(
         &restart_pass,
         &sheet_topology,
@@ -425,6 +506,7 @@ fn curve_split_demands_have_one_canonical_order() {
 
 fn permissive_quality() -> SurfaceQualityTargets {
     SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.001,
         minimum_metric_angle_degrees: 0.01,
         maximum_physical_aspect_ratio: 1.0e9,
         maximum_chordal_deviation_m: 1.0e9,

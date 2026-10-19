@@ -168,24 +168,7 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
             "callable inventory references a source outside the bundle".into(),
         ));
     }
-    for (name, value) in &bundle.manifest.portable_environment {
-        let upper = name.to_ascii_uppercase();
-        if name.is_empty()
-            || name.len() > 128
-            || value.len() > 4096
-            || !name.is_ascii()
-            || !value.is_ascii()
-            || name.chars().any(char::is_control)
-            || value.chars().any(char::is_control)
-            || ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"]
-                .iter()
-                .any(|marker| upper.contains(marker))
-        {
-            return Err(ArtifactError::Invalid(
-                "portable environment contains an invalid or secret-bearing entry".into(),
-            ));
-        }
-    }
+    crate::environment::validate(&bundle.manifest.portable_environment)?;
     Ok(())
 }
 
@@ -260,9 +243,11 @@ fn validate_code_closure(bundle: &ExecutionBundle) -> ArtifactResult<()> {
                 || bundle.manifest.artifacts.iter().any(|artifact| {
                     !matches!(
                         artifact.form,
-                        crate::ExecutableForm::ExecutableUnitV3
+                        crate::ExecutableForm::ExecutableUnitV4
                             | crate::ExecutableForm::NativeObjectV1
                             | crate::ExecutableForm::MeshingWorkload
+                            | crate::ExecutableForm::AnalysisWorkload
+                            | crate::ExecutableForm::GeometryWorkload
                     )
                 })
             {

@@ -47,6 +47,10 @@ pub(crate) mod provider_operation;
 pub(crate) mod document_test_support;
 #[cfg(test)]
 pub(crate) mod physical_test_support;
+mod environment;
+mod portable_host;
+pub(crate) use portable_host::{accepts_queued_interaction, check_active_host};
+pub use portable_host::{NonCapturingPortableHost, PortableConsoleHost, PortableConsoleSink};
 mod runtime;
 #[cfg(feature = "plot-core")]
 pub(crate) use runtime::BackgroundCallbackAuthority;
@@ -161,6 +165,7 @@ pub use services::{
     RuntimeSpmdRetainedOutput, RuntimeSpmdService, RuntimeWholeWorkObservationAuthority,
     RuntimeWholeWorkObservationPermit, RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection,
     RuntimeWorkspaceService,
+    RuntimeAnalysisService, RuntimeProgramCallable, RuntimeProgramService, RuntimeSignalMaterializationRequest,
 };
 pub use source_evaluation::{
     execute_assignin_effect, execute_selected_dynamic_workspace, DynamicWorkspaceInvocation,

@@ -158,10 +158,16 @@ impl std::error::Error for GeometryEvaluationError {}
 /// kernel-backed evaluation remains cancellable and bounded without geometry
 /// owning jobs.
 pub trait GeometryEvaluationControl: Send + Sync {
+    // Preserve the actual probe site for cheap execution diagnostics.
+    #[track_caller]
     fn checkpoint(&self) -> Result<(), GeometryEvaluationError>;
     fn consume_iterations(&self, count: u64) -> Result<(), GeometryEvaluationError>;
     fn consume_search_work(&self, count: u64) -> Result<(), GeometryEvaluationError>;
     fn consume_allocation_bytes(&self, count: u64) -> Result<(), GeometryEvaluationError>;
+    /// Release a successful allocation charge after its storage has been dropped.
+    /// Legacy cumulative controls may keep the charge conservatively. Callers must
+    /// release only their own successful charge, exactly once.
+    fn release_allocation_bytes(&self, _count: u64) {}
 }
 
 pub trait ExactCurveEvaluator: Send + Sync {

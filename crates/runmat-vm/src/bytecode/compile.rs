@@ -749,6 +749,7 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
         | MirRvalue::Colon
         | MirRvalue::End
         | MirRvalue::Future { .. }
+        | MirRvalue::ExternalFuture { .. }
         | MirRvalue::Spawn(_)
         | MirRvalue::Distributed(_)
         | MirRvalue::Collective(_) => false,

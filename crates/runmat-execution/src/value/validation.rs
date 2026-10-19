@@ -1,4 +1,4 @@
-use super::{ValueLimits, ValuePayload, ValueTransportContext};
+use super::{ValueLimits, ValuePayload, ValueRef, ValueTransportContext};
 use crate::ContractError;
 use std::num::NonZeroUsize;
 
@@ -10,6 +10,12 @@ pub(super) fn validate(value: &ValuePayload, limits: ValueLimits) -> Result<(), 
         std::slice::from_ref(value),
         limits,
     ))
+}
+pub(super) fn validate_reference(
+    reference: &ValueRef,
+    limits: ValueLimits,
+) -> Result<(), ContractError> {
+    validate(&ValuePayload::Object(Box::new(reference.clone())), limits)
 }
 pub(super) fn validate_all(
     values: &[ValuePayload],

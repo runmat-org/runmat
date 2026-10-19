@@ -1,49 +1,42 @@
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap};
 #[cfg(test)]
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use runmat_execution::identity::{ArtifactId, WorkerId};
+use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
-use runmat_execution::state::{PoolState, TaskState};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{GraphRequiredSchema, ValuePayload};
 use runmat_execution::{
-    CancellationReason, Digest, ExecutionScopeId, OutputContract, PoolId, ProgramCallable,
-    ProgramInvocationContext, TaskId,
+    CancellationReason, ExecutionScopeId, OutputContract, PoolId, ProgramCallable, TaskId,
 };
 use runmat_execution_artifact::{
-    GraphExecutionRequest, GraphResponseAuthority, ProgramArtifact, ProgramBuildRecipe,
-    ProgramExecutionDescriptor, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+    GraphExecutionRequest, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
-    AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction,
-    DriverCommand, DriverConfig, PoolSpec, TaskSubmission, WorkerSpec,
+    AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction, DriverCommand,
+    DriverConfig, TaskSubmission,
 };
 
 pub(crate) mod collective;
 mod process;
 
-use crate::local_store::{
-    prepare_session_root, ArtifactStore, CheckpointStore, StreamedGraphArtifact,
-};
+mod clock;
+mod completion;
+mod persistence;
+pub(crate) use completion::{next_task_completion_order, TaskCompletion};
+
+use crate::local_store::{prepare_session_root, ArtifactStore, CheckpointStore};
 use crate::protocol::{StoredDirectProgram, StoredProgram};
 use crate::{
-    NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeObjectStore,
+    FilesystemObjectStore, NativeExecutionConfig, NativeExecutionError, NativeExecutionResult,
 };
 
-pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
 pub const NATIVE_ARTIFACT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_ARTIFACT_STORE_ROOT";
 pub const NATIVE_GRAPH_ATTEMPT_SCRATCH_ENV: &str = "RUNMAT_GRAPH_ATTEMPT_SCRATCH_ROOT";
-const MAX_BUFFERED_PROGRESS: usize = 256;
-const NO_COMPLETION_ORDER: u64 = u64::MAX;
-static NEXT_TASK_COMPLETION_ORDER: AtomicU64 = AtomicU64::new(0);
-
-pub(crate) fn next_task_completion_order() -> u64 {
-    NEXT_TASK_COMPLETION_ORDER.fetch_add(1, Ordering::Relaxed)
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TransferFailure {
@@ -79,6 +72,8 @@ pub(crate) struct LocalProgramSubmission {
     pub(crate) inputs: Vec<ValuePayload>,
     pub(crate) outputs: OutputContract,
     pub(crate) retry: RetryPolicy,
+    pub(crate) environment: runmat_execution::EnvironmentSnapshot,
+    pub(crate) console: Option<runmat_execution::console::ConsoleLimits>,
 }
 
 pub(crate) struct LocalGraphSubmission {
@@ -87,149 +82,17 @@ pub(crate) struct LocalGraphSubmission {
     pub(crate) retry: RetryPolicy,
 }
 
-pub(crate) struct TaskCompletion {
-    value: Mutex<Option<TransferResult>>,
-    progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
-    cancellation: runmat_execution::cancellation::CancellationSource,
-    launch_state: std::sync::atomic::AtomicU8,
-    completion_order: AtomicU64,
-    graph_authority: Option<GraphAttemptAuthority>,
-}
-
-pub(crate) struct GraphAttemptAuthority {
-    artifact_id: ArtifactId,
-    stored_digest: Digest,
-    stored_length: u64,
-    context: ProgramInvocationContext,
-    requested_outputs: u16,
-    callable: ProgramCallable,
-    response: GraphResponseAuthority,
-}
-
-impl TaskCompletion {
-    fn new() -> Self {
-        Self {
-            value: Mutex::new(None),
-            progress: Mutex::new(VecDeque::new()),
-            cancellation: runmat_execution::cancellation::CancellationSource::new(),
-            launch_state: std::sync::atomic::AtomicU8::new(0),
-            completion_order: AtomicU64::new(NO_COMPLETION_ORDER),
-            graph_authority: None,
-        }
-    }
-
-    fn new_graph(
-        stored: StreamedGraphArtifact,
-        context: ProgramInvocationContext,
-        requested_outputs: u16,
-        callable: ProgramCallable,
-        response: GraphResponseAuthority,
-    ) -> Self {
-        let mut completion = Self::new();
-        completion.graph_authority = Some(GraphAttemptAuthority {
-            artifact_id: stored.id,
-            stored_digest: stored.digest,
-            stored_length: stored.length,
-            context,
-            requested_outputs,
-            callable,
-            response,
-        });
-        completion
-    }
-
-    pub(crate) fn try_value(&self) -> Option<TransferResult> {
-        self.value.lock().expect("task completion poisoned").clone()
-    }
-
-    pub(crate) fn verified_terminal(&self) -> Option<bool> {
-        self.value
-            .lock()
-            .expect("task completion poisoned")
-            .as_ref()
-            .map(|result| !matches!(result, Err(TransferFailure::RetirementUnverified(_))))
-    }
-
-    pub(crate) fn cancel(&self) {
-        self.cancel_with_reason(CancellationReason::User);
-    }
-
-    pub(crate) fn cancel_with_reason(&self, reason: CancellationReason) {
-        self.cancellation.cancel(reason);
-        // A Graph worker may still be executing foreign shutdown callbacks.
-        // Its terminal order is published only by complete(), after the
-        // process driver has observed cleanup or killed and reaped the child.
-        if self.graph_authority.is_none() {
-            self.mark_completed();
-        }
-    }
-
-    pub(crate) fn is_cancelled(&self) -> bool {
-        self.cancellation.token().is_cancelled()
-    }
-
-    pub(crate) fn cancellation_reason(&self) -> Option<CancellationReason> {
-        self.cancellation.token().reason()
-    }
-
-    pub(crate) fn completion_order(&self) -> Option<u64> {
-        let order = self.completion_order.load(Ordering::Acquire);
-        (order != NO_COMPLETION_ORDER).then_some(order)
-    }
-
-    pub(crate) fn record_progress(&self, progress: crate::protocol::ProgramProgress) {
-        let mut buffered = self.progress.lock().expect("task progress poisoned");
-        if buffered.len() == MAX_BUFFERED_PROGRESS {
-            buffered.pop_front();
-        }
-        buffered.push_back(progress);
-    }
-
-    pub(crate) fn drain_progress(&self) -> Vec<crate::protocol::ProgramProgress> {
-        self.progress
-            .lock()
-            .expect("task progress poisoned")
-            .drain(..)
-            .collect()
-    }
-
-    fn complete(&self, value: TransferResult) {
-        let mut result = self.value.lock().expect("task completion poisoned");
-        if result.is_none() {
-            *result = Some(value);
-            self.mark_completed();
-        }
-    }
-
-    fn complete_cancelled_if_no_active_attempt(&self) {
-        if self
-            .launch_state
-            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            self.complete(Err(TransferFailure::Cancelled));
-        }
-    }
-
-    fn mark_completed(&self) {
-        let _ = self.completion_order.compare_exchange(
-            NO_COMPLETION_ORDER,
-            next_task_completion_order(),
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
-    }
-}
-
 pub(crate) struct LocalDriver {
     config: NativeExecutionConfig,
-    store_root: std::path::PathBuf,
+    clock: clock::DriverClock,
+    store_lifetime: Arc<crate::program_object_source::SessionStoreLifetime>,
     scope_id: ExecutionScopeId,
     pool_id: PoolId,
     driver: Mutex<Driver>,
     artifacts: ArtifactStore,
-    objects: NativeObjectStore,
+    objects: FilesystemObjectStore,
     checkpoints: CheckpointStore,
+    checkpoint_evidence: Mutex<crate::NativeCheckpointEvidence>,
     /// An unverified Graph process tree keeps its exact parent-owned scratch
     /// and child handle until shutdown; new work is refused while unhealthy.
     graph_quarantine: Mutex<Vec<process::GraphProcessQuarantine>>,
@@ -275,64 +138,28 @@ impl LocalDriver {
                 "remote Graph wall-clock allocation must be nonzero".into(),
             ));
         }
-        let pool_id = PoolId::derive(&[scope_id.bytes(), b"local"]);
-        let cpu = config.max_workers.saturating_mul(1000);
-        let memory = u64::from(config.max_workers).saturating_mul(1024 * 1024 * 1024);
-        let resources = remote_graph_inventory
-            .clone()
-            .unwrap_or_else(|| ResourceInventory {
-                cpu_millicores: cpu,
-                memory_bytes: memory,
-                scratch_bytes: memory,
-                accelerators: config.accelerator_devices.clone(),
-                capabilities: config.worker_capabilities.clone(),
-            });
         let mut driver = Driver::new(DriverConfig::default(), 1)?;
-        driver.handle(DriverCommand::RegisterScope {
+        let pool_id = crate::native_pool::register_with_inventory(
+            &mut driver,
+            &config,
             scope_id,
-            parent: None,
-        })?;
-        driver.handle(DriverCommand::CreatePool(PoolSpec {
-            id: pool_id,
-            min_workers: 1,
-            max_workers: config.max_workers,
-            max_in_flight: config.max_workers,
-            resource_limit: resources.clone(),
-        }))?;
-        driver.handle(DriverCommand::SetPoolState {
-            pool_id,
-            state: PoolState::Ready,
-        })?;
-        for index in 0..config.max_workers {
-            let index_bytes = index.to_be_bytes();
-            let worker_id = WorkerId::derive(&[pool_id.bytes().as_slice(), &index_bytes]);
-            driver.handle(DriverCommand::RegisterWorker(WorkerSpec {
-                id: worker_id,
-                pool_id,
-                resources: remote_graph_inventory
-                    .clone()
-                    .unwrap_or_else(|| ResourceInventory {
-                        cpu_millicores: 1000,
-                        memory_bytes: 1024 * 1024 * 1024,
-                        scratch_bytes: 1024 * 1024 * 1024,
-                        accelerators: if index == 0 {
-                            config.accelerator_devices.clone()
-                        } else {
-                            Vec::new()
-                        },
-                        capabilities: config.worker_capabilities.clone(),
-                    }),
-                host: config.host_inventory.clone(),
-            }))?;
-        }
+            remote_graph_inventory.as_ref(),
+        )?;
         prepare_session_root(&config.store_root)?;
+        let store_lifetime =
+            crate::program_object_source::SessionStoreLifetime::new(config.store_root.clone());
         let artifacts = ArtifactStore::new(config.store_root.join("artifacts"))?;
         let objects =
-            NativeObjectStore::open(config.store_root.join("objects"), config.max_object_bytes)
+            FilesystemObjectStore::open(config.store_root.join("objects"), config.max_object_bytes)
                 .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let checkpoints = CheckpointStore::new(config.store_root.join("checkpoints"))?;
+        let clock = clock::DriverClock::new()?;
+        driver.handle(DriverCommand::Tick {
+            now_millis: clock.now_millis(),
+        })?;
         let local = Arc::new(Self {
-            store_root: config.store_root.clone(),
+            store_lifetime,
+            clock,
             config,
             scope_id,
             pool_id,
@@ -340,6 +167,9 @@ impl LocalDriver {
             artifacts,
             objects,
             checkpoints,
+            checkpoint_evidence: Mutex::new(crate::NativeCheckpointEvidence::NotPublished {
+                diagnostic: "initial snapshot has not been published".into(),
+            }),
             graph_quarantine: Mutex::new(Vec::new()),
             remote_graph_inventory,
             remote_graph_max_wall_millis,
@@ -349,11 +179,19 @@ impl LocalDriver {
             fail_next_checkpoint: AtomicBool::new(false),
         });
         local.checkpoint()?;
+        clock::start(&local)?;
         Ok(local)
     }
 
-    pub(crate) fn object_store(&self) -> NativeObjectStore {
+    pub(crate) fn object_store(&self) -> FilesystemObjectStore {
         self.objects.clone()
+    }
+
+    pub(crate) fn object_source(&self) -> crate::NativeProgramObjectSource {
+        crate::NativeProgramObjectSource::new(
+            self.objects.clone(),
+            Arc::clone(&self.store_lifetime),
+        )
     }
 
     pub(crate) const fn scope_id(&self) -> ExecutionScopeId {
@@ -409,7 +247,17 @@ impl LocalDriver {
             inputs,
             outputs,
             retry,
+            environment,
+            console,
         } = submission;
+        let context_bytes =
+            runmat_execution::console::invocation_memory_bytes(&environment, console)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let memory_bytes = (1024_u64 * 1024)
+            .checked_add(context_bytes)
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("invocation memory reservation overflow".into())
+            })?;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
         let host = artifact
             .execution_host_requirement(
@@ -428,10 +276,12 @@ impl LocalDriver {
             host,
             invocation_context,
             inputs,
+            environment,
+            console,
             outputs,
             resources: ResourceRequest {
                 cpu_millicores: 1000,
-                memory_bytes: 1024 * 1024,
+                memory_bytes,
                 scratch_bytes: 1024 * 1024,
                 max_wall_millis: 24 * 60 * 60 * 1000,
                 max_artifact_bytes: u64::from(self.config.max_message_bytes),
@@ -460,26 +310,44 @@ impl LocalDriver {
         recipe: ProgramBuildRecipe,
         artifact: ProgramArtifact,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        self.submit_tasks(vec![(submission, recipe, artifact)])?
+            .pop()
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("local task admission returned no completion".into())
+            })
+    }
+
+    /// Atomically admits a topologically ordered batch before dispatching any task.
+    pub(crate) fn submit_tasks(
+        self: &Arc<Self>,
+        tasks: Vec<(TaskSubmission, ProgramBuildRecipe, ProgramArtifact)>,
+    ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
         self.ensure_no_graph_quarantine()?;
-        let callable = &submission.request.callable.program;
-        ProgramExecutionDescriptor {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
-            recipe: recipe.clone(),
-            artifact: artifact.clone(),
-            callable: callable.clone(),
-            requested_outputs: submission.request.outputs.requested_outputs,
+        let mut registrations = Vec::with_capacity(tasks.len());
+        for (submission, recipe, artifact) in tasks {
+            ProgramExecutionDescriptor {
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+                recipe: recipe.clone(),
+                artifact: artifact.clone(),
+                callable: submission.request.callable.program.clone(),
+                requested_outputs: submission.request.outputs.requested_outputs,
+                environment: submission.request.environment.clone(),
+                console: submission.request.console,
+            }
+            .validate_for_portable_host()
+            .map_err(|error| {
+                NativeExecutionError::Protocol(format!(
+                    "local program descriptor failed validation: {error}"
+                ))
+            })?;
+            let stored_program =
+                StoredProgram::Direct(Box::new(StoredDirectProgram { recipe, artifact }));
+            let encoded = serde_json::to_vec(&stored_program)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+            self.stage_stored_task(&submission, &stored_program, &encoded)?;
+            registrations.push((submission, Arc::new(TaskCompletion::new())));
         }
-        .validate_for_portable_host()
-        .map_err(|error| {
-            NativeExecutionError::Protocol(format!(
-                "local program descriptor failed validation: {error}"
-            ))
-        })?;
-        let stored_program =
-            StoredProgram::Direct(Box::new(StoredDirectProgram { recipe, artifact }));
-        let encoded = serde_json::to_vec(&stored_program)
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        self.submit_stored_task(submission, stored_program, encoded)
+        self.publish_submissions(registrations)
     }
 
     pub(crate) fn submit_graph(
@@ -546,6 +414,8 @@ impl LocalDriver {
             host,
             invocation_context: invocation_context.clone(),
             inputs: Vec::new(),
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
             outputs: recipe.outputs.clone(),
             resources: ResourceRequest {
                 cpu_millicores: 1000,
@@ -592,23 +462,28 @@ impl LocalDriver {
             callable,
             response_authority,
         ));
-        self.publish_submission(
+        self.publish_submissions(vec![(
             TaskSubmission {
                 request,
                 dependencies: BTreeSet::new(),
                 priority: 0,
             },
             completion,
-        )
+        )])?
+        .pop()
+        .ok_or_else(|| {
+            NativeExecutionError::Protocol("local graph admission returned no completion".into())
+        })
     }
 
-    fn submit_stored_task(
-        self: &Arc<Self>,
-        submission: TaskSubmission,
-        stored_program: StoredProgram,
-        stored: Vec<u8>,
-    ) -> NativeExecutionResult<Arc<TaskCompletion>> {
-        let (recipe, artifact) = match &stored_program {
+    /// Validate one stored program against its placement and stage its bytes.
+    fn stage_stored_task(
+        &self,
+        submission: &TaskSubmission,
+        stored_program: &StoredProgram,
+        stored: &[u8],
+    ) -> NativeExecutionResult<()> {
+        let (recipe, artifact) = match stored_program {
             StoredProgram::Direct(stored) => (&stored.recipe, &stored.artifact),
             StoredProgram::Graph(stored) => (&stored.request.recipe, &stored.request.artifact),
         };
@@ -624,9 +499,9 @@ impl LocalDriver {
                 "stored worker request exceeds the message bound".into(),
             ));
         }
-        let artifact_id = match &stored_program {
+        let artifact_id = match stored_program {
             StoredProgram::Direct(_) => ArtifactId::derive(&[artifact.id.0.bytes()]),
-            StoredProgram::Graph(_) => ArtifactId::derive(&[b"graph-worker-request-v8", &stored]),
+            StoredProgram::Graph(_) => ArtifactId::derive(&[b"graph-worker-request-v8", stored]),
         };
         if submission.request.scope_id != self.scope_id
             || submission.request.pool_id != self.pool_id
@@ -641,7 +516,7 @@ impl LocalDriver {
                 "local task submission differs from its session or program artifact".into(),
             ));
         }
-        if let StoredProgram::Graph(stored) = &stored_program {
+        if let StoredProgram::Graph(stored) = stored_program {
             if submission.request.callable.program
                 != stored
                     .request
@@ -662,32 +537,94 @@ impl LocalDriver {
             .program
             .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        self.artifacts.put(artifact_id, &stored)?;
-        let completion = Arc::new(TaskCompletion::new());
-        self.publish_submission(submission, completion)
+        self.artifacts.put(artifact_id, stored)
     }
 
-    fn publish_submission(
+    /// Register and admit a batch atomically: either every task is accepted
+    /// and its snapshot published, or the scheduler and registry are restored.
+    fn publish_submissions(
         self: &Arc<Self>,
-        submission: TaskSubmission,
-        completion: Arc<TaskCompletion>,
-    ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        registrations: Vec<(TaskSubmission, Arc<TaskCompletion>)>,
+    ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
+        if registrations.is_empty() {
+            return Err(NativeExecutionError::Protocol(
+                "local task submission batch must not be empty".into(),
+            ));
+        }
         // Recheck after staging: a different attempt may have entered
         // quarantine while this submission was being encoded.
         self.ensure_no_graph_quarantine()?;
-        let task_id = submission.request.id;
-        self.completions
+        let mut completions = self
+            .completions
             .lock()
-            .expect("completion registry poisoned")
-            .insert(task_id, Arc::clone(&completion));
-        let actions = self
-            .driver
-            .lock()
-            .expect("local driver poisoned")
-            .handle(DriverCommand::Submit(Box::new(submission)))?;
-        self.checkpoint()?;
+            .expect("completion registry poisoned");
+        let mut unique = BTreeSet::new();
+        if registrations.iter().any(|(submission, _)| {
+            !unique.insert(submission.request.id)
+                || completions.contains_key(&submission.request.id)
+        }) {
+            return Err(NativeExecutionError::Protocol(
+                "local task batch contains a duplicate or registered task".into(),
+            ));
+        }
+        for (submission, completion) in &registrations {
+            completions.insert(submission.request.id, Arc::clone(completion));
+        }
+        let (actions, inherited_terminals, checkpoint) = {
+            let mut driver = self.driver.lock().expect("local driver poisoned");
+            let prior = driver.snapshot();
+            let submissions = registrations
+                .iter()
+                .map(|(submission, _)| submission.clone())
+                .collect();
+            let actions = match driver.handle(DriverCommand::SubmitBatch(submissions)) {
+                Ok(actions) => actions,
+                Err(error) => {
+                    for (submission, _) in &registrations {
+                        completions.remove(&submission.request.id);
+                    }
+                    return Err(error.into());
+                }
+            };
+            let snapshot = driver.snapshot();
+            let checkpoint = match self.persist_snapshot(&snapshot) {
+                Ok(checkpoint) => checkpoint,
+                Err(error) => {
+                    // Err means the shared atomic operation did not publish.
+                    // Visible-but-uncertain publication is not rolled back.
+                    driver.restore_snapshot(prior)?;
+                    for (submission, _) in &registrations {
+                        completions.remove(&submission.request.id);
+                    }
+                    return Err(error);
+                }
+            };
+            let terminal = registrations
+                .iter()
+                .filter_map(|(submission, completion)| {
+                    let task_id = submission.request.id;
+                    let state = snapshot.tasks.get(&task_id)?.state;
+                    completion::from_task_snapshot(
+                        &snapshot,
+                        task_id,
+                        Err(TransferFailure::Execution(format!(
+                            "local task inherited terminal dependency state {state:?}"
+                        ))),
+                    )
+                    .map(|original| (Arc::clone(completion), original))
+                })
+                .collect::<Vec<_>>();
+            (actions, terminal, checkpoint)
+        };
+        drop(completions);
+        for (completion, original) in inherited_terminals {
+            completion.complete(original, checkpoint.clone());
+        }
         Self::dispatch(Arc::clone(self), actions);
-        Ok(completion)
+        Ok(registrations
+            .into_iter()
+            .map(|(_, completion)| completion)
+            .collect())
     }
 
     fn ensure_no_graph_quarantine(&self) -> NativeExecutionResult<()> {
@@ -718,17 +655,13 @@ impl LocalDriver {
                 completion.cancel_with_reason(reason);
             }
         }
-        let actions = self
-            .driver
-            .lock()
-            .expect("local driver poisoned")
-            .handle(DriverCommand::CancelScope {
-                scope_id: self.scope_id,
-                reason,
-                now_millis: runmat_time_millis(),
-            })
-            .unwrap_or_default();
-        Self::dispatch(Arc::clone(self), actions);
+        let now_millis = self.clock.now_millis();
+        self.apply_cancellation(DriverCommand::CancelScope {
+            scope_id: self.scope_id,
+            reason,
+            now_millis,
+        })
+        .expect("native cancellation uses an admitted scope and monotonic driver clock");
         // Active Graph cancellation authority is first registered in the
         // scheduler; otherwise the child could report its verified tree
         // retirement before the scheduler knows cancellation was requested.
@@ -737,34 +670,16 @@ impl LocalDriver {
                 completion.cancel_with_reason(reason);
             }
         }
-        let snapshot = self
-            .driver
-            .lock()
-            .expect("local driver poisoned")
-            .snapshot();
-        let completions = self
-            .completions
-            .lock()
-            .expect("completion registry poisoned")
-            .iter()
-            .filter(|(id, _)| {
-                snapshot
-                    .tasks
-                    .get(id)
-                    .is_some_and(|task| task.state == TaskState::Cancelled)
-            })
-            .map(|(_, completion)| Arc::clone(completion))
-            .collect::<Vec<_>>();
-        for completion in completions {
-            completion.complete_cancelled_if_no_active_attempt();
-        }
-        let _ = self.checkpoint();
     }
 
     /// Cancel a single accepted task, including an attempt that raced ahead of
     /// publication of its service-level TaskHandle. Unknown task IDs were not
     /// admitted and require no scheduler cancellation.
-    pub(crate) fn cancel_task(self: &Arc<Self>, task_id: TaskId) -> NativeExecutionResult<bool> {
+    pub(crate) fn cancel_task(
+        self: &Arc<Self>,
+        task_id: TaskId,
+        reason: CancellationReason,
+    ) -> NativeExecutionResult<bool> {
         let completion = self
             .completions
             .lock()
@@ -773,46 +688,79 @@ impl LocalDriver {
             .cloned();
         if let Some(completion) = &completion {
             if completion.graph_authority.is_none() {
-                completion.cancel();
+                completion.cancel_with_reason(reason);
             }
         }
-        let actions = {
-            let mut driver = self.driver.lock().expect("local driver poisoned");
-            match driver.handle(DriverCommand::CancelTask {
-                task_id,
-                now_millis: runmat_time_millis(),
-            }) {
-                Ok(actions) => actions,
-                Err(runmat_execution_runner::RunnerError::UnknownTask(id)) if id == task_id => {
-                    drop(driver);
-                    self.completions
-                        .lock()
-                        .expect("completion registry poisoned")
-                        .remove(&task_id);
-                    return Ok(false);
-                }
-                Err(error) => return Err(error.into()),
+        let now_millis = self.clock.now_millis();
+        match self.apply_cancellation(DriverCommand::CancelTask {
+            task_id,
+            reason,
+            now_millis,
+        }) {
+            Ok(()) => {}
+            Err(NativeExecutionError::Driver(
+                runmat_execution_runner::RunnerError::UnknownTask(id),
+            )) if id == task_id => {
+                self.completions
+                    .lock()
+                    .expect("completion registry poisoned")
+                    .remove(&task_id);
+                return Ok(false);
             }
-        };
-        Self::dispatch(Arc::clone(self), actions);
+            Err(error) => return Err(error),
+        }
         if let Some(completion) = completion {
             if completion.graph_authority.is_some() {
-                completion.cancel();
-            }
-            let cancelled = self
-                .driver
-                .lock()
-                .expect("local driver poisoned")
-                .snapshot()
-                .tasks
-                .get(&task_id)
-                .is_some_and(|task| task.state == TaskState::Cancelled);
-            if cancelled {
-                completion.complete_cancelled_if_no_active_attempt();
+                completion.cancel_with_reason(reason);
             }
         }
-        self.checkpoint()?;
         Ok(true)
+    }
+
+    /// Apply one scheduler cancellation decision, persist it, and publish every
+    /// task whose complete terminal history it established.
+    fn apply_cancellation(
+        self: &Arc<Self>,
+        mut command: DriverCommand,
+    ) -> NativeExecutionResult<()> {
+        let completions = self
+            .completions
+            .lock()
+            .expect("completion registry poisoned")
+            .iter()
+            .map(|(id, completion)| (*id, Arc::clone(completion)))
+            .collect::<Vec<_>>();
+        let (actions, terminal, checkpoint) = {
+            let mut driver = self.driver.lock().expect("local driver poisoned");
+            match &mut command {
+                DriverCommand::CancelTask { now_millis, .. }
+                | DriverCommand::CancelScope { now_millis, .. } => {
+                    *now_millis = (*now_millis).max(driver.now_millis())
+                }
+                _ => unreachable!("cancellation command constructed by this adapter"),
+            }
+            let actions = driver.handle(command)?;
+            let snapshot = driver.snapshot();
+            let checkpoint = self.persist_observed_snapshot(&snapshot);
+            let terminal = completions
+                .into_iter()
+                .filter_map(|(id, completion)| {
+                    completion::from_task_snapshot(&snapshot, id, Err(TransferFailure::Cancelled))
+                        .map(|original| (completion, original))
+                })
+                .collect::<Vec<_>>();
+            (actions, terminal, checkpoint)
+        };
+        for (completion, original) in terminal {
+            let cancelled = matches!(original.result, Err(TransferFailure::Cancelled));
+            completion.complete(original, checkpoint.clone());
+            if cancelled {
+                // A queued cancellation must not race a later child launch.
+                completion.complete_cancelled_if_no_active_attempt(checkpoint.clone());
+            }
+        }
+        Self::dispatch(Arc::clone(self), actions);
+        Ok(())
     }
 
     pub(crate) fn fail_collective_gang(
@@ -847,7 +795,7 @@ impl LocalDriver {
                     }
                 }
                 DriverAction::Checkpoint => {
-                    let _ = this.checkpoint();
+                    this.checkpoint_observed();
                 }
                 DriverAction::ResizePool { .. } | DriverAction::GarbageCollectResults { .. } => {}
             }
@@ -884,7 +832,7 @@ impl LocalDriver {
                 }
                 _ => None,
             };
-            let result = process::execute_attempt(&this, &request, &completion);
+            let observed = process::execute_attempt(&this, &request, &completion);
             // Only this process owner can certify that a cancelled Graph
             // attempt has no live worker tree or foreign callback. Every
             // non-unverified result from execute_attempt has passed the
@@ -898,62 +846,29 @@ impl LocalDriver {
                     .attempts
                     .get(&request.id)
                     .is_some_and(|attempt| attempt.cancellation_requested_at.is_some());
-            let verified_graph_cancel = completion.graph_authority.is_some()
-                && graph_cancel_registered
-                && !matches!(&result, Err(TransferFailure::RetirementUnverified(_)));
-            let report = if verified_graph_cancel {
-                AttemptReport::GraphRetiredCancelled
-            } else {
-                match &result {
-                    Ok(success) => AttemptReport::Succeeded {
-                        result: success.clone(),
-                    },
-                    Err(TransferFailure::Execution(message)) => AttemptReport::Failed {
-                        kind: AttemptFailureKind::Execution,
-                        message: message.clone(),
-                    },
-                    Err(TransferFailure::Infrastructure(message)) => AttemptReport::Failed {
-                        kind: AttemptFailureKind::Infrastructure,
-                        message: message.clone(),
-                    },
-                    Err(TransferFailure::WorkerLost(message)) => AttemptReport::Lost {
-                        message: message.clone(),
-                    },
-                    Err(TransferFailure::RetirementUnverified(message)) => {
-                        AttemptReport::RetirementUnverified {
-                            message: message.clone(),
-                        }
-                    }
-                    Err(TransferFailure::Cancelled) => AttemptReport::Cancelled,
-                    Err(TransferFailure::Runtime(failure)) => AttemptReport::RuntimeFailed {
-                        failure: *failure.clone(),
-                    },
-                }
+            let verified_graph_cancel = graph_cancel_registered
+                && !matches!(
+                    &observed.result,
+                    Err(TransferFailure::RetirementUnverified(_))
+                );
+            let (result, report) = observed.into_backend_report(&request, verified_graph_cancel);
+            let (actions, snapshot, checkpoint) = {
+                let mut driver = this.driver.lock().expect("local driver poisoned");
+                let actions = driver
+                    .handle(DriverCommand::BackendReport(report))
+                    .unwrap_or_default();
+                let snapshot = driver.snapshot();
+                let checkpoint = this.persist_observed_snapshot(&snapshot);
+                (actions, snapshot, checkpoint)
             };
-            let actions = this
-                .driver
-                .lock()
-                .expect("local driver poisoned")
-                .handle(DriverCommand::BackendReport(BackendReport::for_request(
-                    &request, report,
-                )))
-                .unwrap_or_default();
-            let terminal_state = this
-                .driver
-                .lock()
-                .expect("local driver poisoned")
-                .snapshot()
-                .tasks
-                .get(&request.task_id)
-                .map(|task| task.state);
-            if let Some(result) = terminal_completion(terminal_state, result) {
-                completion.complete(result);
-                if let Some(gang) = spmd_gang {
-                    if completion.try_value().is_some_and(|result| result.is_err()) {
-                        // Publish the originating task result before releasing
-                        // peers blocked in this gang's collectives.
-                        this.collectives.fail_gang(&gang, "an SPMD peer failed");
-                    }
+            if let Some(terminal) = completion::from_snapshot(&snapshot, &request, result) {
+                let failed = terminal.result.is_err();
+                // Original execution remains intact even if durable delivery fails.
+                completion.complete(terminal, checkpoint.clone());
+                if let (true, Some(gang)) = (failed, spmd_gang) {
+                    // Publish the originating task result before releasing
+                    // peers blocked in this gang's collectives.
+                    this.collectives.fail_gang(&gang, "an SPMD peer failed");
                 }
             }
             let _ =
@@ -961,27 +876,10 @@ impl LocalDriver {
                     .launch_state
                     .compare_exchange(1, 0, Ordering::AcqRel, Ordering::Acquire);
             if completion.is_cancelled() {
-                completion.complete_cancelled_if_no_active_attempt();
+                completion.complete_cancelled_if_no_active_attempt(checkpoint);
             }
-            let _ = this.checkpoint();
             Self::dispatch(Arc::clone(&this), actions);
         });
-    }
-
-    fn checkpoint(&self) -> NativeExecutionResult<()> {
-        #[cfg(test)]
-        if self.fail_next_checkpoint.swap(false, Ordering::AcqRel) {
-            return Err(NativeExecutionError::Protocol(
-                "injected post-accept checkpoint failure".into(),
-            ));
-        }
-        self.checkpoints.write(
-            &self
-                .driver
-                .lock()
-                .expect("local driver poisoned")
-                .snapshot(),
-        )
     }
 
     #[cfg(test)]
@@ -998,25 +896,6 @@ impl LocalDriver {
     }
 }
 
-fn terminal_completion(state: Option<TaskState>, result: TransferResult) -> Option<TransferResult> {
-    if matches!(
-        state,
-        Some(TaskState::Cancelled | TaskState::Failed | TaskState::Indeterminate)
-    ) && matches!(&result, Err(TransferFailure::RetirementUnverified(_)))
-    {
-        return Some(result);
-    }
-    match state? {
-        TaskState::Succeeded | TaskState::Failed | TaskState::Indeterminate => Some(result),
-        TaskState::Cancelled => Some(Err(TransferFailure::Cancelled)),
-        TaskState::Deferred
-        | TaskState::Ready
-        | TaskState::Assigned
-        | TaskState::Running
-        | TaskState::Committing => None,
-    }
-}
-
 impl Drop for LocalDriver {
     fn drop(&mut self) {
         let quarantine = self
@@ -1027,17 +906,9 @@ impl Drop for LocalDriver {
         if !process::persist_unverified_quarantine(quarantine) {
             // A private scratch whose tree could not be reaped must remain
             // recoverable. Never recursively erase it as ordinary cache data.
-            return;
+            self.store_lifetime.retain_for_recovery();
         }
-        let _ = std::fs::remove_dir_all(&self.store_root);
     }
-}
-
-fn runmat_time_millis() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis() as u64)
 }
 
 #[cfg(test)]
@@ -1047,9 +918,16 @@ mod task_completion_tests {
 
     use runmat_execution::resource::Capability;
 
-    use super::{
-        terminal_completion, LocalDriver, TaskCompletion, TransferFailure, TransferResult,
-    };
+    use super::completion::CompletedTask;
+    use super::{LocalDriver, TaskCompletion, TransferFailure, TransferResult};
+    use crate::NativeCheckpointEvidence;
+
+    fn completed(result: TransferResult) -> CompletedTask {
+        CompletedTask {
+            result,
+            evidence: None,
+        }
+    }
 
     #[test]
     fn completion_is_pollable_without_blocking_the_await_caller() {
@@ -1057,7 +935,7 @@ mod task_completion_tests {
         assert_eq!(completion.try_value(), None);
 
         let result: TransferResult = Err(TransferFailure::Execution("completed".into()));
-        completion.complete(result.clone());
+        completion.complete(completed(result.clone()), NativeCheckpointEvidence::Durable);
         assert_eq!(completion.try_value(), Some(result));
     }
 
@@ -1065,7 +943,7 @@ mod task_completion_tests {
     fn queued_cancellation_cannot_race_a_later_child_launch() {
         let queued = TaskCompletion::new();
         queued.cancel();
-        queued.complete_cancelled_if_no_active_attempt();
+        queued.complete_cancelled_if_no_active_attempt(NativeCheckpointEvidence::Durable);
         assert_eq!(queued.try_value(), Some(Err(TransferFailure::Cancelled)));
         assert!(queued
             .launch_state
@@ -1075,51 +953,13 @@ mod task_completion_tests {
         let active = TaskCompletion::new();
         active.launch_state.store(1, Ordering::Release);
         active.cancel();
-        active.complete_cancelled_if_no_active_attempt();
+        active.complete_cancelled_if_no_active_attempt(NativeCheckpointEvidence::Durable);
         assert!(active.try_value().is_none());
-        active.complete(Err(TransferFailure::Cancelled));
+        active.complete(
+            completed(Err(TransferFailure::Cancelled)),
+            NativeCheckpointEvidence::Durable,
+        );
         assert_eq!(active.try_value(), Some(Err(TransferFailure::Cancelled)));
-    }
-
-    #[test]
-    fn scheduler_terminal_state_is_authoritative_for_cancellation_and_loss() {
-        let late_success = Ok(runmat_execution_runner::AttemptSuccess::Values {
-            outputs: Vec::new(),
-            result_objects: Vec::new(),
-        });
-        assert_eq!(
-            terminal_completion(
-                Some(runmat_execution::state::TaskState::Cancelled),
-                late_success
-            ),
-            Some(Err(TransferFailure::Cancelled))
-        );
-        let unverified = Err(TransferFailure::RetirementUnverified(
-            "process tree could not be reaped".into(),
-        ));
-        assert_eq!(
-            terminal_completion(
-                Some(runmat_execution::state::TaskState::Cancelled),
-                unverified.clone()
-            ),
-            Some(unverified)
-        );
-
-        let worker_loss = Err(TransferFailure::WorkerLost("worker exited".into()));
-        assert_eq!(
-            terminal_completion(
-                Some(runmat_execution::state::TaskState::Indeterminate),
-                worker_loss.clone(),
-            ),
-            Some(worker_loss)
-        );
-        assert_eq!(
-            terminal_completion(
-                Some(runmat_execution::state::TaskState::Running),
-                Err(TransferFailure::Execution("not terminal".into())),
-            ),
-            None
-        );
     }
 
     #[test]
@@ -1134,7 +974,13 @@ mod task_completion_tests {
                 max_message_bytes: 1024,
                 max_object_bytes: 1024,
                 max_stderr_bytes: 1024,
+                local_cpu_capacity_millicores: None,
+                local_memory_capacity_bytes: None,
+                worker_memory_bytes: 1024 * 1024 * 1024,
+                worker_scratch_bytes: 1024 * 1024 * 1024,
+                worker_cpu_millicores: 1000,
                 store_root: temporary.path().join("session"),
+                meshing_subtask_cache_root: None,
                 worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
                 host_inventory: runmat_core::RunMatSession::with_options(false, false)
                     .unwrap()

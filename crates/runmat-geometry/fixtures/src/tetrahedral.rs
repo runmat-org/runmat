@@ -195,6 +195,7 @@ pub fn exact_tetrahedron() -> (GeometryDocument, ExactBRepTopology, ExactEvaluat
                     .unwrap(),
                 start_vertex_id: Some(vertices[endpoints[0]].clone()),
                 end_vertex_id: Some(vertices[endpoints[1]].clone()),
+                tolerance_m: 1.0e-10,
                 is_closed: false,
                 is_periodic: false,
                 is_degenerate: false,

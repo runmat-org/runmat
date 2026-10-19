@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 
-use runmat_geometry_core::{ExactBRepTopology, PersistentEntityId};
-use runmat_meshing_core::{MetricContributionScope, MetricFieldRequest};
+use runmat_geometry_core::{ExactBRepTopology, GeometryEvaluationControl, PersistentEntityId};
+use runmat_meshing_core::MetricFieldRequest;
 use runmat_meshing_size::grading::grade_metric_evaluations;
 use runmat_meshing_size::incidence::TopologyMetricIncidence;
-use runmat_meshing_size::metric::{ResolvedMetricEvaluation, ResolvedMetricField};
+use runmat_meshing_size::metric::{
+    ExactFaceMetricResolutionError, ResolvedMetricEvaluation, ResolvedMetricField,
+};
 
 use super::{
     CurveMetricEvaluation, CurveMetricField, CurveMetricQuery, SharedCurveError,
@@ -13,11 +15,18 @@ use super::{
 
 /// Exact-topology projection of the canonical resolved metric request for curve evaluation.
 ///
-/// Every applicable contribution is combined in canonical request order. Matrix addition is a
-/// conservative SPD intersection: its directional density is at least that of every operand.
+/// Applicable contributions are intersected by the shared sizing owner in canonical order.
+/// Repeated physical tensors retain provenance without multiplying sizing density.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedCurveMetricField {
-    by_edge: BTreeMap<PersistentEntityId, ResolvedMetricEvaluation>,
+    by_edge: BTreeMap<PersistentEntityId, EdgeMetricRecord>,
+    face_metrics: Vec<ResolvedMetricEvaluation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct EdgeMetricRecord {
+    resolved: ResolvedMetricEvaluation,
+    faces: Vec<usize>,
 }
 
 impl ResolvedCurveMetricField {
@@ -25,25 +34,36 @@ impl ResolvedCurveMetricField {
         topology: &ExactBRepTopology,
         request: &MetricFieldRequest,
     ) -> Result<Self, SharedCurveError> {
-        request.validate().map_err(|error| {
-            SharedCurveError::invalid_request("resolved curve metric", error.to_string())
-        })?;
+        Self::prepare(topology, request, None)
+    }
+    pub fn new_with_control(
+        topology: &ExactBRepTopology,
+        request: &MetricFieldRequest,
+        control: &dyn GeometryEvaluationControl,
+    ) -> Result<Self, SharedCurveError> {
+        Self::prepare(topology, request, Some(control))
+    }
+    fn prepare(
+        topology: &ExactBRepTopology,
+        request: &MetricFieldRequest,
+        control: Option<&dyn GeometryEvaluationControl>,
+    ) -> Result<Self, SharedCurveError> {
         let resolver = ResolvedMetricField::new(request).map_err(|error| {
             SharedCurveError::invalid_request("resolved curve metric", error.to_string())
         })?;
         let incidence = TopologyMetricIncidence::new(topology);
-        for contribution in &request.contributions {
-            let entity_id = match &contribution.scope {
-                MetricContributionScope::Region { region_id } => region_id,
-                MetricContributionScope::Entity { entity_id } => entity_id,
-            };
-            if !incidence.knows(entity_id) {
-                return Err(SharedCurveError::invalid_request(
-                    "metric contribution scope",
-                    format!("references unknown exact entity {entity_id:?}"),
-                ));
-            }
-        }
+        let face_metrics = resolver
+            .resolve_exact_faces(topology, &incidence, control)
+            .map_err(|error| match error {
+                ExactFaceMetricResolutionError::Metric(error) => {
+                    SharedCurveError::invalid_request("boundary face metric", error.to_string())
+                }
+                ExactFaceMetricResolutionError::Control(error) => SharedCurveError::new(
+                    SharedCurveErrorKind::GeometryEvaluation(error.kind),
+                    "boundary face metric",
+                    error.reason,
+                ),
+            })?;
         let mut by_edge = BTreeMap::new();
         for edge in &topology.edges {
             let incident = incidence.incident_edge_entities(edge);
@@ -64,7 +84,90 @@ impl ResolvedCurveMetricField {
         .map_err(|error| {
             SharedCurveError::invalid_request("resolved curve metric grading", error.to_string())
         })?;
-        Ok(Self { by_edge })
+        let mut records = BTreeMap::new();
+        for edge in &topology.edges {
+            if let Some(control) = control {
+                control.checkpoint().map_err(|error| {
+                    SharedCurveError::new(
+                        SharedCurveErrorKind::GeometryEvaluation(error.kind),
+                        "curve metric preparation",
+                        error.reason,
+                    )
+                    .for_edge(&edge.id)
+                })?;
+            }
+            let ids = incidence.edge_face_ids(&edge.id);
+            let scratch_bytes = (ids.len() as u64)
+                .checked_mul(std::mem::size_of::<&PersistentEntityId>() as u64)
+                .ok_or_else(|| {
+                    SharedCurveError::invalid_request("edge face references", "storage overflow")
+                })?;
+            let _scratch = control
+                .map(|control| {
+                    runmat_geometry_core::GeometryAllocationReservation::new(control, scratch_bytes)
+                })
+                .transpose()
+                .map_err(control_error)?;
+            let mut face_ids = incidence.edge_face_ids(&edge.id).iter().collect::<Vec<_>>();
+            face_ids.sort_unstable();
+            face_ids.dedup();
+            let mut incident = incidence.incident_edge_entities(edge);
+            if let Some(control) = control {
+                let bytes = (face_ids.len() as u64)
+                    .checked_mul(std::mem::size_of::<usize>() as u64)
+                    .ok_or_else(|| {
+                        SharedCurveError::invalid_request("edge face indices", "storage overflow")
+                    })?;
+                control
+                    .consume_allocation_bytes(bytes)
+                    .map_err(control_error)?;
+            }
+            let mut faces = Vec::with_capacity(face_ids.len());
+            for id in face_ids {
+                let face = topology
+                    .faces
+                    .binary_search_by(|face| face.id.cmp(id))
+                    .map(|index| &topology.faces[index])
+                    .map_err(|_| {
+                        SharedCurveError::invalid_request(
+                            "curve face incidence",
+                            "references an absent exact face",
+                        )
+                        .for_edge(&edge.id)
+                    })?;
+                incident.extend(incidence.incident_face_entities(face));
+                faces.push(
+                    topology
+                        .faces
+                        .binary_search_by(|face| face.id.cmp(id))
+                        .expect("admitted exact face"),
+                );
+            }
+            let mut resolved = by_edge.remove(&edge.id).expect("resolved every exact edge");
+            let provenance = resolver.resolve(&incident).map_err(|error| {
+                SharedCurveError::invalid_request("curve boundary provenance", error.to_string())
+                    .for_edge(&edge.id)
+            })?;
+            resolved.active_sources = provenance.active_sources;
+            resolved.applied_contribution_count = provenance.applied_contribution_count;
+            records.insert(edge.id.clone(), EdgeMetricRecord { resolved, faces });
+        }
+        if let Some(control) = control {
+            let slots = face_metrics
+                .len()
+                .checked_mul(std::mem::size_of::<ResolvedMetricEvaluation>())
+                .and_then(|n| u64::try_from(n).ok())
+                .ok_or_else(|| {
+                    SharedCurveError::invalid_request("face metric table", "storage overflow")
+                })?;
+            control
+                .consume_allocation_bytes(slots)
+                .map_err(control_error)?;
+        }
+        Ok(Self {
+            by_edge: records,
+            face_metrics: face_metrics.into_values().collect(),
+        })
     }
 }
 
@@ -83,7 +186,7 @@ impl CurveMetricField for ResolvedCurveMetricField {
             )
             .for_edge(query.edge_id));
         }
-        let resolved = self.by_edge.get(query.edge_id).ok_or_else(|| {
+        let record = self.by_edge.get(query.edge_id).ok_or_else(|| {
             SharedCurveError::new(
                 SharedCurveErrorKind::MetricEvaluation,
                 "resolved curve metric query",
@@ -91,12 +194,50 @@ impl CurveMetricField for ResolvedCurveMetricField {
             )
             .for_edge(query.edge_id)
         })?;
+        let resolved = &record.resolved;
+        let failure = |error: runmat_meshing_size::metric::MetricContractError| {
+            SharedCurveError::new(
+                SharedCurveErrorKind::MetricEvaluation,
+                "curve boundary trace",
+                error.to_string(),
+            )
+            .for_edge(query.edge_id)
+        };
+        let mut density = resolved
+            .metric
+            .directional_density(query.unit_tangent)
+            .map_err(failure)?;
+        for face in &record.faces {
+            density = density.max(
+                self.face_metrics[*face]
+                    .metric
+                    .directional_density(query.unit_tangent)
+                    .map_err(failure)?,
+            );
+        }
+        let metric = resolved
+            .metric
+            .with_directional_density(query.unit_tangent, density)
+            .map_err(failure)?;
         Ok(CurveMetricEvaluation {
-            metric: resolved.metric,
+            metric,
             active_sources: resolved.active_sources.clone(),
             applied_contribution_count: resolved.applied_contribution_count,
-            clipped_contribution_count: resolved.clipped_contribution_count,
+            clipped_contribution_count: resolved
+                .clipped_contribution_count
+                .saturating_add(u32::from(metric != resolved.metric)),
             rejected_contribution_count: resolved.rejected_contribution_count,
         })
     }
 }
+
+fn control_error(error: runmat_geometry_core::GeometryEvaluationError) -> SharedCurveError {
+    SharedCurveError::new(
+        SharedCurveErrorKind::GeometryEvaluation(error.kind),
+        "curve metric preparation",
+        error.reason,
+    )
+}
+
+#[cfg(test)]
+mod tests;

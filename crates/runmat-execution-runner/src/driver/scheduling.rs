@@ -123,6 +123,7 @@ impl Driver {
                 request: request.clone(),
                 state: AttemptState::Assigned,
                 assigned_at_millis: self.snapshot.now_millis,
+                terminal: None,
                 cancellation_requested_at: None,
                 cancellation_escalation: None,
             },

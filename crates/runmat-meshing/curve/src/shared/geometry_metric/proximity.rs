@@ -1,11 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use runmat_geometry_core::{GeometryEvaluationControl, PersistentEntityId};
+use runmat_geometry_core::{
+    GeometryAllocationReservation, GeometryEvaluationControl, PersistentEntityId,
+};
 use runmat_meshing_core::{
     MetricContribution, MetricContributionScope, MetricSourceKind, MetricTensor3,
 };
 
 use super::{SharedCurveError, SharedCurveErrorKind};
+use runmat_meshing_size::metric::DirectionalMetricEnvelope;
 
 #[derive(Clone, Debug)]
 pub(super) struct EdgeWitness {
@@ -15,9 +18,16 @@ pub(super) struct EdgeWitness {
     pub points_m: Vec<[f64; 3]>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct ContactProximityPairs {
+    pub faces: BTreeSet<(PersistentEntityId, PersistentEntityId)>,
+    pub vertices: BTreeSet<(PersistentEntityId, PersistentEntityId)>,
+}
+
 pub(super) fn derive_proximity_contributions(
     mut witnesses: Vec<EdgeWitness>,
-    contact_face_pairs: &BTreeSet<(PersistentEntityId, PersistentEntityId)>,
+    contact_pairs: &ContactProximityPairs,
+    base_metric: MetricTensor3,
     search_radius_m: f64,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<Vec<MetricContribution>, SharedCurveError> {
@@ -50,11 +60,28 @@ pub(super) fn derive_proximity_contributions(
             .total_cmp(&bounds(right).0[0])
             .then_with(|| left.edge_id.cmp(&right.edge_id))
     });
-    let mut minimum_by_source = BTreeMap::<(PersistentEntityId, MetricSourceKind), f64>::new();
+    let bytes = witnesses
+        .len()
+        .checked_mul(std::mem::size_of::<[Option<DirectionalMetricEnvelope>; 2]>())
+        .and_then(|bytes| u64::try_from(bytes).ok())
+        .ok_or_else(|| {
+            SharedCurveError::invalid_request("proximity metric inventory", "storage overflow")
+        })?;
+    let _storage = GeometryAllocationReservation::new(control, bytes).map_err(|error| {
+        SharedCurveError::new(
+            SharedCurveErrorKind::GeometryEvaluation(error.kind),
+            "proximity metric inventory",
+            error.reason,
+        )
+    })?;
+    let base = DirectionalMetricEnvelope::new(base_metric).map_err(|error| {
+        SharedCurveError::invalid_request("proximity metric baseline", error.to_string())
+    })?;
+    let mut metrics = vec![[None; 2]; witnesses.len()];
     for left_index in 0..witnesses.len() {
         let left = &witnesses[left_index];
         let left_bounds = bounds(left);
-        for right in &witnesses[left_index + 1..] {
+        for (right_index, right) in witnesses.iter().enumerate().skip(left_index + 1) {
             let right_bounds = bounds(right);
             if right_bounds.0[0] - left_bounds.1[0] > search_radius_m {
                 break;
@@ -64,19 +91,24 @@ pub(super) fn derive_proximity_contributions(
             {
                 continue;
             }
-            let source =
-                if face_sets_are_contact(&left.face_ids, &right.face_ids, contact_face_pairs) {
-                    MetricSourceKind::Contact
-                } else {
-                    MetricSourceKind::Proximity
-                };
+            let source = if witnesses_are_contact(left, right, contact_pairs) {
+                MetricSourceKind::Contact
+            } else {
+                MetricSourceKind::Proximity
+            };
             let mut minimum = f64::INFINITY;
+            let mut separation_direction = [0.0; 3];
             for left_point in &left.points_m {
                 for right_point in &right.points_m {
                     control
                         .consume_search_work(1)
                         .map_err(|error| geometry_error(&left.edge_id, error))?;
-                    minimum = minimum.min(distance(*left_point, *right_point));
+                    let separation = distance(*left_point, *right_point);
+                    if separation < minimum {
+                        minimum = separation;
+                        separation_direction =
+                            std::array::from_fn(|axis| right_point[axis] - left_point[axis]);
+                    }
                 }
             }
             if minimum == 0.0 {
@@ -91,30 +123,48 @@ pub(super) fn derive_proximity_contributions(
                 .for_edge(&left.edge_id));
             }
             if minimum < search_radius_m {
-                for edge_id in [&left.edge_id, &right.edge_id] {
-                    minimum_by_source
-                        .entry((edge_id.clone(), source))
-                        .and_modify(|current| *current = current.min(minimum))
-                        .or_insert(minimum);
+                let source_index = usize::from(source == MetricSourceKind::Contact);
+                for index in [left_index, right_index] {
+                    let current = metrics[index][source_index].get_or_insert(base);
+                    current
+                        .include(separation_direction, minimum * 0.5)
+                        .map_err(|error| {
+                            SharedCurveError::invalid_request(
+                                "directional proximity metric",
+                                error.to_string(),
+                            )
+                            .for_edge(&witnesses[index].edge_id)
+                        })?;
                 }
             }
         }
     }
-    minimum_by_source
-        .into_iter()
-        .map(|((edge_id, source), separation)| {
-            Ok(MetricContribution {
-                source,
-                scope: MetricContributionScope::Entity {
-                    entity_id: edge_id.clone(),
-                },
-                metric: MetricTensor3::isotropic_length_m(separation * 0.5).map_err(|error| {
-                    SharedCurveError::invalid_request("curve proximity metric", error.to_string())
-                        .for_edge(&edge_id)
-                })?,
-            })
-        })
-        .collect()
+    let mut contributions = Vec::new();
+    for (witness, metrics) in witnesses.into_iter().zip(metrics) {
+        for (metric, source) in metrics
+            .into_iter()
+            .zip([MetricSourceKind::Proximity, MetricSourceKind::Contact])
+        {
+            if let Some(metric) = metric {
+                contributions.push(MetricContribution {
+                    source,
+                    scope: MetricContributionScope::Entity {
+                        entity_id: witness.edge_id.clone(),
+                    },
+                    metric: metric.metric().map_err(|error| {
+                        SharedCurveError::invalid_request(
+                            "proximity metric envelope",
+                            error.to_string(),
+                        )
+                        .for_edge(&witness.edge_id)
+                    })?,
+                });
+            }
+        }
+    }
+    // The parent request performs the one authoritative canonical ordering
+    // together with curvature and feature contributions.
+    Ok(contributions)
 }
 
 fn bounds(witness: &EdgeWitness) -> ([f64; 3], [f64; 3]) {
@@ -145,15 +195,28 @@ fn bounds_distance(left: ([f64; 3], [f64; 3]), right: ([f64; 3], [f64; 3])) -> f
         .sqrt()
 }
 
-fn face_sets_are_contact(
+fn witnesses_are_contact(
+    left: &EdgeWitness,
+    right: &EdgeWitness,
+    contact_pairs: &ContactProximityPairs,
+) -> bool {
+    sets_have_pair(&left.face_ids, &right.face_ids, &contact_pairs.faces)
+        || sets_have_pair(
+            &left.endpoint_ids,
+            &right.endpoint_ids,
+            &contact_pairs.vertices,
+        )
+}
+
+fn sets_have_pair(
     left: &BTreeSet<PersistentEntityId>,
     right: &BTreeSet<PersistentEntityId>,
-    contact_pairs: &BTreeSet<(PersistentEntityId, PersistentEntityId)>,
+    pairs: &BTreeSet<(PersistentEntityId, PersistentEntityId)>,
 ) -> bool {
     left.iter().any(|left| {
         right
             .iter()
-            .any(|right| contact_pairs.contains(&ordered_pair(left.clone(), right.clone())))
+            .any(|right| pairs.contains(&ordered_pair(left.clone(), right.clone())))
     })
 }
 
@@ -197,8 +260,14 @@ mod tests {
     fn sweep_emits_canonical_nearby_constraints_and_skips_far_edges() {
         let mut witnesses = vec![witness(3, 5.0), witness(1, 0.0), witness(2, 0.2)];
         witnesses[0].points_m.push([6.0, 0.0, 0.0]);
-        let contributions =
-            derive_proximity_contributions(witnesses, &BTreeSet::new(), 1.0, &Control).unwrap();
+        let contributions = derive_proximity_contributions(
+            witnesses,
+            &ContactProximityPairs::default(),
+            MetricTensor3::isotropic_length_m(1.0).unwrap(),
+            1.0,
+            &Control,
+        )
+        .unwrap();
         assert_eq!(contributions.len(), 2);
         assert!(contributions
             .iter()
@@ -210,7 +279,8 @@ mod tests {
     fn sweep_preserves_typed_search_budget_failure() {
         let error = derive_proximity_contributions(
             vec![witness(1, 0.0), witness(2, 0.2)],
-            &BTreeSet::new(),
+            &ContactProximityPairs::default(),
+            MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             &ExhaustedControl,
         )
@@ -234,7 +304,11 @@ mod tests {
 
         let contributions = derive_proximity_contributions(
             vec![left, right],
-            &BTreeSet::from([ordered_pair(left_face, right_face)]),
+            &ContactProximityPairs {
+                faces: BTreeSet::from([ordered_pair(left_face, right_face)]),
+                vertices: BTreeSet::new(),
+            },
+            MetricTensor3::isotropic_length_m(1.0).unwrap(),
             1.0,
             &Control,
         )
@@ -244,6 +318,77 @@ mod tests {
         assert!(contributions
             .iter()
             .all(|contribution| contribution.source == MetricSourceKind::Contact));
+    }
+
+    #[test]
+    fn authored_contact_boundary_vertices_allow_edges_that_only_meet_at_a_corner() {
+        let mut left = witness(1, 0.0);
+        let mut right = witness(2, 0.0);
+        let left_vertex = left.endpoint_ids.iter().next().unwrap().clone();
+        let right_vertex = right.endpoint_ids.iter().next().unwrap().clone();
+        left.face_ids.insert(id(PersistentEntityKind::Face, 21));
+        right.face_ids.insert(id(PersistentEntityKind::Face, 22));
+
+        let contributions = derive_proximity_contributions(
+            vec![left, right],
+            &ContactProximityPairs {
+                faces: BTreeSet::new(),
+                vertices: BTreeSet::from([ordered_pair(left_vertex, right_vertex)]),
+            },
+            MetricTensor3::isotropic_length_m(1.0).unwrap(),
+            1.0,
+            &Control,
+        )
+        .unwrap();
+
+        assert!(contributions.is_empty());
+    }
+
+    #[test]
+    fn thin_extrusion_gap_resolution_preserves_long_direction_under_rotation_and_translation() {
+        for (long, gap) in [
+            ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+            ([0.6, 0.8, 0.0], [-0.8, 0.6, 0.0]),
+            ([0.0, 0.0, 1.0], [0.6, 0.8, 0.0]),
+        ] {
+            let separation = 0.0003535533905932738;
+            let base = MetricTensor3::isotropic_length_m(0.01).unwrap();
+            let mut left = witness(1, 0.0);
+            let mut right = witness(2, 0.0);
+            left.points_m = [0.0, 0.0175, 0.035]
+                .map(|distance| {
+                    std::array::from_fn(|axis| [2.0, -3.0, 4.0][axis] + distance * long[axis])
+                })
+                .to_vec();
+            right.points_m = left
+                .points_m
+                .iter()
+                .map(|point| std::array::from_fn(|axis| point[axis] + separation * gap[axis]))
+                .collect();
+            let contributions = derive_proximity_contributions(
+                vec![left, right],
+                &ContactProximityPairs::default(),
+                base,
+                0.02,
+                &Control,
+            )
+            .unwrap();
+            assert_eq!(contributions.len(), 2);
+            let density = |metric: MetricTensor3, v: [f64; 3]| {
+                let [x, y, z] = v;
+                metric.xx * x * x
+                    + metric.yy * y * y
+                    + metric.zz * z * z
+                    + 2.0 * (metric.xy * x * y + metric.xz * x * z + metric.yz * y * z)
+            };
+            for contribution in contributions {
+                assert!((density(contribution.metric, long) / base.xx - 1.0).abs() < 1e-10);
+                assert!(
+                    (density(contribution.metric, gap) * (separation * 0.5).powi(2) - 1.0).abs()
+                        < 1e-8
+                );
+            }
+        }
     }
 
     fn witness(seed: u8, x: f64) -> EdgeWitness {

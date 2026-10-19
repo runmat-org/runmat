@@ -269,6 +269,12 @@ pub(super) fn evaluate_rvalue(
             args,
             requested_outputs,
             ..
+        }
+        | MirRvalue::ExternalFuture {
+            function,
+            args,
+            requested_outputs,
+            ..
         } => {
             let arguments = super::call::materialize_arguments(state, args)?;
             runmat_runtime::execution::validate_spawn_captures(&arguments)?;
@@ -337,6 +343,14 @@ pub(super) fn evaluate_rvalue(
                 .create_future(runmat_runtime::execution::DeferredCall {
                     invocation,
                     retry: runmat_execution::RetryPolicy::Never,
+                    environment: runmat_runtime::execution::capture_deferred_environment(
+                        &state.runtime,
+                    )?,
+                    console: state
+                        .runtime
+                        .service_ports()
+                        .host()
+                        .and_then(|host| host.console_limits()),
                     program_revision,
                     capabilities: native_function_capabilities(state, *function)?,
                     program,

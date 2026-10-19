@@ -287,6 +287,49 @@ pub(crate) mod wasm {
         })
     }
 
+    pub(super) fn set_surface_presence_impl(
+        surface_id: u32,
+        frame: runmat_plot::collaboration::PresenceFrame,
+    ) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map
+                .get_mut(&surface_id)
+                .ok_or_else(|| web_error("Plotting surface unavailable"))?;
+            let expected = frame.target.map(|target| match target {
+                runmat_plot::collaboration::PresenceTarget::Figure { handle } => {
+                    BoundSurfaceTarget::Figure(handle)
+                }
+                runmat_plot::collaboration::PresenceTarget::GeometryScene { handle } => {
+                    BoundSurfaceTarget::GeometryScene(handle)
+                }
+            });
+            if expected.is_some() && expected != entry.bound_target {
+                return Ok(());
+            }
+            if expected.is_none() && !frame.pointers.is_empty() {
+                return Err(web_error("Presence requires a bound target"));
+            }
+            entry
+                .renderer
+                .set_presence(frame)
+                .map_err(|error| web_error(error.to_string()))
+        })
+    }
+    pub(super) fn capture_surface_pointer_impl(
+        surface_id: u32,
+        x: f32,
+        y: f32,
+    ) -> BuiltinResult<Option<runmat_plot::collaboration::PointerPosition>> {
+        SURFACES.with(|slot| {
+            let map = slot.borrow();
+            let entry = map
+                .get(&surface_id)
+                .ok_or_else(|| web_error("Plotting surface unavailable"))?;
+            Ok(entry.renderer.capture_presence_pointer([x, y]))
+        })
+    }
+
     pub(super) fn set_geometry_scene_presentation_impl(
         surface_id: u32,
         presentation: GeometryScenePresentation,
@@ -323,6 +366,7 @@ pub(crate) mod wasm {
         surface_id: u32,
         x: f32,
         y: f32,
+        mode: runmat_plot::GeometryScenePickMode,
     ) -> BuiltinResult<Option<GeometryScenePickResult>> {
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
@@ -352,7 +396,7 @@ pub(crate) mod wasm {
             Ok(entry.geometry_pick_index.as_ref().and_then(|cached| {
                 entry
                     .renderer
-                    .pick_geometry_scene_region(&cached.index, [x, y])
+                    .pick_geometry_scene_region(&cached.index, [x, y], mode)
             }))
         })
     }
@@ -485,6 +529,7 @@ pub(crate) mod wasm {
     pub(super) fn set_surface_camera_state_impl(
         surface_id: u32,
         state: PlotSurfaceCameraState,
+        expected_target: Option<runmat_plot::collaboration::PresenceTarget>,
     ) -> BuiltinResult<()> {
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
@@ -493,6 +538,17 @@ pub(crate) mod wasm {
                     "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
                 ))
             })?;
+            let expected = expected_target.map(|target| match target {
+                runmat_plot::collaboration::PresenceTarget::Figure { handle } => {
+                    BoundSurfaceTarget::Figure(handle)
+                }
+                runmat_plot::collaboration::PresenceTarget::GeometryScene { handle } => {
+                    BoundSurfaceTarget::GeometryScene(handle)
+                }
+            });
+            if expected.is_some() && expected != entry.bound_target {
+                return Ok(());
+            }
             entry
                 .renderer
                 .set_camera_state(&convert_camera_state_back(state));
@@ -662,6 +718,20 @@ pub(crate) mod wasm {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
+    pub(super) fn set_surface_presence_impl(
+        _surface_id: u32,
+        _frame: runmat_plot::collaboration::PresenceFrame,
+    ) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+    pub(super) fn capture_surface_pointer_impl(
+        _surface_id: u32,
+        _x: f32,
+        _y: f32,
+    ) -> BuiltinResult<Option<runmat_plot::collaboration::PointerPosition>> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
     pub(super) fn set_geometry_scene_presentation_impl(
         _surface_id: u32,
         _presentation: runmat_plot::GeometryScenePresentation,
@@ -673,6 +743,7 @@ pub(crate) mod wasm {
         _surface_id: u32,
         _x: f32,
         _y: f32,
+        _mode: runmat_plot::GeometryScenePickMode,
     ) -> BuiltinResult<Option<runmat_plot::GeometryScenePickResult>> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
@@ -694,6 +765,7 @@ pub(crate) mod wasm {
     pub(super) fn set_surface_camera_state_impl(
         _surface_id: u32,
         _state: PlotSurfaceCameraState,
+        _expected_target: Option<runmat_plot::collaboration::PresenceTarget>,
     ) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
@@ -704,8 +776,16 @@ pub(crate) mod wasm {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
+    /// Native and headless renders use the dark theme unless `RUNMAT_PLOT_THEME` names another
+    /// (`classic_light` or `light`, `high_contrast`), so exported figures can match a light page.
     pub(super) fn current_theme_config_impl() -> runmat_plot::styling::PlotThemeConfig {
-        runmat_plot::styling::PlotThemeConfig::default()
+        use runmat_plot::styling::{PlotThemeConfig, ThemeVariant};
+        let variant = match std::env::var("RUNMAT_PLOT_THEME").as_deref().map(str::trim) {
+            Ok("classic_light") | Ok("light") => ThemeVariant::ClassicLight,
+            Ok("high_contrast") => ThemeVariant::HighContrast,
+            _ => return PlotThemeConfig::default(),
+        };
+        PlotThemeConfig { variant, ..PlotThemeConfig::default() }
     }
 
     pub(super) fn take_surface_host_actions_impl(
@@ -779,8 +859,9 @@ pub fn pick_geometry_scene_region(
     surface_id: u32,
     x: f32,
     y: f32,
+    mode: runmat_plot::GeometryScenePickMode,
 ) -> BuiltinResult<Option<runmat_plot::GeometryScenePickResult>> {
-    wasm::pick_geometry_scene_region_impl(surface_id, x, y)
+    wasm::pick_geometry_scene_region_impl(surface_id, x, y, mode)
 }
 
 pub fn fit_surface_extents(surface_id: u32) -> BuiltinResult<()> {
@@ -798,8 +879,9 @@ pub fn get_surface_camera_state(surface_id: u32) -> BuiltinResult<PlotSurfaceCam
 pub fn set_surface_camera_state(
     surface_id: u32,
     state: PlotSurfaceCameraState,
+    expected_target: Option<runmat_plot::collaboration::PresenceTarget>,
 ) -> BuiltinResult<()> {
-    wasm::set_surface_camera_state_impl(surface_id, state)
+    wasm::set_surface_camera_state_impl(surface_id, state, expected_target)
 }
 
 pub fn take_surface_host_actions(surface_id: u32) -> BuiltinResult<Vec<PlotSurfaceHostAction>> {
@@ -893,3 +975,17 @@ fn convert_camera_state_back(
 }
 
 // No render_web_canvas wrapper; web presentation is surface-driven.
+
+pub fn set_surface_presence(
+    surface_id: u32,
+    frame: runmat_plot::collaboration::PresenceFrame,
+) -> BuiltinResult<()> {
+    wasm::set_surface_presence_impl(surface_id, frame)
+}
+pub fn capture_surface_pointer(
+    surface_id: u32,
+    x: f32,
+    y: f32,
+) -> BuiltinResult<Option<runmat_plot::collaboration::PointerPosition>> {
+    wasm::capture_surface_pointer_impl(surface_id, x, y)
+}

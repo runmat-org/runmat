@@ -231,6 +231,7 @@ fn drain_machine_rooted_with_frames<'a>(
     payload: &'a ValuePayload,
     frame_sources: Option<&'a dyn InlineFrameSourceAuthority>,
 ) -> Result<crate::execution::RootedValueMember, ValueCodecError> {
+    crate::builtins::ensure_builtin_value_classes_registered();
     let mut machine =
         DecodeMachine::new_with_frame_sources(payload, "$".to_owned(), None, frame_sources);
     loop {

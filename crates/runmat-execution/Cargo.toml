@@ -11,6 +11,7 @@ repository = "https://github.com/runmat-org/runmat"
 ed25519-dalek = { workspace = true }
 minicbor = { workspace = true }
 runmat-types = { workspace = true }
+runmat-time = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -18,6 +19,8 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 
 [[bench]]

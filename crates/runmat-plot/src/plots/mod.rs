@@ -5,6 +5,7 @@
 
 pub mod area;
 pub mod bar;
+mod colormap_tables;
 mod clone_budget;
 mod color_data;
 pub mod contour;
@@ -24,6 +25,7 @@ pub mod scatter;
 pub mod scatter3;
 pub mod stairs;
 pub mod stem;
+mod stroke;
 pub mod surface;
 pub mod volume;
 

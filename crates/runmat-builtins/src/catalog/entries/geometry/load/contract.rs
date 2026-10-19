@@ -6,16 +6,25 @@ pub const GEOMETRY_ASSET_CLASS: runmat_types::StaticClassIdentity =
 pub const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
-    notes: "geometry.load accepts only a scalar text path; imported numeric geometry is not a direct integer argument.",
+    notes: "geometry.load accepts a scalar text path and a text Units option; imported numeric geometry is not a direct integer argument.",
 };
 
-const INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "path",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Scalar path to an importable geometry file.",
-}];
+const INPUT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar path to an importable geometry file.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional 'Units' and 'm', 'mm', or 'in': the source unit when the file declares none.",
+    },
+];
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "asset",
     ty: BuiltinParamType::Any,
@@ -24,7 +33,7 @@ const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Host geometry.Asset object.",
 }];
 const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "asset = geometry.load(path)",
+    label: "asset = geometry.load(path, Name, Value)",
     inputs: &INPUT,
     outputs: &OUTPUT,
 }];
@@ -37,7 +46,7 @@ pub const ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 pub const ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GEOMETRY.LOAD.INVALID_PATH",
     identifier: Some("RunMat:geometry:load:InvalidPath"),
-    when: "The path is not scalar string text or a character row.",
+    when: "The path is not scalar string text or a character row, or an option is not a supported Units Name, Value pair.",
     message: "geometry.load: invalid path",
 };
 pub const ERROR_OPERATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

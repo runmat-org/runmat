@@ -10,8 +10,8 @@ use super::moments_cache::{CacheBudget, ReductionReuseCache};
 use super::owner_shared::OwnerShared;
 use super::{
     canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode,
-    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuProvider,
-    WgpuProviderOptions, WorkgroupConfig,
+    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuDeviceHealth,
+    WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions, WorkgroupConfig,
 };
 use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::bind_group::BindGroupCache;
@@ -159,6 +159,11 @@ impl WgpuProvider {
         let mut instance_desc = wgpu::InstanceDescriptor::default();
         #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
         {
+            // D3D12 is the native presentation backend used by RunMat Desktop.
+            // Keeping compute and presentation on this one backend is required
+            // for provider-owned buffers to remain WGPU-resident through draw.
+            // Advanced users can still opt into another backend explicitly.
+            instance_desc.backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::DX12);
             instance_desc.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::from_env()
                 .unwrap_or(wgpu::Dx12Compiler::DynamicDxc {
                     dxil_path: "dxil.dll".into(),
@@ -188,36 +193,22 @@ impl WgpuProvider {
 
         let adapter_info = adapter.get_info();
         let adapter_features = adapter.features();
-        let forced_precision = std::env::var("RUNMAT_WGPU_FORCE_PRECISION")
-            .ok()
-            .and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
-                "f32" | "float32" | "32" => Some(NumericPrecision::F32),
-                "f64" | "float64" | "64" => Some(NumericPrecision::F64),
-                _ => None,
-            });
+        let requested_precision = match opts.precision {
+            WgpuPrecisionPolicy::Automatic => environment_precision()?,
+            WgpuPrecisionPolicy::RequireF32 => Some(NumericPrecision::F32),
+            WgpuPrecisionPolicy::RequireF64 => Some(NumericPrecision::F64),
+        };
 
         #[cfg(target_arch = "wasm32")]
-        let precision = {
-            if forced_precision == Some(NumericPrecision::F64) {
-                warn!("RunMat Accelerate: f64 precision is unavailable on WebGPU/wasm builds; using f32");
-            }
-            NumericPrecision::F32
-        };
+        let precision = select_precision(requested_precision, false)?;
 
         #[cfg(not(target_arch = "wasm32"))]
-        let precision = {
-            let mut p = forced_precision.unwrap_or(NumericPrecision::F32);
-            if p == NumericPrecision::F64 && !adapter_features.contains(wgpu::Features::SHADER_F64)
-            {
-                warn!(
-                    "RunMat Accelerate: requested f64 precision but adapter lacks SHADER_F64; falling back to f32"
-                );
-                p = NumericPrecision::F32;
-            }
-            p
-        };
+        let precision = select_precision(
+            requested_precision,
+            adapter_features.contains(wgpu::Features::SHADER_F64),
+        )?;
 
-        if forced_precision.is_none() {
+        if requested_precision.is_none() {
             info!(
                 "RunMat Accelerate: defaulting to {} kernels for adapter '{}'",
                 match precision {
@@ -282,12 +273,13 @@ impl WgpuProvider {
             )
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
+        let device_health = Arc::new(WgpuDeviceHealth::default());
         let timestamp_period_ns = queue_raw.get_timestamp_period();
         let (access, emission_authority) =
             runmat_accelerate_api::WgpuDeviceAccess::new_profiled(device_raw, queue_raw);
         #[cfg(target_arch = "wasm32")]
         access.with_profiled_shared(&emission_authority, |emission| {
-            install_device_error_handlers(emission.device())
+            install_device_error_handlers(emission.device(), device_health.clone())
         })?;
         let adapter = Arc::new(adapter);
         let satisfied_limits = access
@@ -471,6 +463,9 @@ impl WgpuProvider {
         let ordered_real_mean = (precision == NumericPrecision::F64)
             .then(|| crate::backend::wgpu::pipelines::OrderedRealMeanPipelines::new(&access));
 
+        let sparse_pipelines =
+            super::sparse::SparsePipelines::new(&access, precision, workgroup_config.scalar);
+
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
         let max_poolable_bytes =
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
@@ -490,7 +485,7 @@ impl WgpuProvider {
         allocations.set_reduction_reuse(OwnerShared::downgrade(&reduction_reuse))?;
         #[cfg(not(target_arch = "wasm32"))]
         let observation_stopped = access.with_profiled_shared(&emission_authority, |emission| {
-            install_device_error_handlers(emission.device(), &allocations)
+            install_device_error_handlers(emission.device(), &allocations, device_health.clone())
         })?;
         #[cfg(not(target_arch = "wasm32"))]
         let observation_progress = super::observation_progress::NativeObservationProgress::start(
@@ -506,6 +501,7 @@ impl WgpuProvider {
             instance,
             access,
             emission_authority,
+            device_health,
             adapter,
             adapter_info,
             adapter_limits: satisfied_limits,
@@ -515,6 +511,8 @@ impl WgpuProvider {
             linear_launch,
             global_reduce_launch,
             allocations,
+            sparse: super::sparse::SparseState::default(),
+            sparse_pipelines,
             pipelines,
             f32_real_floating,
             ordered_real_mean,
@@ -555,10 +553,11 @@ impl WgpuProvider {
             reduction_reuse,
             fft_twiddle_cache: Mutex::new(HashMap::new()),
         };
-        let snapshot = crate::placement::wgpu_capability_snapshot(
+        let mut snapshot = crate::placement::wgpu_capability_snapshot(
             &provider,
             provider.adapter_limits.max_buffer_size,
         );
+        snapshot.sparse = Some(super::sparse::capabilities(&provider));
         // Construction owns the provider until its immutable contract is set.
         let _ = provider.capability_snapshot.set(snapshot);
         Ok(provider)
@@ -575,6 +574,52 @@ impl WgpuProvider {
             "RunMat Accelerate: synchronous WGPU initialization is unavailable on wasm targets. Use new_async instead (opts: {:?}).",
             opts
         ))
+    }
+}
+
+fn select_precision(
+    requested: Option<NumericPrecision>,
+    exact_f64_available: bool,
+) -> Result<NumericPrecision> {
+    match requested.unwrap_or(NumericPrecision::F32) {
+        NumericPrecision::F64 if !exact_f64_available => Err(anyhow!(
+            "exact f64 WGPU precision was requested, but the selected adapter does not expose SHADER_F64"
+        )),
+        precision => Ok(precision),
+    }
+}
+
+fn environment_precision() -> Result<Option<NumericPrecision>> {
+    match std::env::var("RUNMAT_WGPU_FORCE_PRECISION") {
+        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+            "f32" | "float32" | "32" => Ok(Some(NumericPrecision::F32)),
+            "f64" | "float64" | "64" => Ok(Some(NumericPrecision::F64)),
+            _ => Err(anyhow!(
+                "RUNMAT_WGPU_FORCE_PRECISION must be one of f32, float32, 32, f64, float64, or 64"
+            )),
+        },
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(anyhow!(
+            "RUNMAT_WGPU_FORCE_PRECISION is not valid Unicode: {error}"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod precision_tests {
+    use super::{select_precision, NumericPrecision};
+
+    #[test]
+    fn exact_f64_selection_fails_closed_without_hardware_support() {
+        assert!(select_precision(Some(NumericPrecision::F64), false).is_err());
+        assert_eq!(
+            select_precision(Some(NumericPrecision::F64), true).expect("supported exact f64"),
+            NumericPrecision::F64
+        );
+        assert_eq!(
+            select_precision(None, false).expect("default native precision"),
+            NumericPrecision::F32
+        );
     }
 }
 

@@ -94,6 +94,8 @@ fn deferred_callable_targets_keep_activation_ancestors_anonymous_captures_and_ar
             }),
             retry: runmat_execution::RetryPolicy::Never,
             program_revision: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
             capabilities: Default::default(),
             program: DeferredProgram::Local,
         };
@@ -117,6 +119,8 @@ fn deferred_callable_targets_keep_activation_ancestors_anonymous_captures_and_ar
                 }),
                 retry: runmat_execution::RetryPolicy::Never,
                 program_revision: None,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
                 capabilities: Default::default(),
                 program: DeferredProgram::Local,
             })

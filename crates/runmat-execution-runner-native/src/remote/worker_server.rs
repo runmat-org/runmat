@@ -1,12 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use runmat_execution::identity::AttemptId;
+use runmat_execution::resource::ResourceRequest;
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ProgramExecutionResponse, WorkerProgramRequest,
 };
+use runmat_execution_runner::scheduler::{fits, release, reserve, ResourceAllocation};
 use runmat_execution_runner::{AttemptRequest, WorkerSpec};
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind, FrameLimits};
 use tokio::sync::Mutex;
@@ -30,6 +32,8 @@ struct WorkerState {
     materialized_project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     bundle_digest: Option<runmat_execution::Digest>,
     attempts: HashMap<AttemptId, ActiveAttempt>,
+    /// Capacity reserved by active attempts, not sampled process utilization.
+    allocated: ResourceAllocation,
     cancelled_attempts: HashSet<AttemptId>,
     values: HashMap<runmat_execution::identity::ValueId, runmat_execution::value::ValuePayload>,
     objects: super::object_transfer::RemoteObjectStore,
@@ -106,9 +110,20 @@ fn graph_stage_scratch_bytes(
 struct ActiveAttempt {
     task: tokio::task::JoinHandle<()>,
     reply: Arc<super::attempt_reply::AttemptReply>,
+    resources: ResourceRequest,
+    assignment: runmat_execution::resource::ResourceAssignment,
     cancellation: Arc<super::worker_execution::AttemptCancellation>,
     collective: Option<Arc<super::collective::RemoteCollectiveChannel>>,
     cooperative: bool,
+    finished: tokio::sync::watch::Receiver<bool>,
+}
+
+impl WorkerState {
+    fn finish_attempt(&mut self, attempt_id: AttemptId) -> Option<ActiveAttempt> {
+        let active = self.attempts.remove(&attempt_id)?;
+        release(&mut self.allocated, &active.resources, &active.assignment);
+        Some(active)
+    }
 }
 
 struct GraphStageSlot {
@@ -202,9 +217,10 @@ pub(super) async fn run_worker_loop(
         materialized_project: None,
         bundle_digest: None,
         attempts: HashMap::new(),
+        allocated: ResourceAllocation::default(),
         cancelled_attempts: HashSet::new(),
         values: HashMap::new(),
-        objects: super::object_transfer::RemoteObjectStore::default(),
+        objects: super::object_transfer::RemoteObjectStore::new()?,
         draining: false,
         bundle_cache,
         graph_staging: HashMap::new(),
@@ -281,6 +297,21 @@ pub(super) async fn run_worker_loop(
             continue;
         }
         match request.command {
+            RemoteWorkerCommand::Describe => {
+                reply(
+                    connection.as_ref(),
+                    &sender,
+                    limits,
+                    RemoteWorkerReply {
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                        correlation_id: request.correlation_id,
+                        outcome: RemoteWorkerOutcome::WorkerDescription {
+                            worker: worker.clone(),
+                        },
+                    },
+                )
+                .await?;
+            }
             RemoteWorkerCommand::InstallBundle {
                 bundle_digest,
                 bundle,
@@ -755,7 +786,8 @@ pub(super) async fn run_worker_loop(
                         continue;
                     }
                 };
-                let rejection = validate_attempt(&state, &worker, driver_fence, &attempt).await;
+                let rejection =
+                    validate_and_reserve_attempt(&state, &worker, driver_fence, &attempt).await;
                 if let Some(message) = rejection {
                     reply(
                         connection.as_ref(),
@@ -767,9 +799,11 @@ pub(super) async fn run_worker_loop(
                     continue;
                 }
                 let attempt_id = attempt.scheduling.id;
+                let scheduling = attempt.scheduling.clone();
+                let reserved_resources = scheduling.task.resources.clone();
+                let reserved_assignment = scheduling.resource_assignment.clone();
                 let graph_run_identity = run_identity.clone();
                 let graph_worker_resources = worker.resources.clone();
-                let graph_task_resources = attempt.scheduling.task.resources.clone();
                 let graph_worker_host = worker.host.clone();
                 let correlation_id = request.correlation_id;
                 let attempt_reply = super::attempt_reply::AttemptReply::spawn(
@@ -807,16 +841,31 @@ pub(super) async fn run_worker_loop(
                         state.objects.clone(),
                     )
                 };
-                let cooperative = matches!(
+                // Direct invocations run in the installed bundle's frozen
+                // portable environment; Graph attempts carry their own.
+                let environment = bundle
+                    .as_ref()
+                    .map(|bundle| bundle.manifest.portable_environment.clone())
+                    .unwrap_or_default();
+                // Workload artifacts read object inputs from the worker store
+                // and cooperate with cancellation instead of being aborted.
+                let externalized = matches!(
                     &attempt.program,
                     WorkerProgramRequest::Direct(program)
-                        if program.artifact.form == ExecutableForm::MeshingWorkload
-                ) || matches!(&attempt.program, WorkerProgramRequest::Graph(_));
+                        if matches!(
+                            program.artifact.form,
+                            ExecutableForm::MeshingWorkload
+                                | ExecutableForm::AnalysisWorkload
+                                | ExecutableForm::GeometryWorkload
+                        )
+                );
+                let graph_attempt = matches!(&attempt.program, WorkerProgramRequest::Graph(_));
+                let cooperative = externalized || graph_attempt;
                 let cancellation =
                     Arc::new(super::worker_execution::AttemptCancellation::default());
                 let cancellation_for_task = Arc::clone(&cancellation);
                 let cancellation_after_task = Arc::clone(&cancellation);
-                let graph_attempt = matches!(&attempt.program, WorkerProgramRequest::Graph(_));
+                let (finished_sender, finished) = tokio::sync::watch::channel(false);
                 let meshing_host = meshing_host.clone();
                 let drain_complete_for_task = Arc::clone(&drain_complete);
                 let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
@@ -824,10 +873,11 @@ pub(super) async fn run_worker_loop(
                     if start_receiver.await.is_err() {
                         return;
                     }
+                    let started = Instant::now();
                     let program = attempt.program;
                     let materialized = match &program {
                         WorkerProgramRequest::Graph(_) => Ok(Vec::new()),
-                        WorkerProgramRequest::Direct(direct) if cooperative => {
+                        WorkerProgramRequest::Direct(direct) if externalized => {
                             Ok(direct.arguments.clone())
                         }
                         WorkerProgramRequest::Direct(direct) => {
@@ -864,18 +914,19 @@ pub(super) async fn run_worker_loop(
                                 });
                                 super::worker_execution::execute(
                                     super::worker_execution::WorkerExecutionInput {
+                                        attempt_id,
                                         program,
                                         graph_attempt: graph_attempt.then_some(
                                             super::worker_execution::GraphAttemptContext {
                                                 run_identity: graph_run_identity,
-                                                attempt_id,
                                                 resources: graph_worker_resources,
-                                                task_resources: graph_task_resources,
                                                 host: graph_worker_host,
                                             },
                                         ),
                                         project: materialized_project,
                                         bundle,
+                                        environment,
+                                        resources: scheduling.task.resources.clone(),
                                     },
                                     super::worker_execution::WorkerExecutionPorts {
                                         collective,
@@ -922,22 +973,26 @@ pub(super) async fn run_worker_loop(
                             }
                         }
                     };
-                    // Graph cancellation enters the selected runtime token and
-                    // completes adapter retirement before terminal publication.
-                    // Never publish a late successful Graph result after the
-                    // scheduler has cancelled the attempt.
+                    // Cancellation enters the selected runtime token and
+                    // completes cooperative/adapter retirement before terminal
+                    // publication. Never publish a late successful result after
+                    // the scheduler has cancelled the attempt.
                     let (report, retirement_unverified) = match response {
                         super::worker_execution::WorkerExecutionOutcome::RetirementUnverified(message) => (
                             runmat_execution_runner::AttemptReport::RetirementUnverified { message },
                             true,
                         ),
                         super::worker_execution::WorkerExecutionOutcome::Response(response) => {
-                            let report = if graph_attempt
-                                && cancellation_after_task.token().is_cancelled()
-                            {
+                            let report = if cancellation_after_task.was_cancelled() {
                                 runmat_execution_runner::AttemptReport::Cancelled
                             } else {
-                                super::worker_execution::report(response)
+                                super::worker_execution::report(
+                                    &scheduling,
+                                    response,
+                                    u64::try_from(started.elapsed().as_millis())
+                                        .unwrap_or(u64::MAX)
+                                        .max(1),
+                                )
                             };
                             (report, false)
                         }
@@ -953,7 +1008,8 @@ pub(super) async fn run_worker_loop(
                         attempt_reply_for_task.complete(report);
                     }
                     let mut state = state_for_task.lock().await;
-                    state.attempts.remove(&attempt_id);
+                    let _ = state.finish_attempt(attempt_id);
+                    finished_sender.send_replace(true);
                     let retired_program = state.graph_programs.remove(&attempt_id);
                     if state.draining && state.attempts.is_empty() {
                         drain_complete_for_task.notify_waiters();
@@ -966,9 +1022,12 @@ pub(super) async fn run_worker_loop(
                     ActiveAttempt {
                         task,
                         reply: attempt_reply,
+                        resources: reserved_resources,
+                        assignment: reserved_assignment,
                         cancellation,
                         collective,
                         cooperative,
+                        finished,
                     },
                 );
                 let _ = start_sender.send(());
@@ -1001,6 +1060,8 @@ pub(super) async fn run_worker_loop(
             RemoteWorkerCommand::Cancel { attempt_id } => {
                 let mut state = state.lock().await;
                 let mut cancelled_reply = None;
+                let mut completion = None;
+                let mut aborted_task = None;
                 // A Cancel may overtake Execute while the driver streams a
                 // staged Graph. Retain that exact attempt's cancellation so
                 // a later Execute cannot start foreign effects.
@@ -1019,11 +1080,12 @@ pub(super) async fn run_worker_loop(
                     .cloned();
                 if let Some(active) = state.attempts.get(&attempt_id) {
                     active.cancellation.cancel();
-                    if !active.cooperative {
-                        if let Some(active) = state.attempts.remove(&attempt_id) {
-                            active.task.abort();
-                            cancelled_reply = Some(active.reply);
-                        }
+                    if active.cooperative {
+                        completion = Some(active.finished.clone());
+                    } else if let Some(active) = state.finish_attempt(attempt_id) {
+                        active.task.abort();
+                        cancelled_reply = Some(active.reply);
+                        aborted_task = Some(active.task);
                     }
                 }
                 if state.draining && state.attempts.is_empty() {
@@ -1037,6 +1099,16 @@ pub(super) async fn run_worker_loop(
                 drop(retired_program);
                 if let Some(cancelled_reply) = cancelled_reply {
                     cancelled_reply.complete(runmat_execution_runner::AttemptReport::Cancelled);
+                }
+                // Acknowledge only after the attempt has stopped: cooperative
+                // work publishes its terminal report, aborted work is joined.
+                if let Some(mut completion) = completion {
+                    if !*completion.borrow() {
+                        let _ = completion.changed().await;
+                    }
+                }
+                if let Some(aborted_task) = aborted_task {
+                    let _ = aborted_task.await;
                 }
                 reply(
                     connection.as_ref(),
@@ -1218,18 +1290,29 @@ async fn resolve_attempt(
     })
 }
 
-async fn validate_attempt(
+async fn validate_and_reserve_attempt(
     state: &Mutex<WorkerState>,
     worker: &WorkerSpec,
     driver_fence: u64,
     attempt: &ResolvedRemoteAttempt,
 ) -> Option<String> {
-    let state = state.lock().await;
+    let mut state = state.lock().await;
     if state.draining
         || attempt.scheduling.driver_fence != driver_fence
         || attempt.scheduling.worker_id != worker.id
     {
         return Some("attempt is outside live worker authority".into());
+    }
+    if state.attempts.contains_key(&attempt.scheduling.id) {
+        return Some("attempt is already active on the worker".into());
+    }
+    if attempt
+        .scheduling
+        .task
+        .validate_invocation_reservation()
+        .is_err()
+    {
+        return Some("attempt invocation context exceeds its reservation".into());
     }
     match &attempt.program {
         WorkerProgramRequest::Direct(program) => {
@@ -1238,6 +1321,9 @@ async fn validate_attempt(
             };
             if bundle.requires_materialization() != state.materialized_project.is_some()
                 || program.validate_for_portable_host().is_err()
+                || attempt.scheduling.task.environment != program.environment
+                || attempt.scheduling.task.console != program.console
+                || bundle.manifest.portable_environment != program.environment.entries()
                 || !bundle
                     .manifest
                     .recipes
@@ -1299,9 +1385,39 @@ async fn validate_attempt(
             }
         }
     }
-    None
+    reserve_attempt_capacity(
+        &worker.resources,
+        &mut state.allocated,
+        &attempt.scheduling.task.resources,
+        &attempt.scheduling.resource_assignment,
+    )
+    .err()
+    .map(str::to_owned)
+}
+
+fn reserve_attempt_capacity(
+    inventory: &runmat_execution::resource::ResourceInventory,
+    allocated: &mut ResourceAllocation,
+    request: &ResourceRequest,
+    assignment: &runmat_execution::resource::ResourceAssignment,
+) -> Result<(), &'static str> {
+    request
+        .validate()
+        .map_err(|_| "attempt has an invalid resource request")?;
+    if !fits(inventory, allocated, request) {
+        return Err("attempt resources exceed the worker's available inventory");
+    }
+    // `reserve` can fail after a preceding field was updated; commit only a complete reservation.
+    let mut next = allocated.clone();
+    reserve(&mut next, request, assignment)
+        .map_err(|_| "attempt resource reservation overflowed")?;
+    *allocated = next;
+    Ok(())
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
 }
+
+#[cfg(test)]
+mod tests;

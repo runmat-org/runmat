@@ -1,0 +1,11 @@
+{
+  "name": "runmat-docs-export",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  },
+  "dependencies": {
+    "ajv": "6.12.6"
+  }
+}

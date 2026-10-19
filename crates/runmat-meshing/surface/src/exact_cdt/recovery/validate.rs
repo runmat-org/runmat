@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::{
-    predicate::{incircle2d_symbolic, orient2d},
+    predicate::{incircle2d, orient2d},
     MeshingCancellationSignal, PredicateSign,
 };
 
@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{planarity::validate_planar_edges, ExactFaceConstrainedDelaunay};
-use crate::exact_cdt::topology::{edge_uses, sorted_edge};
+use crate::exact_cdt::topology::{edge_uses_with_checkpoint, sorted_edge};
 
 pub fn validate_exact_face_constrained_delaunay(
     constrained: &ExactFaceConstrainedDelaunay,
@@ -27,17 +27,30 @@ pub fn validate_exact_face_constrained_delaunay(
             error.to_string(),
         )
     })?;
-    validate_face_constrained_topology(constrained, pslg, cancellation, options)
+    validate_face_constrained_topology(constrained, pslg, cancellation, options, None)
 }
 
+#[track_caller]
 pub(crate) fn validate_face_constrained_topology(
     constrained: &ExactFaceConstrainedDelaunay,
     pslg: &ExactFacePslg,
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
 ) -> Result<(), ExactFaceDelaunayError> {
     validate_options(pslg, options)?;
     checkpoint(cancellation, pslg)?;
+    validate_topology_body(constrained, pslg, cancellation, options, geometry_control)
+}
+
+// Keep inner-loop probe sites local while the entry probe reports its caller.
+fn validate_topology_body(
+    constrained: &ExactFaceConstrainedDelaunay,
+    pslg: &ExactFacePslg,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
+) -> Result<(), ExactFaceDelaunayError> {
     if constrained.source_face_id != pslg.source_face_id
         || constrained.triangles.is_empty()
         || constrained.triangles.len() > options.maximum_triangles
@@ -115,7 +128,8 @@ pub(crate) fn validate_face_constrained_topology(
         ));
     }
 
-    let edges = edge_uses(&constrained.triangles);
+    let edges =
+        edge_uses_with_checkpoint(&constrained.triangles, || checkpoint(cancellation, pslg))?;
     if edges.values().any(|uses| uses.len() > 2) {
         return Err(invalid(
             pslg,
@@ -133,6 +147,7 @@ pub(crate) fn validate_face_constrained_topology(
                 .saturating_sub(predicate_count),
             ..options
         },
+        geometry_control,
     )?);
     let mut protected = BTreeSet::new();
     for (index, (actual, expected)) in constrained
@@ -177,13 +192,14 @@ pub(crate) fn validate_face_constrained_topology(
         .map(|index| {
             super::super::triangulation::predicate_point(pslg.vertices[index as usize], index)
         });
-        if incircle2d_symbolic(query).map_err(|error| predicate_error(pslg, error))?
+        if incircle2d(query.map(|point| point.coordinates))
+            .map_err(|error| predicate_error(pslg, error))?
             == PredicateSign::Positive
         {
             return Err(invalid(
                 pslg,
                 ExactFaceDelaunayErrorKind::InvalidTopology,
-                format!("unprotected edge {edge:?} is not symbolically Delaunay"),
+                format!("unprotected edge {edge:?} is not Delaunay"),
             ));
         }
     }
@@ -223,6 +239,7 @@ fn consume(
     }
 }
 
+#[track_caller]
 fn checkpoint(
     cancellation: &dyn MeshingCancellationSignal,
     pslg: &ExactFacePslg,

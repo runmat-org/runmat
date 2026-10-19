@@ -1,12 +1,10 @@
 use runmat_meshing_core::{NeverCancelled, StableDigest};
 
 use super::*;
+use crate::cdt::{insert_delaunay_volume_node, validate_delaunay_volume_topology};
 
 fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
-    DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([identity; 32]),
-        coordinates_m,
-    }
+    DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
 }
 
 fn point_set() -> Vec<DelaunayVolumeNode> {
@@ -20,7 +18,7 @@ fn point_set() -> Vec<DelaunayVolumeNode> {
 }
 
 #[test]
-fn point_set_bootstrap_is_canonical_and_removes_enclosing_nodes() {
+fn point_set_bootstrap_is_canonical_and_closes_the_hull() {
     let expected_nodes = point_set();
     let mut reversed = expected_nodes.clone();
     reversed.reverse();
@@ -94,6 +92,45 @@ fn point_set_bootstrap_resolves_cospherical_topology_by_stable_identity() {
 }
 
 #[test]
+fn point_set_bootstrap_closes_the_convex_hull_of_a_torus_point_cloud() {
+    let mut points = Vec::new();
+    let mut identity = 1_u8;
+    for major_index in 0..12 {
+        let major = std::f64::consts::TAU * major_index as f64 / 12.0;
+        for minor_index in 0..6 {
+            let minor = std::f64::consts::TAU * minor_index as f64 / 6.0;
+            let radius = 2.0 + 0.5 * minor.cos();
+            points.push(node(
+                identity,
+                [
+                    radius * major.cos(),
+                    radius * major.sin(),
+                    0.5 * minor.sin(),
+                ],
+            ));
+            identity += 1;
+        }
+    }
+    let first = points[3].coordinates_m;
+    let last = points[9].coordinates_m;
+    let midpoint = std::array::from_fn(|axis| first[axis] * 0.5 + last[axis] * 0.5);
+    let topology = build_delaunay_volume_point_set(
+        points,
+        DelaunayPointSetOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+
+    insert_delaunay_volume_node(
+        topology,
+        node(250, midpoint),
+        DelaunayInsertionOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+}
+
+#[test]
 fn point_set_bootstrap_rejects_degenerate_and_duplicate_inputs() {
     let coplanar = vec![
         node(10, [0.0, 0.0, 0.0]),
@@ -144,7 +181,6 @@ fn point_set_bootstrap_enforces_limits_and_cancellation() {
             },
             ..DelaunayInsertionOptions::default()
         },
-        ..DelaunayPointSetOptions::default()
     };
     assert_eq!(
         build_delaunay_volume_point_set(point_set(), bounded, &NeverCancelled)
@@ -160,7 +196,6 @@ fn point_set_bootstrap_enforces_limits_and_cancellation() {
             },
             ..DelaunayInsertionOptions::default()
         },
-        ..DelaunayPointSetOptions::default()
     };
     assert_eq!(
         build_delaunay_volume_point_set(point_set(), bounded_intermediate, &NeverCancelled,)
@@ -181,7 +216,7 @@ fn point_set_bootstrap_enforces_limits_and_cancellation() {
 }
 
 #[test]
-fn point_set_bootstrap_handles_construction_identity_collision_and_extreme_range() {
+fn point_set_bootstrap_handles_low_identity_and_extreme_range() {
     let mut collision = point_set()[..4].to_vec();
     let mut reserved = [0; 32];
     reserved[31] = 1;
@@ -210,4 +245,51 @@ fn point_set_bootstrap_handles_construction_identity_collision_and_extreme_range
         .kind,
         DelaunayPointSetErrorKind::ResourceLimit
     );
+}
+
+#[test]
+fn admitted_cpu_counts_preserve_complete_point_set_and_independent_validation() {
+    let mut state = 31_u64;
+    let mut points = point_set();
+    for index in 0..192_u32 {
+        let mut random = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 32) as f64 / u32::MAX as f64
+        };
+        points.push(DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes(
+                <sha2::Sha256 as sha2::Digest>::digest(index.to_be_bytes()).into(),
+            ),
+            [4. * random() - 1., 4. * random() - 1., 4. * random() - 1.],
+        ));
+    }
+    let mut reference = None;
+    for threads in [1, 2, 4] {
+        let start = std::time::Instant::now();
+        let mesh = runmat_cpu_execution::with_cpu_pool(threads, || {
+            build_delaunay_volume_point_set(
+                points.clone(),
+                DelaunayPointSetOptions::default(),
+                &NeverCancelled,
+            )
+        })
+        .unwrap()
+        .unwrap();
+        validate_delaunay_volume_topology(
+            &mesh,
+            DelaunayInsertionOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap();
+        if let Some(expected) = &reference {
+            assert_eq!(&mesh, expected);
+        } else {
+            reference = Some(mesh);
+        }
+        eprintln!(
+            "CPU_POINT_SET threads={threads} nodes={} wall_seconds={:.6}",
+            points.len(),
+            start.elapsed().as_secs_f64()
+        );
+    }
 }

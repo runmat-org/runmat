@@ -1,35 +1,36 @@
-use runmat_execution::Digest;
 use runmat_meshing_core::{
     MeshingChunkMediaType, MeshingChunkStream, MeshingFailure, MeshingFailureCategory,
     MeshingPartitionKind, MeshingStageKind, MeshingStageResultKind, StableDigest,
 };
 use runmat_meshing_curve::{
-    apply_shared_curve_splits, decode_shared_curve_mesh, encode_shared_curve_mesh,
-    SharedCurveEvaluationContext, SHARED_CURVE_MESH_SCHEMA_VERSION,
+    apply_shared_curve_splits, decode_shared_curve_mesh_with_cancellation,
+    encode_shared_curve_mesh_admitted, SharedCurveEvaluationContext,
+    SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 use runmat_meshing_surface::{
-    decode_exact_face_partition_result, decode_exact_surface_pass_result, ExactSurfacePassOutcome,
+    decode_exact_face_partition_records_admitted,
+    decode_exact_surface_pass_result_with_cancellation, ExactSurfacePassOutcome,
     EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION, MAX_EXACT_FACE_PARTITIONS,
 };
 
 use crate::curve_kernel::{curve_failure, curve_options, map_curve_error, resolved_curve_metric};
-use crate::surface_join_kernel::partition_record;
+use crate::surface_join_kernel::partition_records;
 use crate::surface_kernel::{curve_record, exact_surface_join_options};
 use crate::{
-    ExactCurveEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, PortableCurveEvaluatorProvider, PreparedExactGeometryObjects,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
     PreparedMeshingInput, PreparedMeshingResultPublication, ValidatedMeshingStageOutput,
 };
 
 #[derive(Clone, Debug)]
-pub struct ExactCurveRefinementKernel<P = PortableCurveEvaluatorProvider> {
+pub struct ExactCurveRefinementKernel<P = PortableMeshingEvaluatorProvider> {
     evaluator_provider: P,
 }
 
-impl Default for ExactCurveRefinementKernel<PortableCurveEvaluatorProvider> {
+impl Default for ExactCurveRefinementKernel<PortableMeshingEvaluatorProvider> {
     fn default() -> Self {
         Self {
-            evaluator_provider: PortableCurveEvaluatorProvider,
+            evaluator_provider: PortableMeshingEvaluatorProvider,
         }
     }
 }
@@ -40,7 +41,7 @@ impl<P> ExactCurveRefinementKernel<P> {
     }
 }
 
-impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveRefinementKernel<P> {
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveRefinementKernel<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
@@ -57,9 +58,22 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveRefinement
         }
         let (geometry, curve_publication, pass_publication, partition_publications) =
             inputs(invocation.inputs)?;
-        let curve_bytes = curve_record(geometry, curve_publication)?;
-        let curves =
-            decode_shared_curve_mesh(&curve_bytes, &geometry.topology).map_err(map_curve_error)?;
+        let reconstruction_control = invocation.control.geometry_evaluation_control();
+        let curve_reconstruction =
+            runmat_geometry_core::GeometryAllocationScope::new(&reconstruction_control);
+        let (curve_bytes, curves) = {
+            let control = invocation.control.geometry_evaluation_control();
+            let bytes = curve_record(
+                geometry,
+                curve_publication,
+                Some(&control),
+                Some(&curve_reconstruction),
+            )?;
+            let curves =
+                decode_shared_curve_mesh_with_cancellation(&bytes, &geometry.topology, &control)
+                    .map_err(map_curve_error)?;
+            (bytes, curves)
+        };
         let geometry_digest = StableDigest::from_bytes(*geometry.root.digest.bytes());
         let curve_digest =
             StableDigest::from_bytes(*curve_publication.stage_objects().root.digest.bytes());
@@ -67,45 +81,118 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveRefinement
             std::iter::once(curve_bytes.len()),
             "shared curve byte count overflowed",
         )?;
+        drop(curve_bytes);
+        drop(curve_reconstruction);
+        let partitions_owner =
+            runmat_geometry_core::GeometryAllocationScope::new(&reconstruction_control);
         let mut partitions = Vec::with_capacity(partition_publications.len());
         let mut pass_prerequisites = vec![geometry_digest, curve_digest];
         for publication in partition_publications {
-            let bytes = partition_record(publication, geometry_digest, curve_digest)?;
-            encoded_input_bytes = add_bytes(encoded_input_bytes, bytes.len())?;
-            partitions.push(
-                decode_exact_face_partition_result(&bytes, &geometry.topology, &curves)
-                    .map_err(|error| invalid_input(&error.to_string()))?,
-            );
+            let partition_reconstruction =
+                runmat_geometry_core::GeometryAllocationScope::new(&partitions_owner);
+            let bytes = {
+                let control = invocation.control.geometry_evaluation_control();
+                partition_records(
+                    publication,
+                    geometry_digest,
+                    curve_digest,
+                    &control,
+                    &partition_reconstruction,
+                )?
+            };
+            encoded_input_bytes = add_bytes(encoded_input_bytes, bytes.iter().map(Vec::len).sum())?;
+            let partition = {
+                let codec = crate::codec_control::CodecControl::new(&partition_reconstruction);
+                decode_exact_face_partition_records_admitted(
+                    &bytes,
+                    &geometry.topology,
+                    &curves,
+                    &codec,
+                    &codec,
+                )
+                .map_err(|error| {
+                    if let Some(original) = codec.take_failure() {
+                        return curve_failure(
+                            crate::geometry_failure::category(original.kind),
+                            None,
+                            "honor the original face reconstruction admission",
+                            &original.to_string(),
+                        );
+                    }
+
+                    if error.kind == runmat_meshing_surface::ExactSurfaceMeshErrorKind::Cancelled {
+                        curve_failure(
+                            MeshingFailureCategory::Cancelled,
+                            None,
+                            "cancelled surface partition read",
+                            &error.to_string(),
+                        )
+                    } else {
+                        invalid_input(&error.to_string())
+                    }
+                })?
+            };
             pass_prerequisites.push(StableDigest::from_bytes(
                 *publication.stage_objects().root.digest.bytes(),
             ));
+            let retained = partition
+                .retained_storage_bytes(&partition_reconstruction)
+                .map_err(|error| {
+                    curve_failure(
+                        crate::geometry_failure::category(error.kind),
+                        None,
+                        "admit the complete retained face partition",
+                        &error.to_string(),
+                    )
+                })?;
+            partition_reconstruction.retain_bytes(retained);
+            partitions.push(partition);
+            drop(bytes);
+            drop(partition_reconstruction);
             invocation
                 .control
                 .checkpoint(MeshingStageCheckpoint::default())?;
         }
         pass_prerequisites.sort();
-        let pass_bytes = pass_record(pass_publication, &pass_prerequisites)?;
+        let pass_reconstruction =
+            runmat_geometry_core::GeometryAllocationScope::new(&reconstruction_control);
+        let pass_bytes = {
+            let control = invocation.control.geometry_evaluation_control();
+            pass_record(
+                pass_publication,
+                &pass_prerequisites,
+                &control,
+                &pass_reconstruction,
+            )?
+        };
         encoded_input_bytes = add_bytes(encoded_input_bytes, pass_bytes.len())?;
-        let pass = decode_exact_surface_pass_result(
-            &pass_bytes,
-            &geometry.topology,
-            &curves,
-            &partitions,
-            exact_surface_join_options(invocation.host),
-        )
-        .map_err(|error| invalid_input(&error.to_string()))?;
+        let pass = {
+            let control = invocation.control.geometry_evaluation_control();
+            decode_exact_surface_pass_result_with_cancellation(
+                &pass_bytes,
+                &geometry.topology,
+                &curves,
+                &partitions,
+                exact_surface_join_options(invocation.host),
+                &control,
+            )
+            .map_err(map_surface_error)?
+        };
+        drop(pass_bytes);
+        drop(pass_reconstruction);
         let ExactSurfacePassOutcome::RequiresCurveSplits { splits } = pass.outcome else {
             return Err(invalid_input(
                 "a converged surface pass cannot enter curve refinement",
             ));
         };
 
+        let control = invocation.control.geometry_evaluation_control();
         let evaluator = self
             .evaluator_provider
-            .evaluator(geometry)
+            .evaluator(geometry, &control)
             .map_err(|error| invalid_input(&error.to_string()))?;
-        let control = invocation.control.geometry_evaluation_control();
         let metric = resolved_curve_metric(
+            &self.evaluator_provider,
             geometry,
             evaluator.as_ref(),
             &control,
@@ -125,7 +212,8 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveRefinement
         )
         .map_err(map_curve_error)?;
         let encoded =
-            encode_shared_curve_mesh(&refined, &geometry.topology).map_err(map_curve_error)?;
+            encode_shared_curve_mesh_admitted(&refined, &geometry.topology, &control, &control)
+                .map_err(map_curve_error)?;
         let usage = control.usage();
 
         let edge_count = checked_count(
@@ -164,7 +252,12 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveRefinement
         invocation.control.checkpoint(checkpoint.clone())?;
 
         Ok(ValidatedMeshingStageOutput {
-            invariant_summary_digest: validation_digest(&encoded),
+            invariant_summary_digest: crate::publication_digest::record(
+                b"runmat-refined-global-curve-validation/v1\0",
+                &encoded,
+                invocation.control,
+                &checkpoint,
+            )?,
             streams: vec![MeshingChunkStream {
                 media_type: MeshingChunkMediaType::CurveMesh,
                 schema_version: SHARED_CURVE_MESH_SCHEMA_VERSION,
@@ -210,7 +303,9 @@ fn inputs(
                 pass = Some(input.as_ref());
             }
             PreparedMeshingInput::StageArtifact(input) => partitions.push(input.as_ref()),
-            PreparedMeshingInput::ExactGeometry(_) | PreparedMeshingInput::FacetedGeometry(_) => {
+            PreparedMeshingInput::ExactGeometry(_)
+            | PreparedMeshingInput::FacetedGeometry(_)
+            | PreparedMeshingInput::Evidence(_) => {
                 return Err(invalid_input("curve refinement input kinds are invalid"));
             }
         }
@@ -231,11 +326,22 @@ fn inputs(
 fn pass_record(
     publication: &PreparedMeshingResultPublication,
     prerequisites: &[StableDigest],
+    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
+    allocations: &dyn runmat_geometry_core::GeometryEvaluationControl,
 ) -> Result<Vec<u8>, Box<MeshingFailure>> {
-    let streams = publication
-        .stage_objects()
-        .decoded_streams()
-        .map_err(|error| invalid_input(&error.to_string()))?;
+    let streams = crate::controlled_streams::decode_admitted(
+        publication.stage_objects(),
+        cancellation,
+        allocations,
+    )
+    .map_err(|error| {
+        crate::surface_kernel::error::surface_failure(
+            error.category,
+            None,
+            "regenerate the exact surface pass publication",
+            &error.detail,
+        )
+    })?;
     let [stream] = streams.as_slice() else {
         return Err(invalid_input(
             "surface pass must contain one logical stream",
@@ -257,7 +363,7 @@ fn pass_record(
             "surface pass identity, prerequisites, media, schema, or record count is invalid",
         ));
     }
-    Ok(stream.records[0].clone())
+    Ok(crate::controlled_streams::take_single_record(streams, 0).expect("one admitted record"))
 }
 
 fn add_bytes(total: u64, length: usize) -> Result<u64, Box<MeshingFailure>> {
@@ -293,8 +399,15 @@ fn invalid_input(detail: &str) -> Box<MeshingFailure> {
     )
 }
 
-fn validation_digest(encoded: &[u8]) -> StableDigest {
-    let mut bytes = b"runmat-refined-global-curve-validation/v1\0".to_vec();
-    bytes.extend_from_slice(encoded);
-    StableDigest::from_bytes(*Digest::sha256(&bytes).bytes())
+fn map_surface_error(error: runmat_meshing_surface::ExactSurfaceMeshError) -> Box<MeshingFailure> {
+    if error.kind == runmat_meshing_surface::ExactSurfaceMeshErrorKind::Cancelled {
+        crate::surface_kernel::error::surface_failure(
+            MeshingFailureCategory::Cancelled,
+            None,
+            "retry the cancelled surface pass admission",
+            &error.to_string(),
+        )
+    } else {
+        invalid_input(&error.to_string())
+    }
 }

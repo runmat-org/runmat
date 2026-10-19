@@ -19,6 +19,7 @@ pub struct ExecutableUnitManifest {
     pub identity: ExecutableIdentity,
     pub revisions: ExecutableComponentRevisions,
     pub components: Vec<ExecutableComponentDescriptor>,
+    pub dependencies: Vec<super::ExecutableDependencyDescriptor>,
     pub capabilities: CapabilitySet,
     pub regions: Vec<RegionContract>,
     pub interop: InteropManifest,
@@ -37,6 +38,7 @@ impl ExecutableUnitManifest {
         self.identity.validate()?;
         self.revisions.validate()?;
         validate_component_descriptors(&self.components, &self.revisions)?;
+        super::dependencies::validate_descriptors(&self.dependencies)?;
         if self.identity.program.catalog_fingerprint() != &self.revisions.catalog_fingerprint {
             return Err(ContractError::invalid(
                 "executable.revisions.catalog_fingerprint",

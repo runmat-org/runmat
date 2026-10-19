@@ -8,9 +8,8 @@ mod core;
 mod native;
 
 use log::LevelFilter;
-use native::RunMatLanguageServer;
 use tokio::io::{stdin, stdout};
-use tower_lsp::{LspService, Server};
+use tower_lsp::Server;
 
 #[tokio::main]
 async fn main() {
@@ -19,14 +18,7 @@ async fn main() {
     let stdin = stdin();
     let stdout = stdout();
 
-    let (service, socket) = LspService::build(RunMatLanguageServer::new)
-        .custom_method("runmat/discoverTests", RunMatLanguageServer::discover_tests)
-        .custom_method(
-            "runmat/quickInformation",
-            RunMatLanguageServer::quick_information,
-        )
-        .custom_method("runmat/semanticFacts", RunMatLanguageServer::semantic_facts)
-        .finish();
+    let (service, socket) = native::service();
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 

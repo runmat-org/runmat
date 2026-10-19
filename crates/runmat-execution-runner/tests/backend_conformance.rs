@@ -15,8 +15,8 @@ fn serial_backend_returns_a_report_bound_to_the_exact_attempt() {
         common::task("serial", fixture.scope, fixture.pool, RetryPolicy::Never),
     );
     let mut backend = SerialBackend::new(
-        |_: &runmat_execution_runner::AttemptRequest| -> runmat_execution_runner::RunnerResult<_> {
-            Ok(common::success())
+        |request: &runmat_execution_runner::AttemptRequest| -> runmat_execution_runner::RunnerResult<_> {
+            Ok(common::success(request))
         },
     );
     let report = block_on(backend.launch(request.clone())).unwrap();
@@ -33,11 +33,12 @@ fn scripted_backend_preserves_script_order_and_records_cancellation() {
         &mut fixture.driver,
         common::task("scripted", fixture.scope, fixture.pool, RetryPolicy::Never),
     );
-    let mut backend = ScriptedBackend::new([AttemptReport::Started, common::success()]);
+    let success = common::success(&request);
+    let mut backend = ScriptedBackend::new([AttemptReport::Started, success.clone()]);
     let first = block_on(backend.launch(request.clone())).unwrap();
     let second = block_on(backend.launch(request.clone())).unwrap();
     assert_eq!(first.report, AttemptReport::Started);
-    assert_eq!(second.report, common::success());
+    assert_eq!(second.report, success);
     block_on(backend.cancel(&request)).unwrap();
     assert_eq!(backend.launched.len(), 2);
     assert_eq!(backend.cancelled, vec![request]);

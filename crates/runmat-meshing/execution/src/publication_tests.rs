@@ -13,8 +13,7 @@ use runmat_execution_runner::{AttemptReport, Driver, PoolSpec, TaskSubmission, W
 
 use crate::tests::{fixture, MemoryCache};
 use crate::{
-    import_result_publication, prepare_result_publication, prepare_stage_objects,
-    MeshingArtifactAccess,
+    import_result_publication, prepare_result_publication, prepare_stage_objects, ArtifactAccess,
 };
 
 #[test]
@@ -137,7 +136,7 @@ fn runner_commits_root_and_complete_inventory_atomically() {
         .handle(DriverCommand::BackendReport(BackendReport::for_request(
             &request,
             AttemptReport::Succeeded {
-                result: publication.attempt_success(),
+                result: accounted_publication(&publication, &request),
             },
         )))
         .unwrap();
@@ -158,7 +157,7 @@ fn stale_and_duplicate_publications_are_not_visible_and_are_collected() {
     let mut stale = BackendReport::for_request(
         &request,
         AttemptReport::Succeeded {
-            result: publication.attempt_success(),
+            result: accounted_publication(&publication, &request),
         },
     );
     stale.driver_fence = stale.driver_fence.saturating_sub(1);
@@ -169,7 +168,7 @@ fn stale_and_duplicate_publications_are_not_visible_and_are_collected() {
     let success = BackendReport::for_request(
         &request,
         AttemptReport::Succeeded {
-            result: publication.attempt_success(),
+            result: accounted_publication(&publication, &request),
         },
     );
     driver
@@ -183,6 +182,23 @@ fn stale_and_duplicate_publications_are_not_visible_and_are_collected() {
     assert_gc_contains(&duplicate_actions, publication.result_objects());
 }
 
+// A scheduler report requires worker-bound accounting; a prepared domain publication
+// intentionally has no attempt allocation or observed execution interval.
+fn accounted_publication(
+    publication: &crate::PreparedMeshingResultPublication,
+    request: &runmat_execution_runner::AttemptRequest,
+) -> runmat_execution_runner::AttemptSuccess {
+    runmat_execution_runner::AttemptSuccess::new(
+        request,
+        vec![publication.root_output().clone()],
+        publication.result_objects().to_vec(),
+        1,
+        0,
+        0,
+    )
+    .unwrap()
+}
+
 fn publication() -> crate::PreparedMeshingResultPublication {
     prepare_result_publication(
         fixture(vec![vec![1; 200], vec![2; 300]], 512),
@@ -192,8 +208,8 @@ fn publication() -> crate::PreparedMeshingResultPublication {
     .unwrap()
 }
 
-fn access(scope: &str, seed: u8) -> MeshingArtifactAccess {
-    MeshingArtifactAccess {
+fn access(scope: &str, seed: u8) -> ArtifactAccess {
+    ArtifactAccess {
         authorization_scope: scope.into(),
         encryption_context: Digest::sha256([seed]),
     }
@@ -244,6 +260,8 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
     let actions = driver
         .handle(DriverCommand::Submit(Box::new(TaskSubmission {
             request: TaskRequest {
+                console: None,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
                 id: task_id,
                 scope_id: scope,
                 pool_id: pool,
@@ -299,3 +317,5 @@ fn assert_gc_contains(actions: &[DriverAction], expected: &[runmat_execution::va
         DriverAction::GarbageCollectResults { objects, .. } if objects == expected
     )));
 }
+
+mod admitted;

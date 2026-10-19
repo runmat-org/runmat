@@ -2914,6 +2914,36 @@ mod function_registry_tests {
     }
 
     #[test]
+    fn installing_new_unit_regions_preserves_foreign_original_metadata() {
+        let contract = region_contract();
+        let mut function = test_function(7, "original_owner", "");
+        function.resume_points.insert(contract.entry, 5);
+        function.resume_points.insert(contract.exits[0], 11);
+        let mut bytecode = Bytecode::empty();
+        bytecode
+            .function_registry
+            .functions
+            .insert(FunctionId(7), function.clone());
+        bytecode.bound_functions.insert(FunctionId(7), function);
+        bytecode
+            .install_regions(std::slice::from_ref(&contract))
+            .unwrap();
+        let original = bytecode.function_registry.functions[&FunctionId(7)]
+            .regions
+            .clone();
+        assert_eq!(original.len(), 1);
+        bytecode
+            .install_regions_for_functions(&[], &Default::default())
+            .unwrap();
+        assert!(bytecode.regions.is_empty());
+        assert_eq!(
+            bytecode.function_registry.functions[&FunctionId(7)].regions,
+            original
+        );
+        assert_eq!(bytecode.bound_functions[&FunctionId(7)].regions, original);
+    }
+
+    #[test]
     fn bytecode_omits_regions_without_an_exact_resume_boundary() {
         let contract = region_contract();
         let mut function = test_function(7, "region_owner", "");

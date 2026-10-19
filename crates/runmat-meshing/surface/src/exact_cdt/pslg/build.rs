@@ -146,11 +146,11 @@ fn vertex_key(vertex: ExactFacePslgVertex) -> VertexKey {
 }
 
 fn compare_keys(left: &VertexKey, right: &VertexKey) -> std::cmp::Ordering {
-    left.node_id
-        .cmp(&right.node_id)
-        .then_with(|| left.seam_image.cmp(&right.seam_image))
-        .then_with(|| f64::from_bits(left.uv_bits[0]).total_cmp(&f64::from_bits(right.uv_bits[0])))
+    f64::from_bits(left.uv_bits[0])
+        .total_cmp(&f64::from_bits(right.uv_bits[0]))
         .then_with(|| f64::from_bits(left.uv_bits[1]).total_cmp(&f64::from_bits(right.uv_bits[1])))
+        .then_with(|| left.seam_image.cmp(&right.seam_image))
+        .then_with(|| left.node_id.cmp(&right.node_id))
 }
 
 fn resource_error(source_face_id: &PersistentEntityId, reason: &str) -> ExactFacePslgError {

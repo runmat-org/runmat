@@ -1,0 +1,12 @@
+{
+  "title": "fea.MassDensity.kilogramsPerCubicMeter",
+  "category": "fea",
+  "keywords": ["fea", "quantity", "density", "fluid"],
+  "summary": "Create a positive typed mass density in kilograms per cubic meter.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_domain_constructors_preserve_typed_physics_boundaries", "integration": null },
+  "description": "`density = fea.MassDensity.kilogramsPerCubicMeter(value)` creates an `fea.MassDensity` for material and fluid-domain definitions.",
+  "behaviors": ["The input must be a finite positive real scalar.", "Host integer inputs cross one checked binary64 storage boundary; resident values are rejected."],
+  "examples": [{ "description": "Create the density of air", "input": "density = fea.MassDensity.kilogramsPerCubicMeter(1.225);" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/values.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/values.rs" }
+}

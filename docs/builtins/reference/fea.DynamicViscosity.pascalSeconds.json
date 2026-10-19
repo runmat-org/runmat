@@ -1,0 +1,12 @@
+{
+  "title": "fea.DynamicViscosity.pascalSeconds",
+  "category": "fea",
+  "keywords": ["fea", "quantity", "viscosity", "fluid"],
+  "summary": "Create a positive typed dynamic viscosity in pascal-seconds.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_domain_constructors_preserve_typed_physics_boundaries", "integration": null },
+  "description": "`viscosity = fea.DynamicViscosity.pascalSeconds(value)` creates an `fea.DynamicViscosity` for a Newtonian fluid domain.",
+  "behaviors": ["The input must be a finite positive real scalar.", "Host integer inputs cross one checked binary64 storage boundary; resident values are rejected."],
+  "examples": [{ "description": "Create the viscosity of air", "input": "viscosity = fea.DynamicViscosity.pascalSeconds(1.81e-5);" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/values.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/values.rs" }
+}

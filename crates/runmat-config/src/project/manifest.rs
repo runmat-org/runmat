@@ -3,6 +3,7 @@ use super::dependency::{
     ProjectRegistry, ProjectSourceReplacement, ProjectTargetDependencies,
 };
 use super::testing::ProjectTestConfig;
+use super::ProjectExecutionProfile;
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -28,6 +29,7 @@ pub struct ProjectManifest {
     pub source_replacements: BTreeMap<String, ProjectSourceReplacement>,
     pub publish: Option<ProjectPublication>,
     pub entrypoints: Vec<ProjectEntrypoint>,
+    pub execution_profiles: BTreeMap<String, ProjectExecutionProfile>,
     pub native_interfaces: BTreeMap<String, ProjectNativeInterface>,
     pub mex_artifacts: BTreeMap<String, ProjectMexArtifact>,
     pub java_artifacts: BTreeMap<String, ProjectJavaArtifact>,
@@ -119,6 +121,8 @@ struct RawProjectManifest {
     publish: Option<ProjectPublication>,
     #[serde(default)]
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
+    #[serde(default, rename = "execution-profiles")]
+    execution_profiles: BTreeMap<String, ProjectExecutionProfile>,
     #[serde(default, rename = "native-interfaces")]
     native_interfaces: BTreeMap<String, ProjectNativeInterface>,
     #[serde(default, rename = "mex-artifacts")]
@@ -171,6 +175,7 @@ impl From<RawProjectManifest> for ProjectManifest {
             source_replacements: value.source_replacements,
             publish: value.publish,
             entrypoints,
+            execution_profiles: value.execution_profiles,
             native_interfaces: value.native_interfaces,
             mex_artifacts: value.mex_artifacts,
             java_artifacts: value.java_artifacts,
@@ -213,6 +218,11 @@ impl Serialize for ProjectManifest {
             #[serde(skip_serializing_if = "Option::is_none")]
             publish: &'a Option<ProjectPublication>,
             entrypoints: BTreeMap<&'a str, CanonicalEntrypoint<'a>>,
+            #[serde(
+                rename = "execution-profiles",
+                skip_serializing_if = "BTreeMap::is_empty"
+            )]
+            execution_profiles: &'a BTreeMap<String, ProjectExecutionProfile>,
             #[serde(rename = "native-interfaces")]
             native_interfaces: &'a BTreeMap<String, ProjectNativeInterface>,
             #[serde(rename = "mex-artifacts")]
@@ -262,6 +272,7 @@ impl Serialize for ProjectManifest {
             source_replacements: &self.source_replacements,
             publish: &self.publish,
             entrypoints,
+            execution_profiles: &self.execution_profiles,
             native_interfaces: &self.native_interfaces,
             mex_artifacts: &self.mex_artifacts,
             java_artifacts: &self.java_artifacts,
@@ -382,6 +393,9 @@ impl ProjectManifest {
                     ),
                 });
             }
+        }
+        for (name, profile) in &self.execution_profiles {
+            messages.extend(profile.validate(name));
         }
         messages.extend(self.test.validation_messages());
         for (field, paths) in [

@@ -5,6 +5,7 @@ mod limits;
 mod process_tree;
 mod retirement;
 mod spawn;
+mod startup;
 mod stderr;
 
 pub use lifecycle::{ChildProcess, ChildStdio, ProcessExit};
@@ -15,4 +16,5 @@ pub use retirement::{
     ProcessRetirementLease, ProcessSpawnEvidence, RetirementBoundChild,
 };
 pub use spawn::{spawn, spawn_observed};
-pub use stderr::CapturedStderr;
+pub use startup::release_startup_stderr;
+pub use stderr::{CapturedStderr, StderrCompletion, StderrSnapshot};

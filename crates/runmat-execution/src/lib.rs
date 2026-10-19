@@ -1,8 +1,12 @@
 //! Portable execution contracts shared by native, browser, test, and remote hosts.
 
-pub mod collective;
 pub mod cancellation;
+pub use cancellation::{CancellationSource, CancellationToken};
+pub mod collective;
+pub mod console;
 pub mod distributed;
+mod environment;
+pub use environment::{EnvironmentSnapshot, EnvironmentStorageProfile};
 mod error;
 pub mod executable;
 pub mod gang;
@@ -31,10 +35,11 @@ pub use distributed::{
 pub use error::ContractError;
 pub use executable::{
     ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
-    ExecutableComponentRevisions, ExecutableEntrypointKind, ExecutableIdentity,
-    ExecutableOptionalSection, ExecutableSectionSupport, ExecutableSourceMapV2,
-    ExecutableSourceRecordV2, ExecutableUnitAdmission, ExecutableUnitEnvelope,
-    ExecutableUnitManifest, SectionRequirement, ValidatedExecutableEntrypoint,
+    ExecutableComponentRevisions, ExecutableDependencyDescriptor, ExecutableDependencyProduct,
+    ExecutableEntrypointKind, ExecutableIdentity, ExecutableOptionalSection,
+    ExecutableSectionSupport, ExecutableSourceMapV2, ExecutableSourceRecordV2,
+    ExecutableUnitAdmission, ExecutableUnitEnvelope, ExecutableUnitManifest, SectionRequirement,
+    ValidatedExecutableEntrypoint, EXECUTABLE_DEPENDENCY_MAX_PRODUCTS,
     EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 pub use gang::{GangHandle, GangRequest, GangSnapshot, SpmdOutputValue, SpmdTaskContext};

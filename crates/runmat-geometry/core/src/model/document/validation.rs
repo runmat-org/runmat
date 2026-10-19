@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use super::{
     GeometryDocument, GeometryModel, GeometryObjectRef, GeometrySourceFormat,
     DISPLAY_TESSELLATION_MEDIA_TYPE, EXACT_BREP_MEDIA_TYPE, FACETED_SOLID_MEDIA_TYPE,
@@ -106,10 +104,10 @@ pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), Geome
             "too many derived display cache entries",
         ));
     }
-    let mut profiles = BTreeSet::new();
-    for display in &document.display_tessellations {
+    let mut profiles = [None; MAX_DISPLAY_TESSELLATIONS];
+    for (index, display) in document.display_tessellations.iter().enumerate() {
         validate_token("display tessellation profile", &display.profile_id, 128)?;
-        if !profiles.insert(display.profile_id.as_str())
+        if profiles[..index].contains(&Some(display.profile_id.as_str()))
             || display.geometry_revision != document.revision.revision
             || display.derived_from_primary_digest != document.primary_artifact().digest
         {
@@ -118,6 +116,7 @@ pub(super) fn validate_document(document: &GeometryDocument) -> Result<(), Geome
                 "profiles must be unique and bind the exact document revision and primary payload",
             ));
         }
+        profiles[index] = Some(display.profile_id.as_str());
         validate_object(&display.artifact, DISPLAY_TESSELLATION_MEDIA_TYPE)?;
         if display.artifact.digest == document.primary_artifact().digest {
             return Err(invalid(

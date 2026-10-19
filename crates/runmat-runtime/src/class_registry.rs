@@ -24,6 +24,7 @@ mod registration;
 mod revision;
 mod selected;
 mod event_data;
+pub mod declaration;
 pub use event_data::{
     default_event_data, is_event_data_value, prepare_event_data, EventDataError, PreparedEventData,
 };

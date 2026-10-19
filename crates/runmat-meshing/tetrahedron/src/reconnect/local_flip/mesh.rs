@@ -151,7 +151,7 @@ fn first_local_reconnection_candidate(
         for right_index in (left_index + 1)..mesh.elements.len() {
             let left_element = &mesh.elements[left_index];
             let right_element = &mesh.elements[right_index];
-            if left_element.material_region_id != right_element.material_region_id {
+            if left_element.region_id != right_element.region_id {
                 continue;
             }
             let Some(shared_face) = shared_element_face(left_element, right_element) else {
@@ -214,7 +214,7 @@ fn has_potential_local_reconnection_candidate(
         for right_index in (left_index + 1)..mesh.elements.len() {
             let left_element = &mesh.elements[left_index];
             let right_element = &mesh.elements[right_index];
-            if left_element.material_region_id != right_element.material_region_id {
+            if left_element.region_id != right_element.region_id {
                 continue;
             }
             let Some(shared_face) = shared_element_face(left_element, right_element) else {
@@ -324,7 +324,7 @@ fn apply_two_to_three_reconnection(
     for (node_id, local_id) in node_index {
         local_to_topology.insert(*local_id, node_id.clone());
     }
-    let material_region_id = mesh.elements[left_index].material_region_id.clone();
+    let region_id = mesh.elements[left_index].region_id.clone();
     let removed = [left_index, right_index]
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -352,7 +352,7 @@ fn apply_two_to_three_reconnection(
                 local_to_topology[&created[2]].clone(),
                 local_to_topology[&created[3]].clone(),
             ],
-            material_region_id: material_region_id.clone(),
+            region_id: region_id.clone(),
         });
     }
     mesh.elements = next_elements;

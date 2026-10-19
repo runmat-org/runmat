@@ -9,13 +9,15 @@ use runmat_meshing_core::{
 };
 
 mod lineage;
+mod node_projection;
 mod point_location;
 mod preserved_boundary;
 #[cfg(test)]
 mod tests;
 
 use lineage::{build_coarsening_lineage, build_refinement_lineage};
-use point_location::build_volume_element_transfers;
+use node_projection::build_node_transfers;
+use point_location::{build_volume_element_transfers, PointLocationWork};
 use preserved_boundary::require_unchanged_boundaries;
 
 use super::{
@@ -48,6 +50,7 @@ pub enum DelaunayAdaptiveTransferErrorKind {
     InvalidLineage,
     InvalidArtifact,
     UnsupportedBoundaryChange,
+    UnsupportedGeometry,
     ProjectionFailure,
     ResourceLimit,
     Cancelled,
@@ -244,8 +247,15 @@ fn build_map(
         ));
     }
 
+    let mut work = PointLocationWork::new(options, cancellation);
+    if source_artifact.resolved_request.element_order == runmat_meshing_core::ElementOrder::Tet10
+        || target_artifact.resolved_request.element_order
+            == runmat_meshing_core::ElementOrder::Tet10
+    {
+        node_transfers = build_node_transfers(source_artifact, target_artifact, &mut work)?;
+    }
     let volume_element_transfers =
-        build_volume_element_transfers(source_artifact, target_artifact, options, cancellation)?;
+        build_volume_element_transfers(source_artifact, target_artifact, &mut work)?;
     let transfer = SolverMeshTransferMap {
         schema_version: SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
         source_artifact_digest: source_artifact.canonical_digest,

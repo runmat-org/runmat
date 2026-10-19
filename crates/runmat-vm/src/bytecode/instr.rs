@@ -558,6 +558,7 @@ pub enum Instr {
     CallFevalExpandMultiOutputUsingOutputSlot(Vec<ArgumentSpec>, usize),
     // Create a lazy semantic-future descriptor from call arguments.
     CreateSemanticFuture(FunctionId, usize, usize),
+    CreateExternalFuture(FunctionId, Vec<ArgumentSpec>, usize),
     CreateSemanticFutureExpandMultiOutput(FunctionId, Vec<ArgumentSpec>, usize),
     // Resolve the pool/no-pool overload and schedule a MATLAB-facing invocation.
     ScheduleFeval {
@@ -1017,7 +1018,8 @@ impl Instr {
                 let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
                 effect(1 + operands, 0)
             }
-            Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _) => {
+            Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
+            | Instr::CreateExternalFuture(_, specs, _) => {
                 let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
                 effect(operands, 1)
             }

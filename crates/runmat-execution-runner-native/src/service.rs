@@ -18,7 +18,7 @@ use runmat_value::{Value, ValueSequence};
 use crate::config::fresh_scope_id;
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::durable::DurableJobBridge;
-use crate::supervisor::{GraphBatchSubmission, ProgramBatchSubmission};
+use crate::supervisor::GraphBatchSubmission;
 use crate::{NativeExecutionConfig, NativeExecutionResult};
 
 mod materialization;
@@ -106,7 +106,7 @@ impl NativeExecutionService {
     pub fn new(mut config: NativeExecutionConfig) -> NativeExecutionResult<Self> {
         let nonce = NEXT_NATIVE_SCOPE.fetch_add(1, Ordering::Relaxed);
         let scope_id = fresh_scope_id(b"native-session", nonce);
-        config.store_root.push(scope_id.to_string());
+        config.scope_store(scope_id);
         Ok(Self {
             scope_id,
             driver: LocalDriver::new(config, scope_id)?,
@@ -401,6 +401,8 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 },
                 retry: runmat_execution::RetryPolicy::Never,
                 program_revision: call.program_revision.clone(),
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
                 capabilities: call.capabilities.clone(),
                 program: runmat_runtime::execution::DeferredProgram::RegionSourcesV1(
                     call.program.clone().into(),
@@ -434,6 +436,8 @@ impl RuntimeExecutionServices for NativeExecutionService {
                     owned_work: None,
                 },
                 retry: runmat_execution::RetryPolicy::Never,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
             }) {
                 Ok(completion) => completion,
                 Err(error) => {
@@ -563,7 +567,9 @@ impl RuntimeExecutionServices for NativeExecutionService {
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let mut state = self.state.lock().expect("native service poisoned");
         let sequence = state.next_future;
-        state.next_future = sequence.wrapping_add(1);
+        state.next_future = sequence
+            .checked_add(1)
+            .ok_or(ExecutionServiceError::UnknownHandle)?;
         let id = FutureId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
         state
             .futures
@@ -784,16 +790,22 @@ impl RuntimeExecutionServices for NativeExecutionService {
         }
         let (callable, invocation_context, recipe, artifact, arguments) =
             materialize_call(&call, outputs)?;
-        self.durable.submit(ProgramBatchSubmission {
-            recipe,
-            artifact,
-            callable,
-            invocation_context,
-            arguments,
-            requested_outputs,
-            idempotency_key: options.idempotency_key,
-            retention_millis: options.retention_millis,
-        })
+        self.durable.submit(
+            runmat_execution_artifact::ProgramExecutionRequest {
+                schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+                recipe,
+                artifact,
+                callable,
+                context: invocation_context,
+                assignment: None,
+                job_id: None,
+                arguments,
+                requested_outputs,
+                environment: call.environment.clone(),
+                console: call.console,
+            },
+            options,
+        )
     }
 
     fn await_job(&self, job: &JobHandle) -> Result<Value, ExecutionServiceError> {
@@ -815,13 +827,21 @@ impl RuntimeExecutionServices for NativeExecutionService {
         self.sweep_completed_graph_cancellations();
         if let Value::Job(handle) = &value {
             return self
-                .await_job(handle)
+                .durable
+                .try_await_job(handle)
                 .and_then(|value| {
-                    ValueSequence::single(value)
-                        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
+                    value
+                        .map(|value| {
+                            ValueSequence::single(value)
+                                .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
+                                .and_then(runmat_runtime::execution::RootedValueSequence::new)
+                        })
+                        .transpose()
                 })
-                .and_then(runmat_runtime::execution::RootedValueSequence::new)
-                .map(AwaitAction::Completed);
+                .map(|result| match result {
+                    Some(value) => AwaitAction::Completed(value),
+                    None => AwaitAction::Pending(value),
+                });
         }
         let original = value.clone();
         let future = match self.future_for_value(value)? {
@@ -889,10 +909,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 FutureState::Cancelled => return Err(ExecutionServiceError::Cancelled),
             }
         };
-        let Some(completion) = completion.try_value() else {
+        let Some(outcome) = completion.try_value() else {
             return Ok(AwaitAction::Pending(original));
         };
-        let result = completion
+        let result = outcome
             .and_then(|success| {
                 let Some((outputs, result_objects)) = success.values() else {
                     return Err(crate::driver::TransferFailure::Infrastructure(
@@ -1167,7 +1187,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                     .ok_or(ExecutionServiceError::UnknownHandle)?
                     .future_id
             }
-            Value::Job(handle) => return self.durable.cancel(handle.clone()),
+            Value::Job(handle) => return self.durable.cancel(handle.clone(), reason),
             _ => return Err(ExecutionServiceError::UnknownHandle),
         };
         let mut state = self.state.lock().expect("native service poisoned");
@@ -1221,7 +1241,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 )
             })?;
             self.driver
-                .cancel_task(task_id)
+                .cancel_task(task_id, reason)
                 .map_err(|error| ExecutionServiceError::Infrastructure(error.to_string()))?;
         }
         drop(retired);
@@ -1411,7 +1431,7 @@ fn materialize_call(
         runmat_execution_artifact::ProgramTarget::portable(format!(
             "{}-{}-interpreter-bytecode-v2",
             std::env::consts::ARCH,
-            std::env::consts::OS
+            std::env::consts::OS,
         )),
     )
 }

@@ -760,6 +760,7 @@ fn query_windows_registry(root: &str, key: &str, value: Option<&str>) -> Builtin
     if let Some(value) = value {
         cmd.args(["/v", value]);
     }
+    runtime_env::apply_to_command(&mut cmd);
     let output = cmd
         .output()
         .map_err(|err| compat_error("winqueryreg", format!("winqueryreg: {err}")))?;
@@ -811,8 +812,10 @@ fn query_windows_registry_names(root: &str, key: &str) -> BuiltinResult<Value> {
         full.push('\\');
         full.push_str(key);
     }
-    let output = Command::new("reg")
-        .args(["query", &full])
+    let mut command = Command::new("reg");
+    command.args(["query", &full]);
+    runtime_env::apply_to_command(&mut command);
+    let output = command
         .output()
         .map_err(|err| compat_error("winqueryreg", format!("winqueryreg: {err}")))?;
     if !output.status.success() {

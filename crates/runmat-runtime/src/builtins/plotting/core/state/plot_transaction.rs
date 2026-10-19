@@ -174,9 +174,12 @@ where
             state.figure.set_grid(opts.grid);
             state.figure.set_axis_equal(opts.axis_equal);
 
+            let first_new_plot = state.figure.plots().count();
             let _axes_context = AxesContextGuard::install(state, axes_index);
             apply(&mut state.figure, axes_index)
                 .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+            // New colormapped graphics use their axes' colormap, as in MATLAB.
+            state.figure.apply_axes_colormaps_from(first_new_plot);
 
             // Increment revision after a successful mutation so surfaces can avoid
             // re-rendering unchanged figures when "presenting" an already-loaded handle.

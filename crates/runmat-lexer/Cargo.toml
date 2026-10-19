@@ -10,3 +10,5 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 logos = { workspace = true }
+runmat-types = { workspace = true }
+serde = { workspace = true }

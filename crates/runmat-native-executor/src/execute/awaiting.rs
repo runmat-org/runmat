@@ -122,23 +122,9 @@ pub(super) async fn complete(
             }
             AwaitWork::Execute { mut running, call } => {
                 let requested_outputs = call.invocation.requested_outputs();
-                let result = match call.invocation {
-                    runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
-                        runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(
-                            &runtime,
-                            *descriptor,
-                        )
-                        .await
-                    }
-                    runmat_runtime::execution::DeferredInvocation::Program { .. } => {
-                        Err(runmat_runtime::runtime_error::semantic_error(
-                            "ParallelProgramUnavailable",
-                            "native continuation cannot execute a deferred program in-process",
-                        ))
-                    }
-                }
-                .map_err(NativeExecutorError::from)
-                .and_then(|sequence| normalize_outputs(sequence, requested_outputs));
+                let result = execute_deferred_call(&runtime, *call)
+                    .await
+                    .and_then(|sequence| normalize_outputs(sequence, requested_outputs));
                 let sequence = store_callable_outcome(&mut running, result)?;
                 return Ok(AwaitCompletion {
                     edge,
@@ -147,6 +133,32 @@ pub(super) async fn complete(
             }
         }
     }
+}
+
+/// Run the deferred callable inside the original invocation environment it
+/// captured at future creation, not the awaiting caller's current one.
+async fn execute_deferred_call(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    call: DeferredCall,
+) -> NativeExecutorResult<RootedValueSequence> {
+    let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) = call.invocation
+    else {
+        return Err(runmat_runtime::runtime_error::semantic_error(
+            "ParallelProgramUnavailable",
+            "native continuation cannot execute a deferred program in-process",
+        )
+        .into());
+    };
+    let invocation = runtime
+        .clone()
+        .with_invocation_environment(&call.environment)
+        .map_err(|error| execution_error(ExecutionServiceError::Failed(error.to_string())))?;
+    runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(
+        &invocation,
+        *descriptor,
+    )
+    .await
+    .map_err(NativeExecutorError::from)
 }
 
 fn store_callable_outcome(
@@ -292,6 +304,8 @@ mod tests {
                     ),
                 ),
                 retry: runmat_execution::RetryPolicy::Never,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
                 program_revision: None,
                 capabilities: Default::default(),
                 program: DeferredProgram::Local,

@@ -154,4 +154,4 @@ Before a Native IR product is accepted, its verifier checks it against the execu
 
 The VM compiler also records the bytecode instruction corresponding to each eligible empty-stack MIR boundary. A native executor can therefore materialize the exact live frame and continue in the interpreter after a failed specialization guard or safepoint check. Continuation is admitted only when the mapping exists and all active state has a VM representation; native-only loop iterators, exception handlers, nested mutations, and pending awaits continue through the exact generic-native site instead. Both paths preserve completed effects and never restart the function.
 
-This boundary is compiler infrastructure rather than a new user-selectable execution mode. The VM remains the semantic baseline, and user-facing native execution behavior is documented with the JIT/AOT feature that exposes it.
+This boundary is compiler infrastructure rather than a user-selectable execution mode. See [JIT Compiler](/docs/runtime/jit) for adaptive native execution and [Native Compilation](/docs/runtime/compiler/native-compilation) for host-linked executables.

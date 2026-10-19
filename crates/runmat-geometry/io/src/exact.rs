@@ -10,6 +10,7 @@ use runmat_geometry_core::{
     GeometryRevisionIdentity, GeometrySourceFormat, GeometrySourceIdentity,
     GeometryTolerancePolicy, UnitSystem, GEOMETRY_DOCUMENT_SCHEMA_VERSION,
 };
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -22,8 +23,11 @@ use crate::{
 pub struct ImportedExactCad {
     pub source_digest: GeometryDigest,
     pub source_format: GeometrySourceFormat,
+    /// Authored fallback for unitless source formats; exchange declarations take precedence.
     pub source_units: UnitSystem,
     pub kernel_version: String,
+    /// Scale of the retained kernel representation, independent of the authored fallback.
+    /// STEP and IGES are retained in millimetres; unitless BREP uses `source_units`.
     pub meters_per_source_unit: f64,
     /// Canonical OCCT B-rep with all derived polygonal caches removed.
     pub representation: Vec<u8>,
@@ -34,6 +38,9 @@ pub struct ImportedExactCad {
     pub model: ExactBRepModel,
     /// Present only when the kernel changed authoritative topology under the admitted policy.
     pub healing_report: Option<GeometryHealingReport>,
+    /// Kernel-authored mapping from display-import face ordinals to exact persistent faces.
+    /// This selector metadata does not enter canonical geometry identity.
+    pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
     /// Analysis identity and mutation policy admitted before the kernel import. Keeping this on
     /// the imported object prevents closure construction from claiming a different tolerance or
     /// healing policy than the one under which topology was produced.
@@ -42,6 +49,12 @@ pub struct ImportedExactCad {
     /// the topology; these ordinals never enter serialized geometry contracts.
     pub(crate) kernel_body_shapes:
         BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
+    /// Exact result-table join used only while translating kernel feature history. Shape-table
+    /// keys never become semantic identity and never cross the geometry contract boundary.
+    pub(crate) kernel_entity_ids: BTreeMap<
+        (u64, runmat_geometry_core::PersistentEntityKind, u64),
+        runmat_geometry_core::PersistentEntityId,
+    >,
 }
 
 impl ImportedExactCad {
@@ -65,9 +78,9 @@ impl ImportedExactCad {
         Ok(self)
     }
 
-    pub fn build_closure(
+    pub fn geometry_document(
         &self,
-    ) -> Result<EncodedExactGeometryClosure, runmat_geometry_core::GeometryContractError> {
+    ) -> Result<GeometryDocument, runmat_geometry_core::GeometryContractError> {
         let tolerance = GeometryTolerancePolicy {
             source_tolerance_m: self
                 .topology
@@ -98,8 +111,15 @@ impl ImportedExactCad {
             },
             display_tessellations: Vec::new(),
         };
+        document.validate()?;
+        Ok(document)
+    }
+
+    pub fn build_closure(
+        &self,
+    ) -> Result<EncodedExactGeometryClosure, runmat_geometry_core::GeometryContractError> {
         build_exact_geometry_closure(
-            document,
+            self.geometry_document()?,
             &self.topology,
             &self.evaluators,
             Some(&self.representation),
@@ -108,7 +128,8 @@ impl ImportedExactCad {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExactCadAnalysisOptions {
     pub revision: GeometryRevisionIdentity,
     pub absolute_tolerance_floor_m: f64,
@@ -146,7 +167,8 @@ pub(crate) fn exact_representation_digest(representation: &[u8]) -> [u8; 32] {
     Sha256::digest(representation).into()
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExactCadImportOptions {
     pub source_units: UnitSystem,
     /// Geometry identity, tolerance, and healing authority for this import. These settings are
@@ -181,6 +203,63 @@ impl Default for ExactCadImportOptions {
     }
 }
 
+impl ExactCadImportOptions {
+    pub fn validate(&self) -> Result<(), GeometryImportError> {
+        if self.max_representation_bytes == 0
+            || self.max_entities == 0
+            || self.max_identity_work_bytes == 0
+            || self.max_validation_iterations == 0
+            || self.max_validation_search_work == 0
+            || self.max_validation_allocation_bytes == 0
+        {
+            return Err(GeometryImportError::InvalidOptions(
+                "exact representation, entity, identity-work, and validation budgets must be nonzero"
+                    .into(),
+            ));
+        }
+        let tolerance = GeometryTolerancePolicy {
+            source_tolerance_m: 0.0,
+            absolute_floor_m: self.analysis.absolute_tolerance_floor_m,
+            model_relative_term: self.analysis.model_relative_tolerance,
+            requested_deviation_m: self.analysis.requested_deviation_m,
+            maximum_healing_displacement_m: self.analysis.maximum_healing_displacement_m,
+        };
+        tolerance
+            .validate()
+            .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
+        self.analysis
+            .healing
+            .validate()
+            .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
+        let topology_changing_modes = u8::from(self.analysis.healing.sew)
+            + u8::from(self.analysis.healing.consolidate_duplicates)
+            + u8::from(self.analysis.healing.repair_tolerance_scale_gaps)
+            + u8::from(self.analysis.healing.simplify_short_edges_and_sliver_faces);
+        if topology_changing_modes > 1 {
+            return Err(GeometryImportError::InvalidOptions(
+                "sewing, duplicate consolidation, gap repair, and small-topology repair must be requested as separate geometry revisions".into(),
+            ));
+        }
+        if (self.analysis.healing.repair_tolerance_scale_gaps
+            || self.analysis.healing.simplify_short_edges_and_sliver_faces)
+            && self.analysis.maximum_healing_displacement_m <= 0.0
+        {
+            return Err(GeometryImportError::InvalidOptions(
+                "gap or small-topology repair requires a positive maximum healing displacement"
+                    .into(),
+            ));
+        }
+        if self.analysis.revision.revision == 0
+            || self.analysis.revision.persistent_mapping_version == 0
+        {
+            return Err(GeometryImportError::InvalidOptions(
+                "exact geometry revision and persistent mapping version must be nonzero".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 pub fn import_exact_cad(
     source_name: &str,
     bytes: &[u8],
@@ -194,65 +273,7 @@ pub fn import_exact_cad(
             "exact CAD payload is empty".into(),
         ));
     }
-    if options.max_representation_bytes == 0
-        || options.max_entities == 0
-        || options.max_identity_work_bytes == 0
-        || options.max_validation_iterations == 0
-        || options.max_validation_search_work == 0
-        || options.max_validation_allocation_bytes == 0
-    {
-        return Err(GeometryImportError::InvalidOptions(
-            "exact representation, entity, identity-work, and validation budgets must be nonzero"
-                .into(),
-        ));
-    }
-    let tolerance = GeometryTolerancePolicy {
-        source_tolerance_m: 0.0,
-        absolute_floor_m: options.analysis.absolute_tolerance_floor_m,
-        model_relative_term: options.analysis.model_relative_tolerance,
-        requested_deviation_m: options.analysis.requested_deviation_m,
-        maximum_healing_displacement_m: options.analysis.maximum_healing_displacement_m,
-    };
-    tolerance
-        .validate()
-        .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
-    options
-        .analysis
-        .healing
-        .validate()
-        .map_err(|error| GeometryImportError::InvalidOptions(error.to_string()))?;
-    let topology_changing_modes = u8::from(options.analysis.healing.sew)
-        + u8::from(options.analysis.healing.consolidate_duplicates)
-        + u8::from(options.analysis.healing.repair_tolerance_scale_gaps)
-        + u8::from(
-            options
-                .analysis
-                .healing
-                .simplify_short_edges_and_sliver_faces,
-        );
-    if topology_changing_modes > 1 {
-        return Err(GeometryImportError::InvalidOptions(
-            "sewing, duplicate consolidation, gap repair, and small-topology repair must be requested as separate geometry revisions".into(),
-        ));
-    }
-    if (options.analysis.healing.repair_tolerance_scale_gaps
-        || options
-            .analysis
-            .healing
-            .simplify_short_edges_and_sliver_faces)
-        && options.analysis.maximum_healing_displacement_m <= 0.0
-    {
-        return Err(GeometryImportError::InvalidOptions(
-            "gap or small-topology repair requires a positive maximum healing displacement".into(),
-        ));
-    }
-    if options.analysis.revision.revision == 0
-        || options.analysis.revision.persistent_mapping_version == 0
-    {
-        return Err(GeometryImportError::InvalidOptions(
-            "exact geometry revision and persistent mapping version must be nonzero".into(),
-        ));
-    }
+    options.validate()?;
     let format = OcctCadFormat::from_geometry_format(format)
         .ok_or(GeometryImportError::UnsupportedFormat)?;
     occt::import_exact_cad_shape(source_name, bytes, format, options, context)

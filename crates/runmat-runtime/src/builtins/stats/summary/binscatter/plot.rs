@@ -60,12 +60,7 @@ pub(super) fn render_binscatter(
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         NAME,
-        PlotRenderOptions {
-            title: "Binscatter Plot",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             let plot_index = figure.add_surface_plot_on_axes(
                 surface.take().expect("binscatter plot consumed once"),

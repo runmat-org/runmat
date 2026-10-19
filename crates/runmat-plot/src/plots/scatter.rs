@@ -357,6 +357,18 @@ impl ScatterPlot {
         self.invalidate_gpu_vertices();
         self
     }
+
+    /// Map scalar color data (`C`) through `cmap`; RGB colors are left as they are.
+    pub fn recolor_with_colormap(&mut self, cmap: &ColorMap) {
+        if self.color_values.is_none() {
+            return;
+        }
+        self.per_point_colors = None;
+        self.colormap = cmap.clone();
+        self.dirty = true;
+        self.invalidate_gpu_vertices();
+        self.gpu_has_per_point_colors = false;
+    }
     pub fn set_filled(&mut self, filled: bool) {
         self.filled = filled;
         self.dirty = true;

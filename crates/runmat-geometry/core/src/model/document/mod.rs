@@ -1,5 +1,6 @@
 mod codec;
 mod payload;
+mod storage;
 mod validation;
 
 use serde::{Deserialize, Serialize};

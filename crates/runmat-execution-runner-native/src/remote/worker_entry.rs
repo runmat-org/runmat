@@ -10,96 +10,57 @@ use super::route::{QuicFrameRoute, RelayFrameRoute};
 use super::worker_server::{run_worker_loop, WorkerLoopContext};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-pub async fn run_remote_worker_quic(
-    listener: QuicOverlayListener,
-    run_identity: impl Into<String>,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
-) -> NativeExecutionResult<()> {
-    run_remote_worker_quic_inner(
-        listener,
-        run_identity.into(),
-        worker,
-        driver_fence,
-        session_id,
-        run_key,
-        limits,
-        None,
-        false,
-    )
-    .await
+pub struct RemoteWorkerQuicRequest {
+    pub listener: QuicOverlayListener,
+    pub run_identity: String,
+    pub worker: WorkerSpec,
+    pub driver_fence: u64,
+    pub session_id: [u8; 16],
+    pub run_key: RunKeyMaterial,
+    pub limits: FrameLimits,
+}
+
+pub async fn run_remote_worker_quic(request: RemoteWorkerQuicRequest) -> NativeExecutionResult<()> {
+    run_remote_worker_quic_inner(request, None, false).await
 }
 
 /// Explicit V5-compatible QUIC opt-in for a caller that owns this pinned
 /// allocation session and its run key. Old callers remain silent on V5.
 pub async fn run_remote_worker_quic_ready_v1(
-    listener: QuicOverlayListener,
-    run_identity: impl Into<String>,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
+    request: RemoteWorkerQuicRequest,
 ) -> NativeExecutionResult<()> {
-    run_remote_worker_quic_inner(
-        listener,
-        run_identity.into(),
-        worker,
-        driver_fence,
-        session_id,
-        run_key,
-        limits,
-        None,
-        true,
-    )
-    .await
+    run_remote_worker_quic_inner(request, None, true).await
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct RemoteMeshingWorkerQuicRequest {
+    pub worker: RemoteWorkerQuicRequest,
+    pub kernel: Arc<dyn MeshingStageKernel>,
+    pub meshing_limits: crate::NativeMeshingHostLimits,
+}
+
 pub async fn run_remote_meshing_worker_quic(
-    listener: QuicOverlayListener,
-    run_identity: impl Into<String>,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
-    kernel: Arc<dyn MeshingStageKernel>,
-    meshing_limits: crate::NativeMeshingHostLimits,
+    request: RemoteMeshingWorkerQuicRequest,
 ) -> NativeExecutionResult<()> {
-    meshing_limits.validate()?;
-    run_remote_worker_quic_inner(
-        listener,
-        run_identity.into(),
-        worker,
-        driver_fence,
-        session_id,
-        run_key,
-        limits,
-        Some(super::worker_execution::RemoteMeshingHost::new(
-            kernel,
-            meshing_limits,
-        )),
-        false,
-    )
-    .await
+    request.meshing_limits.validate()?;
+    let meshing_host =
+        super::worker_execution::RemoteMeshingHost::new(request.kernel, request.meshing_limits);
+    run_remote_worker_quic_inner(request.worker, Some(meshing_host), false).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_remote_worker_quic_inner(
-    listener: QuicOverlayListener,
-    run_identity: String,
-    worker: WorkerSpec,
-    driver_fence: u64,
-    session_id: [u8; 16],
-    run_key: RunKeyMaterial,
-    limits: FrameLimits,
+    request: RemoteWorkerQuicRequest,
     meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
     ready_v1: bool,
 ) -> NativeExecutionResult<()> {
+    let RemoteWorkerQuicRequest {
+        listener,
+        run_identity,
+        worker,
+        driver_fence,
+        session_id,
+        run_key,
+        limits,
+    } = request;
     let connection = Arc::new(listener.accept().await.map_err(protocol)?);
     tokio::task::LocalSet::new()
         .run_until(run_worker_loop(
@@ -141,6 +102,47 @@ pub(crate) async fn run_remote_worker_relay_cached(
     request: RemoteWorkerRelayRequest<'_>,
     bundle_cache: Option<std::path::PathBuf>,
 ) -> NativeExecutionResult<()> {
+    run_remote_worker_relay_cached_with_meshing(request, bundle_cache, None).await
+}
+
+pub(crate) async fn run_remote_meshing_worker_relay_cached(
+    request: RemoteWorkerRelayRequest<'_>,
+    bundle_cache: Option<std::path::PathBuf>,
+    kernel: Arc<dyn MeshingStageKernel>,
+    limits: crate::NativeMeshingHostLimits,
+) -> NativeExecutionResult<()> {
+    limits.validate()?;
+    run_remote_worker_relay_cached_with_meshing(
+        request,
+        bundle_cache,
+        Some(super::worker_execution::RemoteMeshingHost::new(
+            kernel, limits,
+        )),
+    )
+    .await
+}
+
+#[cfg(all(test, feature = "occt-native"))]
+pub(crate) async fn run_remote_meshing_worker_relay_with_held_attempt(
+    request: RemoteWorkerRelayRequest<'_>,
+    kernel: Arc<dyn MeshingStageKernel>,
+    limits: crate::NativeMeshingHostLimits,
+    attempt: super::worker_execution::HeldWorkloadAttempt,
+) -> NativeExecutionResult<()> {
+    limits.validate()?;
+    run_remote_worker_relay_cached_with_meshing(
+        request,
+        None,
+        Some(super::worker_execution::RemoteMeshingHost::new(kernel, limits).hold_attempt(attempt)),
+    )
+    .await
+}
+
+async fn run_remote_worker_relay_cached_with_meshing(
+    request: RemoteWorkerRelayRequest<'_>,
+    bundle_cache: Option<std::path::PathBuf>,
+    meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
+) -> NativeExecutionResult<()> {
     let RemoteWorkerRelayRequest {
         url,
         headers,
@@ -166,7 +168,7 @@ pub(crate) async fn run_remote_worker_relay_cached(
                 run_key,
                 limits,
                 bundle_cache,
-                meshing_host: None,
+                meshing_host,
                 ready_v1,
             },
         ))

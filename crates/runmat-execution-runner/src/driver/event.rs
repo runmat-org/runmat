@@ -82,6 +82,11 @@ pub enum DriverEventKind {
         attempt_id: AttemptId,
         reason: String,
     },
+    TaskCancellationRequested {
+        task_id: TaskId,
+        reason: CancellationReason,
+        now_millis: u64,
+    },
     ScopeCancelled {
         scope_id: ExecutionScopeId,
         reason: CancellationReason,

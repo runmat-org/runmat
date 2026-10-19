@@ -7,7 +7,7 @@ use crate::{
     ExactFaceDelaunayError, ExactFaceDelaunayErrorKind, ExactFaceDelaunayOptions, ExactFacePslg,
 };
 
-use super::{super::topology::edge_uses, ExactFaceTrimmedDelaunay};
+use super::{super::topology::edge_uses_with_checkpoint, ExactFaceTrimmedDelaunay};
 
 pub fn carve_exact_face_domain(
     constrained: &ExactFaceConstrainedDelaunay,
@@ -17,7 +17,7 @@ pub fn carve_exact_face_domain(
     options: ExactFaceDelaunayOptions,
 ) -> Result<ExactFaceTrimmedDelaunay, ExactFaceDelaunayError> {
     validate_exact_face_constrained_delaunay(constrained, pslg, boundary, cancellation, options)?;
-    carve_validated_face_domain(constrained, pslg, cancellation, options)
+    carve_validated_face_domain(constrained, pslg, cancellation, options, None)
 }
 
 pub(crate) fn carve_validated_face_domain(
@@ -25,16 +25,23 @@ pub(crate) fn carve_validated_face_domain(
     pslg: &ExactFacePslg,
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
 ) -> Result<ExactFaceTrimmedDelaunay, ExactFaceDelaunayError> {
-    crate::exact_cdt::validate_face_constrained_topology(constrained, pslg, cancellation, options)?;
+    crate::exact_cdt::validate_face_constrained_topology(
+        constrained,
+        pslg,
+        cancellation,
+        options,
+        geometry_control,
+    )?;
     let mut control = CarvingControl::new(pslg, cancellation, options);
     control.checkpoint()?;
-    let protected = constrained
-        .protected_segments
-        .iter()
-        .map(|segment| sorted_edge(segment.vertex_indices))
-        .collect::<BTreeSet<_>>();
-    let edges = edge_uses(&constrained.triangles);
+    let mut protected = BTreeSet::new();
+    for segment in &constrained.protected_segments {
+        control.checkpoint()?;
+        protected.insert(sorted_edge(segment.vertex_indices));
+    }
+    let edges = edge_uses_with_checkpoint(&constrained.triangles, || control.checkpoint())?;
     let (component_of, components) = components(
         constrained.triangles.len(),
         &edges,
@@ -44,11 +51,13 @@ pub(crate) fn carve_validated_face_domain(
 
     // A recovered segment is an impermeable topological barrier. Any component
     // touching an unprotected convex-hull edge is therefore outside the outer wire.
-    let exterior_components = edges
-        .iter()
-        .filter(|(edge, uses)| uses.len() == 1 && !protected.contains(*edge))
-        .map(|(_, uses)| component_of[uses[0].triangle_index])
-        .collect::<BTreeSet<_>>();
+    let mut exterior_components = BTreeSet::new();
+    for (edge, uses) in &edges {
+        control.checkpoint()?;
+        if uses.len() == 1 && !protected.contains(edge) {
+            exterior_components.insert(component_of[uses[0].triangle_index]);
+        }
+    }
     let mut hole_components = BTreeSet::new();
     for loop_index in 1..pslg.loops.len() {
         let loop_record = &pslg.loops[loop_index];
@@ -108,18 +117,18 @@ pub(crate) fn carve_validated_face_domain(
         .union(&hole_components)
         .copied()
         .collect::<BTreeSet<_>>();
-    let triangles = constrained
-        .triangles
-        .iter()
-        .enumerate()
-        .filter_map(|(index, triangle)| {
-            (!removed.contains(&component_of[index])).then_some(*triangle)
-        })
-        .collect::<Vec<_>>();
+    let mut triangles = Vec::new();
+    for (index, triangle) in constrained.triangles.iter().enumerate() {
+        control.checkpoint()?;
+        if !removed.contains(&component_of[index]) {
+            triangles.push(*triangle);
+        }
+    }
     if triangles.is_empty() {
         return Err(control.invalid("trim-domain carving removed every triangle"));
     }
 
+    control.checkpoint()?;
     let result = ExactFaceTrimmedDelaunay {
         source_face_id: pslg.source_face_id.clone(),
         triangles,
@@ -133,6 +142,7 @@ pub(crate) fn carve_validated_face_domain(
         pslg,
         cancellation,
         options,
+        None,
     )?;
     Ok(result)
 }
@@ -145,12 +155,14 @@ fn components(
 ) -> Result<(Vec<usize>, Vec<Vec<usize>>), ExactFaceDelaunayError> {
     let mut adjacency = vec![Vec::new(); triangle_count];
     for (edge, uses) in edges {
+        control.checkpoint()?;
         if !protected.contains(edge) && uses.len() == 2 {
             adjacency[uses[0].triangle_index].push(uses[1].triangle_index);
             adjacency[uses[1].triangle_index].push(uses[0].triangle_index);
         }
     }
     for neighbors in &mut adjacency {
+        control.checkpoint()?;
         neighbors.sort_unstable();
         neighbors.dedup();
     }
@@ -158,6 +170,7 @@ fn components(
     let mut component_of = vec![usize::MAX; triangle_count];
     let mut result = Vec::new();
     for seed in 0..triangle_count {
+        control.checkpoint()?;
         if component_of[seed] != usize::MAX {
             continue;
         }
@@ -254,6 +267,7 @@ impl<'a> CarvingControl<'a> {
         }
     }
 
+    #[track_caller]
     fn consume_predicate(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.predicates_remaining = self.predicates_remaining.checked_sub(1).ok_or_else(|| {
             self.error(
@@ -264,6 +278,7 @@ impl<'a> CarvingControl<'a> {
         self.work(1)
     }
 
+    #[track_caller]
     fn visit(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.visits_remaining = self.visits_remaining.checked_sub(1).ok_or_else(|| {
             self.error(
@@ -274,6 +289,7 @@ impl<'a> CarvingControl<'a> {
         self.work(1)
     }
 
+    #[track_caller]
     fn work(&mut self, amount: u64) -> Result<(), ExactFaceDelaunayError> {
         self.work_since_check = self.work_since_check.saturating_add(amount);
         if self.work_since_check >= self.check_interval {
@@ -288,6 +304,7 @@ impl<'a> CarvingControl<'a> {
         Ok(())
     }
 
+    #[track_caller]
     fn checkpoint(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.work_since_check = 0;
         if self.cancellation.is_cancelled() {

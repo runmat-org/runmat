@@ -1,23 +1,40 @@
 mod auth;
+mod bootstrap;
+mod cancellation;
 mod client;
+mod config;
+mod console_access;
+mod console_journal;
+mod control;
 mod driver;
+mod driver_files;
+mod execution;
 mod filesystem;
 pub(crate) use filesystem::unix_millis;
 mod model;
+mod ownership;
+mod program_store;
 mod protocol;
+mod scheduler;
+mod server;
 mod service;
 mod store;
 #[cfg(all(test, unix))]
 mod tests;
 
 pub use client::LocalSupervisorClient;
+pub use config::LocalSupervisorConfig;
 pub use driver::{
-    complete_batch_driver, complete_batch_driver_with_response, execute_graph_batch,
-    execute_program_batch, prepare_batch_driver,
+    complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_program_batch,
+    execute_graph_batch, prepare_batch_driver,
 };
 pub use model::{
-    BatchDriverInvocation, BatchSubmission, GraphBatchSubmission, JobAttachment, LocalJobRecord,
-    LocalJobState, LocalJobWorkloadKind, ProgramBatchSubmission, MIN_RETENTION_MILLIS,
+    BatchDriverInvocation, BatchSubmission, DurableExecutionContext, DurableProgramAttempt,
+    GraphBatchSubmission, JobAttachment, LocalJobRecord, LocalJobState, LocalJobWorkloadKind,
+    ProgramBatchExecution, ProgramBatchSubmission, MIN_RETENTION_MILLIS,
 };
-pub use service::{run_local_supervisor, LocalSupervisor, LocalSupervisorConfig};
+pub use server::run_local_supervisor;
+pub use service::LocalSupervisor;
 pub use store::SupervisorPaths;
+
+pub use ownership::DurableAttemptLease;

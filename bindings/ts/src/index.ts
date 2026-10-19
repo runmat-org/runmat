@@ -1,14 +1,48 @@
+import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
+import type { InputManifest } from "./generated/collaboration-contracts.js";
+export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
+export { MAX_WORKSPACE_PUBLICATION_EDITS, MAX_WORKSPACE_PUBLICATION_BYTES } from "./generated/fea-workspace-contracts.js";
+export type {
+  WorkspaceCaptureRequest,
+  WorkspaceSnapshot as SourceWorkspaceSnapshot,
+  WorkspacePublicationRequest,
+  WorkspacePublicationOutcome,
+  WorkspaceEdit as SourceWorkspaceEdit,
+  WorkspaceRevision as SourceWorkspaceRevision,
+} from "./generated/fea-workspace-contracts.js";
 import type {
   RunMatFilesystemProvider
 } from "./fs/provider-types.js";
 import type {
-  FeaAnalysisProfile,
-  FeaAnalysisRunKind,
   FeaCapabilities,
-  FeaCheckResult,
+  FeaSourceCheckResult,
+  FeaBrowseRequest,
+  FeaBrowseOutcome,
+  FeaWorkingCheckRequest,
+  FeaChangeSetId,
+  FeaChangeSetRequest,
+  FeaChangeSetReviewRequest,
+  FeaChangeSetReview,
+  FeaChangeSetCheck,
+  FeaChangeSetPublication,
+  FeaWorkspaceCheckRequest,
+  FeaWorkspaceCheckResult,
+  SourceDigest,
+  FeaSemanticProgram,
+  FeaSourceIndex,
+  FeaSourceIndexEntry,
+  FeaSourceIdentity,
+  AuthoredStudy,
+  AuthoredModel,
+  GeometryDefinition,
+  GeneratorCallable,
+  MeshDefinition,
+  FeaDeclaredMaterial,
+  MaterialModel,
   FeaDiagnosticsArtifactPayload,
   FeaDocumentKind,
-  FeaFieldDescriptorsArtifactPayload,
+  FeaFieldBinding,
+  FeaFieldBindingsArtifactPayload,
   FeaFieldKind,
   FeaFieldDescriptor,
   FeaFieldLocation,
@@ -24,24 +58,26 @@ import type {
   FeaRunDatasetFieldPagingPolicy,
   FeaRunDatasetPayload,
   FeaRunDatasetStudyRef,
-  FeaRunResult,
-  FeaStudyDocumentOperation,
-  FeaStudyDocumentOperationOutput
+  FeaRunResult
 } from "./fea-contracts.js";
 import {
+  isFeaSourceCheckContract,
+  isFeaSemanticProgram,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_SCHEMA_VERSION,
   FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
   FEA_FIELD_DEFAULT_PAGE_SIZE,
-  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
-  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_FIELD_BINDINGS_ARTIFACT_KIND,
+  FEA_FIELD_BINDINGS_SCHEMA_VERSION,
   FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
 } from "./fea-contracts.js";
 import { createDefaultFsProvider } from "./fs/default.js";
+import type { PlotPresenceFrame, PlotPointerPosition } from "./plot-presence.js";
+export type { PlotPresenceFrame, PlotPointerPosition } from "./plot-presence.js";
 import { createIndexedDbPackageCache } from "./package-cache/indexeddb.js";
 import { fetchGitTreeInventoryWire } from "./package-cache/git-gateway.js";
 import { BrowserProjectResolver } from "./package-cache/browser-resolver.js";
@@ -66,35 +102,69 @@ import type {
 import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
 import { installWebGpuCompatibilityShims } from "./webgpu-shims.js";
 export {
-  FEA_ANALYSIS_PROFILES,
-  FEA_ANALYSIS_RUN_KINDS,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_SCHEMA_VERSION,
   FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
   FEA_FIELD_DEFAULT_PAGE_SIZE,
-  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
-  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_FIELD_BINDINGS_ARTIFACT_KIND,
+  FEA_FIELD_BINDINGS_SCHEMA_VERSION,
   FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
   FEA_RUN_CELL_ID,
   FEA_RUN_KIND,
   FEA_RUN_MANIFEST_METADATA_SCHEMA_VERSION,
-  FEA_STUDY_DOCUMENT_OPERATIONS,
-  FEA_SUPPORTED_PHYSICS_FAMILIES,
-  FEA_SUPPORTED_PHYSICS_PROFILES,
   feaRunArtifactRefId,
 } from "./fea-contracts.js";
 export type {
-  FeaAnalysisProfile,
-  FeaAnalysisRunKind,
+  AuthoredBoundary,
+  AuthoredConnector,
+  AuthoredConstraint,
+  AuthoredExcitation,
+  AuthoredExcitationCase,
+  AuthoredInitialCondition,
+  AuthoredInterface,
+  AuthoredMaterialAssignment,
+  AuthoredModel,
+  AuthoredOutput,
+  AuthoredPropertyAssignment,
+  AuthoredStudy,
+  FeaDeclaredMaterial,
+  FeaModelMemberKind,
+  FeaSemanticProgram,
+  FeaSourceIdentity,
+  FeaSourceIndex,
+  FeaSourceIndexEntry,
+  GeometryDefinition,
+  GeometryRegionRef,
+  GeneratorCallable,
+  MaterialModel,
+  MeshDefinition,
+  PhysicalSignal,
+  ProcedureStep,
+  FeaAnalysisProcedure,
+  FeaBoundaryInput,
+  FeaCanonicalSequence,
   FeaCapabilities,
-  FeaCheckResult,
+  FeaSourceCheckResult,
+  FeaBrowseRequest,
+  FeaBrowseOutcome,
+  FeaWorkingCheckRequest,
+  FeaChangeSetId,
+  FeaChangeSetRequest,
+  FeaChangeSetReviewRequest,
+  FeaChangeSetReview,
+  FeaChangeSetCheck,
+  FeaChangeSetPublication,
+  FeaWorkspaceCheckRequest,
+  FeaWorkspaceCheckResult,
+  SourceDigest,
   FeaDiagnosticsArtifactPayload,
   FeaDocumentKind,
-  FeaFieldDescriptorsArtifactPayload,
+  FeaFieldBinding,
+  FeaFieldBindingsArtifactPayload,
   FeaFieldKind,
   FeaFieldDescriptor,
   FeaFieldLocation,
@@ -104,7 +174,28 @@ export type {
   FeaFieldStorage,
   FeaFieldStorageRef,
   FeaObjectArtifactMetadata,
-  FeaPhysicsProfileCatalogEntry,
+  FeaComputeBackend,
+  FeaConnectorInput,
+  FeaConstraintInput,
+  FeaDomainsInput,
+  FeaElementOrder,
+  FeaExecutionInput,
+  FeaMaxwellHarmonicOptions,
+  FeaFormulationRequirement,
+  FeaExcitationCaseInput,
+  FeaExcitationInput,
+  FeaGeometryUnits,
+  FeaInitialConditionInput,
+  FeaInterfaceInput,
+  FeaMaterialAssignmentInput,
+  FeaMaterialInput,
+  FeaPhysicsFamily,
+  FeaProcedureStep,
+  FeaRegionInput,
+  FeaRegionSelector,
+  FeaRegionTarget,
+  FeaResponseSpectrumInput,
+  FeaSignalInput,
   FeaProgressEvent,
   FeaProgressPhase,
   FeaProgressStatus,
@@ -112,20 +203,6 @@ export type {
   FeaRunDatasetPayload,
   FeaRunDatasetStudyRef,
   FeaRunResult,
-  FeaStudyBoundaryConditionEntry,
-  FeaStudyDocumentCounts,
-  FeaStudyDocumentDiff,
-  FeaStudyDocumentOperation,
-  FeaStudyDocumentOperationOutput,
-  FeaStudyDocumentOperationResult,
-  FeaStudyDrivingConditionEntry,
-  FeaStudyMaterialAssignmentEntry,
-  FeaStudyMaterialEntry,
-  FeaStudyOutputEntry,
-  FeaStudyReadiness,
-  FeaStudyRegionEntry,
-  FeaStudyStepEntry,
-  FeaStudySummary,
   FeaRunArtifactRole
 } from "./fea-contracts.js";
 export {
@@ -662,6 +739,7 @@ export interface ExecuteRequestPathSource {
 export type ExecuteRequestSource = ExecuteRequestTextSource | ExecuteRequestPathSource;
 
 export interface ExecuteRequest {
+  inputManifest?: InputManifest;
   source: ExecuteRequestSource;
   compatibility?: LanguageCompatMode;
   hostPolicy?: {
@@ -672,6 +750,8 @@ export interface ExecuteRequest {
 }
 
 export interface ExecuteResult {
+  /** Canonical lock for the dependency graph actually used for this captured run. */
+  dependencyLock?: string | null;
   flow: RuntimeFlow;
   displayEvents: DisplayEvent[];
   valueText?: string;
@@ -1022,14 +1102,15 @@ export interface RunMatSessionHandle {
     geometrySceneHandle?: number | null,
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
-  checkFeaStudy(path: string): Promise<FeaCheckResult>;
-  applyFeaStudyDocumentOperation(
-    operation: FeaStudyDocumentOperation,
-    path: string,
-    source: string | null,
-    input: Record<string, unknown>,
-  ): Promise<FeaStudyDocumentOperationOutput>;
-  runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult>;
+  checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult>;
+  checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult>;
+  browseFeaSource(request: FeaBrowseRequest): Promise<FeaBrowseOutcome>;
+  inspectFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetCheck>;
+  reviewFeaChanges(request: FeaChangeSetReviewRequest): Promise<FeaChangeSetReview>;
+  stageFeaChanges(request: FeaChangeSetRequest): Promise<FeaChangeSetCheck>;
+  publishFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetPublication>;
+  discardFeaChanges(id: FeaChangeSetId): Promise<void>;
+  checkFeaWorkingSource(request: FeaWorkingCheckRequest): Promise<FeaSourceCheckResult>;
   feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult>;
   materializeDataFileVariable(
     path: string,
@@ -1040,6 +1121,7 @@ export interface RunMatSessionHandle {
   exportGeometryScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
   importGeometryScene?(scene: Uint8Array): Promise<number | null>;
+  createFeaFieldScene?(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
   importFigureSceneFromPath?(path: string): Promise<number | null>;
   currentFigureHandle?(): Promise<number>;
   dispose(): void;
@@ -1059,6 +1141,7 @@ export interface RunMatSessionHandle {
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
   setFsProvider?(provider: RunMatFilesystemProvider): Promise<void>;
   packageCacheSnapshot(): Promise<PackageCacheSnapshot | null>;
+  prepareCapturedProject: CapturedProjectResolver;
   installProjectHandoff(handoff: unknown): Promise<unknown>;
   clearProjectHandoff(): Promise<void>;
   projectRevision(): Promise<unknown | null>;
@@ -1120,14 +1203,15 @@ interface RunMatNativeSession {
     geometrySceneHandle?: number | null,
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
-  checkFeaStudy?: (path: string) => FeaCheckResult | Promise<FeaCheckResult>;
-  applyFeaStudyDocumentOperation?: (
-    operation: FeaStudyDocumentOperation,
-    path: string,
-    source: string | null,
-    input: Record<string, unknown>,
-  ) => FeaStudyDocumentOperationOutput | Promise<FeaStudyDocumentOperationOutput>;
-  runFeaStudy?: (path: string, artifactRoot?: string | null) => FeaRunResult | Promise<FeaRunResult>;
+  inspectFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
+  reviewFeaChanges?: (request: FeaChangeSetReviewRequest) => FeaChangeSetReview | Promise<FeaChangeSetReview>;
+  stageFeaChanges?: (request: FeaChangeSetRequest) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
+  publishFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetPublication | Promise<FeaChangeSetPublication>;
+  discardFeaChanges?: (id: FeaChangeSetId) => void | Promise<void>;
+  checkFeaWorkingSource?: (request: FeaWorkingCheckRequest) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
+  browseFeaSource?: (request: FeaBrowseRequest) => FeaBrowseOutcome | Promise<FeaBrowseOutcome>;
+  checkFeaWorkspace?: (request: FeaWorkspaceCheckRequest) => FeaWorkspaceCheckResult | Promise<FeaWorkspaceCheckResult>;
+  checkFeaSource?: (path: string, inputManifest?: InputManifest) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
   feaField?: (
     runId: string,
     fieldId: string,
@@ -1142,6 +1226,7 @@ interface RunMatNativeSession {
   exportGeometryScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importGeometryScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  createFeaFieldScene?: (runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null) => { handle: number; deformationScale: number; exact?: boolean } | Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   currentFigureHandle?: () => number;
   dispose?: () => void;
@@ -1161,6 +1246,7 @@ interface RunMatNativeSession {
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
   setFsProvider?: (provider: RunMatFilesystemProvider) => void;
   packageCacheSnapshot?: () => Promise<PackageCacheSnapshot | null>;
+  prepareCapturedProject?: CapturedProjectResolver;
   installProjectHandoff?: (handoff: unknown) => unknown;
   clearProjectHandoff?: () => void;
   projectRevision?: () => unknown | null;
@@ -1231,6 +1317,18 @@ export interface PlotSurfaceCameraState {
   axes: PlotCameraState[];
 }
 
+export interface FeaFieldSceneView {
+  cameraPosition: [number, number, number];
+  cameraTarget: [number, number, number];
+  cameraUp: [number, number, number];
+  fovYRadians: number;
+  orthographicHeight?: number;
+  aspectRatio: number;
+  viewportHeightPx: number;
+  triangleBudget: number;
+  refineAbovePx: number;
+}
+
 export type GeometrySceneDisplayMode = "shaded" | "edges" | "wireframe";
 export type GeometrySceneViewPreset =
   | "perspective"
@@ -1252,25 +1350,57 @@ export interface GeometrySceneRegionHighlightState {
 export interface GeometrySceneRegionAnnotationState {
   regionId: string;
   color?: [number, number, number, number] | null;
-  role?: string | null;
+  kind: GeometrySceneAnnotationKind;
   label?: string | null;
   direction?: [number, number, number] | null;
   size?: number | null;
 }
 
+export type GeometrySceneAnnotationKind =
+  | "force"
+  | "moment"
+  | "pressure"
+  | "traction"
+  | "body_force"
+  | "heat_flux"
+  | "current_density"
+  | "normal_velocity"
+  | "flow_velocity"
+  | "mass_flow"
+  | "wall_motion"
+  | "fixed_support"
+  | "symmetry_support"
+  | "prescribed_motion"
+  | "boundary_condition"
+  | "thermal_condition"
+  | "electrical_condition"
+  | "magnetic_condition"
+  | "acoustic_condition"
+  | "fluid_condition"
+  | "connector"
+  | "interface"
+  | "initial_condition";
+
 export interface GeometryScenePresentationState {
   selectedRegionId?: string | null;
   selectedRegionIds?: string[] | null;
+  selectedTopology?: GeometrySceneTopologySelectionState[];
   hoveredRegionId?: string | null;
   regionHighlights?: GeometrySceneRegionHighlightState[];
   regionAnnotations?: GeometrySceneRegionAnnotationState[];
   displayMode?: GeometrySceneDisplayMode;
   edgeOverlayEnabled?: boolean;
+  showGrid?: boolean;
   hiddenOwnerNodeIds?: string[] | null;
   isolatedOwnerNodeIds?: string[] | null;
   section?: GeometrySceneImageSectionState | null;
   viewPreset?: GeometrySceneViewPreset | null;
 }
+
+export type GeometrySceneTopologySelectionState =
+  | { kind: "face"; chunkId: string; triangleIndex: number }
+  | { kind: "edge"; chunkId: string; vertexIndices: [number, number]; segments?: [number, number][] }
+  | { kind: "point"; chunkId: string; vertexIndex: number };
 
 export interface GeometryScenePickResult {
   meshId: string | null;
@@ -1281,6 +1411,9 @@ export interface GeometryScenePickResult {
   regionTag: string | null;
   distance: number;
   position: [number, number, number];
+  vertexIndices?: [number, number, number];
+  barycentricCoordinates?: [number, number, number];
+  topologySelection?: GeometrySceneTopologySelectionState;
 }
 
 
@@ -1363,15 +1496,17 @@ interface RunMatNativeModule {
   bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
   presentSurface?: (surfaceId: number) => void;
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
+  setSurfacePresence?: (surfaceId: number, frame: PlotPresenceFrame) => void;
+  captureSurfacePointer?: (surfaceId: number, x: number, y: number) => unknown;
   presentGeometrySceneOnSurface?: (surfaceId: number, handle: number) => void;
   setGeometryScenePresentation?: (surfaceId: number, presentation: GeometryScenePresentationState) => void;
-  pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number) => GeometryScenePickResult | null;
+  pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number, mode: string) => GeometryScenePickResult | null;
   handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
   takePlotSurfaceHostActions?: (surfaceId: number) => unknown;
   fitPlotSurfaceExtents?: (surfaceId: number) => void;
   resetPlotSurfaceCamera?: (surfaceId: number) => void;
   getPlotSurfaceCameraState?: (surfaceId: number) => unknown;
-  setPlotSurfaceCameraState?: (surfaceId: number, state: unknown) => void;
+  setPlotSurfaceCameraState?: (surfaceId: number, state: PlotSurfaceCameraState, expectedTarget?: NonNullable<PlotPresenceFrame["target"]>) => void;
   setPlotThemeConfig?: (theme: unknown) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
@@ -1742,6 +1877,18 @@ export async function presentSurface(surfaceId: number): Promise<void> {
   native.presentSurface(surfaceId);
 }
 
+export async function setSurfacePresence(surfaceId: number, frame: PlotPresenceFrame): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setSurfacePresence");
+  native.setSurfacePresence(surfaceId, frame);
+}
+
+export async function captureSurfacePointer(surfaceId: number, x: number, y: number): Promise<PlotPointerPosition | null> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "captureSurfacePointer");
+  return (normalizeWasmStructuredValue(native.captureSurfacePointer(surfaceId, x, y)) ?? null) as PlotPointerPosition | null;
+}
+
 export async function presentFigureOnSurface(surfaceId: number, handle: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "presentFigureOnSurface");
@@ -1767,10 +1914,11 @@ export async function pickGeometrySceneRegion(
   surfaceId: number,
   x: number,
   y: number,
+  mode = "face",
 ): Promise<GeometryScenePickResult | null> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "pickGeometrySceneRegion");
-  return native.pickGeometrySceneRegion(surfaceId, x, y) ?? null;
+  return native.pickGeometrySceneRegion(surfaceId, x, y, mode) ?? null;
 }
 
 export async function renderCurrentFigureScene(handle: number): Promise<void> {
@@ -1814,11 +1962,12 @@ export async function getPlotSurfaceCameraState(surfaceId: number): Promise<Plot
 
 export async function setPlotSurfaceCameraState(
   surfaceId: number,
-  state: PlotSurfaceCameraState
+  state: PlotSurfaceCameraState,
+  expectedTarget?: NonNullable<PlotPresenceFrame["target"]>
 ): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "setPlotSurfaceCameraState");
-  native.setPlotSurfaceCameraState(surfaceId, state);
+  native.setPlotSurfaceCameraState(surfaceId, state, expectedTarget);
 }
 
 export async function setPlotThemeConfig(theme: unknown): Promise<void> {
@@ -2222,33 +2371,62 @@ class WebRunMatSession implements RunMatSessionHandle {
     return this.native.feaCapabilities();
   }
 
-  async checkFeaStudy(path: string): Promise<FeaCheckResult> {
+  async checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult> {
     this.ensureActive();
-    if (typeof this.native.checkFeaStudy !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose checkFeaStudy yet.");
+    if (typeof this.native.checkFeaSource !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose checkFeaSource yet.");
     }
-    return this.native.checkFeaStudy(path);
+    const result = await (inputManifest ? this.native.checkFeaSource(path, inputManifest) : this.native.checkFeaSource(path));
+    return admitFeaSourceCheckResult(result);
   }
 
-  async applyFeaStudyDocumentOperation(
-    operation: FeaStudyDocumentOperation,
-    path: string,
-    source: string | null,
-    input: Record<string, unknown>,
-  ): Promise<FeaStudyDocumentOperationOutput> {
+  async inspectFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetCheck> {
     this.ensureActive();
-    if (typeof this.native.applyFeaStudyDocumentOperation !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose applyFeaStudyDocumentOperation yet.");
-    }
-    return this.native.applyFeaStudyDocumentOperation(operation, path, source, input);
+    if (!this.native.inspectFeaChanges) throw new Error("The runtime does not support study drafts.");
+    const check = await this.native.inspectFeaChanges(id);
+    return { ...check, roots: check.roots.map(admitFeaSourceCheckResult) };
   }
 
-  async runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult> {
+  async reviewFeaChanges(request: FeaChangeSetReviewRequest): Promise<FeaChangeSetReview> {
     this.ensureActive();
-    if (typeof this.native.runFeaStudy !== "function") {
-      throw new Error("The loaded runmat-wasm module does not expose runFeaStudy yet.");
+    if (!this.native.reviewFeaChanges) throw new Error("The runtime does not support checked source proposals.");
+    return this.native.reviewFeaChanges(request);
+  }
+  async stageFeaChanges(request: FeaChangeSetRequest): Promise<FeaChangeSetCheck> {
+    this.ensureActive();
+    if (!this.native.stageFeaChanges) throw new Error("The runtime does not support checked source proposals.");
+    return this.native.stageFeaChanges(request);
+  }
+  async publishFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetPublication> {
+    this.ensureActive();
+    if (!this.native.publishFeaChanges) throw new Error("The runtime does not support coherent source publication.");
+    return this.native.publishFeaChanges(id);
+  }
+  async discardFeaChanges(id: FeaChangeSetId): Promise<void> {
+    this.ensureActive();
+    if (!this.native.discardFeaChanges) throw new Error("The runtime does not support discarding source proposals.");
+    return this.native.discardFeaChanges(id);
+  }
+
+  async checkFeaWorkingSource(request: FeaWorkingCheckRequest): Promise<FeaSourceCheckResult> {
+    this.ensureActive();
+    if (!this.native.checkFeaWorkingSource) throw new Error("The runtime does not expose working FEA checks.");
+    const result = await this.native.checkFeaWorkingSource(request);
+    return admitFeaSourceCheckResult(result);
+  }
+
+  async browseFeaSource(request: FeaBrowseRequest): Promise<FeaBrowseOutcome> {
+    this.ensureActive();
+    if (typeof this.native.browseFeaSource !== "function") throw new Error("The runtime does not expose checked FEA browsing.");
+    return this.native.browseFeaSource(request);
+  }
+
+  async checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult> {
+    this.ensureActive();
+    if (typeof this.native.checkFeaWorkspace !== "function") {
+      throw new Error("The loaded runtime does not support candidate workspace checks.");
     }
-    return this.native.runFeaStudy(path, artifactRoot ?? null);
+    return this.native.checkFeaWorkspace(request);
   }
 
   async feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult> {
@@ -2330,6 +2508,14 @@ class WebRunMatSession implements RunMatSessionHandle {
     } catch {
       return null;
     }
+  }
+
+  async createFeaFieldScene(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }> {
+    this.ensureActive();
+    if (typeof this.native.createFeaFieldScene !== "function") {
+      throw new Error("FEA field visualization is unavailable in this runtime");
+    }
+    return this.native.createFeaFieldScene(runId, fieldId, shapeMode, exaggeration, showUndeformedOutline, view, replaceHandle);
   }
 
   async importFigureSceneFromPath(path: string): Promise<number | null> {
@@ -2465,6 +2651,13 @@ class WebRunMatSession implements RunMatSessionHandle {
     return (await this.native.packageCacheSnapshot()) ?? null;
   }
 
+  prepareCapturedProject: CapturedProjectResolver = async (request, provider, filesystem) => {
+    if (!this.native.prepareCapturedProject) {
+      throw new Error("The loaded runtime does not support captured package resolution");
+    }
+    return this.native.prepareCapturedProject(request, provider, filesystem);
+  };
+
   async installProjectHandoff(handoff: unknown): Promise<unknown> {
     this.ensureActive();
     if (typeof this.native.installProjectHandoff !== "function") {
@@ -2535,6 +2728,13 @@ function ensureFsProvider(provider: RunMatFilesystemProvider): void {
       throw new Error(`fsProvider.${String(method)} must be a function`);
     }
   }
+}
+
+function admitFeaSourceCheckResult(result: FeaSourceCheckResult): FeaSourceCheckResult {
+  if (!isFeaSourceCheckContract(result.contract) || !isFeaSemanticProgram(result.program)) {
+    throw new Error("The runtime returned an incompatible study format. Update RunMat and try again.");
+  }
+  return result;
 }
 
 function requireNativeFunction<T, K extends keyof T>(
@@ -2847,3 +3047,5 @@ export const __internals = {
 function isNativeSession(value: unknown): value is RunMatNativeSession {
   return Boolean(value && typeof (value as RunMatNativeSession).executeRequest === "function");
 }
+
+export { readImmutableFilesystemResponse } from "./fs/immutable-input.js";

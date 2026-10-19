@@ -388,6 +388,12 @@ async fn execute_parfor_tasks(
                 },
                 retry: runmat_execution::RetryPolicy::IdempotentInfrastructure,
                 program_revision: None,
+                environment: runmat_runtime::execution::capture_deferred_environment(&context.runtime)?,
+                console: context
+                    .runtime
+                    .service_ports()
+                    .host()
+                    .and_then(|host| host.console_limits()),
                 capabilities: executable.contract.capabilities.clone(),
                 program: program.clone(),
             })

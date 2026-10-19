@@ -3,7 +3,7 @@ use runmat_execution::identity::{PoolId, WorkerId};
 use runmat_execution::resource::Capability;
 use runmat_execution::value::ValueRef;
 use runmat_execution::Digest;
-use runmat_execution_runner::AttemptReport;
+use runmat_execution_runner::{AttemptReport, WorkerSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -40,6 +40,7 @@ impl RemoteWorkerRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteWorkerCommand {
+    Describe,
     InstallBundle {
         bundle_digest: Digest,
         bundle: Vec<u8>,
@@ -118,6 +119,9 @@ pub struct WorkerReady {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteWorkerOutcome {
+    WorkerDescription {
+        worker: WorkerSpec,
+    },
     WorkerReady {
         ready: WorkerReady,
     },
@@ -184,7 +188,9 @@ mod tests {
             command: RemoteWorkerCommand::Drain,
         };
         let error = request.validate_schema().unwrap_err();
-        assert!(error.contains("unsupported remote worker protocol 4; expected 5"));
+        assert!(error.contains(&format!(
+            "unsupported remote worker protocol 4; expected {REMOTE_WORKER_PROTOCOL_VERSION}"
+        )));
         assert!(error.contains("rebuild or upgrade"));
     }
 

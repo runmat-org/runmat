@@ -55,6 +55,81 @@ impl GeometryEvaluationControl for Unlimited {
 }
 
 #[test]
+fn exact_evaluator_reconstructs_from_the_transferable_closure() {
+    let imported = import_exact_cad(
+        "box.brep",
+        BOX,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let direct = OcctExactEvaluator::new(&imported).unwrap();
+    let reconstructed = OcctExactEvaluator::from_closure(
+        &imported.representation,
+        imported.meters_per_source_unit,
+        &imported.topology,
+        &imported.evaluators,
+    )
+    .unwrap();
+    let curve_id = &imported.topology.edges[0].curve_evaluator_id;
+    let range = direct.parameter_range(curve_id).unwrap();
+    assert_eq!(
+        direct.point(curve_id, range.start, &Unlimited).unwrap(),
+        reconstructed
+            .point(curve_id, range.start, &Unlimited)
+            .unwrap()
+    );
+
+    let mut poisoned_representation = imported.representation.clone();
+    poisoned_representation[0] ^= 1;
+    assert_eq!(
+        OcctExactEvaluator::from_closure(
+            &poisoned_representation,
+            imported.meters_per_source_unit,
+            &imported.topology,
+            &imported.evaluators,
+        )
+        .err()
+        .unwrap()
+        .kind,
+        GeometryEvaluationErrorKind::InconsistentGeometry
+    );
+    assert!(OcctExactEvaluator::from_closure(
+        &imported.representation,
+        0.0,
+        &imported.topology,
+        &imported.evaluators,
+    )
+    .is_err());
+}
+
+#[test]
+fn exact_import_maps_every_source_face_ordinal_to_authoritative_topology() {
+    let imported = import_exact_cad(
+        "box.brep",
+        BOX,
+        GeometryFormat::Brep,
+        &ExactCadImportOptions::default(),
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        imported.source_face_ids.len(),
+        imported.topology.faces.len()
+    );
+    for (ordinal, face_id) in &imported.source_face_ids {
+        assert!((*ordinal as usize) < imported.topology.faces.len());
+        assert!(imported
+            .topology
+            .faces
+            .iter()
+            .any(|face| face.id == *face_id));
+    }
+}
+
+#[test]
 fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() {
     let imported = import_exact_cad(
         "two_box_assembly.step",
@@ -80,6 +155,14 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
     assert_eq!(imported.topology.solids.len(), 2);
     assert_eq!(imported.topology.regions.len(), 2);
     assert_eq!(imported.topology.faces.len(), 12);
+    assert_eq!(
+        imported.source_face_ids.len(),
+        imported.topology.faces.len()
+    );
+    assert_eq!(
+        imported.source_face_ids.keys().copied().collect::<Vec<_>>(),
+        (0..imported.topology.faces.len() as u64).collect::<Vec<_>>()
+    );
     let body_assemblies = imported
         .topology
         .assemblies
@@ -97,7 +180,7 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
         .topology
         .instances
         .iter()
-        .find(|instance| instance.transform.0[3] == 10.0)
+        .find(|instance| instance.transform.0[3] == 0.010)
         .expect("one part occurrence must retain its translation");
     assert_eq!(translated.transform.0[7], 0.0);
     assert_eq!(translated.transform.0[11], 0.0);
@@ -109,7 +192,7 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
             .filter(|vertex| vertex.id.assembly_path == translated.id.assembly_path)
             .map(|vertex| vertex.point_m[0])
             .max_by(f64::total_cmp),
-        Some(1.0),
+        Some(0.001),
         "definition-local geometry must not absorb occurrence placement",
     );
 
@@ -128,7 +211,10 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
             .centroid_m
         })
         .collect::<Vec<_>>();
-    assert_eq!(centroids, vec![[0.5, 1.0, 1.5], [0.5, 1.0, 1.5]]);
+    assert_eq!(
+        centroids,
+        vec![[0.0005, 0.001, 0.0015], [0.0005, 0.001, 0.0015]]
+    );
 
     let definition_limited = ExactCadImportOptions {
         max_representation_bytes: imported.representation.len() as u64,
@@ -233,12 +319,17 @@ fn mixed_exact_definition_projects_distinct_solid_and_sheet_bodies() {
         .iter_mut()
         .find(|record| record.id == sheet.mass_properties_evaluator_id)
         .unwrap();
-    let runmat_geometry_core::ExactMassPropertiesImplementation::Kernel { reference } =
-        &mut sheet_record.implementation
-    else {
-        panic!("mixed bodies require body-specific kernel evaluators");
-    };
-    reference.entity_token = "body:solid".into();
+    match &mut sheet_record.implementation {
+        runmat_geometry_core::ExactMassPropertiesImplementation::Kernel { reference } => {
+            reference.entity_token = "body:solid".into();
+        }
+        runmat_geometry_core::ExactMassPropertiesImplementation::KernelValidated {
+            validation_digest,
+            ..
+        } => {
+            validation_digest[0] ^= 1;
+        }
+    }
     assert!(matches!(
         OcctExactEvaluator::new(&mislabeled),
         Err(GeometryEvaluationError {
@@ -340,7 +431,7 @@ fn independent_coincident_faces_require_explicit_contact_authoring() {
                 .iter()
                 .find(|instance| instance.id.assembly_path == face.id.assembly_path)
                 .map(|instance| instance.transform.0[3])?;
-            ((point[0] + translation_x - 1.0).abs() < 1.0e-12).then(|| face.id.clone())
+            ((point[0] + translation_x - 0.001).abs() < 1.0e-12).then(|| face.id.clone())
         })
         .collect::<Vec<_>>();
     coincident_faces.sort();
@@ -1411,3 +1502,5 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         GeometryEvaluationErrorKind::InconsistentGeometry
     );
 }
+
+mod surface_session;

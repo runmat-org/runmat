@@ -2,9 +2,10 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 use crate::{
-    DirEntry, FileHandle, FsBoundedInput, FsFilePayloadContract, FsFileType,
-    FsManagedOpenedInputCost, FsManagedReadBacking, FsManagedReadContract, FsMetadata, FsProvider,
-    FsResourceContract, FsResourceLease, FsResourceLeaseHandle, FsResourceRevision, OpenFlags,
+    AtomicCreateResult, AtomicReplaceOutcome, DirEntry, FileHandle, FsBoundedInput,
+    FsFilePayloadContract, FsFileType, FsManagedOpenedInputCost, FsManagedReadBacking,
+    FsManagedReadContract, FsMetadata, FsProvider, FsResourceContract, FsResourceLease,
+    FsResourceLeaseHandle, FsResourceRevision, OpenFlags,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -15,6 +16,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use url::Url;
 
+mod atomic_create;
+mod atomic_replace;
+mod private_directory;
 #[path = "native/staged.rs"]
 pub(crate) mod staged;
 #[path = "native/mapped.rs"]
@@ -23,8 +27,66 @@ mod mapped;
 #[derive(Default)]
 pub struct NativeFsProvider;
 
+impl NativeFsProvider {
+    /// Read exactly the admitted regular-file inventory, rejecting growth.
+    pub fn read_bounded_sync(&self, path: &Path, maximum_bytes: u64) -> io::Result<Vec<u8>> {
+        crate::workspace_access::file::read(path, maximum_bytes)
+    }
+
+    /// Native callers can use the same publication owner without entering an executor.
+    pub fn atomic_replace_sync(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+    ) -> io::Result<AtomicReplaceOutcome> {
+        atomic_replace::publish(path, bytes)
+    }
+
+    /// Synchronous counterpart of the portable create-if-absent operation.
+    pub fn atomic_create_new_sync(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+    ) -> io::Result<AtomicCreateResult> {
+        atomic_create_new_native(path, bytes)
+    }
+
+    /// Create a consumer-owned private directory chain and flush each new entry.
+    /// Failure can leave created directories visible; consumers must stop durable
+    /// admission rather than infer that the namespace was rolled back.
+    pub fn create_private_directory_durable(&self, path: &Path) -> io::Result<()> {
+        private_directory::create_durable(path)
+    }
+
+    /// Publish a complete private native file without replacing an existing winner.
+    /// Unix staging files are mode0600 before any bytes are written or made visible;
+    /// other platforms inherit the caller's private directory permissions. Existing
+    /// content reads are bounded and Unix files with broader permissions reject.
+    pub fn atomic_create_private_new(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+        maximum_existing_bytes: u64,
+    ) -> io::Result<AtomicCreateResult> {
+        atomic_create::publish(path, bytes, Some(maximum_existing_bytes), true)
+    }
+}
+
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
+    fn workspace_access(
+        &self,
+        root: &Path,
+        writable: bool,
+        maximum_resident_bytes: u64,
+    ) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
+        Ok(Box::new(crate::workspace_access::NativeAccess::open(
+            root.to_path_buf(),
+            writable,
+            None,
+            maximum_resident_bytes,
+        )?))
+    }
     fn path_namespace(&self) -> crate::FsPathNamespace {
         crate::FsPathNamespace::NativeOs
     }
@@ -123,6 +185,10 @@ impl FsProvider for NativeFsProvider {
         Ok(Box::new(file))
     }
 
+    async fn atomic_replace(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicReplaceOutcome> {
+        self.atomic_replace_sync(path, bytes)
+    }
+
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         fs::read(path)
     }
@@ -194,6 +260,10 @@ impl FsProvider for NativeFsProvider {
         let mut perms = fs::metadata(path)?.permissions();
         perms.set_readonly(readonly);
         fs::set_permissions(path, perms)
+    }
+
+    async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        self.atomic_create_new_sync(path, bytes)
     }
 
     async fn data_manifest_descriptor(
@@ -274,6 +344,21 @@ impl FsProvider for NativeFsProvider {
         }
         fs::write(path, data)
     }
+}
+
+pub(crate) fn atomic_create_new_native(
+    path: &Path,
+    bytes: &[u8],
+) -> io::Result<AtomicCreateResult> {
+    atomic_create_new_native_bounded(path, bytes, None)
+}
+
+pub(crate) fn atomic_create_new_native_bounded(
+    path: &Path,
+    bytes: &[u8],
+    maximum_existing_bytes: Option<u64>,
+) -> io::Result<AtomicCreateResult> {
+    atomic_create::publish(path, bytes, maximum_existing_bytes, false)
 }
 
 struct NativeDirectFileLease;

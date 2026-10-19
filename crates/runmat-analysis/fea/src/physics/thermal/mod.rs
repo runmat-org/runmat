@@ -1,4 +1,8 @@
-use runmat_analysis_core::AnalysisModel;
+pub(crate) mod assembly;
+pub(crate) mod history_fields;
+pub(crate) mod initial_state;
+pub mod qualification;
+pub mod radiation;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThermalConstitutiveStats {
@@ -7,84 +11,46 @@ pub struct ThermalConstitutiveStats {
     pub density_mean: f64,
     pub conductivity_spread_ratio: f64,
     pub heat_capacity_spread_ratio: f64,
-    pub diffusivity_estimate: f64,
-    pub response_rate: f64,
 }
 
-pub fn constitutive_stats(model: &AnalysisModel) -> ThermalConstitutiveStats {
-    let mut conductivities = Vec::new();
-    let mut heat_capacities = Vec::new();
-    for material in &model.materials {
-        conductivities.push(material.thermal.conductivity_w_per_mk.max(1.0e-6));
-        heat_capacities.push(material.thermal.specific_heat_j_per_kgk.max(1.0));
+pub(crate) fn constitutive_stats(
+    conductivities: &[f64],
+    heat_capacities: &[f64],
+    densities: &[f64],
+) -> Option<ThermalConstitutiveStats> {
+    if conductivities.is_empty()
+        || conductivities.len() != heat_capacities.len()
+        || conductivities.len() != densities.len()
+    {
+        return None;
     }
-    let conductivity_mean = if conductivities.is_empty() {
-        1.0
-    } else {
-        conductivities.iter().sum::<f64>() / conductivities.len() as f64
+    let mean = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+    let spread_ratio = |values: &[f64]| {
+        let min = values.iter().copied().reduce(f64::min)?;
+        let max = values.iter().copied().reduce(f64::max)?;
+        Some((max / min.max(1.0e-12)).max(1.0))
     };
-    let heat_capacity_mean = if heat_capacities.is_empty() {
-        1.0
-    } else {
-        heat_capacities.iter().sum::<f64>() / heat_capacities.len() as f64
-    };
-    let density_mean = 7_800.0;
-    let conductivity_spread_ratio = if conductivities.is_empty() {
-        1.0
-    } else {
-        let min = conductivities
-            .iter()
-            .copied()
-            .reduce(f64::min)
-            .unwrap_or(1.0);
-        let max = conductivities
-            .iter()
-            .copied()
-            .reduce(f64::max)
-            .unwrap_or(1.0);
-        (max / min.max(1.0e-9)).clamp(1.0, 32.0)
-    };
-    let heat_capacity_spread_ratio = if heat_capacities.is_empty() {
-        1.0
-    } else {
-        let min = heat_capacities
-            .iter()
-            .copied()
-            .reduce(f64::min)
-            .unwrap_or(1.0);
-        let max = heat_capacities
-            .iter()
-            .copied()
-            .reduce(f64::max)
-            .unwrap_or(1.0);
-        (max / min.max(1.0e-9)).clamp(1.0, 32.0)
-    };
-    let diffusivity_estimate = conductivity_mean / (density_mean * heat_capacity_mean).max(1.0e-9);
-    let response_rate = (diffusivity_estimate * 5.0e6).clamp(0.02, 2.0);
-
-    ThermalConstitutiveStats {
-        conductivity_mean,
-        heat_capacity_mean,
-        density_mean,
-        conductivity_spread_ratio,
-        heat_capacity_spread_ratio,
-        diffusivity_estimate,
-        response_rate,
-    }
+    Some(ThermalConstitutiveStats {
+        conductivity_mean: mean(conductivities),
+        heat_capacity_mean: mean(heat_capacities),
+        density_mean: mean(densities),
+        conductivity_spread_ratio: spread_ratio(conductivities)?,
+        heat_capacity_spread_ratio: spread_ratio(heat_capacities)?,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixtures::{fixture_model, FixtureId};
-
     #[test]
-    fn constitutive_stats_are_finite_for_fixture_model() {
-        let model = fixture_model(FixtureId::ThermoRampSmooth);
-        let stats = constitutive_stats(&model);
-        assert!(stats.conductivity_mean.is_finite());
-        assert!(stats.heat_capacity_mean.is_finite());
-        assert!(stats.diffusivity_estimate.is_finite());
-        assert!(stats.response_rate >= 0.02 && stats.response_rate <= 2.0);
+    fn constitutive_stats_use_exact_element_coefficients() {
+        let stats = constitutive_stats(&[2.0, 8.0], &[10.0, 30.0], &[4.0, 12.0]).unwrap();
+        assert_eq!(stats.conductivity_mean, 5.0);
+        assert_eq!(stats.heat_capacity_mean, 20.0);
+        assert_eq!(stats.density_mean, 8.0);
+        assert_eq!(stats.conductivity_spread_ratio, 4.0);
+        assert_eq!(stats.heat_capacity_spread_ratio, 3.0);
+        assert!(constitutive_stats(&[], &[], &[]).is_none());
+        assert!(constitutive_stats(&[1.0], &[], &[1.0]).is_none());
     }
 }

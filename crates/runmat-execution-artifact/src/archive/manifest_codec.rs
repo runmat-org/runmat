@@ -550,12 +550,14 @@ fn decode_form(value: u8) -> ArtifactResult<ExecutableForm> {
         0 => Ok(ExecutableForm::InterpreterBytecodeV1),
         1 => Ok(ExecutableForm::InterpreterScriptV1),
         2 => Ok(ExecutableForm::TestAttemptV1),
-        3 => Ok(ExecutableForm::ExecutableUnitV3),
+        9 => Ok(ExecutableForm::ExecutableUnitV4),
         4 => Ok(ExecutableForm::NativeObjectV1),
         5 => Ok(ExecutableForm::MeshingWorkload),
         6 => Ok(ExecutableForm::InterpreterBytecodeV2),
         7 => Ok(ExecutableForm::InterpreterScriptV2),
         8 => Ok(ExecutableForm::InterpreterRegionSourcesV1),
+        10 => Ok(ExecutableForm::AnalysisWorkload),
+        11 => Ok(ExecutableForm::GeometryWorkload),
         _ => Err(ArtifactError::Invalid("invalid executable form".into())),
     }
 }
@@ -621,4 +623,22 @@ fn encode_error(error: minicbor::encode::Error<std::convert::Infallible>) -> Art
 
 fn decode_error(error: minicbor::decode::Error) -> ArtifactError {
     ArtifactError::Encoding(error.to_string())
+}
+
+#[cfg(test)]
+mod executable_revision_tests {
+    use super::*;
+
+    #[test]
+    fn complete_dependency_product_has_a_distinct_wire_form() {
+        assert_eq!(ExecutableForm::ExecutableUnitV4 as u8, 9);
+        assert_eq!(decode_form(9).unwrap(), ExecutableForm::ExecutableUnitV4);
+        assert!(
+            decode_form(3).is_err(),
+            "old unit discriminant must not alias the dependency-bearing form"
+        );
+        for form in [4, 5, 6, 7, 8, 10, 11] {
+            assert!(decode_form(form).is_ok());
+        }
+    }
 }

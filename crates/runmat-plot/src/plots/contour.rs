@@ -15,6 +15,10 @@ pub struct ContourPlot {
     pub force_3d: bool,
     pub label: Option<String>,
     pub visible: bool,
+    /// The data range the contour colors span, for the colorbar.
+    pub value_range: Option<(f64, f64)>,
+    /// Each CPU vertex's position in the colormap (0 to 1), so a new colormap can recolor it.
+    colormap_positions: Option<Vec<f32>>,
     pub line_width: f32,
     vertices: Option<Vec<Vertex>>,
     gpu_vertices: Option<GpuVertexBuffer>,
@@ -54,6 +58,8 @@ impl ContourPlot {
             force_3d: false,
             label: None,
             visible: true,
+            value_range: None,
+            colormap_positions: None,
             line_width: 1.0,
             vertex_count: vertices.len(),
             vertices: Some(vertices),
@@ -74,12 +80,39 @@ impl ContourPlot {
             force_3d: false,
             label: None,
             visible: true,
+            value_range: None,
+            colormap_positions: None,
             line_width: 1.0,
             vertex_count,
             vertices: None,
             gpu_vertices: Some(buffer),
             bounds: Some(bounds),
         }
+    }
+
+    /// Record each vertex's colormap position (0 to 1) so the colors can follow the colormap.
+    pub fn with_colormap_positions(mut self, positions: Vec<f32>) -> Self {
+        let matches = self.vertices.as_ref().is_some_and(|v| v.len() == positions.len());
+        self.colormap_positions = matches.then_some(positions);
+        self
+    }
+
+    /// Recolor the vertices through `cmap`; plots without recorded positions keep their colors.
+    pub fn recolor_with_colormap(&mut self, cmap: &crate::plots::surface::ColorMap) {
+        let (Some(vertices), Some(positions)) =
+            (self.vertices.as_mut(), self.colormap_positions.as_ref())
+        else {
+            return;
+        };
+        for (vertex, &t) in vertices.iter_mut().zip(positions) {
+            let rgb = cmap.map_value(t);
+            vertex.color = [rgb.x, rgb.y, rgb.z, vertex.color[3]];
+        }
+    }
+
+    pub fn with_value_range(mut self, range: Option<(f64, f64)>) -> Self {
+        self.value_range = range;
+        self
     }
 
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
@@ -114,6 +147,16 @@ impl ContourPlot {
 
     pub fn bounds(&self) -> BoundingBox {
         self.bounds.unwrap_or_default()
+    }
+
+    /// The color the legend shows for this contour: its line color when set (every vertex has
+    /// it), otherwise a level from the middle of its colormap. Mid-gray when only GPU vertices exist.
+    pub fn legend_color(&self) -> Vec4 {
+        self.vertices
+            .as_ref()
+            .and_then(|v| v.get(v.len() / 2))
+            .map(|v| Vec4::from_array(v.color))
+            .unwrap_or(Vec4::new(0.5, 0.5, 0.5, 1.0))
     }
 
     pub fn cpu_vertices(&self) -> Option<&[Vertex]> {

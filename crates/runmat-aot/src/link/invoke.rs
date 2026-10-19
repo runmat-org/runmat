@@ -195,9 +195,14 @@ pub(super) fn invoke_prepared(
     let response = super::response::encode(&plan.response_tokens, plan.driver.family)?;
     std::fs::write(&response_path, response)
         .map_err(|error| AotError::io("write linker response file", &response_path, error))?;
-    let mut command = std::process::Command::new(&plan.driver.path);
+    let mut command = plan.driver.command();
     if matches!(environment, LinkProcessEnvironment::QualifiedTree) {
-        command.env_clear().current_dir(temporary.path());
+        // The discovered tool environment (for example the MSVC LIB/PATH set)
+        // is part of the linker authority and survives the isolation reset.
+        command
+            .env_clear()
+            .envs(plan.driver.environment.iter().cloned())
+            .current_dir(temporary.path());
     }
     let result = command
         .arg(format!("@{}", response_path.display()))

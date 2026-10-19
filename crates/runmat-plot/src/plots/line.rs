@@ -51,6 +51,7 @@ pub struct LinePlot {
     gpu_topology: Option<PipelineType>,
     gpu_pack_viewport_px: Option<(u32, u32)>,
     gpu_pack_view_bounds: Option<(f32, f32, f32, f32)>,
+    gpu_pack_log_axes: (bool, bool),
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +265,7 @@ impl LinePlot {
             gpu_topology: None,
             gpu_pack_viewport_px: None,
             gpu_pack_view_bounds: None,
+            gpu_pack_log_axes: (false, false),
         })
     }
 
@@ -300,6 +302,7 @@ impl LinePlot {
             gpu_topology: Some(pipeline),
             gpu_pack_viewport_px: None,
             gpu_pack_view_bounds: None,
+            gpu_pack_log_axes: (false, false),
         }
     }
 
@@ -337,6 +340,7 @@ impl LinePlot {
             gpu_topology: None,
             gpu_pack_viewport_px: None,
             gpu_pack_view_bounds: None,
+            gpu_pack_log_axes: (false, false),
         }
     }
 
@@ -632,12 +636,13 @@ impl LinePlot {
         gpu: &GpuPackContext<'_>,
         viewport_px: (u32, u32),
         view_bounds: Option<(f64, f64, f64, f64)>,
+        log_axes: (bool, bool),
     ) -> Result<(), String> {
         let bounds = self
             .bounds
             .as_ref()
             .ok_or_else(|| "missing line bounds".to_string())?;
-        let stroke_bounds = Self::stroke_bounds_from_view_bounds(*bounds, view_bounds);
+        let stroke_bounds = super::stroke::stroke_bounds(*bounds, view_bounds);
         let pack_bounds_key = (
             stroke_bounds.min.x,
             stroke_bounds.max.x,
@@ -647,6 +652,7 @@ impl LinePlot {
         if self.gpu_vertices.is_some() {
             if self.gpu_pack_viewport_px == Some(viewport_px)
                 && self.gpu_pack_view_bounds == Some(pack_bounds_key)
+                && self.gpu_pack_log_axes == log_axes
             {
                 return Ok(());
             }
@@ -659,8 +665,21 @@ impl LinePlot {
         };
 
         let stroke_width_px = self.line_width.max(1.0);
-        let x_span = (stroke_bounds.max.x - stroke_bounds.min.x).abs().max(1e-12);
-        let y_span = (stroke_bounds.max.y - stroke_bounds.min.y).abs().max(1e-12);
+        // Extrusion runs in pixel space, so log axes map through log10 like the draw shader.
+        let x_axis = super::stroke::StrokeAxis::new(
+            stroke_bounds.min.x,
+            stroke_bounds.max.x,
+            viewport_px.0 as f32,
+            log_axes.0,
+            &[],
+        );
+        let y_axis = super::stroke::StrokeAxis::new(
+            stroke_bounds.min.y,
+            stroke_bounds.max.y,
+            viewport_px.1 as f32,
+            log_axes.1,
+            &[],
+        );
         trace!(
             target: "runmat_plot",
             "line-pack: begin len={} line_width_px={} stroke_width_px={} viewport_px={:?} bounds=({:?}..{:?}) stroke_bounds=({:?}..{:?})",
@@ -679,10 +698,12 @@ impl LinePlot {
             half_width_px: stroke_width_px * 0.5,
             viewport_width_px: viewport_px.0 as f32,
             viewport_height_px: viewport_px.1 as f32,
-            x_min: stroke_bounds.min.x,
-            x_span,
-            y_min: stroke_bounds.min.y,
-            y_span,
+            x_min: x_axis.origin as f32,
+            x_span: x_axis.span as f32,
+            y_min: y_axis.origin as f32,
+            y_span: y_axis.span as f32,
+            x_log: log_axes.0,
+            y_log: log_axes.1,
             line_style: self.line_style,
             marker_size: 1.0,
         };
@@ -700,6 +721,7 @@ impl LinePlot {
         self.gpu_topology = Some(PipelineType::Triangles);
         self.gpu_pack_viewport_px = Some(viewport_px);
         self.gpu_pack_view_bounds = Some(pack_bounds_key);
+        self.gpu_pack_log_axes = log_axes;
         Ok(())
     }
 
@@ -707,6 +729,7 @@ impl LinePlot {
         &mut self,
         viewport_px: Option<(u32, u32)>,
         view_bounds: Option<(f64, f64, f64, f64)>,
+        log_axes: (bool, bool),
         gpu: Option<&GpuPackContext<'_>>,
     ) -> RenderData {
         trace!(
@@ -720,12 +743,12 @@ impl LinePlot {
         );
         if self.gpu_line_inputs.is_some() {
             if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
-                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp, view_bounds) {
+                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp, view_bounds, log_axes) {
                     warn!("line gpu pack failed: {err}");
                 }
             }
         }
-        self.render_data_with_viewport_and_view_bounds(viewport_px, view_bounds)
+        self.render_data_with_viewport_and_view_bounds(viewport_px, view_bounds, log_axes)
     }
 
     /// Generate complete render data for the graphics pipeline
@@ -814,13 +837,14 @@ impl LinePlot {
     /// `line_width` is expressed in *pixels* and extrusion is performed in viewport space,
     /// then mapped back to data coordinates for the rest of the render pipeline.
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
-        self.render_data_with_viewport_and_view_bounds(viewport_px, None)
+        self.render_data_with_viewport_and_view_bounds(viewport_px, None, (false, false))
     }
 
     pub fn render_data_with_viewport_and_view_bounds(
         &mut self,
         viewport_px: Option<(u32, u32)>,
         view_bounds: Option<(f64, f64, f64, f64)>,
+        log_axes: (bool, bool),
     ) -> RenderData {
         if self.gpu_vertices.is_some() {
             // GPU paths already handle sizing via pipeline/state; keep existing behavior.
@@ -831,9 +855,14 @@ impl LinePlot {
             return self.render_data();
         };
         let bounds = self.bounds();
-        let stroke_bounds = Self::stroke_bounds_from_view_bounds(bounds, view_bounds);
+        let stroke_bounds = super::stroke::stroke_bounds(bounds, view_bounds);
         let stroke_width_px = self.line_width.max(1.0);
-        let tris = self.build_viewport_stroke_vertices(stroke_bounds, viewport_px, stroke_width_px);
+        let tris = self.build_viewport_stroke_vertices(
+            stroke_bounds,
+            viewport_px,
+            stroke_width_px,
+            log_axes,
+        );
         let vertex_count = tris.len();
 
         let style_code = match self.line_style {
@@ -882,90 +911,89 @@ impl LinePlot {
         }
     }
 
-    fn stroke_bounds_from_view_bounds(
-        data_bounds: BoundingBox,
-        view_bounds: Option<(f64, f64, f64, f64)>,
-    ) -> BoundingBox {
-        crate::core::ResolvedViewport {
-            pixels: None,
-            view: view_bounds,
-        }
-        .bounds(data_bounds)
-    }
-
     fn build_viewport_stroke_vertices(
         &self,
         bounds: BoundingBox,
         viewport_px: (u32, u32),
         stroke_width_px: f32,
+        log_axes: (bool, bool),
     ) -> Vec<Vertex> {
-        let x_span = (bounds.max.x - bounds.min.x).abs().max(1e-12);
-        let y_span = (bounds.max.y - bounds.min.y).abs().max(1e-12);
         #[cfg(test)]
         VIEWPORT_TESSELLATIONS.with(|count| count.set(count.get() + 1));
-        let vw = (viewport_px.0 as f32).max(1.0);
-        let vh = (viewport_px.1 as f32).max(1.0);
-        let sx = vw / x_span;
-        let sy = vh / y_span;
-
         let (x_data, y_data) = self
             .host_xy_f64()
             .expect("validated line host source")
             .unwrap_or_default();
-        let x_px: Vec<f64> = x_data
-            .iter()
-            .map(|&x| ((x as f32 - bounds.min.x) * sx) as f64)
-            .collect();
-        let y_px: Vec<f64> = y_data
-            .iter()
-            .map(|&y| ((y as f32 - bounds.min.y) * sy) as f64)
-            .collect();
+        let vw = (viewport_px.0 as f32).max(1.0);
+        let vh = (viewport_px.1 as f32).max(1.0);
+        let x_axis =
+            super::stroke::StrokeAxis::new(bounds.min.x, bounds.max.x, vw, log_axes.0, &x_data);
+        let y_axis =
+            super::stroke::StrokeAxis::new(bounds.min.y, bounds.max.y, vh, log_axes.1, &y_data);
+        let x_px: Vec<f64> = x_data.iter().map(|&x| x_axis.to_px(x)).collect();
+        let y_px: Vec<f64> = y_data.iter().map(|&y| y_axis.to_px(y)).collect();
 
-        let base_tris = match self.line_cap {
-            LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
-                &x_px,
-                &y_px,
-                self.color,
-                stroke_width_px,
-                self.line_join,
-            ),
-            LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
-                &x_px,
-                &y_px,
-                self.color,
-                stroke_width_px,
-            ),
-            LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
-                &x_px,
-                &y_px,
-                self.color,
-                stroke_width_px,
-                12,
-            ),
-        };
-        let mut tris = match self.line_style {
+        // Points that cannot be drawn (NaN, or non-positive on a log axis) break the line;
+        // each unbroken run is extruded on its own.
+        let mut tris = Vec::new();
+        let mut run_start = 0;
+        for end in 0..=x_px.len() {
+            let drawable = end < x_px.len() && x_px[end].is_finite() && y_px[end].is_finite();
+            if drawable {
+                continue;
+            }
+            if end - run_start >= 2 {
+                tris.extend(self.extrude_stroke(
+                    &x_px[run_start..end],
+                    &y_px[run_start..end],
+                    stroke_width_px,
+                ));
+            }
+            run_start = end + 1;
+        }
+
+        for v in &mut tris {
+            v.position[0] = x_axis.from_px(v.position[0]);
+            v.position[1] = y_axis.from_px(v.position[1]);
+        }
+        tris
+    }
+
+    fn extrude_stroke(&self, x_px: &[f64], y_px: &[f64], stroke_width_px: f32) -> Vec<Vertex> {
+        match self.line_style {
             LineStyle::None => Vec::new(),
-            LineStyle::Solid => base_tris,
             LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
-                vertex_utils::create_thick_polyline_dashed(
-                    &x_px,
-                    &y_px,
+                vertex_utils::create_thick_polyline_dashed_px(
+                    x_px,
+                    y_px,
                     self.color,
                     stroke_width_px,
                     self.line_style,
                 )
             }
-        };
-
-        let inv_sx = x_span / vw;
-        let inv_sy = y_span / vh;
-        for v in &mut tris {
-            let px = v.position[0];
-            let py = v.position[1];
-            v.position[0] = bounds.min.x + px * inv_sx;
-            v.position[1] = bounds.min.y + py * inv_sy;
+            LineStyle::Solid => match self.line_cap {
+                LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
+                    x_px,
+                    y_px,
+                    self.color,
+                    stroke_width_px,
+                    self.line_join,
+                ),
+                LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
+                    x_px,
+                    y_px,
+                    self.color,
+                    stroke_width_px,
+                ),
+                LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
+                    x_px,
+                    y_px,
+                    self.color,
+                    stroke_width_px,
+                    12,
+                ),
+            },
         }
-        tris
     }
 
     /// Generate render data representing the markers for this line plot.
@@ -1449,8 +1477,11 @@ mod tests {
         let viewport = (1000, 500);
         let view_bounds = (0.0, 30.0, -1.0, 1.0);
 
-        let render_data =
-            plot.render_data_with_viewport_and_view_bounds(Some(viewport), Some(view_bounds));
+        let render_data = plot.render_data_with_viewport_and_view_bounds(
+            Some(viewport),
+            Some(view_bounds),
+            (false, false),
+        );
 
         assert_eq!(render_data.pipeline_type, PipelineType::Triangles);
         let v0 = render_data.vertices[0].position;
@@ -1461,5 +1492,68 @@ mod tests {
             (width_px - 2.0).abs() < 0.05,
             "expected zoomed stroke to remain ~2px, got {width_px}"
         );
+    }
+
+    #[test]
+    fn viewport_stroke_on_log_axes_keeps_pixel_width_and_positive_vertices() {
+        // A steep power law spanning four decades on both axes.
+        let x: Vec<f64> = (0..=40)
+            .map(|i| 10f64.powf(1.0 + i as f64 * 0.05))
+            .collect();
+        let y: Vec<f64> = x.iter().map(|v| 1.0 / (v * v)).collect();
+        let mut plot = LinePlot::new(x, y).unwrap();
+        plot.set_line_width(2.0);
+        let viewport = (400, 400);
+        let view_bounds = (10.0, 1000.0, 1e-6, 1e-2);
+
+        let render_data = plot.render_data_with_viewport_and_view_bounds(
+            Some(viewport),
+            Some(view_bounds),
+            (true, true),
+        );
+
+        // 400 px over two decades of x and four decades of y.
+        let to_px = |p: [f32; 3]| {
+            (
+                ((p[0] as f64).log10() - 1.0) * 200.0,
+                ((p[1] as f64).log10() + 6.0) * 100.0,
+            )
+        };
+        assert!(!render_data.vertices.is_empty());
+        for v in &render_data.vertices {
+            assert!(v.position[0] > 0.0 && v.position[1] > 0.0);
+        }
+        // The first quad's two start corners sit a full stroke width apart in log-pixel space.
+        let (ax, ay) = to_px(render_data.vertices[0].position);
+        let (bx, by) = to_px(render_data.vertices[1].position);
+        let width_px = ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt();
+        assert!(
+            (width_px - 2.0).abs() < 0.05,
+            "expected ~2px stroke on log axes, got {width_px}"
+        );
+    }
+
+    #[test]
+    fn viewport_stroke_on_log_axes_breaks_at_non_positive_values() {
+        let x = vec![1.0, 10.0, 100.0, 1000.0];
+        let y = vec![1.0, -1.0, 1.0, 10.0];
+        let mut plot = LinePlot::new(x, y).unwrap();
+        plot.set_line_width(2.0);
+
+        let render_data = plot.render_data_with_viewport_and_view_bounds(
+            Some((400, 400)),
+            Some((1.0, 1000.0, 0.1, 10.0)),
+            (true, true),
+        );
+
+        // Only the segment from x = 100 to x = 1000 can be drawn.
+        assert!(!render_data.vertices.is_empty());
+        for v in &render_data.vertices {
+            assert!(
+                v.position[0] >= 90.0 && v.position[1] > 0.0,
+                "{:?}",
+                v.position
+            );
+        }
     }
 }

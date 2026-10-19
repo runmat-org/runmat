@@ -55,6 +55,7 @@ pub(super) fn commit(
         MemoryEntry::File {
             bytes: Arc::new(replacement),
             readonly: false,
+            revision: uuid::Uuid::new_v4().to_string(),
             identity: expected_identity.clone(),
         },
     );

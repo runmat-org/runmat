@@ -1,81 +1,49 @@
-#[cfg(unix)]
-use std::fs;
 use std::sync::Arc;
-use std::time::Duration;
 
 use runmat_execution::JobId;
 use runmat_process_host::environment::EnvironmentPolicy;
-use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
-use runmat_process_host::{
-    is_process_alive, terminate_process_tree, ChildLifetime, HiddenMode, HostCommand, StdioPolicy,
-};
-use tokio::io::{AsyncRead, AsyncWrite};
+use runmat_process_host::{is_process_alive, ChildLifetime, HiddenMode, HostCommand, StdioPolicy};
 use tokio::sync::Mutex;
 
-use super::auth::{constant_time_eq, load_or_create_token, SupervisorLock};
+use super::auth::acquire_supervisor_lock;
+use super::driver_files::write_driver_marker;
 use super::filesystem::{secure_directory, unix_millis};
-use super::model::{
-    BatchSubmission, GraphBatchSubmission, LocalJobRecord, LocalJobState, ProgramBatchSubmission,
-};
-use super::protocol::{
-    SupervisorCommand, SupervisorRequest, SupervisorResponse, SUPERVISOR_MAX_MESSAGE_BYTES,
-    SUPERVISOR_PROTOCOL_VERSION,
-};
-use super::store::{write_driver_marker, JobStore, SupervisorPaths};
+use super::model::{BatchSubmission, GraphBatchSubmission, LocalJobRecord, LocalJobState};
+use super::protocol::{SupervisorCommand, SupervisorResponse};
+use super::store::JobStore;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-const STARTING_RECOVERY_GRACE_MILLIS: u64 = 10_000;
+pub(super) const STARTING_RECOVERY_GRACE_MILLIS: u64 = 10_000;
 
-#[derive(Clone, Debug)]
-pub struct LocalSupervisorConfig {
-    pub executable: std::path::PathBuf,
-    pub paths: SupervisorPaths,
-    pub max_stderr_bytes: usize,
-    pub max_object_bytes: u64,
-}
-
-impl LocalSupervisorConfig {
-    pub fn for_current_executable() -> NativeExecutionResult<Self> {
-        Ok(Self {
-            executable: std::env::current_exe().map_err(protocol_io)?,
-            paths: SupervisorPaths::platform_default()?,
-            max_stderr_bytes: 1024 * 1024,
-            max_object_bytes: 512 * 1024 * 1024,
-        })
-    }
-
-    fn validate(&self) -> NativeExecutionResult<()> {
-        if self.executable.as_os_str().is_empty()
-            || self.max_stderr_bytes == 0
-            || self.max_object_bytes == 0
-        {
-            return Err(NativeExecutionError::Configuration(
-                "local supervisor configuration contains an empty bound".into(),
-            ));
-        }
-        Ok(())
-    }
-}
+use super::LocalSupervisorConfig;
 
 pub struct LocalSupervisor {
-    config: LocalSupervisorConfig,
+    // This guard outlives all service-owned reconciliation and connection futures.
+    _authority: runmat_filesystem::ExclusiveFileLock,
+    pub(super) config: LocalSupervisorConfig,
     pub(super) store: Mutex<JobStore>,
+    pub(super) scheduler: Mutex<super::scheduler::DurableScheduler>,
 }
 
 impl LocalSupervisor {
     pub fn open(config: LocalSupervisorConfig) -> NativeExecutionResult<Arc<Self>> {
         config.validate()?;
+        secure_directory(&config.paths.root)?;
+        let authority = acquire_supervisor_lock(&config.paths)?;
         let store = JobStore::open(config.paths.clone())?;
+        let scheduler = super::scheduler::DurableScheduler::open(&config, &authority)?;
         Ok(Arc::new(Self {
+            _authority: authority,
             config,
             store: Mutex::new(store),
+            scheduler: Mutex::new(scheduler),
         }))
     }
 
-    pub fn object_store(&self) -> NativeExecutionResult<crate::NativeObjectStore> {
-        crate::NativeObjectStore::open(
+    pub fn object_store(&self) -> NativeExecutionResult<crate::FilesystemObjectStore> {
+        crate::FilesystemObjectStore::open(
             self.config.paths.root.join("objects"),
-            self.config.max_object_bytes,
+            self.config.execution.max_object_bytes,
         )
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))
     }
@@ -86,19 +54,6 @@ impl LocalSupervisor {
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         let mut store = self.store.lock().await;
         let (record, created) = store.create_script(submission, unix_millis())?;
-        if !created {
-            return Ok((record, true));
-        }
-        let record = self.launch(&mut store, record).await?;
-        Ok((record, false))
-    }
-
-    pub async fn submit_program(
-        &self,
-        submission: ProgramBatchSubmission,
-    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
-        let mut store = self.store.lock().await;
-        let (record, created) = store.create_program(submission, unix_millis())?;
         if !created {
             return Ok((record, true));
         }
@@ -139,54 +94,27 @@ impl LocalSupervisor {
         stderr_offset: u64,
     ) -> NativeExecutionResult<super::model::JobAttachment> {
         self.reconcile().await?;
-        self.store
-            .lock()
-            .await
-            .attachment(job_id, stdout_offset, stderr_offset)
-    }
-
-    pub async fn cancel(&self, job_id: JobId) -> NativeExecutionResult<LocalJobRecord> {
-        self.reconcile().await?;
         let store = self.store.lock().await;
-        let mut record = store.record(job_id)?;
-        if record.state.is_terminal() {
-            return Ok(record);
-        }
-        let process_id = record.driver_process_id.or_else(|| {
-            store
-                .driver_marker(job_id)
-                .ok()
-                .flatten()
-                .map(|value| value.process_id)
-        });
-        let now = unix_millis();
-        if process_id.is_none() {
-            record.state = LocalJobState::Cancelled;
-            record.updated_unix_millis = now;
-            record.message = Some("cancelled before driver start".into());
-            store.write_record(&record)?;
-            return Ok(record);
-        }
-        record.state = LocalJobState::Cancelling;
-        record.driver_process_id = process_id;
-        record.updated_unix_millis = now;
-        store.write_record(&record)?;
-        terminate_process_tree(process_id.expect("checked above"))
-            .await
-            .map_err(protocol_io)?;
-        record.state = LocalJobState::Cancelled;
-        record.driver_process_id = None;
-        record.updated_unix_millis = unix_millis();
-        record.message = Some("cancelled by user".into());
-        store.write_record(&record)?;
-        Ok(record)
+        let mut attachment = store.attachment(job_id, stdout_offset, stderr_offset)?;
+        self.attach_program(&store, &mut attachment).await?;
+        Ok(attachment)
     }
 
     pub async fn reconcile(&self) -> NativeExecutionResult<()> {
         let mut store = self.store.lock().await;
         let now = unix_millis();
         let records = store.list()?;
+        {
+            let mut scheduler = self.scheduler.lock().await;
+            let actions = scheduler.tick_if_active()?;
+            self.dispatch_program_actions(&mut store, &mut scheduler, actions)
+                .await?;
+        }
         for mut record in records {
+            if store.program_submission(record.handle.id)?.is_some() {
+                self.reconcile_program(&mut store, &mut record).await?;
+                continue;
+            }
             if record.state.is_terminal() {
                 continue;
             }
@@ -260,11 +188,14 @@ impl LocalSupervisor {
                 | LocalJobState::Indeterminate => {}
             }
         }
-        let _ = store.gc(now)?;
+        let scheduler = self.scheduler.lock().await;
+        let _ = store.gc(now, |job| {
+            scheduler.job_has_provider(&store, job).map(|owned| !owned)
+        })?;
         Ok(())
     }
 
-    async fn launch(
+    pub(super) async fn launch(
         &self,
         store: &mut JobStore,
         mut record: LocalJobRecord,
@@ -275,7 +206,7 @@ impl LocalSupervisor {
         store.write_record(&record)?;
 
         let job_dir = store.job_dir(record.handle.id);
-        let mut command = HostCommand::new(&self.config.executable);
+        let mut command = HostCommand::new(&self.config.execution.executable);
         command.arguments = vec![HiddenMode::ExecutionDriver.marker().into()];
         command.environment_policy = EnvironmentPolicy::Inherit;
         command.environment.insert(
@@ -291,12 +222,18 @@ impl LocalSupervisor {
                 .to_string_lossy()
                 .into_owned(),
         );
+        if let Some(assignment) = store.program_assignment(record.handle.id)? {
+            command.environment.insert(
+                super::program_store::ATTEMPT_ID_ENV.into(),
+                assignment.request.id.to_string(),
+            );
+        }
         command.lifetime = ChildLifetime::Detached;
         command.stdio = StdioPolicy::Files {
             stdout: store.stdout_path(record.handle.id),
             stderr: store.stderr_path(record.handle.id),
         };
-        command.max_stderr_bytes = self.config.max_stderr_bytes;
+        command.max_stderr_bytes = self.config.execution.max_stderr_bytes;
         let child = match command.spawn().await {
             Ok(child) => child,
             Err(error) => {
@@ -310,7 +247,11 @@ impl LocalSupervisor {
         let process_id = child.id().ok_or_else(|| {
             NativeExecutionError::Protocol("batch driver did not expose a process id".into())
         })?;
-        write_driver_marker(&job_dir, process_id)?;
+        if store.program_assignment(record.handle.id)?.is_none() {
+            // Program markers are published only by the original leased provider.
+            // A parent PID observation cannot establish physical attempt ownership.
+            write_driver_marker(&job_dir, process_id, None)?;
+        }
         drop(child);
         record.state = LocalJobState::Running;
         record.driver_process_id = Some(process_id);
@@ -319,12 +260,19 @@ impl LocalSupervisor {
         Ok(record)
     }
 
-    async fn command(
+    pub(super) async fn command(
         &self,
         command: SupervisorCommand,
     ) -> NativeExecutionResult<SupervisorResponse> {
         Ok(match command {
-            SupervisorCommand::Ping => SupervisorResponse::Pong,
+            SupervisorCommand::Ping => SupervisorResponse::Pong {
+                config_identity: self.config.identity()?,
+            },
+            SupervisorCommand::ExecutionContext { idempotency_key } => {
+                SupervisorResponse::ExecutionContext {
+                    context: self.execution_context(idempotency_key.as_deref()).await?,
+                }
+            }
             SupervisorCommand::Submit { submission } => {
                 let (record, duplicate) = self.submit(*submission).await?;
                 SupervisorResponse::Submitted { record, duplicate }
@@ -353,115 +301,22 @@ impl LocalSupervisor {
             SupervisorCommand::Cancel { job_id } => SupervisorResponse::Cancelled {
                 record: self.cancel(job_id).await?,
             },
+            SupervisorCommand::ConsolePage {
+                handle,
+                attempt_id,
+                cursor,
+                budget,
+            } => SupervisorResponse::ConsolePage {
+                attempt_id,
+                page: self
+                    .console_page(handle, attempt_id, cursor, budget)
+                    .await?
+                    .map(Box::new),
+            },
+            SupervisorCommand::CancelHandle { handle, reason } => SupervisorResponse::Cancelled {
+                record: self.cancel_handle(handle, reason).await?,
+            },
         })
-    }
-}
-
-pub async fn run_local_supervisor(config: LocalSupervisorConfig) -> NativeExecutionResult<()> {
-    secure_directory(&config.paths.root)?;
-    let _lock = SupervisorLock::acquire(&config.paths)?;
-    let token = load_or_create_token(&config.paths)?;
-    let supervisor = LocalSupervisor::open(config.clone())?;
-    supervisor.reconcile().await?;
-    let background = Arc::clone(&supervisor);
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(250));
-        loop {
-            interval.tick().await;
-            let _ = background.reconcile().await;
-        }
-    });
-    run_listener(config.paths, supervisor, token).await
-}
-
-async fn handle_connection<S>(mut stream: S, supervisor: Arc<LocalSupervisor>, token: Arc<String>)
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let limits = FrameLimits {
-        max_message_bytes: SUPERVISOR_MAX_MESSAGE_BYTES,
-    };
-    let response = match read_payload(&mut stream, limits).await {
-        Ok(payload) => match serde_json::from_slice::<SupervisorRequest>(&payload) {
-            Ok(request)
-                if request.protocol_version == SUPERVISOR_PROTOCOL_VERSION
-                    && constant_time_eq(
-                        request.authentication_token.as_bytes(),
-                        token.as_bytes(),
-                    ) =>
-            {
-                supervisor
-                    .command(request.command)
-                    .await
-                    .unwrap_or_else(|error| {
-                        SupervisorResponse::error("request_failed", error.to_string())
-                    })
-            }
-            Ok(_) => SupervisorResponse::error(
-                "authentication_failed",
-                "local supervisor authentication or protocol negotiation failed",
-            ),
-            Err(error) => SupervisorResponse::error("malformed_request", error.to_string()),
-        },
-        Err(error) => SupervisorResponse::error("invalid_frame", error.to_string()),
-    };
-    if let Ok(payload) = serde_json::to_vec(&response) {
-        let _ = write_payload(&mut stream, &payload, limits).await;
-    }
-}
-
-#[cfg(unix)]
-async fn run_listener(
-    paths: SupervisorPaths,
-    supervisor: Arc<LocalSupervisor>,
-    token: String,
-) -> NativeExecutionResult<()> {
-    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-
-    if paths.socket.exists() {
-        fs::remove_file(&paths.socket).map_err(protocol_io)?;
-    }
-    let listener = tokio::net::UnixListener::bind(&paths.socket).map_err(protocol_io)?;
-    fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600)).map_err(protocol_io)?;
-    let token_owner = fs::metadata(&paths.token).map_err(protocol_io)?.uid();
-    let token = Arc::new(token);
-    loop {
-        let (stream, _) = listener.accept().await.map_err(protocol_io)?;
-        let peer_owner = stream.peer_cred().map_err(protocol_io)?.uid();
-        if peer_owner != token_owner {
-            continue;
-        }
-        tokio::spawn(handle_connection(
-            stream,
-            Arc::clone(&supervisor),
-            Arc::clone(&token),
-        ));
-    }
-}
-
-#[cfg(windows)]
-async fn run_listener(
-    paths: SupervisorPaths,
-    supervisor: Arc<LocalSupervisor>,
-    token: String,
-) -> NativeExecutionResult<()> {
-    use tokio::net::windows::named_pipe::ServerOptions;
-
-    let token = Arc::new(token);
-    let mut first = true;
-    loop {
-        let server = ServerOptions::new()
-            .first_pipe_instance(first)
-            .reject_remote_clients(true)
-            .create(&paths.pipe)
-            .map_err(protocol_io)?;
-        first = false;
-        server.connect().await.map_err(protocol_io)?;
-        tokio::spawn(handle_connection(
-            server,
-            Arc::clone(&supervisor),
-            Arc::clone(&token),
-        ));
     }
 }
 
@@ -476,8 +331,4 @@ fn mark_indeterminate(
     record.updated_unix_millis = now;
     record.message = Some(message.into());
     store.write_record(record)
-}
-
-fn protocol_io(error: std::io::Error) -> NativeExecutionError {
-    NativeExecutionError::Protocol(error.to_string())
 }

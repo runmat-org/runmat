@@ -13,7 +13,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use super::common::numeric_plot_data_pair;
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
-use super::state::{PlotRenderOptions, PreparedPlotTarget};
+use super::state::{continue_line_color_cycle_after, PlotRenderOptions, PreparedPlotTarget};
 use super::style::{
     looks_like_plot_option_name, marker_metadata_from_appearance, parse_line_style_args,
     value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
@@ -216,6 +216,10 @@ async fn plot_builtin_with_runtime(
                 *plot_index_slot.borrow_mut() = Some((axes_index, plot_index));
             }
         }
+        if !hold_enabled {
+            // Rendering cleared the axes and reset the color order; resume it after these series.
+            continue_line_color_cycle_after(axes_index, total);
+        }
         Ok(())
     });
     let Some((axes_index, plot_index)) = *plot_index_out.borrow() else {
@@ -340,7 +344,7 @@ fn parse_series_specs(
             (first_val, y_val, y_arg_index)
         };
 
-        let series_input = PlotSeriesInput::new(x_val, y_val)?;
+        let pairs = split_matrix_series(x_val, y_val, shorthand_plot_y)?;
 
         let mut style_tokens = Vec::new();
         loop {
@@ -369,15 +373,18 @@ fn parse_series_specs(
         if let Some(order) = parsed_style.line_style_order.clone() {
             line_style_order = Some(order);
         }
-        plans.push(SeriesRenderPlan {
-            data: series_input,
-            appearance: parsed_style.appearance,
-            requires_cpu: parsed_style.requires_cpu_fallback,
-            line_style_explicit: parsed_style.line_style_explicit,
-            color_explicit: parsed_style.color_explicit,
-            label: parsed_style.label.clone(),
-            source_y_arg_index: Some(y_arg_index),
-        });
+        // A matrix argument is one line per column (or per row), each with the same style.
+        for (x_part, y_part) in pairs {
+            plans.push(SeriesRenderPlan {
+                data: PlotSeriesInput::new(x_part, y_part)?,
+                appearance: parsed_style.appearance.clone(),
+                requires_cpu: parsed_style.requires_cpu_fallback,
+                line_style_explicit: parsed_style.line_style_explicit,
+                color_explicit: parsed_style.color_explicit,
+                label: parsed_style.label.clone(),
+                source_y_arg_index: Some(y_arg_index),
+            });
+        }
     }
 
     if plans.is_empty() {
@@ -385,6 +392,95 @@ fn parse_series_specs(
     }
 
     Ok((plans, line_style_order))
+}
+
+/// Splits matrix data into the series MATLAB draws: `plot(Y)` and `plot(x, Y)` give one line per
+/// column of Y, or per row when it is the rows whose length matches x; `plot(X, Y)` with two
+/// matrices of one size pairs their columns. Vectors, and gpuArray data, pass through as one series.
+fn split_matrix_series(x: Value, y: Value, implicit_x: bool) -> BuiltinResult<Vec<(Value, Value)>> {
+    let host = |v: &Value| match v {
+        Value::Tensor(t) => Some(t.clone()),
+        _ => None,
+    };
+    let (Some(xt), Some(yt)) = (host(&x), host(&y)) else {
+        return Ok(vec![(x, y)]);
+    };
+    let dims = |t: &Tensor| {
+        (
+            t.shape().first().copied().unwrap_or(1),
+            t.shape().get(1).copied().unwrap_or(1),
+        )
+    };
+    let is_matrix = |t: &Tensor| {
+        let (r, c) = dims(t);
+        r > 1 && c > 1 && t.shape().len() <= 2
+    };
+    if !is_matrix(&yt) && !is_matrix(&xt) {
+        return Ok(vec![(x, y)]);
+    }
+    let values = |t: &Tensor| tensor_utils::tensor_values_f64(t);
+    let column = |t: &Tensor, j: usize| -> Vec<f64> {
+        let (r, _) = dims(t);
+        values(t)[j * r..(j + 1) * r].to_vec()
+    };
+    let row = |t: &Tensor, i: usize| -> Vec<f64> {
+        let (r, c) = dims(t);
+        let data = values(t);
+        (0..c).map(|j| data[j * r + i]).collect()
+    };
+    let vector = |data: Vec<f64>| -> BuiltinResult<Value> {
+        let n = data.len();
+        Tensor::new(data, vec![n, 1])
+            .map(Value::Tensor)
+            .map_err(|e| plot_err(format!("{e}")))
+    };
+    let mismatch = || plot_err("X and Y inputs must have the same number of elements");
+    let mut pairs = Vec::new();
+    if is_matrix(&yt) {
+        let (r, c) = dims(&yt);
+        if implicit_x {
+            let xs: Vec<f64> = (1..=r).map(|i| i as f64).collect();
+            for j in 0..c {
+                pairs.push((vector(xs.clone())?, vector(column(&yt, j))?));
+            }
+        } else if is_matrix(&xt) {
+            if dims(&xt) != (r, c) {
+                return Err(mismatch());
+            }
+            for j in 0..c {
+                pairs.push((vector(column(&xt, j))?, vector(column(&yt, j))?));
+            }
+        } else {
+            let xs = values(&xt);
+            if xs.len() == r {
+                for j in 0..c {
+                    pairs.push((vector(xs.clone())?, vector(column(&yt, j))?));
+                }
+            } else if xs.len() == c {
+                for i in 0..r {
+                    pairs.push((vector(xs.clone())?, vector(row(&yt, i))?));
+                }
+            } else {
+                return Err(mismatch());
+            }
+        }
+    } else {
+        // X a matrix, Y a vector: one line per column (or row) of X against Y.
+        let (r, c) = dims(&xt);
+        let ys = values(&yt);
+        if ys.len() == r {
+            for j in 0..c {
+                pairs.push((vector(column(&xt, j))?, vector(ys.clone())?));
+            }
+        } else if ys.len() == c {
+            for i in 0..r {
+                pairs.push((vector(row(&xt, i))?, vector(ys.clone())?));
+            }
+        } else {
+            return Err(mismatch());
+        }
+    }
+    Ok(pairs)
 }
 
 fn is_numeric_value(value: &Value) -> bool {
@@ -907,6 +1003,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn parse_series_specs_splits_matrix_y_into_one_series_per_column_or_row() {
+        let x = Value::Tensor(tensor_with_shape(&[1.0, 2.0, 3.0], vec![1, 3]));
+        // 3x2: columns match x
+        let cols = Value::Tensor(tensor_with_shape(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]));
+        let (plans, _) = parse_series_specs(vec![x.clone(), cols.clone()]).expect("columns");
+        assert_eq!(plans.len(), 2);
+        // 2x3: rows match x
+        let rows = Value::Tensor(tensor_with_shape(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]));
+        let (plans, _) = parse_series_specs(vec![x.clone(), rows]).expect("rows");
+        assert_eq!(plans.len(), 2);
+        // plot(Y): one line per column, not one flattened line
+        let (plans, _) = parse_series_specs(vec![cols]).expect("implicit x");
+        assert_eq!(plans.len(), 2);
+        // a length that matches neither side is an error
+        let bad = Value::Tensor(tensor_with_shape(&[0.0; 8], vec![2, 4]));
+        assert!(parse_series_specs(vec![x, bad]).is_err());
+    }
+
+    #[test]
     fn parse_series_specs_supports_plot_y_shorthand() {
         let _guard = setup_plot_tests();
         let args = vec![Value::Tensor(tensor_from(&[10.0, 20.0, 30.0]))];
@@ -1022,6 +1137,37 @@ pub(crate) mod tests {
         assert_eq!(second.color, line_color_for_series_index(1));
         assert_eq!(first.line_style, LineStyle::Solid);
         assert_eq!(second.line_style, LineStyle::Solid);
+    }
+
+    #[test]
+    fn plot_builtin_hold_on_after_plain_plot_takes_next_color() {
+        let _guard = setup_plot_tests();
+        set_hold(HoldMode::Off);
+        let _ = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+        ]));
+        set_hold(HoldMode::On);
+        let _ = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+        ]));
+
+        let fig = clone_figure(current_figure_handle()).expect("figure exists");
+        let colors = fig
+            .plots()
+            .map(|plot| match plot {
+                PlotElement::Line(line) => line.color,
+                _ => panic!("expected line plots"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            colors,
+            vec![
+                line_color_for_series_index(0),
+                line_color_for_series_index(1)
+            ]
+        );
     }
 
     #[test]

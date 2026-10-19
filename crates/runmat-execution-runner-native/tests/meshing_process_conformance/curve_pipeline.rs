@@ -1,9 +1,9 @@
 use super::*;
 
 use runmat_execution_runner_native::supervisor::{
-    complete_batch_driver_with_response, execute_program_batch, prepare_batch_driver,
-    BatchDriverInvocation, LocalJobState, LocalSupervisor, LocalSupervisorConfig,
-    ProgramBatchSubmission, SupervisorPaths, MIN_RETENTION_MILLIS,
+    execute_and_complete_program_batch, prepare_batch_driver, BatchDriverInvocation, LocalJobState,
+    LocalSupervisor, LocalSupervisorConfig, ProgramBatchSubmission, SupervisorPaths,
+    MIN_RETENTION_MILLIS,
 };
 pub(super) use runmat_meshing_execution::MeshingKernelDispatcher as CurvePipelineKernel;
 use runmat_meshing_execution::{ExactCurveJoinKernel, ExactCurveStageKernel};
@@ -24,6 +24,12 @@ pub(super) async fn native_conformance() {
     let session = NativeProgramSession::new(config(directory.path(), "--curve-child")).unwrap();
     let mut store = session.object_store();
     seed_exact_input(&mut store, &fixture.input);
+    seed_host_invocation(
+        &mut store,
+        &fixture.partition_host,
+        &fixture.partition_request,
+    );
+    seed_host_invocation(&mut store, &fixture.join_host, &fixture.join_request);
 
     let partition = session
         .submit(
@@ -67,27 +73,45 @@ pub(super) async fn native_conformance() {
 
 pub(super) async fn durable_conformance() {
     let directory = tempfile::tempdir().unwrap();
-    let configuration = LocalSupervisorConfig {
-        executable: std::env::current_exe().unwrap(),
-        paths: SupervisorPaths::new(directory.path().join("durable-state")).unwrap(),
-        max_stderr_bytes: 1024 * 1024,
-        max_object_bytes: limits().inventory.max_object_bytes,
-    };
+    let mut execution = config(directory.path(), "--curve-child");
+    execution.max_object_bytes = limits().inventory.max_object_bytes;
+    let configuration = LocalSupervisorConfig::new(
+        execution,
+        SupervisorPaths::new(directory.path().join("durable-state")).unwrap(),
+    )
+    .unwrap();
     let fixture = fixture(revision(), "durable-curve-meshing-run");
     let supervisor = LocalSupervisor::open(configuration.clone()).unwrap();
     let mut store = supervisor.object_store().unwrap();
     seed_exact_input(&mut store, &fixture.input);
+    seed_host_invocation(
+        &mut store,
+        &fixture.partition_host,
+        &fixture.partition_request,
+    );
+    seed_host_invocation(&mut store, &fixture.join_host, &fixture.join_request);
 
+    let context = supervisor
+        .execution_context(Some("curve-partition"))
+        .await
+        .unwrap();
+    let partition_task = submission_for(
+        context.scope_id,
+        context.pool_id,
+        &fixture.partition_host,
+        &fixture.partition_request,
+    );
     let partition = supervisor
         .submit_program(ProgramBatchSubmission::from_request(
             fixture.partition_request.clone(),
+            partition_task.clone(),
             Some("curve-partition".into()),
             MIN_RETENTION_MILLIS,
         ))
         .await
         .unwrap()
         .0;
-    let partition = wait_for_durable(&supervisor, partition.handle.id).await;
+    let partition = wait_for_durable(&supervisor, partition.handle.id, &partition_task).await;
     let ProgramExecutionResponse::ExternalizedSuccess {
         outputs,
         result_objects,
@@ -113,16 +137,27 @@ pub(super) async fn durable_conformance() {
         Some(ProgramExecutionResponse::ExternalizedSuccess { .. })
     ));
 
+    let context = supervisor
+        .execution_context(Some("curve-join"))
+        .await
+        .unwrap();
+    let join_task = submission_for(
+        context.scope_id,
+        context.pool_id,
+        &fixture.join_host,
+        &fixture.join_request,
+    );
     let join = supervisor
         .submit_program(ProgramBatchSubmission::from_request(
             fixture.join_request.clone(),
+            join_task.clone(),
             Some("curve-join".into()),
             MIN_RETENTION_MILLIS,
         ))
         .await
         .unwrap()
         .0;
-    let join = wait_for_durable(&supervisor, join.handle.id).await;
+    let join = wait_for_durable(&supervisor, join.handle.id, &join_task).await;
     let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = join.response.unwrap()
     else {
         panic!("durable curve join did not externalize its result")
@@ -147,26 +182,44 @@ pub(super) async fn durable_conformance() {
 pub(super) async fn run_durable_driver() {
     let invocation = prepare_batch_driver().unwrap();
     let BatchDriverInvocation::Program {
-        job_directory,
-        job_id,
+        attempt,
         submission,
+        lease,
+        ..
     } = invocation
     else {
         panic!("meshing conformance durable driver received a script")
     };
-    let response = execute_program_batch(*submission, job_id).await;
-    complete_batch_driver_with_response(&job_directory, response).unwrap();
+    execute_and_complete_program_batch(*attempt, *submission, *lease)
+        .await
+        .unwrap();
 }
 
 async fn wait_for_durable(
     supervisor: &std::sync::Arc<LocalSupervisor>,
     job_id: runmat_execution::JobId,
+    original_task: &runmat_execution_runner::TaskSubmission,
 ) -> runmat_execution_runner_native::supervisor::JobAttachment {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let attachment = supervisor.attach(job_id, 0, 0).await.unwrap();
             if attachment.record.state.is_terminal() {
                 assert_eq!(attachment.record.state, LocalJobState::Succeeded);
+                let resources = attachment
+                    .resources
+                    .as_ref()
+                    .expect("durable meshing must retain generic resource accounting");
+                resources.validate().unwrap();
+                assert_eq!(
+                    resources.resources.allocation,
+                    original_task.request.resources
+                );
+                let history = attachment
+                    .execution
+                    .as_ref()
+                    .expect("durable meshing must retain original admitted history");
+                history.validate().unwrap();
+                assert_eq!(&history.task.submission, original_task);
                 break attachment;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -192,6 +245,8 @@ pub(super) async fn remote_conformance(
         pool.register_execution_object(reference.clone(), object.bytes.clone())
             .unwrap();
     }
+    register_host_invocation(pool, &fixture.partition_host, &fixture.partition_request);
+    register_host_invocation(pool, &fixture.join_host, &fixture.join_request);
     let partition = pool
         .submit(
             submission_for(
@@ -251,7 +306,7 @@ pub(super) async fn remote_conformance(
 }
 
 pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> CurveFixture {
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: authorization_scope.into(),
         encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
     };
@@ -291,11 +346,13 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> C
         partition,
     );
     let partition_request = partition_host
-        .program_request(revision.clone(), std::slice::from_ref(input.root_input()))
-        .unwrap();
+        .prepare_program_request(revision.clone(), std::slice::from_ref(input.root_input()))
+        .unwrap()
+        .into_request();
 
     let mut serial_store = TestStore::default();
     seed_exact_input(&mut serial_store, &input);
+    seed_host_invocation(&mut serial_store, &partition_host, &partition_request);
     let partition_response = execute_meshing_program_request(
         &partition_request,
         &mut serial_store,
@@ -331,11 +388,13 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> C
         },
     );
     let join_request = join_host
-        .program_request(
+        .prepare_program_request(
             revision,
             &[input.root_input().clone(), partition_root.as_ref().clone()],
         )
-        .unwrap();
+        .unwrap()
+        .into_request();
+    seed_host_invocation(&mut serial_store, &join_host, &join_request);
     let join_response = execute_meshing_program_request(
         &join_request,
         &mut serial_store,
@@ -365,7 +424,7 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> C
 fn host(
     resolved_request: MeshingRequest,
     document: runmat_geometry_core::GeometryDocument,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     inputs: Vec<MeshingInputRef>,
     partition: MeshingPartitionDescriptor,
 ) -> MeshingHostWorkload {

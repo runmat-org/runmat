@@ -2,17 +2,19 @@ use std::num::NonZeroU64;
 
 use anyhow::{Context, Result};
 use runmat_server_client::auth::{
-    build_public_client, map_public_error, resolve_auth_token, resolve_org_id, resolve_server_url,
-    RemoteConfig,
+    build_public_client, map_public_error, resolve_auth_token, resolve_public_org_id,
+    resolve_server_url, RemoteConfig,
 };
 use runmat_server_client::public_api;
 use uuid::Uuid;
 
 use crate::cli::{ClusterStateArg, NodeStateArg};
 
-async fn client(org: Option<Uuid>) -> Result<(public_api::Client, String)> {
+async fn client(
+    org: Option<Uuid>,
+) -> Result<(public_api::Client, runmat_server_client::ids::OrgId)> {
     let mut config = RemoteConfig::load()?;
-    let org_id = resolve_org_id(&config, org)?.to_string();
+    let org_id = resolve_public_org_id(&config, org)?;
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     Ok((build_public_client(&server_url, &token)?, org_id))
@@ -26,7 +28,7 @@ pub async fn list(
 ) -> Result<()> {
     let (client, org_id) = client(org).await?;
     let response = client
-        .list_clusters(&org_id, cursor.as_deref(), nonzero_limit(limit)?)
+        .list_clusters(org_id.as_str(), cursor.as_deref(), nonzero_limit(limit)?)
         .await
         .map_err(map_public_error)?
         .into_inner();
@@ -50,17 +52,18 @@ pub async fn list(
 pub async fn create(
     org: Option<Uuid>,
     name: String,
-    project_id: Option<String>,
+    project_id: Option<Uuid>,
     queues: Vec<String>,
     json: bool,
 ) -> Result<()> {
     let (client, org_id) = client(org).await?;
     let cluster = client
         .create_cluster(
-            &org_id,
+            org_id.as_str(),
             &public_api::types::CreateClusterRequest {
                 name,
-                project_id,
+                project_id: project_id
+                    .map(|id| runmat_server_client::ids::ProjectId::from_uuid(id).to_string()),
                 queues,
             },
         )
@@ -89,7 +92,7 @@ pub async fn set_state(
     };
     let cluster = client
         .set_cluster_state(
-            &org_id,
+            org_id.as_str(),
             &cluster_id,
             &public_api::types::SetClusterStateRequest { state },
         )
@@ -114,7 +117,7 @@ pub async fn enroll(
     let (client, org_id) = client(org).await?;
     let enrollment = client
         .create_node_enrollment(
-            &org_id,
+            org_id.as_str(),
             &cluster_id,
             &public_api::types::CreateEnrollmentRequest {
                 requested_identity_fingerprint,
@@ -145,7 +148,7 @@ pub async fn list_nodes(
     let (client, org_id) = client(org).await?;
     let response = client
         .list_nodes(
-            &org_id,
+            org_id.as_str(),
             &cluster_id,
             cursor.as_deref(),
             nonzero_limit(limit)?,
@@ -183,7 +186,7 @@ pub async fn set_node_state(
     };
     let node = client
         .set_node_state(
-            &org_id,
+            org_id.as_str(),
             &cluster_id,
             &node_id,
             &public_api::types::SetNodeStateRequest { state },

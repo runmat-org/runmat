@@ -17,6 +17,32 @@ impl RunMatSession {
             .set_dynamic_eval_enabled(self.dynamic_eval_enabled);
     }
 
+    /// Install an exact environment owned by this session and its nested invocations.
+    /// Missing names remain absent; this never changes the worker process environment.
+    pub fn install_environment_snapshot(
+        &mut self,
+        entries: Vec<(String, String)>,
+    ) -> std::io::Result<()> {
+        self.runtime_context.install_environment_snapshot(entries)?;
+        let path = self
+            .environment_snapshot()
+            .into_iter()
+            .find_map(|(name, value)| (name == "RUNMAT_PATH").then_some(value))
+            .unwrap_or_default();
+        self.runtime_context = self
+            .runtime_context
+            .clone()
+            .with_search_path(std::sync::Arc::new(
+                runmat_runtime::builtins::common::path_state::SearchPath::new(path),
+            ));
+        self.dynamic_function_cache.clear();
+        Ok(())
+    }
+
+    pub fn environment_snapshot(&self) -> Vec<(String, String)> {
+        self.runtime_context.environment_snapshot()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn install_native_interface_artifact(
         &self,
@@ -131,6 +157,19 @@ impl RunMatSession {
             .service_ports()
             .clone()
             .with_parallel(service);
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+    }
+
+    /// Install the host that executes admitted generated analysis inputs.
+    pub fn install_analysis_service(
+        &mut self,
+        service: std::rc::Rc<dyn runmat_runtime::context::RuntimeAnalysisService>,
+    ) {
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_analysis(service);
         self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
     }
 

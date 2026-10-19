@@ -910,11 +910,9 @@ fn render_wordcloud(data: WordCloudData, options: WordCloudOptions) -> BuiltinRe
     let render_result = crate::builtins::plotting::state::render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "",
-            x_label: "",
-            y_label: "",
             grid: false,
             axis_equal: true,
+            ..Default::default()
         },
         move |figure, axes| {
             *axes_out.borrow_mut() = Some(axes);

@@ -128,7 +128,7 @@ pub fn materialize_deferred_graph_call(
     };
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::ExecutableUnitV3,
+        ExecutableForm::ExecutableUnitV4,
         captured.primary_unit.to_vec(),
     )
     .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;

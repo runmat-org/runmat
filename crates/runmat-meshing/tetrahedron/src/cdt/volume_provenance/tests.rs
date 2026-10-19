@@ -29,9 +29,11 @@ fn topology() -> DelaunayVolumeTopology {
     ]
     .into_iter()
     .enumerate()
-    .map(|(index, coordinates_m)| DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-        coordinates_m,
+    .map(|(index, coordinates_m)| {
+        DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes([(index + 1) as u8; 32]),
+            coordinates_m,
+        )
     })
     .collect();
     let topology = build_delaunay_volume_topology(

@@ -73,6 +73,27 @@ pub(super) fn face_uses_for_parameters(
             }
             *node_uv.last_mut().expect("node UV inventory is non-empty") = first;
         }
+        if !face.periodic_u && !face.periodic_v && node_uv.len() > 1 {
+            for (index, vertex) in [
+                (0, edge.start_vertex_id.as_ref()),
+                (node_uv.len() - 1, edge.end_vertex_id.as_ref()),
+            ] {
+                if let Some(vertex) = vertex {
+                    node_uv[index] = super::vertex_uv::VertexUvContext {
+                        topology,
+                        pcurves,
+                        control,
+                        maximum_error: pcurve_absolute_error,
+                    }
+                    .canonical_coordinate(
+                        edge,
+                        coedge,
+                        vertex,
+                        node_uv[index],
+                    )?;
+                }
+            }
+        }
         face_uses.push(SharedCurveFaceUse {
             coedge_id: coedge.id.clone(),
             face_id: coedge.face_id.clone(),

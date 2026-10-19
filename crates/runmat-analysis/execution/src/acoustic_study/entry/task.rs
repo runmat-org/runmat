@@ -1,0 +1,74 @@
+//! Dispatch prepared entry phases without choosing placement or executing numerical work.
+use super::*;
+
+impl AcousticStudyEntryCoordinator {
+    pub fn prepare_next(&mut self) -> AnalysisBridgeResult<()> {
+        match self.phase {
+            AcousticStudyPhase::ReadyForSolve => {
+                self.prepare_solve()?;
+            }
+            AcousticStudyPhase::ReadyForAccuracy => {
+                self.prepare_accuracy()?;
+            }
+            AcousticStudyPhase::ReadyForState { .. } => {
+                self.prepare_next_state()?;
+            }
+            AcousticStudyPhase::ReadyForBaseline => {
+                self.freeze_baseline()?;
+                self.prepare_publication()?;
+            }
+            AcousticStudyPhase::ReadyForPublication => {
+                self.prepare_publication()?;
+            }
+            _ => return Err(invalid("entry has no ready task phase")),
+        }
+        Ok(())
+    }
+    pub fn pending_task(
+        &self,
+    ) -> AnalysisBridgeResult<(
+        &AnalysisHostWorkload,
+        &crate::PreparedAnalysisProgram,
+        &FeaResourcePlan,
+    )> {
+        match self.phase {
+            AcousticStudyPhase::AwaitingSolve => {
+                let task = self.solve_task.as_ref().expect("awaited solve");
+                Ok((&task.host, &task.program, &task.resource_plan))
+            }
+            AcousticStudyPhase::AwaitingAccuracy => {
+                let task = self.accuracy_task.as_ref().expect("awaited accuracy");
+                Ok((&task.host, &task.program, &task.resource_plan))
+            }
+            AcousticStudyPhase::AwaitingState { .. } => {
+                let task = self.state_task.as_ref().expect("awaited state");
+                Ok((&task.host, &task.program, &task.resource_plan))
+            }
+            AcousticStudyPhase::AwaitingPublication => {
+                let task = self.publication_task.as_ref().expect("awaited publication");
+                Ok((&task.host, &task.program, &task.resource_plan))
+            }
+            _ => Err(invalid("entry has no pending task phase")),
+        }
+    }
+    pub fn complete_next(
+        &mut self,
+        source: &impl CacheImport,
+        response: ProgramExecutionResponse,
+        accounting: AnalysisPhaseExecutionEvidence,
+    ) -> AnalysisBridgeResult<()> {
+        match self.phase {
+            AcousticStudyPhase::AwaitingSolve => self.complete_solve(source, response, accounting),
+            AcousticStudyPhase::AwaitingAccuracy => {
+                self.complete_accuracy(source, response, accounting)
+            }
+            AcousticStudyPhase::AwaitingState { .. } => {
+                self.complete_next_state(source, response, accounting)
+            }
+            AcousticStudyPhase::AwaitingPublication => {
+                self.complete_publication(source, response, accounting)
+            }
+            _ => Err(invalid("entry has no pending completion phase")),
+        }
+    }
+}

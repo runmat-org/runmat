@@ -483,6 +483,7 @@ impl AccelProvider for TestProvider {
             ],
             max_rank: None,
             max_allocation_bytes: None,
+            sparse: None,
             concurrency: ProviderConcurrencyCapabilities {
                 spawn_handles: self.spawn_handle_concurrency(),
                 concurrent_dispatch: false,

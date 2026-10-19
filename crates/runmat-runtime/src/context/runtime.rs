@@ -138,6 +138,7 @@ pub struct RuntimeContext {
     selected_static_site_resolver: Option<Rc<SelectedStaticSiteResolver>>,
     selected_static_caller: Option<FunctionBindingOrigin>,
     native_resolution_scope: crate::user_functions::NativeResolutionScope,
+    pub(super) environment: Rc<std::cell::RefCell<super::environment::EnvironmentState>>,
     program_revision: Option<runmat_execution::ProgramRevision>,
     program_sources: Option<Rc<crate::source_context::ProgramSourceBinding>>,
     source_current: Option<
@@ -253,6 +254,18 @@ impl RuntimeContext {
         execution: Rc<dyn RuntimeExecutionServices>,
         cancellation: CancellationToken,
     ) -> Self {
+        Self::with_environment_state(
+            execution,
+            cancellation,
+            super::environment::EnvironmentState::from_host(),
+        )
+    }
+
+    pub(super) fn with_environment_state(
+        execution: Rc<dyn RuntimeExecutionServices>,
+        cancellation: CancellationToken,
+        environment: super::environment::EnvironmentState,
+    ) -> Self {
         runmat_accelerate_api::register_execution_provider_authorizer(
             super::scope::execution_provider_authorization,
         );
@@ -261,6 +274,7 @@ impl RuntimeContext {
         let context = Self {
             graphics_callback_mutation: None,
             execution,
+            environment: Rc::new(std::cell::RefCell::new(environment)),
             selected_graph_program: None,
             selected_graph_function_resolver: None,
             selected_static_site_resolver: None,

@@ -38,3 +38,36 @@ fn recovery_requeues_only_explicitly_replayable_work() {
     let recovered = reconcile_snapshot(fixture.driver.snapshot()).unwrap();
     assert_eq!(recovered.snapshot().tasks[&task_id].state, TaskState::Ready);
 }
+
+#[test]
+fn exclusive_continuation_preserves_original_assignment_while_replacement_closes_it() {
+    use runmat_execution_runner::port::BackendReport;
+    use runmat_execution_runner::recovery::DriverCheckpoint;
+    use runmat_execution_runner::{AttemptReport, DriverCommand};
+    let mut fixture = common::fixture(1, 1);
+    let submission = common::task(
+        "exclusive-continuation",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let request = common::submit(&mut fixture.driver, submission);
+    let original = fixture.driver.snapshot();
+    let checkpoint = DriverCheckpoint::new(1, original.clone());
+    let wire = serde_json::to_vec(&checkpoint).unwrap();
+    let cold: DriverCheckpoint = serde_json::from_slice(&wire).unwrap();
+    let mut continued = cold.continue_under_exclusive_ownership().unwrap();
+    assert_eq!(continued.snapshot(), original);
+    let report = BackendReport::for_request(&request, AttemptReport::Started);
+    assert!(continued.accepts_backend_report(&report));
+    continued
+        .handle(DriverCommand::BackendReport(report))
+        .unwrap();
+    assert_eq!(continued.snapshot().attempts[&request.id].request, request);
+    let replaced = checkpoint.restore().unwrap();
+    assert_eq!(replaced.snapshot().driver_fence, original.driver_fence + 1);
+    assert_eq!(
+        replaced.snapshot().attempts[&request.id].state,
+        AttemptState::Lost
+    );
+}

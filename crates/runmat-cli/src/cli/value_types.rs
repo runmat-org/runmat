@@ -66,6 +66,20 @@ pub enum CaptureFiguresMode {
     On,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum MeshElementOrderArg {
+    Tet4,
+    Tet10,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum MeshSourceUnitsArg {
+    #[default]
+    Meter,
+    Millimeter,
+    Inch,
+}
+
 #[derive(Clone, Debug)]
 pub struct FigureSize {
     pub width: u32,

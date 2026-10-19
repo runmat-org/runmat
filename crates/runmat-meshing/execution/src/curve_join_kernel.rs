@@ -1,30 +1,29 @@
-use runmat_execution::Digest;
 use runmat_meshing_core::{
     MeshingChunkMediaType, MeshingChunkStream, MeshingFailure, MeshingFailureCategory,
     MeshingStageKind, MeshingStageResultKind, StableDigest,
 };
 use runmat_meshing_curve::{
-    decode_shared_curve_batch, encode_shared_curve_mesh, join_shared_curve_batches,
+    decode_shared_curve_batch, encode_shared_curve_mesh_admitted, join_shared_curve_batches,
     validate_shared_curve_geometry, SharedCurveBatch, SHARED_CURVE_BATCH_SCHEMA_VERSION,
     SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
 
 use crate::curve_kernel::{curve_failure, curve_options, map_curve_error, resolved_curve_metric};
 use crate::{
-    ExactCurveEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, PortableCurveEvaluatorProvider, PreparedExactGeometryObjects,
+    ExactMeshingEvaluatorProvider, MeshingStageCheckpoint, MeshingStageInvocation,
+    MeshingStageKernel, PortableMeshingEvaluatorProvider, PreparedExactGeometryObjects,
     PreparedMeshingInput, PreparedMeshingResultPublication, ValidatedMeshingStageOutput,
 };
 
 #[derive(Clone, Debug)]
-pub struct ExactCurveJoinKernel<P = PortableCurveEvaluatorProvider> {
+pub struct ExactCurveJoinKernel<P = PortableMeshingEvaluatorProvider> {
     evaluator_provider: P,
 }
 
-impl Default for ExactCurveJoinKernel<PortableCurveEvaluatorProvider> {
+impl Default for ExactCurveJoinKernel<PortableMeshingEvaluatorProvider> {
     fn default() -> Self {
         Self {
-            evaluator_provider: PortableCurveEvaluatorProvider,
+            evaluator_provider: PortableMeshingEvaluatorProvider,
         }
     }
 }
@@ -35,7 +34,7 @@ impl<P> ExactCurveJoinKernel<P> {
     }
 }
 
-impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel<P> {
+impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel<P> {
     fn execute(
         &self,
         invocation: MeshingStageInvocation<'_, '_>,
@@ -88,16 +87,22 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel
                 decode_shared_curve_batch(&stream.records[0], &geometry.topology)
                     .map_err(map_curve_error)?,
             );
+            // Cold admission is part of execution work: check cancellation after
+            // each bounded partition rather than after the entire fan-in.
+            invocation
+                .control
+                .checkpoint(MeshingStageCheckpoint::default())?;
         }
 
         let mesh =
             join_shared_curve_batches(&geometry.topology, batches).map_err(map_curve_error)?;
+        let control = invocation.control.geometry_evaluation_control();
         let evaluator = self
             .evaluator_provider
-            .evaluator(geometry)
+            .evaluator(geometry, &control)
             .map_err(|error| invalid_partition(&error.to_string()))?;
-        let control = invocation.control.geometry_evaluation_control();
         let metric = resolved_curve_metric(
+            &self.evaluator_provider,
             geometry,
             evaluator.as_ref(),
             &control,
@@ -115,7 +120,8 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel
         )
         .map_err(map_curve_error)?;
         let encoded =
-            encode_shared_curve_mesh(&mesh, &geometry.topology).map_err(map_curve_error)?;
+            encode_shared_curve_mesh_admitted(&mesh, &geometry.topology, &control, &control)
+                .map_err(map_curve_error)?;
         let usage = control.usage();
 
         let mut entity_counts = std::collections::BTreeMap::new();
@@ -141,7 +147,12 @@ impl<P: ExactCurveEvaluatorProvider> MeshingStageKernel for ExactCurveJoinKernel
         invocation.control.checkpoint(checkpoint.clone())?;
 
         Ok(ValidatedMeshingStageOutput {
-            invariant_summary_digest: validation_digest(&encoded),
+            invariant_summary_digest: crate::publication_digest::record(
+                b"runmat-exact-global-curve-validation/v1\0",
+                &encoded,
+                invocation.control,
+                &checkpoint,
+            )?,
             streams: vec![MeshingChunkStream {
                 media_type: MeshingChunkMediaType::CurveMesh,
                 schema_version: SHARED_CURVE_MESH_SCHEMA_VERSION,
@@ -169,7 +180,9 @@ fn inputs(
                 geometry = Some(input.geometry_objects());
             }
             PreparedMeshingInput::StageArtifact(input) => partitions.push(input.as_ref()),
-            PreparedMeshingInput::ExactGeometry(_) | PreparedMeshingInput::FacetedGeometry(_) => {
+            PreparedMeshingInput::ExactGeometry(_)
+            | PreparedMeshingInput::FacetedGeometry(_)
+            | PreparedMeshingInput::Evidence(_) => {
                 return Err(invalid_partition("curve join input kinds are invalid"));
             }
         }
@@ -190,10 +203,4 @@ fn invalid_partition(detail: &str) -> Box<MeshingFailure> {
         "regenerate every curve partition from the same admitted exact revision",
         detail,
     )
-}
-
-fn validation_digest(encoded: &[u8]) -> StableDigest {
-    let mut bytes = b"runmat-exact-global-curve-validation/v1\0".to_vec();
-    bytes.extend_from_slice(encoded);
-    StableDigest::from_bytes(*Digest::sha256(&bytes).bytes())
 }

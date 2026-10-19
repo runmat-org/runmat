@@ -1,3 +1,5 @@
+mod quadratic;
+
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{
     solver_volume_element_identity, AlgorithmVersionSet, CancellationPolicy,
@@ -6,8 +8,8 @@ use runmat_meshing_core::{
     MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
     NeverCancelled, SolverMeshAdaptationKind, SolverMeshAdaptationLineage, SolverMeshArtifact,
     SolverMeshNode, SolverMeshTopology, SolverTransferMethod, SolverVolumeElement, StableDigest,
-    SurfaceQualityTargets, VolumeQualityTargets, ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
-    MESHING_REQUEST_SCHEMA_VERSION,
+    SurfaceQualityTargets, VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
+    SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
 
@@ -36,9 +38,11 @@ fn topology() -> DelaunayVolumeTopology {
     ]
     .into_iter()
     .enumerate()
-    .map(|(index, coordinates_m)| DelaunayVolumeNode {
-        identity: StableDigest::from_bytes([(index + 1) as u8; 32]),
-        coordinates_m,
+    .map(|(index, coordinates_m)| {
+        DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes([(index + 1) as u8; 32]),
+            coordinates_m,
+        )
     })
     .collect();
     let topology = build_delaunay_volume_topology(
@@ -87,6 +91,7 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 10.0,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
@@ -156,7 +161,6 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
                 .map(|vertex| vertex as u64 + 1)
                 .into(),
             region_id: region.clone(),
-            material_id: "steel".into(),
             provenance: vec![region.clone()],
         })
         .collect::<Vec<_>>();
@@ -179,7 +183,7 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
     let node_ids = (1..=nodes.len() as u64).collect::<Vec<_>>();
     let element_ids = (1..=volume_elements.len() as u64).collect::<Vec<_>>();
     let mut artifact = SolverMeshArtifact {
-        schema_version: ANALYSIS_MESH_ARTIFACT_SCHEMA_VERSION,
+        schema_version: SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
         canonical_digest: StableDigest::ZERO,
         root_stage_manifest_digest: StableDigest::from_bytes([90; 32]),
         geometry: GeometryRevisionRef {
@@ -196,10 +200,9 @@ fn artifact(topology: &DelaunayVolumeTopology) -> SolverMeshArtifact {
             boundary_edges: Vec::new(),
             regions: vec![MeshRegion {
                 region_id: region,
-                material_id: "steel".into(),
                 element_ids: element_ids.clone(),
             }],
-            material_interfaces: Vec::new(),
+            conformal_interfaces: Vec::new(),
             contacts: Vec::new(),
             field_topologies: vec![
                 FieldTopologyMap {
@@ -267,6 +270,7 @@ fn adaptation() -> (
             provenance: &provenance,
             quality: &quality,
             quality_options,
+            fixed_node_identities: &[],
         },
         &[mark],
         DelaunayAdaptiveRefinementOptions::default(),
@@ -293,6 +297,7 @@ fn adaptive_lineage_builds_canonical_refinement_and_coarsening_records() {
         provenance: &provenance,
         quality: &quality,
         quality_options,
+        fixed_node_identities: &[],
     };
     let source = artifact(&topology);
     let refined = artifact(&refinement.topology);
@@ -405,6 +410,7 @@ fn adaptive_transfer_rejects_mismatches_limits_cancellation_and_invalid_options(
         provenance: &provenance,
         quality: &quality,
         quality_options,
+        fixed_node_identities: &[],
     };
     let source = artifact(&topology);
     let refined = artifact(&refinement.topology);

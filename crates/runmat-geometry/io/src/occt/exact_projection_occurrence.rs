@@ -124,6 +124,7 @@ impl<'a> OccurrenceIndex<'a> {
     pub fn project_assemblies(
         &self,
         body_partitions: &BodyPartitions,
+        meters_per_source_unit: f64,
     ) -> Result<AssemblyProjection, GeometryImportError> {
         let mut child_instances = BTreeMap::<u64, Vec<PersistentEntityId>>::new();
         let mut instances = Vec::new();
@@ -134,11 +135,16 @@ impl<'a> OccurrenceIndex<'a> {
                 .entry(occurrence.parent_occurrence_index)
                 .or_default()
                 .push(id.clone());
-            let transform: [f64; 16] = occurrence
+            let mut transform: [f64; 16] = occurrence
                 .transform
                 .as_slice()
                 .try_into()
                 .map_err(|_| invalid("OCCT exact occurrence transform is malformed"))?;
+            // Placement translation carries length; rotation and homogeneous
+            // coordinates are dimensionless. Exact contracts use SI throughout.
+            for index in [3, 7, 11] {
+                transform[index] *= meters_per_source_unit;
+            }
             instances.push(ExactInstance {
                 id,
                 parent_assembly_id: assembly_id(self.path(occurrence.parent_occurrence_index)?),

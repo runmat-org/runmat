@@ -417,7 +417,8 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         parse_plot3_series_specs(args).map_err(map_plot3_invalid_argument)?;
 
     let opts = PlotRenderOptions {
-        axis_equal: true,
+        // MATLAB leaves the data aspect free; `axis equal` sets it.
+        axis_equal: false,
         ..Default::default()
     };
 

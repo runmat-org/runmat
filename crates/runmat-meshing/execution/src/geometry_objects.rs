@@ -1,22 +1,21 @@
-use runmat_execution::value::ValueRef;
+use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::{validate_inventory, ObjectInventoryLimits};
 use runmat_execution_artifact::{ArtifactError, LogicalObject, ObjectDescriptor, ObjectNamespace};
 use runmat_geometry_core::{
-    build_exact_geometry_closure, decode_exact_evaluators, decode_exact_topology,
-    decode_geometry_healing_report, ExactBRepTopology, ExactEvaluatorRegistry,
-    ExactGeometryManifest, GeometryDigest, GeometryDocument, GeometryHealingReport, GeometryModel,
-    GeometryObjectRef, EXACT_BREP_MEDIA_TYPE, EXACT_EVALUATOR_MEDIA_TYPE,
-    EXACT_TOPOLOGY_MEDIA_TYPE, GEOMETRY_HEALING_MEDIA_TYPE,
-    GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION, KERNEL_REPRESENTATION_MEDIA_TYPE,
+    build_exact_geometry_closure, ExactBRepTopology, ExactEvaluatorRegistry, ExactGeometryManifest,
+    GeometryDocument, GeometryHealingReport, GeometryModel, GeometryObjectRef,
+    EXACT_BREP_MEDIA_TYPE, EXACT_EVALUATOR_MEDIA_TYPE, EXACT_TOPOLOGY_MEDIA_TYPE,
+    GEOMETRY_HEALING_MEDIA_TYPE, GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
+    KERNEL_REPRESENTATION_MEDIA_TYPE,
 };
 
 use crate::object_support::{
-    add_inventory_bytes, enforce_object_length, input_object_reference, logical_object, read_exact,
-    validate_input_root,
+    add_inventory_bytes, admit_import_storage, enforce_object_length, import_slots, logical_object,
+    read_exact,
 };
-use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
+use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 const EXACT_MANIFEST_SCHEMA: &str = "runmat.geometry.exact-manifest.v2";
 const EXACT_TOPOLOGY_SCHEMA: &str = "runmat.geometry.exact-topology.v2";
@@ -36,7 +35,6 @@ pub struct PreparedExactGeometryObjects {
     pub manifest: ExactGeometryManifest,
     pub topology: ExactBRepTopology,
     pub evaluators: ExactEvaluatorRegistry,
-    pub kernel_representation: Option<Vec<u8>>,
     pub healing_report: Option<GeometryHealingReport>,
     pub root: ObjectDescriptor,
     pub objects: Vec<LogicalObject>,
@@ -51,20 +49,7 @@ impl PreparedExactGeometryObjects {
     }
 
     pub fn revalidate(&self, limits: ObjectInventoryLimits) -> MeshingExecutionResult<()> {
-        let rebuilt = prepare_exact_geometry_objects(
-            self.document.clone(),
-            self.topology.clone(),
-            self.evaluators.clone(),
-            self.kernel_representation.clone(),
-            self.healing_report.clone(),
-            limits,
-        )?;
-        if rebuilt != *self {
-            return Err(MeshingExecutionError::Identity(
-                "prepared exact geometry is not its canonical object closure",
-            ));
-        }
-        Ok(())
+        verification::revalidate(self, limits)
     }
 }
 
@@ -76,6 +61,11 @@ pub struct PreparedExactGeometryInput {
 }
 
 impl PreparedExactGeometryInput {
+    /// Transfer the verified closure without retaining a second encoded inventory.
+    pub fn into_geometry_objects(self) -> PreparedExactGeometryObjects {
+        self.geometry_objects
+    }
+
     pub const fn geometry_objects(&self) -> &PreparedExactGeometryObjects {
         &self.geometry_objects
     }
@@ -91,16 +81,61 @@ impl PreparedExactGeometryInput {
 
 pub fn prepare_exact_geometry_input(
     geometry_objects: PreparedExactGeometryObjects,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
+    limits: ObjectInventoryLimits,
+) -> MeshingExecutionResult<PreparedExactGeometryInput> {
+    prepare_exact_geometry_value(geometry_objects, access, ValueRefKind::DriverObject, limits)
+}
+
+/// Projects a worker-admitted exact geometry closure as a reusable execution result.
+pub fn prepare_exact_geometry_result(
+    geometry_objects: PreparedExactGeometryObjects,
+    access: ArtifactAccess,
+    limits: ObjectInventoryLimits,
+) -> MeshingExecutionResult<PreparedExactGeometryInput> {
+    prepare_exact_geometry_value(geometry_objects, access, ValueRefKind::ResultObject, limits)
+}
+
+fn prepare_exact_geometry_value(
+    geometry_objects: PreparedExactGeometryObjects,
+    access: ArtifactAccess,
+    kind: ValueRefKind,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedExactGeometryInput> {
     access.validate()?;
     geometry_objects.revalidate(limits)?;
-    let input_objects = geometry_objects
-        .objects
-        .iter()
-        .map(|object| exact_object_reference(object, &geometry_objects.root, &access))
-        .collect::<MeshingExecutionResult<Vec<_>>>()?;
+    project_exact_geometry_value(geometry_objects, access, kind, None)
+}
+
+// Private projection is reached only after public revalidation or raw import.
+fn project_exact_geometry_value(
+    geometry_objects: PreparedExactGeometryObjects,
+    access: ArtifactAccess,
+    kind: ValueRefKind,
+    control: Option<&dyn runmat_geometry_core::GeometryCanonicalControl>,
+) -> MeshingExecutionResult<PreparedExactGeometryInput> {
+    admit_import_storage(
+        control,
+        import_slots::<ValueRef>(geometry_objects.objects.len())?,
+    )?;
+    let mut input_objects = Vec::with_capacity(geometry_objects.objects.len());
+    for object in &geometry_objects.objects {
+        let schema = exact_object_schema(object, &geometry_objects.root)?;
+        admit_import_storage(
+            control,
+            access.reference_text_bytes(&object.descriptor.media_type, schema)?,
+        )?;
+        input_objects.push(exact_object_reference(
+            object,
+            &geometry_objects.root,
+            &access,
+            kind,
+        )?);
+    }
+    admit_import_storage(
+        control,
+        access.reference_text_bytes(EXACT_BREP_MEDIA_TYPE, EXACT_MANIFEST_SCHEMA)?,
+    )?;
     let root_input = input_objects
         .iter()
         .find(|reference| reference.logical_digest == geometry_objects.root.digest)
@@ -119,12 +154,22 @@ pub fn import_exact_geometry_input(
     source: &impl CacheImport,
     document: GeometryDocument,
     root: &ValueRef,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
+) -> MeshingExecutionResult<PreparedExactGeometryInput> {
+    import_exact_geometry_input_controlled(source, document, root, access, limits, None)
+}
+pub(crate) fn import_exact_geometry_input_controlled(
+    source: &impl CacheImport,
+    document: GeometryDocument,
+    root: &ValueRef,
+    access: ArtifactAccess,
+    limits: ObjectInventoryLimits,
+    control: Option<&dyn runmat_geometry_core::GeometryCanonicalControl>,
 ) -> MeshingExecutionResult<PreparedExactGeometryInput> {
     access.validate()?;
     validate_exact_root(root, &access)?;
-    let geometry_objects = import_exact_geometry_objects(
+    let geometry_objects = import::import_exact_geometry_objects_controlled(
         source,
         document,
         ExactGeometryObjectRoot {
@@ -132,8 +177,9 @@ pub fn import_exact_geometry_input(
             encoded_length: root.encoded_length,
         },
         limits,
+        control,
     )?;
-    let prepared = prepare_exact_geometry_input(geometry_objects, access, limits)?;
+    let prepared = project_exact_geometry_value(geometry_objects, access, root.kind, control)?;
     if prepared.root_input != *root {
         return Err(MeshingExecutionError::Identity(
             "imported exact geometry root differs from its execution reference",
@@ -168,12 +214,11 @@ pub fn prepare_exact_geometry_objects(
         encoded.evaluator_bytes,
     )?;
     let kernel_representation_object = kernel_representation
-        .as_ref()
         .map(|bytes| {
             geometry_object(
                 "geometry/canonical/kernel",
                 KERNEL_REPRESENTATION_MEDIA_TYPE,
-                bytes.clone(),
+                bytes,
             )
         })
         .transpose()?;
@@ -226,103 +271,14 @@ pub fn prepare_exact_geometry_objects(
         manifest: encoded.manifest,
         topology,
         evaluators,
-        kernel_representation,
         healing_report,
         root,
         objects,
     })
 }
 
-pub fn import_exact_geometry_objects(
-    source: &impl CacheImport,
-    document: GeometryDocument,
-    root: ExactGeometryObjectRoot,
-    limits: ObjectInventoryLimits,
-) -> MeshingExecutionResult<PreparedExactGeometryObjects> {
-    document.validate()?;
-    if document.primary_artifact().digest.bytes() != root.digest.bytes()
-        || document.primary_artifact().encoded_length != root.encoded_length
-    {
-        return Err(MeshingExecutionError::Identity(
-            "exact geometry root differs from the document artifact",
-        ));
-    }
-    enforce_object_length("exact geometry manifest", root.encoded_length, limits)?;
-    let manifest_bytes = read_exact(source, root.digest, root.encoded_length)?;
-    let manifest = ExactGeometryManifest::canonical_decode(&manifest_bytes)?;
-    let object_count = 3
-        + usize::from(manifest.kernel_representation.is_some())
-        + usize::from(manifest.healing_report.is_some());
-    if object_count > limits.max_objects {
-        return Err(ArtifactError::Limit("too many exact geometry objects".into()).into());
-    }
-    let mut total_bytes = root.encoded_length;
-    let topology_bytes = read_component(
-        source,
-        "exact geometry topology",
-        &manifest.topology,
-        &mut total_bytes,
-        limits,
-    )?;
-    let evaluator_bytes = read_component(
-        source,
-        "exact geometry evaluators",
-        &manifest.evaluators,
-        &mut total_bytes,
-        limits,
-    )?;
-    let kernel_representation = manifest
-        .kernel_representation
-        .as_ref()
-        .map(|reference| {
-            read_component(
-                source,
-                "kernel representation",
-                reference,
-                &mut total_bytes,
-                limits,
-            )
-        })
-        .transpose()?;
-    let healing_bytes = manifest
-        .healing_report
-        .as_ref()
-        .map(|reference| {
-            read_component(
-                source,
-                "geometry healing report",
-                reference,
-                &mut total_bytes,
-                limits,
-            )
-        })
-        .transpose()?;
-    let GeometryModel::ExactBRep { model } = &document.model else {
-        return Err(MeshingExecutionError::Invalid(
-            "faceted geometry cannot import an exact closure".into(),
-        ));
-    };
-    let topology = decode_exact_topology(&topology_bytes, model)?;
-    let evaluators = decode_exact_evaluators(&evaluator_bytes, &topology, model)?;
-    let healing_report = healing_bytes
-        .as_deref()
-        .map(decode_geometry_healing_report)
-        .transpose()?;
-    let prepared = prepare_exact_geometry_objects(
-        document,
-        topology,
-        evaluators,
-        kernel_representation,
-        healing_report,
-        limits,
-    )?;
-    if prepared.root.digest != root.digest || prepared.root.encoded_length != root.encoded_length {
-        return Err(MeshingExecutionError::Identity(
-            "imported exact geometry manifest differs from requested root",
-        ));
-    }
-    Ok(prepared)
-}
+pub use import::import_exact_geometry_objects;
+mod import;
 
 pub(crate) fn geometry_object(
     logical_prefix: &str,
@@ -337,20 +293,15 @@ pub(crate) fn geometry_object(
     )
 }
 
-fn geometry_reference(object: &LogicalObject) -> GeometryObjectRef {
-    GeometryObjectRef {
-        digest: GeometryDigest::from_bytes(*object.descriptor.digest.bytes()),
-        encoded_length: object.descriptor.encoded_length,
-        media_type: object.descriptor.media_type.clone(),
-        schema_version: GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION,
-    }
-}
-
 pub(crate) fn validate_geometry_reference(
     object: &LogicalObject,
     reference: &GeometryObjectRef,
 ) -> MeshingExecutionResult<()> {
-    if geometry_reference(object) != *reference {
+    if object.descriptor.digest.bytes() != reference.digest.bytes()
+        || object.descriptor.encoded_length != reference.encoded_length
+        || object.descriptor.media_type != reference.media_type
+        || reference.schema_version != GEOMETRY_PRIMARY_ARTIFACT_SCHEMA_VERSION
+    {
         return Err(MeshingExecutionError::Identity(
             "execution object differs from its geometry-owned reference",
         ));
@@ -358,11 +309,10 @@ pub(crate) fn validate_geometry_reference(
     Ok(())
 }
 
-fn exact_object_reference(
+fn exact_object_schema(
     object: &LogicalObject,
     root: &ObjectDescriptor,
-    access: &MeshingArtifactAccess,
-) -> MeshingExecutionResult<ValueRef> {
+) -> MeshingExecutionResult<&'static str> {
     let value_schema = if object.descriptor.digest == root.digest {
         EXACT_MANIFEST_SCHEMA
     } else {
@@ -378,25 +328,40 @@ fn exact_object_reference(
             }
         }
     };
-    input_object_reference(
-        object,
-        access,
-        value_schema,
-        "invalid exact geometry input reference",
-    )
+    Ok(value_schema)
+}
+fn exact_object_reference(
+    object: &LogicalObject,
+    root: &ObjectDescriptor,
+    access: &ArtifactAccess,
+    kind: ValueRefKind,
+) -> MeshingExecutionResult<ValueRef> {
+    let value_schema = exact_object_schema(object, root)?;
+    let reference = access.reference_descriptor(&object.descriptor, kind, value_schema)?;
+    reference
+        .validate(runmat_execution::value::ValueLimits::default())
+        .map_err(|_| {
+            MeshingExecutionError::Identity("invalid exact geometry execution reference")
+        })?;
+    Ok(reference)
 }
 
-fn validate_exact_root(
-    root: &ValueRef,
-    access: &MeshingArtifactAccess,
-) -> MeshingExecutionResult<()> {
-    validate_input_root(
+fn validate_exact_root(root: &ValueRef, access: &ArtifactAccess) -> MeshingExecutionResult<()> {
+    if !matches!(
+        root.kind,
+        ValueRefKind::DriverObject | ValueRefKind::ResultObject
+    ) {
+        return Err(MeshingExecutionError::Identity(
+            "exact geometry root has a nonportable execution kind",
+        ));
+    }
+    access.validate_reference(
         root,
-        access,
+        root.kind,
         EXACT_BREP_MEDIA_TYPE,
         EXACT_MANIFEST_SCHEMA,
-        "exact geometry root is outside input artifact authority",
-    )
+    )?;
+    Ok(())
 }
 
 fn read_component(
@@ -419,3 +384,6 @@ fn read_component(
         reference.encoded_length,
     )
 }
+
+mod components;
+mod verification;

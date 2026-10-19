@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use runmat_execution::identity::{ValueId, WorkerId};
+use runmat_execution::identity::ValueId;
 use runmat_execution::value::{ValuePayload, ValueRef};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -14,10 +14,29 @@ type StoredValue = (ValueRef, Arc<[u8]>);
 #[derive(Default)]
 pub(super) struct RemoteValueCatalog {
     objects: Mutex<HashMap<ValueId, StoredValue>>,
-    transferred: AsyncMutex<HashSet<(WorkerId, ValueId)>>,
+    transferred: AsyncMutex<HashSet<(super::pool::WorkerRouteIdentity, ValueId)>>,
 }
 
 impl RemoteValueCatalog {
+    pub(super) fn checkpoint_references(&self) -> Vec<ValueRef> {
+        self.objects
+            .lock()
+            .expect("remote value catalog poisoned")
+            .values()
+            .map(|(reference, _)| reference.clone())
+            .collect()
+    }
+
+    pub(super) fn encoded(&self, reference: &ValueRef) -> NativeExecutionResult<Option<Arc<[u8]>>> {
+        let objects = self.objects.lock().expect("remote value catalog poisoned");
+        match objects.get(&reference.id) {
+            Some((stored, bytes)) if stored == reference => Ok(Some(Arc::clone(bytes))),
+            Some(_) => Err(protocol(
+                "remote value reference differs from stored content",
+            )),
+            None => Ok(None),
+        }
+    }
     pub(super) fn register(
         &self,
         reference: ValueRef,
@@ -41,7 +60,7 @@ impl RemoteValueCatalog {
     pub(super) async fn transfer(
         &self,
         channel: &dyn RemoteWorkerChannel,
-        worker_id: WorkerId,
+        route: super::pool::WorkerRouteIdentity,
         values: &[ValuePayload],
         execution_objects: &RemoteObjectCatalog,
     ) -> NativeExecutionResult<()> {
@@ -50,7 +69,7 @@ impl RemoteValueCatalog {
             if execution_objects.contains(&reference)? {
                 continue;
             }
-            let key = (worker_id, reference.id);
+            let key = (route, reference.id);
             if self.transferred.lock().await.contains(&key) {
                 continue;
             }
@@ -80,6 +99,26 @@ impl RemoteValueCatalog {
             self.transferred.lock().await.insert(key);
         }
         Ok(())
+    }
+
+    pub(super) fn resolve(
+        &self,
+        reference: &ValueRef,
+        authorization_scope: &str,
+    ) -> NativeExecutionResult<ValuePayload> {
+        let (stored, encoded) = self
+            .objects
+            .lock()
+            .expect("remote value catalog poisoned")
+            .get(&reference.id)
+            .cloned()
+            .ok_or_else(|| protocol("remote value object is not registered"))?;
+        if &stored != reference {
+            return Err(protocol(
+                "remote value reference differs from its registered object",
+            ));
+        }
+        super::value_transfer::decode_value(&stored, &encoded, authorization_scope)
     }
 }
 

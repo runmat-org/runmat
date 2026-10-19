@@ -88,7 +88,7 @@ impl SelectedUnitInteropReceipt {
             .manifest
             .artifacts
             .iter()
-            .filter(|artifact| artifact.form == ExecutableForm::ExecutableUnitV3)
+            .filter(|artifact| artifact.form == ExecutableForm::ExecutableUnitV4)
             .collect::<Vec<_>>();
         if matching.len() != 1 || matching[0].executable_bytes.as_slice() != canonical_v3.as_ref() {
             return Err("selected foreign bundle has no unique exact V3 artifact".into());

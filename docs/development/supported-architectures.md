@@ -19,18 +19,20 @@ CI also cross-builds the same native targets before release. The main test matri
 
 RunMat is written in Rust and much of the parser, compiler, VM, runtime, builtin library, and session engine is portable across CPU architectures that support Rust `std`. Packaged and CI-covered support is currently narrower than theoretical source-build support.
 
-| Target family | Support tier | Package | CI coverage | JIT | GPU path | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| `x86_64-pc-windows-msvc` | Packaged native | Yes | Cross-build + release validation | Supported | WGPU / DX12 | Full CLI/runtime target. |
-| `x86_64-apple-darwin` | Packaged native | Yes | macOS tests + cross-build | Supported | WGPU / Metal | Full CLI/runtime target. |
-| `aarch64-apple-darwin` | Packaged native | Yes | macOS tests + cross-build | Supported | WGPU / Metal | Apple Silicon; best-supported ARM target today. |
-| `x86_64-unknown-linux-gnu` | Packaged native | Yes | Linux tests + cross-build | Supported | WGPU / Vulkan or host backend | Full CLI/runtime target when native dependencies are present. |
-| `aarch64-pc-windows-msvc` | Configured native | No | Build configuration only | AArch64 backend, unvalidated | WGPU / DX12 if the native stack works | `.cargo/config.toml` includes linker stack sizing, but this target is not packaged. |
-| `aarch64-unknown-linux-gnu` | Experimental source build | No | No routine coverage | AArch64 backend, unvalidated | Experimental WGPU / Linux graphics stack | Source-build target; treat as experimental until CI and packaging cover it. |
-| `armv7-*`, `arm-unknown-linux-*` | Untested source build | No | No routine coverage | Not supported | Platform-specific, untested | Interpreter-only builds may be possible, but native dependencies and GPU support vary by board. |
-| `wasm32-unknown-unknown` | Packaged WASM | Yes | WASM build + browser tests | Not supported | Browser WebGPU | Browser and TypeScript package target, not a native CLI target. |
+| Target family | Support tier | Package | CI coverage | JIT | Native compilation | GPU path | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `x86_64-pc-windows-msvc` | Packaged native | Yes | Cross-build + release validation | Supported | Supported | WGPU / DX12 | Full CLI/runtime target. |
+| `x86_64-apple-darwin` | Packaged native | Yes | macOS tests + cross-build | Supported | Supported | WGPU / Metal | Full CLI/runtime target. |
+| `aarch64-apple-darwin` | Packaged native | Yes | macOS tests + cross-build | Supported | Supported | WGPU / Metal | Apple Silicon; best-supported ARM target today. |
+| `x86_64-unknown-linux-gnu` | Packaged native | Yes | Linux tests + cross-build | Supported | Supported | WGPU / Vulkan or host backend | Full CLI/runtime target when native dependencies are present. |
+| `aarch64-pc-windows-msvc` | Configured native | No | Build configuration only | AArch64 backend, unvalidated | Not packaged or validated | WGPU / DX12 if the native stack works | `.cargo/config.toml` includes linker stack sizing, but this target is not packaged. |
+| `aarch64-unknown-linux-gnu` | Experimental source build | No | No routine coverage | AArch64 backend, unvalidated | Not packaged or validated | Experimental WGPU / Linux graphics stack | Source-build target; treat as experimental until CI and packaging cover it. |
+| `armv7-*`, `arm-unknown-linux-*` | Untested source build | No | No routine coverage | Not supported | Not supported | Platform-specific, untested | Interpreter-only builds may be possible, but native dependencies and GPU support vary by board. |
+| `wasm32-unknown-unknown` | Packaged WASM | Yes | WASM build + browser tests | Not supported | Not supported | Browser WebGPU | Browser and TypeScript package target, not a native CLI target. |
 
 The host-native JIT tier is more constrained than the interpreter. RunMat's Cranelift backend supports `x86_64` and `aarch64`; other architectures should be expected to run interpreter-only even if the rest of the runtime builds. WebAssembly validates the portable executable and Native IR contracts but does not allocate host-native executable memory.
+
+`runmat compile` is host-native on the four packaged native targets. It requires a target-matched runtime archive and system linker and does not cross-compile. See [Native Compilation](/docs/runtime/compiler/native-compilation) for the complete workflow.
 
 ## Embedded And Edge Devices
 

@@ -79,6 +79,7 @@ impl CodecPurpose {
 }
 
 pub fn encode_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
+    crate::builtins::ensure_builtin_value_classes_registered();
     encode(value, "$", CodecPurpose::ExecutionV2, None)
 }
 
@@ -86,6 +87,7 @@ pub fn encode_inline_value_in_context(
     value: &Value,
     runtime: &crate::context::RuntimeContext,
 ) -> Result<ValuePayload, ValueCodecError> {
+    crate::builtins::ensure_builtin_value_classes_registered();
     encode(value, "$", CodecPurpose::ExecutionV2, Some(runtime))
 }
 
@@ -93,6 +95,7 @@ pub(super) fn encode_inline_value_with_authority(
     value: &Value,
     issuer: &dyn InlineSourceAuthority,
 ) -> Result<ValuePayload, ValueCodecError> {
+    crate::builtins::ensure_builtin_value_classes_registered();
     encode(value, "$", CodecPurpose::ExecutionV2, Some(issuer))
 }
 
@@ -229,6 +232,12 @@ fn encode(
                 fields,
             })
         }
+        Value::Object(value)
+            if super::immutable_class::schema_for_class(value.class_name.display_name())?
+                .is_some() =>
+        {
+            encode_immutable_class(value, path, purpose, runtime)?
+        }
         Value::Object(_) | Value::ObjectArray(_) => {
             return Err(ValueCodecError::unsupported(
                 path,
@@ -362,6 +371,38 @@ fn encode(
         )),
     };
     Ok(ValuePayload::Inline(Box::new(inline)))
+}
+
+fn encode_immutable_class(
+    object: &runmat_value::ObjectInstance,
+    path: &str,
+    purpose: CodecPurpose,
+    runtime: Option<&dyn InlineSourceAuthority>,
+) -> Result<InlineValue, ValueCodecError> {
+    let schema =
+        super::immutable_class::schema_for_class(object.class_name.display_name())?.ok_or_else(|| {
+            ValueCodecError::unsupported(
+                path,
+                "value classes require an explicitly registered immutable class codec",
+            )
+        })?;
+    schema.validate_object(object, path)?;
+    let mut fields = object.properties.iter().collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.0.cmp(right.0));
+    let fields = fields
+        .into_iter()
+        .map(|(name, value)| {
+            Ok(RegisteredField {
+                name: name.clone(),
+                value: encode(value, &field_path(path, name), purpose, runtime)?,
+            })
+        })
+        .collect::<Result<Vec<_>, ValueCodecError>>()?;
+    Ok(InlineValue::ImmutableValueClass(RegisteredData {
+        type_identity: schema.type_identity().to_owned(),
+        schema_version: schema.schema_version(),
+        fields,
+    }))
 }
 
 fn selected_session_lease(runtime: Option<&dyn InlineSourceAuthority>) -> std::sync::Weak<()> {

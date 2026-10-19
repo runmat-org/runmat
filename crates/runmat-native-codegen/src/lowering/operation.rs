@@ -396,7 +396,7 @@ fn collect_rvalue_inputs(
             collect_operand(base, locals, output)?;
             collect_operand(member, locals, output)?;
         }
-        R::Future { args, .. } => {
+        R::Future { args, .. } | R::ExternalFuture { args, .. } => {
             for argument in args {
                 match argument {
                     runmat_mir::MirCallArg::Single(operand) => {

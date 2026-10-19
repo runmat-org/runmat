@@ -25,6 +25,9 @@ fn env_lock() -> &'static RwLock<BTreeMap<String, String>> {
 }
 
 pub fn var(key: &str) -> io::Result<String> {
+    if let Some(context) = crate::context::legacy::active() {
+        return context.environment_state().borrow().var(key);
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let guard = env_lock().read().expect("env lock poisoned");
@@ -43,6 +46,9 @@ pub fn var(key: &str) -> io::Result<String> {
 }
 
 pub fn vars() -> Vec<(String, String)> {
+    if let Some(context) = crate::context::legacy::active() {
+        return context.environment_state().borrow().vars();
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let guard = env_lock().read().expect("env lock poisoned");
@@ -55,6 +61,14 @@ pub fn vars() -> Vec<(String, String)> {
 }
 
 pub fn set_var(key: &str, value: &str) {
+    assert!(
+        !key.is_empty() && !key.contains(['=', '\0']) && !value.contains('\0'),
+        "invalid environment variable"
+    );
+    if let Some(context) = crate::context::legacy::active() {
+        context.environment_state().borrow_mut().set_var(key, value);
+        return;
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let mut guard = env_lock().write().expect("env lock poisoned");
@@ -67,6 +81,14 @@ pub fn set_var(key: &str, value: &str) {
 }
 
 pub fn remove_var(key: &str) {
+    assert!(
+        !key.is_empty() && !key.contains(['=', '\0']),
+        "invalid environment variable"
+    );
+    if let Some(context) = crate::context::legacy::active() {
+        context.environment_state().borrow_mut().remove_var(key);
+        return;
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let mut guard = env_lock().write().expect("env lock poisoned");
@@ -86,5 +108,14 @@ pub fn temp_dir() -> PathBuf {
     #[cfg(not(target_arch = "wasm32"))]
     {
         std::env::temp_dir()
+    }
+}
+
+/// Native subprocesses inherit the active session snapshot, including local changes.
+/// Standalone compatibility calls retain their existing host-process behavior.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn apply_to_command(command: &mut std::process::Command) {
+    if let Some(context) = crate::context::legacy::active() {
+        command.env_clear().envs(context.environment_snapshot());
     }
 }

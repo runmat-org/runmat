@@ -42,15 +42,9 @@ unsafe extern "C" fn poll_safepoint(
         // SAFETY: the pointers were checked and are borrowed for this callback.
         unsafe { (*safepoint).validate() }
             .map_err(|error| NativeExecutorError::Host(error.to_string()))?;
-        if state.runtime.is_cancelled() {
+        if let Some(cancelled) = super::control::poll(&state.runtime.cancellation()) {
             // SAFETY: exit is a checked writable callback output.
-            unsafe {
-                *exit = NativeExit::cancelled(NativeCancellation {
-                    reason: NativeCancellationReason::REQUESTED,
-                    reserved: 0,
-                    generation: 1,
-                })
-            };
+            unsafe { *exit = cancelled };
         }
         Ok(())
     })

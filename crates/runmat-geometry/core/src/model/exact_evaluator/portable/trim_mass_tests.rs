@@ -147,6 +147,7 @@ fn circular_face_with_hole() -> (ExactEvaluatorRegistry, ExactBRepTopology, Exac
         curve_evaluator_id: CurveEvaluatorId::new("curve:2").unwrap(),
         start_vertex_id: Some(topology.vertices[0].id.clone()),
         end_vertex_id: Some(topology.vertices[0].id.clone()),
+        tolerance_m: 1.0e-8,
         is_closed: true,
         is_periodic: true,
         is_degenerate: false,

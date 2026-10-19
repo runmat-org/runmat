@@ -229,7 +229,7 @@ fn rvalue_preserves_slice_pattern(
             chain.visit_operands(|operand| mentions |= operand_is_local(operand, local));
             !mentions
         }
-        MirRvalue::Future { args, .. } => args
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => args
             .iter()
             .all(|argument| !call_argument_mentions_local(argument, local)),
         MirRvalue::Distributed(operation) => operation

@@ -67,7 +67,7 @@ async fn selected_graph_worker_preserves_callable_argument_layouts() {
         expected_artifact_id: None,
     };
     let artifact =
-        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, bytes).unwrap();
+        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV4, bytes).unwrap();
     let legacy_values = vec![
         Value::BoundFunctionHandle(BoundFunctionHandle::new(
             proof.qualified_name.clone(),

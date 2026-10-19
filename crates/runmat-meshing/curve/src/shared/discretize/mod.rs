@@ -7,6 +7,7 @@ mod math;
 mod pcurves;
 mod sampling;
 mod types;
+mod vertex_uv;
 
 pub use generate::discretize_shared_curves;
 pub use types::*;

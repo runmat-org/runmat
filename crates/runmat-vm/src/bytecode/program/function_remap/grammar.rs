@@ -19,7 +19,8 @@ macro_rules! with_instruction_function_references {
             } => {
                 $direct($context, function);
             }
-            crate::bytecode::Instr::CreateExternalBoundFunctionHandle(function, ..) => {
+            crate::bytecode::Instr::CreateExternalBoundFunctionHandle(function, ..)
+            | crate::bytecode::Instr::CreateExternalFuture(function, ..) => {
                 $external_direct($context, function);
             }
             crate::bytecode::Instr::CallFunctionMulti { identity, .. }

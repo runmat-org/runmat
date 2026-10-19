@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use runmat_geometry_core::PersistentEntityId;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StructuralModel {
     #[serde(default)]
@@ -12,10 +14,22 @@ pub struct StructuralModel {
     pub shell_sections: Vec<ShellSectionModel>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructuralNode {
     pub node_id: u32,
     pub coordinates_m: [f64; 3],
+    pub solid_attachment: Option<ConformalSolidAttachment>,
+}
+
+/// Declares that an explicit beam/shell node and one exact canonical solid-mesh node are the same
+/// structural node. Translation is shared; the explicit formulation contributes any rotational
+/// degrees of freedom. Geometry-authored nodes bind by occurrence-qualified CAD identity, while
+/// mesh-derived nodes bind directly by canonical solver-node identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ConformalSolidAttachment {
+    GeometryVertex { entity: PersistentEntityId },
+    SolverNode { stable_identity: [u8; 32] },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,13 +78,74 @@ pub struct BeamSectionModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ShellSectionModel {
+#[serde(deny_unknown_fields)]
+pub struct HomogeneousShellSectionModel {
     pub section_id: String,
     pub thickness_m: f64,
+    pub reference_surface: HomogeneousShellReferenceSurface,
     #[serde(default = "default_shell_shear_correction")]
     pub shear_correction: f64,
-    #[serde(default = "default_shell_drilling_stiffness_scale")]
-    pub drilling_stiffness_scale: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "distance_m")]
+pub enum HomogeneousShellReferenceSurface {
+    MidSurface,
+    NegativeNormalSurface,
+    PositiveNormalSurface,
+    OffsetFromMidSurface(f64),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaminateShellSectionModel {
+    pub section_id: String,
+    pub reference_orientation_id: String,
+    pub ply_order: PlyOrderDirection,
+    pub reference_surface: ShellReferenceSurface,
+    pub plies: Vec<LaminatePlyModel>,
+    pub shear_correction: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlyOrderDirection {
+    AlongSurfaceNormal,
+    OppositeSurfaceNormal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "distance_m")]
+pub enum ShellReferenceSurface {
+    MidSurface,
+    FirstPlySurface,
+    LastPlySurface,
+    OffsetFromMidSurface(f64),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "section")]
+pub enum ShellSectionModel {
+    Homogeneous(HomogeneousShellSectionModel),
+    Laminate(LaminateShellSectionModel),
+}
+
+impl ShellSectionModel {
+    pub fn section_id(&self) -> &str {
+        match self {
+            Self::Homogeneous(value) => &value.section_id,
+            Self::Laminate(value) => &value.section_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaminatePlyModel {
+    pub ply_id: String,
+    pub material_id: String,
+    pub thickness_m: f64,
+    pub angle_rad: f64,
 }
 
 fn default_beam_reference_axis() -> [f64; 3] {
@@ -83,8 +158,4 @@ fn default_shell_reference_axis() -> [f64; 3] {
 
 fn default_shell_shear_correction() -> f64 {
     5.0 / 6.0
-}
-
-fn default_shell_drilling_stiffness_scale() -> f64 {
-    1.0e-4
 }

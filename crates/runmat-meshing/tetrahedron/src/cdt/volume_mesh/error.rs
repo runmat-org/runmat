@@ -6,6 +6,7 @@ use crate::cdt::{
     DelaunaySegmentRecoveryErrorKind, DelaunayVolumeProvenanceError,
     DelaunayVolumeProvenanceErrorKind, DelaunayVolumeQualityError, DelaunayVolumeQualityErrorKind,
     DelaunayVolumeRefinementStepError, DelaunayVolumeRefinementStepErrorKind,
+    DelaunayVolumeSliverError, DelaunayVolumeSliverErrorKind,
 };
 
 pub(super) fn constraint_error(failure: DelaunayConstraintError) -> DelaunayVolumeMeshError {
@@ -159,6 +160,26 @@ pub(super) fn refinement_error(
         DelaunayVolumeRefinementStepErrorKind::Cancelled => DelaunayVolumeMeshErrorKind::Cancelled,
     };
     mapped(DelaunayVolumeMeshStage::Refinement, kind, failure)
+}
+
+pub(super) fn sliver_error(failure: DelaunayVolumeSliverError) -> DelaunayVolumeMeshError {
+    let kind = match failure.kind {
+        DelaunayVolumeSliverErrorKind::InvalidOptions => {
+            DelaunayVolumeMeshErrorKind::InvalidOptions
+        }
+        DelaunayVolumeSliverErrorKind::InvalidInput
+        | DelaunayVolumeSliverErrorKind::InvalidTopology
+        | DelaunayVolumeSliverErrorKind::InvalidProvenance => {
+            DelaunayVolumeMeshErrorKind::InvalidTopology
+        }
+        DelaunayVolumeSliverErrorKind::InvalidQuality
+        | DelaunayVolumeSliverErrorKind::NoAdmissibleOptimization => {
+            DelaunayVolumeMeshErrorKind::InvalidQuality
+        }
+        DelaunayVolumeSliverErrorKind::ResourceLimit => DelaunayVolumeMeshErrorKind::ResourceLimit,
+        DelaunayVolumeSliverErrorKind::Cancelled => DelaunayVolumeMeshErrorKind::Cancelled,
+    };
+    mapped(DelaunayVolumeMeshStage::Optimization, kind, failure)
 }
 
 fn mapped(

@@ -6,12 +6,16 @@ mod cooperation;
 mod errors;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native_task;
-mod running_future;
+mod program_capture;
 mod retained_value;
 pub(crate) mod rooted_continuation;
+mod running_future;
 mod services;
-mod storable;
 pub(crate) mod staged_file;
+mod storable;
+pub use program_capture::{
+    capture_deferred_environment, capture_deferred_program, DeferredProgramCapture,
+};
 pub mod value_codec;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -6,7 +6,7 @@ use crate::{
     build_task_submission, import_exact_geometry_input, prepare_exact_geometry_input,
     prepare_exact_geometry_objects, prepare_faceted_geometry_input,
     prepare_faceted_geometry_objects, prepare_result_publication, prepare_stage_objects,
-    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
+    ArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
     MeshingTaskEffectPolicy,
 };
 use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
@@ -40,6 +40,8 @@ use super::{
     PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
 
+mod chunk_admission;
+mod reuse;
 mod surface_restart;
 mod volume;
 
@@ -49,6 +51,40 @@ struct MemoryStore {
 }
 
 impl CacheImport for MemoryStore {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if let Some(bytes) = self.objects.get(&digest) {
+            if maximum_bytes == 0 || bytes.len() as u64 > maximum_bytes {
+                return Err(runmat_execution_artifact::ArtifactError::Limit(
+                    "test read exceeds admitted bound".into(),
+                ));
+            }
+            admit(bytes.len() as u64)?;
+            return Ok(Some(bytes.clone()));
+        }
+        Ok(None)
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if maximum_bytes == 0
+            || self
+                .objects
+                .get(&digest)
+                .is_some_and(|bytes| bytes.len() as u64 > maximum_bytes)
+        {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "test read exceeds admitted bound".into(),
+            ));
+        }
+        Ok(self.objects.get(&digest).cloned())
+    }
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.objects.get(&digest).cloned())
     }
@@ -98,6 +134,18 @@ impl MeshingStageKernel for SurfaceKernel {
             entity_counts: counts.clone(),
             ..MeshingStageCheckpoint::default()
         })?;
+        invocation
+            .control
+            .geometry_evaluation_control()
+            .consume_allocation_bytes(3 * 700)
+            .map_err(|error| {
+                crate::budget::failure(
+                    invocation.host.workload.stage,
+                    crate::geometry_failure::category(error.kind),
+                    &error.reason,
+                    None,
+                )
+            })?;
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: stable(90),
             streams: vec![MeshingChunkStream {
@@ -185,6 +233,22 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
     )
     .unwrap();
 
+    let success = completed.attempt_success();
+    assert_eq!(
+        success.result_objects.len(),
+        completed.publication().result_objects().len() + 1
+    );
+    assert_eq!(
+        crate::import_stage_evidence_observation(
+            &fixture.store,
+            &fixture.host,
+            &success.result_objects,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+        *completed.stage_evidence()
+    );
+
     completed
         .workload_result()
         .validate_against(&fixture.host.workload)
@@ -221,6 +285,73 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
         .0
         .windows(2)
         .all(|pair| pair[1].validate_after(&pair[0]).is_ok()));
+}
+
+#[test]
+fn externalized_stage_evidence_rejects_missing_and_poisoned_objects() {
+    let mut fixture = Fixture::new();
+    let completed = execute_serial_stage(
+        &fixture.program,
+        &mut fixture.store,
+        &SurfaceKernel,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1024),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let mut success = completed.attempt_success();
+    success
+        .result_objects
+        .retain(|reference| reference.media_type != crate::STAGE_EVIDENCE_MEDIA_TYPE);
+    assert!(crate::import_stage_evidence_observation(
+        &fixture.store,
+        &fixture.host,
+        &success.result_objects,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("exactly one"));
+
+    let success = completed.attempt_success();
+    let evidence = success
+        .result_objects
+        .iter()
+        .find(|reference| reference.media_type == crate::STAGE_EVIDENCE_MEDIA_TYPE)
+        .unwrap();
+    fixture
+        .store
+        .objects
+        .insert(evidence.logical_digest, b"poisoned".to_vec());
+    assert!(crate::import_stage_evidence_observation(
+        &fixture.store,
+        &fixture.host,
+        &success.result_objects,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("wrong digest"));
+
+    let stage_object_count = completed.publication().result_objects().len();
+    let mut bounded = Fixture::new();
+    let limits = ObjectInventoryLimits {
+        max_objects: stage_object_count,
+        ..ObjectInventoryLimits::default()
+    };
+    assert!(execute_serial_stage(
+        &bounded.program,
+        &mut bounded.store,
+        &SurfaceKernel,
+        &NeverCancelled,
+        &mut Progress::default(),
+        chunk_policy(1024),
+        limits,
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("count or uniqueness"));
 }
 
 #[test]
@@ -332,7 +463,15 @@ fn serial_surface_partition_consumes_the_global_curve_artifact() {
         streams[0].media_type,
         MeshingChunkMediaType::SurfacePartitions
     );
-    assert_eq!(streams[0].records.len(), 1);
+    assert_eq!(
+        streams[0].records.len(),
+        2,
+        "one explicit header and one original face"
+    );
+    assert_eq!(
+        streams[0].schema_version,
+        runmat_meshing_surface::EXACT_FACE_PARTITION_RECORD_SET_SCHEMA_VERSION
+    );
     let curve_streams = joined
         .publication()
         .stage_objects()
@@ -343,12 +482,71 @@ fn serial_surface_partition_consumes_the_global_curve_artifact() {
         &exact.geometry_objects().topology,
     )
     .unwrap();
-    let result = runmat_meshing_surface::decode_exact_face_partition_result(
-        &streams[0].records[0],
+    let result = runmat_meshing_surface::decode_exact_face_partition_records(
+        &streams[0].records,
         &exact.geometry_objects().topology,
         &curves,
     )
     .unwrap();
+    assert!(
+        runmat_meshing_surface::decode_exact_face_partition_records(
+            &streams[0].records[..1],
+            &exact.geometry_objects().topology,
+            &curves
+        )
+        .is_err(),
+        "missing original face must reject before any complete-partition claim"
+    );
+    let mut duplicated = streams[0].records.clone();
+    duplicated.push(streams[0].records[1].clone());
+    assert!(
+        runmat_meshing_surface::decode_exact_face_partition_records(
+            &duplicated,
+            &exact.geometry_objects().topology,
+            &curves
+        )
+        .is_err(),
+        "extra face record cannot enter the declared partition"
+    );
+    let admitted = crate::geometry_control::tests::bounded_control(512 * 1024 * 1024);
+    {
+        let scope = runmat_geometry_core::GeometryAllocationScope::new(&admitted);
+        let decoded = runmat_meshing_surface::decode_exact_face_partition_records_admitted(
+            &streams[0].records,
+            &exact.geometry_objects().topology,
+            &curves,
+            &runmat_meshing_core::NeverCancelled,
+            &scope,
+        )
+        .unwrap();
+        assert_eq!(decoded, result);
+        let retained = decoded.retained_storage_bytes(&scope).unwrap();
+        let owned = scope.transfer_reservation(retained).unwrap();
+        drop(scope);
+        assert_eq!(
+            admitted.usage().live_allocation_bytes,
+            retained,
+            "cold original faces stay charged after wire and DTO scope release"
+        );
+        drop(decoded);
+        drop(owned);
+    }
+    assert_eq!(admitted.usage().live_allocation_bytes, 0);
+    let denied = crate::geometry_control::tests::bounded_control(1);
+    {
+        let scope = runmat_geometry_core::GeometryAllocationScope::new(&denied);
+        assert!(
+            runmat_meshing_surface::decode_exact_face_partition_records_admitted(
+                &streams[0].records,
+                &exact.geometry_objects().topology,
+                &curves,
+                &runmat_meshing_core::NeverCancelled,
+                &scope
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(denied.usage().live_allocation_bytes, 0);
     assert_eq!(result.partition, partition);
 }
 
@@ -405,7 +603,7 @@ fn execute_surface_pipeline_with_fixture(
     let stage = &pass.partitions()[0];
     let partition = stage.host().workload.partition.clone();
     let host = stage.host().clone();
-    let program = stage.program_request(revision()).unwrap();
+    let program = stage_program(stage, &mut fixture.store);
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -436,7 +634,7 @@ fn execute_curve_pipeline_from(
     ValueRef,
     CompletedMeshingStage,
 ) {
-    let exact_root = root(&fixture.program.arguments[0]);
+    let exact_root = root(&fixture.program.arguments[1]);
     let exact = import_exact_geometry_input(
         &fixture.store,
         fixture.host.geometry_document.clone().unwrap(),
@@ -452,7 +650,7 @@ fn execute_curve_pipeline_from(
         .unwrap();
     let mut partition_roots = Vec::with_capacity(pass.partitions().len());
     for stage in pass.partitions() {
-        let program = stage.program_request(revision()).unwrap();
+        let program = stage_program(stage, &mut fixture.store);
         let partition = execute_serial_stage(
             &program,
             &mut fixture.store,
@@ -467,7 +665,7 @@ fn execute_curve_pipeline_from(
     }
     let join = planner.curve_join(&pass, partition_roots).unwrap();
     let host = join.host().clone();
-    let program = join.program_request(revision()).unwrap();
+    let program = stage_program(&join, &mut fixture.store);
     let joined = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -552,14 +750,11 @@ fn ordinary_serial_backend_carries_the_complete_fenced_stage_publication() {
     )
     .unwrap();
     let expected = completed.attempt_success();
-    let root = root(&fixture.program.arguments[0]);
     let scope_id = ExecutionScopeId::derive(&[b"serial-stage-scope"]);
     let pool_id = PoolId::derive(&[b"serial-stage-pool"]);
     let submission = build_task_submission(
-        &fixture.host.workload,
-        &fixture.host.stage_identity,
-        &fixture.host.resolved_request,
-        std::slice::from_ref(&root),
+        &fixture.host,
+        &fixture.program.arguments,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
@@ -626,6 +821,14 @@ fn serial_stage_reports_typed_cancellation_and_search_budget_failures() {
         .unwrap()
         .unwrap();
     response.validate_against(&cancelled.host).unwrap();
+    let runmat_execution_artifact::ProgramExecutionResponse::Failure { message } =
+        response.program_response()
+    else {
+        panic!("failed meshing response must use the program failure channel")
+    };
+    let transported = MeshingHostResponse::failure_from_program_message(&message)
+        .expect("program failure must retain its canonical meshing failure");
+    assert_eq!(transported, *stage_failure(&error));
     assert_eq!(
         stage_failure(&error).category,
         MeshingFailureCategory::Cancelled
@@ -665,6 +868,7 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
     let MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
+        stage_evidence,
         mut root,
         mut result_objects,
     } = response
@@ -675,15 +879,28 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
     let missing = MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
+        stage_evidence: stage_evidence.clone(),
         root: root.clone(),
         result_objects,
     };
     assert!(missing.validate_against(&fixture.host).is_err());
 
+    let mut mismatched_evidence = (*stage_evidence).clone();
+    mismatched_evidence.stage_result_digest = StableDigest::from_bytes([77; 32]);
+    let mismatched = MeshingHostResponse::Validated {
+        schema_version,
+        stage_manifest_digest,
+        stage_evidence: Box::new(mismatched_evidence),
+        root: root.clone(),
+        result_objects: completed.publication().result_objects().to_vec(),
+    };
+    assert!(mismatched.validate_against(&fixture.host).is_err());
+
     root.authorization_scope = "another-run".into();
     let wrong_authority = MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,
+        stage_evidence,
         root,
         result_objects: completed.publication().result_objects().to_vec(),
     };
@@ -826,7 +1043,38 @@ fn exact_geometry_checkpoints_renew_the_enclosing_stage_deadline() {
     std::thread::sleep(std::time::Duration::from_millis(600));
     stage.geometry_evaluation_control().checkpoint().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(600));
+    assert!(!stage.geometry_evaluation_control().is_cancelled());
+    std::thread::sleep(std::time::Duration::from_millis(600));
     stage.guard().unwrap();
+}
+
+#[test]
+fn exact_geometry_checkpoints_publish_search_work_to_the_enclosing_stage() {
+    let mut bounded = request();
+    bounded.cancellation.maximum_work_units_between_checks = 2;
+    let mut progress = Progress::default();
+    let mut stage = MeshingStageControl::new(
+        MeshingStageKind::SurfaceMesh,
+        0,
+        &bounded,
+        &NeverCancelled,
+        &mut progress,
+    )
+    .unwrap();
+    stage.checkpoint(MeshingStageCheckpoint::default()).unwrap();
+    {
+        let geometry = stage.geometry_evaluation_control();
+        geometry.consume_search_work(2).unwrap();
+        geometry.checkpoint().unwrap();
+        geometry.consume_search_work(2).unwrap();
+        assert!(!geometry.is_cancelled());
+    }
+    stage
+        .checkpoint(MeshingStageCheckpoint {
+            search_work: 4,
+            ..MeshingStageCheckpoint::default()
+        })
+        .unwrap();
 }
 
 #[test]
@@ -873,7 +1121,7 @@ fn stage_control_enforces_wall_time_and_serialization_enforces_artifact_bytes() 
 #[test]
 fn serial_stage_rehashes_every_input_before_invoking_the_kernel() {
     let mut fixture = Fixture::new();
-    let ValuePayload::Object(root) = &fixture.program.arguments[0] else {
+    let ValuePayload::Object(root) = &fixture.program.arguments[1] else {
         panic!("fixture input is not externalized")
     };
     fixture
@@ -906,7 +1154,7 @@ impl Fixture {
     }
 
     fn with_request(request: MeshingRequest) -> Self {
-        let access = MeshingArtifactAccess {
+        let access = ArtifactAccess {
             authorization_scope: "serial-meshing-run".into(),
             encryption_context: Digest::sha256(b"serial-meshing-encryption-context"),
         };
@@ -960,9 +1208,7 @@ impl Fixture {
             ],
         };
         let host = MeshingHostWorkload::new(workload, identity, request, access, None).unwrap();
-        let program = host
-            .program_request(revision(), std::slice::from_ref(&root))
-            .unwrap();
+        let program = host_program(&host, std::slice::from_ref(&root), &mut store);
         Self {
             host,
             program,
@@ -979,11 +1225,16 @@ impl Fixture {
     }
 
     fn with_exact_tetrahedron_curve_partition() -> Self {
-        Self::with_exact_geometry_fixture(
+        Self::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet4)
+    }
+
+    fn with_exact_tetrahedron_curve_partition_order(element_order: ElementOrder) -> Self {
+        Self::with_exact_geometry_fixture_order(
             MeshingStageKind::CurveMesh,
             runmat_geometry_fixtures::exact_tetrahedron(),
             false,
             true,
+            element_order,
         )
     }
 
@@ -998,7 +1249,7 @@ impl Fixture {
 
     fn with_exact_geometry_fixture(
         stage: MeshingStageKind,
-        (mut document, mut topology, mut evaluators): (
+        fixture: (
             runmat_geometry_core::GeometryDocument,
             runmat_geometry_core::ExactBRepTopology,
             runmat_geometry_core::ExactEvaluatorRegistry,
@@ -1006,7 +1257,27 @@ impl Fixture {
         curve_as_sheet: bool,
         relaxed_volume: bool,
     ) -> Self {
-        let access = MeshingArtifactAccess {
+        Self::with_exact_geometry_fixture_order(
+            stage,
+            fixture,
+            curve_as_sheet,
+            relaxed_volume,
+            ElementOrder::Tet4,
+        )
+    }
+
+    fn with_exact_geometry_fixture_order(
+        stage: MeshingStageKind,
+        (mut document, mut topology, mut evaluators): (
+            runmat_geometry_core::GeometryDocument,
+            runmat_geometry_core::ExactBRepTopology,
+            runmat_geometry_core::ExactEvaluatorRegistry,
+        ),
+        curve_as_sheet: bool,
+        relaxed_volume: bool,
+        element_order: ElementOrder,
+    ) -> Self {
+        let access = ArtifactAccess {
             authorization_scope: "serial-exact-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-exact-geometry-context"),
         };
@@ -1063,6 +1334,7 @@ impl Fixture {
             store.write_verified(object).unwrap();
         }
         let mut request = request();
+        request.element_order = element_order;
         request.tolerance = document.tolerance;
         if relaxed_volume {
             request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
@@ -1086,7 +1358,7 @@ impl Fixture {
             request.resources.maximum_memory_bytes = 64_000_000;
             request.resources.maximum_artifact_bytes = 16_000_000;
             request.resources.maximum_search_work = 1_000_000;
-            request.resources.maximum_iterations = 100_000;
+            request.resources.maximum_iterations = if relaxed_volume { 2_000_000 } else { 100_000 };
         }
         let root_digest = StableDigest::from_bytes(*input.root_input().logical_digest.bytes());
         let exact_input = MeshingInputRef {
@@ -1133,7 +1405,7 @@ impl Fixture {
                     },
                 },
                 MeshingCapabilityRequirement::ElementOrder {
-                    order: ElementOrder::Tet4,
+                    order: element_order,
                 },
                 MeshingCapabilityRequirement::DeterministicPlatformCohort {
                     cohort: "native-cohort-v1".into(),
@@ -1142,9 +1414,7 @@ impl Fixture {
         };
         let host =
             MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
-        let program = host
-            .program_request(revision(), std::slice::from_ref(input.root_input()))
-            .unwrap();
+        let program = host_program(&host, std::slice::from_ref(input.root_input()), &mut store);
         Self {
             host,
             program,
@@ -1153,7 +1423,7 @@ impl Fixture {
     }
 
     fn with_faceted_geometry() -> Self {
-        let access = MeshingArtifactAccess {
+        let access = ArtifactAccess {
             authorization_scope: "serial-faceted-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-faceted-geometry-context"),
         };
@@ -1222,9 +1492,7 @@ impl Fixture {
         };
         let host =
             MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
-        let program = host
-            .program_request(revision(), std::slice::from_ref(input.root_input()))
-            .unwrap();
+        let program = host_program(&host, std::slice::from_ref(input.root_input()), &mut store);
         Self {
             host,
             program,
@@ -1265,7 +1533,7 @@ fn stage_failure(error: &MeshingSerialExecutionError) -> &MeshingFailure {
     failure
 }
 
-fn input_publication(access: MeshingArtifactAccess) -> crate::PreparedMeshingResultPublication {
+fn input_publication(access: ArtifactAccess) -> crate::PreparedMeshingResultPublication {
     let payload = build_chunked_stage_payload(
         &[MeshingChunkStream {
             media_type: MeshingChunkMediaType::ExactGeometry,
@@ -1345,6 +1613,7 @@ pub(crate) fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
             surface: SurfaceQualityTargets {
+                minimum_metric_edge_length: 0.1,
                 minimum_metric_angle_degrees: 20.0,
                 maximum_physical_aspect_ratio: 10.0,
                 maximum_chordal_deviation_m: 1.0e-5,
@@ -1388,6 +1657,25 @@ fn revision() -> ProgramRevision {
         .unwrap(),
     )
     .unwrap()
+}
+
+fn host_program(
+    host: &MeshingHostWorkload,
+    roots: &[ValueRef],
+    store: &mut impl CacheExport,
+) -> runmat_execution_artifact::ProgramExecutionRequest {
+    let invocation = host.prepare_program_request(revision(), roots).unwrap();
+    invocation.write_to(store).unwrap();
+    invocation.into_request()
+}
+
+fn stage_program(
+    stage: &crate::PlannedMeshingStage,
+    store: &mut impl CacheExport,
+) -> runmat_execution_artifact::ProgramExecutionRequest {
+    let invocation = stage.prepare_invocation(revision()).unwrap();
+    invocation.write_to(store).unwrap();
+    invocation.into_request()
 }
 
 fn stable(seed: u8) -> StableDigest {

@@ -326,6 +326,7 @@ async fn invoke_semantic_function_with_rooted_captures(
     ),
     RuntimeError,
 > {
+    let runtime = runtime.inherit_same_session_environment();
     let runtime = runtime.with_constructor_receiver_for_method(
         function_registry
             .get(runmat_hir::FunctionId(function))

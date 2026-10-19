@@ -82,6 +82,7 @@ pub enum TaskExecutableIdentity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TaskRequest {
     pub schema_version: u16,
     pub id: TaskId,
@@ -98,6 +99,9 @@ pub struct TaskRequest {
     #[serde(default)]
     pub invocation_context: ProgramInvocationContext,
     pub inputs: Vec<ValuePayload>,
+    pub environment: crate::EnvironmentSnapshot,
+    #[serde(deserialize_with = "crate::console::deserialize_controls")]
+    pub console: Option<crate::console::ConsoleLimits>,
     pub outputs: OutputContract,
     pub resources: ResourceRequest,
     pub retry: RetryPolicy,
@@ -105,6 +109,30 @@ pub struct TaskRequest {
 }
 
 impl TaskRequest {
+    /// Admit the original context component. Whole execution storage remains separate.
+    pub fn validate_invocation_reservation(&self) -> Result<(), crate::ContractError> {
+        let minimum = crate::console::invocation_memory_bytes(&self.environment, self.console)?;
+        let console = self
+            .console
+            .map(|limits| limits.storage_profile())
+            .transpose()?;
+        if minimum > self.resources.memory_bytes {
+            return Err(crate::ContractError::invalid(
+                "invocation context",
+                "exceeds task memory reservation",
+            ));
+        }
+        if console
+            .is_some_and(|profile| profile.max_encoded_bytes > self.resources.max_artifact_bytes)
+        {
+            return Err(crate::ContractError::invalid(
+                "invocation console",
+                "exceeds task artifact reservation",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate_executable(&self) -> Result<(), crate::ContractError> {
         if self.schema_version != TASK_REQUEST_SCHEMA_VERSION {
             return Err(crate::ContractError::invalid(
@@ -142,3 +170,6 @@ impl TaskRequest {
         }
     }
 }
+
+#[cfg(test)]
+mod console_tests;

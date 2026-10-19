@@ -1,10 +1,18 @@
+//! Launch one admitted local attempt and retain its original provider evidence:
+//! observed interval, process termination, IPC volume, console transcript and
+//! reservation accounting travel with the scheduler report.
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use runmat_execution_artifact::PrivateArtifactLease;
-use runmat_execution_runner::{AttemptRequest, AttemptSuccess};
+use runmat_execution_runner::{
+    AttemptExecutionObservation, AttemptExecutionTermination, AttemptFailureKind, AttemptReport,
+    AttemptRequest, AttemptResourceAccounting, AttemptSuccess,
+};
 use runmat_process_host::environment::EnvironmentPolicy;
-use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
+use runmat_process_host::ipc::{
+    read_payload, write_payload, FrameLimits, IpcByteCounter, MeteredIo,
+};
 use runmat_process_host::{
     ChildProcess, ChildStdio, HostCommand, ProcessExit, ProcessHostError, ProcessHostResult,
     ProcessRetirementLease, RetirementBoundChild,
@@ -13,13 +21,80 @@ use tokio::io::BufReader;
 
 use super::{
     LocalDriver, TaskCompletion, TransferFailure, TransferResult, NATIVE_ARTIFACT_STORE_ROOT_ENV,
-    NATIVE_GRAPH_ATTEMPT_SCRATCH_ENV, NATIVE_OBJECT_STORE_ROOT_ENV,
+    NATIVE_GRAPH_ATTEMPT_SCRATCH_ENV,
+};
+use crate::process_provider::{
+    NATIVE_MESHING_SUBTASK_CACHE_ROOT_ENV, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 use crate::protocol::{
-    CollectiveProcessResult, StagedGraphWorkerLaunch, StagedGraphWorkerReference, StoredProgram,
-    WorkerDriverMessage, WorkerLaunchRequest, WorkerProcessMessage, WorkerRequest, WorkerResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+    CollectiveProcessResult, ReservedProgramExecutionRequest, StagedGraphWorkerLaunch,
+    StagedGraphWorkerReference, StoredProgram, WorkerDriverMessage, WorkerLaunchRequest,
+    WorkerProcessMessage, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
+
+/// Original evidence for one launched (or preflight-rejected) attempt.
+pub(super) struct LocalAttemptObservation {
+    pub result: TransferResult,
+    pub execution: AttemptExecutionObservation,
+    pub unsuccessful_resources: Option<Box<AttemptResourceAccounting>>,
+    pub console: Option<runmat_execution::console::ConsoleTranscript>,
+}
+
+impl LocalAttemptObservation {
+    /// Build the scheduler report. A verified Graph cancellation is reported
+    /// as cleanup proof, never as an ordinary success or failure.
+    pub(super) fn report(&self, verified_graph_cancel: bool) -> AttemptReport {
+        if verified_graph_cancel {
+            return AttemptReport::GraphRetiredCancelled;
+        }
+        match &self.result {
+            Ok(success) => AttemptReport::Succeeded {
+                result: success.clone(),
+            },
+            Err(TransferFailure::Execution(message)) => AttemptReport::Failed {
+                kind: AttemptFailureKind::Execution,
+                message: message.clone(),
+            },
+            Err(TransferFailure::Infrastructure(message)) => AttemptReport::Failed {
+                kind: AttemptFailureKind::Infrastructure,
+                message: message.clone(),
+            },
+            Err(TransferFailure::WorkerLost(message)) => AttemptReport::Lost {
+                message: message.clone(),
+            },
+            Err(TransferFailure::RetirementUnverified(message)) => {
+                AttemptReport::RetirementUnverified {
+                    message: message.clone(),
+                }
+            }
+            Err(TransferFailure::Cancelled) => AttemptReport::Cancelled,
+            Err(TransferFailure::Runtime(failure)) => AttemptReport::RuntimeFailed {
+                failure: *failure.clone(),
+            },
+        }
+    }
+
+    pub(super) fn into_backend_report(
+        self,
+        request: &AttemptRequest,
+        verified_graph_cancel: bool,
+    ) -> (TransferResult, runmat_execution_runner::port::BackendReport) {
+        let mut report = runmat_execution_runner::port::BackendReport::for_request(
+            request,
+            self.report(verified_graph_cancel),
+        );
+        report.execution = Some(Box::new(self.execution));
+        report.unsuccessful_resources = self.unsuccessful_resources;
+        report.console = self.console.map(Box::new);
+        (self.result, report)
+    }
+}
+
+#[derive(Default)]
+struct TransportMeters {
+    sent: IpcByteCounter,
+    received: IpcByteCounter,
+}
 
 pub(super) enum GraphProcessQuarantine {
     KnownChild {
@@ -187,7 +262,30 @@ pub(super) fn execute_attempt(
     driver: &LocalDriver,
     request: &AttemptRequest,
     completion: &TaskCompletion,
-) -> TransferResult {
+) -> LocalAttemptObservation {
+    let started = Instant::now();
+    let meters = TransportMeters::default();
+    let mut termination = AttemptExecutionTermination::NotStarted;
+    let mut console = None;
+    let result = launch_attempt(
+        driver,
+        request,
+        completion,
+        &meters,
+        &mut termination,
+        &mut console,
+    );
+    observe(request, started, result, meters, termination, console)
+}
+
+fn launch_attempt(
+    driver: &LocalDriver,
+    request: &AttemptRequest,
+    completion: &TaskCompletion,
+    meters: &TransportMeters,
+    termination: &mut AttemptExecutionTermination,
+    console: &mut Option<runmat_execution::console::ConsoleTranscript>,
+) -> Result<WorkerResponse, TransferFailure> {
     request
         .validate()
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
@@ -225,9 +323,31 @@ pub(super) fn execute_attempt(
         let artifact_id = request.task.program_artifact_id().ok_or_else(|| {
             TransferFailure::Infrastructure("native program attempt has no program artifact".into())
         })?;
+        request
+            .task
+            .validate_invocation_reservation()
+            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+        if let Some(limits) = request.task.console {
+            limits
+                .validate_transport(u64::from(driver.config.max_message_bytes))
+                .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+        }
+        let invocation = runmat_execution::console::invocation_memory_bytes(
+            &request.task.environment,
+            request.task.console,
+        )
+        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+        if invocation
+            .checked_add(runmat_process_host::ipc::WORKER_PARENT_MONITOR_STACK_BYTES)
+            .is_none_or(|minimum| minimum > request.task.resources.memory_bytes)
+        {
+            return Err(TransferFailure::Infrastructure(
+                "native invocation and parent monitor exceed task memory reservation".into(),
+            ));
+        }
         let stored = driver
             .artifacts
-            .get(artifact_id)
+            .get(artifact_id, u64::from(driver.config.max_message_bytes))
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
         let stored: StoredProgram = serde_json::from_slice(&stored)
             .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
@@ -236,19 +356,32 @@ pub(super) fn execute_attempt(
                 "Graph local artifact lacks its typed response authority".into(),
             ));
         };
-        WorkerLaunchRequest::Direct(Box::new(WorkerRequest::Direct(
-            runmat_execution_artifact::ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
-                recipe: stored.recipe,
-                artifact: stored.artifact,
-                callable: request.task.callable.program.clone(),
-                context: request.task.invocation_context.clone(),
-                assignment: Some(assignment),
-                job_id: None,
-                arguments: request.task.inputs.clone(),
-                requested_outputs: request.task.outputs.requested_outputs,
-            },
-        )))
+        let program = runmat_execution_artifact::ProgramExecutionRequest {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            recipe: stored.recipe,
+            artifact: stored.artifact,
+            callable: request.task.callable.program.clone(),
+            context: request.task.invocation_context.clone(),
+            assignment: Some(assignment),
+            job_id: None,
+            arguments: request.task.inputs.clone(),
+            requested_outputs: request.task.outputs.requested_outputs,
+            environment: request.task.environment.clone(),
+            console: request.task.console,
+        };
+        // Never repair a malformed stored entrypoint or invoke a foreign artifact.
+        if runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()])
+            != artifact_id
+        {
+            return Err(TransferFailure::Infrastructure(
+                "native stored program differs from original admitted artifact".into(),
+            ));
+        }
+        // The worker receives its exact reservation and admits CPU parallelism within it.
+        WorkerLaunchRequest::Reserved(Box::new(
+            ReservedProgramExecutionRequest::new(program, request.task.resources.clone())
+                .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
+        ))
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -263,6 +396,7 @@ pub(super) fn execute_attempt(
                 ));
             }
         },
+        WorkerLaunchRequest::Reserved(request) => &request.request().context,
         WorkerLaunchRequest::StagedGraph(request) => &request.staged_graph_v10.context,
     };
     let spmd_rank = match context {
@@ -271,7 +405,14 @@ pub(super) fn execute_attempt(
         }
         _ => None,
     };
-    let result = runtime.block_on(run_process(driver, worker_request, completion));
+    let result = runtime.block_on(run_process(
+        driver,
+        worker_request,
+        completion,
+        meters,
+        termination,
+        console,
+    ));
     if let Some((gang, rank)) = spmd_rank {
         driver.terminate_collective_rank(&gang, rank);
     }
@@ -282,7 +423,10 @@ async fn run_process(
     driver: &LocalDriver,
     request: WorkerLaunchRequest,
     completion: &TaskCompletion,
-) -> TransferResult {
+    meters: &TransportMeters,
+    termination: &mut AttemptExecutionTermination,
+    console: &mut Option<runmat_execution::console::ConsoleTranscript>,
+) -> Result<WorkerResponse, TransferFailure> {
     #[cfg(windows)]
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
         let own_executable = std::env::current_exe()
@@ -308,11 +452,24 @@ async fn run_process(
             "local worker has an unverified Graph process tree and refuses new work".into(),
         ));
     }
-    if let WorkerLaunchRequest::Direct(request) = &request {
-        request
+    match &request {
+        WorkerLaunchRequest::Direct(request) => request
             .validate()
-            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
+        WorkerLaunchRequest::Reserved(request) => request
+            .validate()
+            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
+        WorkerLaunchRequest::StagedGraph(_) => {}
     }
+    let console_controls = match &request {
+        WorkerLaunchRequest::Reserved(request) => request.request().console,
+        WorkerLaunchRequest::Direct(_) | WorkerLaunchRequest::StagedGraph(_) => None,
+    };
+    let mut console_receiver = console_controls
+        .map(runmat_execution::console::ConsoleReceiver::new)
+        .transpose()
+        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+    let mut console_receipt = None;
     let payload = serde_json::to_vec(&request)
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     if payload.len() > driver.config.max_message_bytes as usize {
@@ -325,7 +482,7 @@ async fn run_process(
     }
     let graph_scratch = if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
         Some(
-            PrivateArtifactLease::new_attempt_scratch_in(&driver.store_root)
+            PrivateArtifactLease::new_attempt_scratch_in(&driver.config.store_root)
                 .map_err(TransferFailure::Infrastructure)?,
         )
     } else {
@@ -345,6 +502,16 @@ async fn run_process(
         NATIVE_OBJECT_STORE_ROOT_ENV.into(),
         driver.objects.root().to_string_lossy().into_owned(),
     );
+    command.environment.insert(
+        NATIVE_MESHING_SUBTASK_CACHE_ROOT_ENV.into(),
+        driver
+            .config
+            .meshing_subtask_cache_root
+            .clone()
+            .unwrap_or_else(|| driver.config.store_root.join("meshing-subtask-cache/v1"))
+            .to_string_lossy()
+            .into_owned(),
+    );
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
         command.environment.insert(
             NATIVE_ARTIFACT_STORE_ROOT_ENV.into(),
@@ -361,6 +528,9 @@ async fn run_process(
         );
     }
     command.max_stderr_bytes = driver.config.max_stderr_bytes;
+    // Spawn can fail after creating a child (for example during containment).
+    // Until root exit is observed, even an error leaves launch unconfirmed.
+    *termination = AttemptExecutionTermination::Unconfirmed;
     let child = match command.spawn().await {
         Ok(child) => child,
         Err(error) if graph_scratch.is_some() => {
@@ -409,8 +579,8 @@ async fn run_process(
     let stdio = child
         .take_stdio()
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
-    let mut reader = BufReader::new(stdio.stdout);
-    let mut writer = stdio.stdin;
+    let mut reader = BufReader::new(MeteredIo::new(stdio.stdout, meters.received.clone()));
+    let mut writer = MeteredIo::new(stdio.stdin, meters.sent.clone());
     let limits = FrameLimits {
         max_message_bytes: driver.config.max_message_bytes,
     };
@@ -492,7 +662,35 @@ async fn run_process(
                         .await
                         .map_err(|error| worker_exchange_failure(error, &stderr.text()))?;
                 }
-                WorkerProcessMessage::Completed { response } => break response,
+                WorkerProcessMessage::Console { record } => {
+                    console_receiver
+                        .as_mut()
+                        .ok_or_else(|| {
+                            TransferFailure::Infrastructure(
+                                "worker emitted unrequested console evidence".into(),
+                            )
+                        })?
+                        .push(record)
+                        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
+                }
+                WorkerProcessMessage::Completed {
+                    response,
+                    console: receipt,
+                } => {
+                    match (console_receiver.as_ref(), receipt.as_ref()) {
+                        (Some(receiver), Some(receipt)) => receiver
+                            .verify_receipt(receipt)
+                            .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?,
+                        (None, None) => {}
+                        _ => {
+                            return Err(TransferFailure::Infrastructure(
+                                "worker console receipt differs from requested controls".into(),
+                            ))
+                        }
+                    }
+                    console_receipt = receipt;
+                    break response;
+                }
                 WorkerProcessMessage::InfrastructureFailure { message } => {
                     // Do not reap the owned Graph leader before the outer
                     // error path retires its group. A completion wait here
@@ -515,7 +713,13 @@ async fn run_process(
         // No cancellation or collective command is legal after completion.
         drop(writer);
         match tokio::time::timeout(Duration::from_secs(5), child.wait_and_retire_tree()).await {
-            Ok(Ok(_)) => child_retired = true,
+            Ok(Ok(exit)) => {
+                child_retired = true;
+                *termination = AttemptExecutionTermination::ProcessExited {
+                    code: exit.code,
+                    success: exit.success,
+                };
+            }
             Ok(Err(error)) => {
                 let message = format!(
                     "Graph worker replied, but its process tree could not be retired: {error}"
@@ -536,7 +740,19 @@ async fn run_process(
             }
         }
     } else {
-        let _ = child.wait().await;
+        let exit = child.wait().await.map_err(|error| {
+            TransferFailure::WorkerLost(format!("worker exit was not observed: {error}"))
+        })?;
+        *termination = AttemptExecutionTermination::ProcessExited {
+            code: exit.code,
+            success: exit.success,
+        };
+        if !exit.success {
+            return Err(TransferFailure::Execution(format!(
+                "worker returned a response but exited unsuccessfully: {:?}",
+                exit.code
+            )));
+        }
     }
     match &request {
         WorkerLaunchRequest::Direct(request) => match request.as_ref() {
@@ -547,6 +763,7 @@ async fn run_process(
             ));
             }
         },
+        WorkerLaunchRequest::Reserved(request) => response.validate_against(request.request()),
         WorkerLaunchRequest::StagedGraph(_) => completion
             .graph_authority
             .as_ref()
@@ -560,27 +777,13 @@ async fn run_process(
     if graph_cancel_sent_at.is_some() || completion.is_cancelled() {
         return Err(TransferFailure::Cancelled);
     }
-    match response {
-        WorkerResponse::Success { outputs } => Ok(AttemptSuccess::Values {
-            outputs,
-            result_objects: Vec::new(),
-        }),
-        WorkerResponse::GraphSuccess { graph } => Ok(AttemptSuccess::Graph { graph }),
-        WorkerResponse::ExternalizedSuccess {
-            outputs,
-            result_objects,
-        } => Ok(AttemptSuccess::Values {
-            outputs,
-            result_objects,
-        }),
-        WorkerResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
-        WorkerResponse::Failure { message } => Err(TransferFailure::Execution(message)),
-        WorkerResponse::RuntimeFailure { failure } => {
-            Err(TransferFailure::Runtime(Box::new(failure)))
-        }
-    }
+    Ok(response)
     }
     .await;
+    *console = console_receiver
+        .map(|receiver| receiver.finish(console_receipt.as_ref()))
+        .transpose()
+        .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) && !child_retired {
         if let Some(reason) = child_preserved_reason {
             let AttemptChild::Graph(child) = child else {
@@ -635,6 +838,68 @@ async fn run_process(
     outcome
 }
 
+fn observe(
+    request: &AttemptRequest,
+    started: Instant,
+    response: Result<WorkerResponse, TransferFailure>,
+    meters: TransportMeters,
+    termination: AttemptExecutionTermination,
+    console: Option<runmat_execution::console::ConsoleTranscript>,
+) -> LocalAttemptObservation {
+    let wall_millis = u64::try_from(started.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    let execution = AttemptExecutionObservation {
+        attempt_id: request.id,
+        worker_id: request.worker_id,
+        wall_millis,
+        termination,
+        local_ipc_sent_bytes: meters.sent.bytes(),
+        local_ipc_received_bytes: meters.received.bytes(),
+    };
+    let accounting = |error: String| TransferFailure::Infrastructure(error);
+    let mut result = response.and_then(|response| match response {
+        WorkerResponse::Success { outputs } => {
+            AttemptSuccess::new(request, outputs, Vec::new(), wall_millis, 0, 0).map_err(accounting)
+        }
+        WorkerResponse::ExternalizedSuccess {
+            outputs,
+            result_objects,
+        } => AttemptSuccess::new(request, outputs, result_objects, wall_millis, 0, 0)
+            .map_err(accounting),
+        WorkerResponse::GraphSuccess { graph } => Ok(AttemptSuccess::Graph { graph }),
+        WorkerResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
+        WorkerResponse::Failure { message } => Err(TransferFailure::Execution(message)),
+        WorkerResponse::RuntimeFailure { failure } => {
+            Err(TransferFailure::Runtime(Box::new(failure)))
+        }
+    });
+    // Preflight only reads the admitted program. No process or result producer
+    // has been invoked, so output/egress/relay consumption is known zero. Once
+    // launch is attempted, no such claim can be inferred from its eventual error.
+    let unsuccessful_resources =
+        if result.is_err() && termination == AttemptExecutionTermination::NotStarted {
+            match AttemptResourceAccounting::for_attempt(request, wall_millis, 0, 0, 0) {
+                Ok(resources) => Some(Box::new(resources)),
+                Err(error) => {
+                    result = Err(TransferFailure::Infrastructure(format!(
+                        "{}; preflight accounting unavailable: {error}",
+                        result.as_ref().expect_err("unsuccessful preflight")
+                    )));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+    LocalAttemptObservation {
+        result,
+        execution,
+        unsuccessful_resources,
+        console,
+    }
+}
+
 fn worker_exchange_failure(error: ProcessHostError, stderr: &str) -> TransferFailure {
     let worker_was_lost = matches!(&error, ProcessHostError::Io(_));
     let message = if stderr.is_empty() {
@@ -649,135 +914,5 @@ fn worker_exchange_failure(error: ProcessHostError, stderr: &str) -> TransferFai
     }
 }
 
-#[cfg(all(test, unix))]
-mod tests {
-    use std::collections::BTreeSet;
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use runmat_execution::resource::Capability;
-    use runmat_execution::{
-        Digest, OutputContract, ProgramCallable, ProgramFunctionId, ProgramInvocationContext,
-        ProgramRevision,
-    };
-    use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
-
-    use super::{
-        run_process, worker_exchange_failure, TransferFailure, WorkerLaunchRequest, WorkerRequest,
-    };
-    use crate::driver::{LocalDriver, TaskCompletion};
-
-    mod selection;
-
-    fn shell_driver(script: &str) -> (tempfile::TempDir, Arc<LocalDriver>) {
-        let temporary = tempfile::tempdir().expect("temporary execution root");
-        let scope = crate::config::fresh_scope_id(b"process-outcome-test", 1);
-        let driver = LocalDriver::new(
-            crate::NativeExecutionConfig {
-                executable: "/bin/sh".into(),
-                worker_arguments: vec!["-c".into(), script.into()],
-                max_workers: 1,
-                max_message_bytes: 64 * 1024,
-                max_object_bytes: 64 * 1024,
-                max_stderr_bytes: 4096,
-                store_root: temporary.path().join("session"),
-                worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
-                host_inventory: runmat_core::RunMatSession::with_options(false, false)
-                    .unwrap()
-                    .execution_host_inventory(
-                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
-                    )
-                    .unwrap(),
-                accelerator_devices: Vec::new(),
-            },
-            scope,
-        )
-        .expect("local driver");
-        (temporary, driver)
-    }
-
-    fn request() -> WorkerRequest {
-        let revision = ProgramRevision::new(
-            Digest::sha256(b"graph"),
-            Digest::sha256(b"source"),
-            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
-        )
-        .expect("program revision");
-        let recipe = ProgramBuildRecipe {
-            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-            program_revision: revision,
-            entrypoint: "0".into(),
-            outputs: OutputContract {
-                requested_outputs: 1,
-                owned_work: None,
-            },
-            execution_mode: "interpreter".into(),
-            target: runmat_execution_artifact::ProgramTarget::portable("process-outcome-test"),
-            interop: runmat_types::InteropManifest::empty(),
-            accelerators: Vec::new(),
-            features: BTreeSet::new(),
-            compile_options: BTreeSet::new(),
-            source_objects: Vec::new(),
-            foreign_policy: None,
-            expected_artifact_id: None,
-        };
-        let artifact = ProgramArtifact::materialize(
-            &recipe,
-            ExecutableForm::InterpreterBytecodeV2,
-            b"not-executed".to_vec(),
-        )
-        .expect("program artifact");
-        WorkerRequest::Direct(runmat_execution_artifact::ProgramExecutionRequest {
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
-            recipe,
-            artifact,
-            callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
-            context: ProgramInvocationContext::Direct,
-            assignment: None,
-            job_id: None,
-            arguments: Vec::new(),
-            requested_outputs: 1,
-        })
-    }
-
-    #[tokio::test]
-    async fn dispatched_worker_exit_is_typed_as_worker_loss() {
-        let (_temporary, driver) = shell_driver("dd bs=1 count=1 >/dev/null 2>&1; exit 42");
-        let completion = TaskCompletion::new();
-        let failure = run_process(
-            &driver,
-            WorkerLaunchRequest::Direct(Box::new(request())),
-            &completion,
-        )
-        .await
-        .expect_err("worker exit must fail");
-        assert!(matches!(failure, TransferFailure::WorkerLost(_)));
-    }
-
-    #[tokio::test]
-    async fn requested_process_termination_remains_typed_cancellation() {
-        let (_temporary, driver) = shell_driver("dd bs=1 count=1 >/dev/null 2>&1; sleep 30");
-        let completion = TaskCompletion::new();
-        let execution = run_process(
-            &driver,
-            WorkerLaunchRequest::Direct(Box::new(request())),
-            &completion,
-        );
-        tokio::pin!(execution);
-        tokio::select! {
-            result = &mut execution => panic!("worker exited before cancellation: {result:?}"),
-            _ = tokio::time::sleep(Duration::from_millis(50)) => completion.cancel(),
-        }
-        let failure = execution.await.expect_err("cancelled worker must fail");
-        assert_eq!(failure, TransferFailure::Cancelled);
-    }
-
-    #[test]
-    fn malformed_worker_frames_remain_infrastructure_failures() {
-        let failure = worker_exchange_failure(
-            runmat_process_host::ProcessHostError::Protocol("oversized frame".into()),
-            "",
-        );
-        assert!(matches!(failure, TransferFailure::Infrastructure(_)));
-    }
-}
+#[cfg(test)]
+mod tests;

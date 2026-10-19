@@ -1179,13 +1179,93 @@ impl AccelProvider for WgpuProvider {
         ))
     }
 
+    fn query_sparse_feasibility(
+        &self,
+        query: &runmat_accelerate_api::SparseFeasibilityQuery,
+    ) -> runmat_accelerate_api::SparseFeasibility {
+        sparse::feasibility(self, query)
+    }
+
+    fn estimate_sparse_cost(
+        &self,
+        query: &runmat_accelerate_api::SparseCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        sparse::cost(self, query)
+    }
+
+    fn upload_sparse_pattern(
+        &self,
+        pattern: runmat_accelerate_api::HostCsrPatternView<'_>,
+    ) -> Result<runmat_accelerate_api::SparsePatternHandle> {
+        let id = self.sparse.next_id();
+        self.sparse.upload_pattern(self, id, pattern)
+    }
+
+    fn bind_sparse_values(
+        &self,
+        pattern: &runmat_accelerate_api::SparsePatternHandle,
+        values: &HostNumericTensorView<'_>,
+    ) -> Result<runmat_accelerate_api::SparseMatrixHandle> {
+        let id = self.sparse.next_id();
+        self.sparse.bind_values(self, id, pattern, *values)
+    }
+
+    fn free_sparse_pattern(
+        &self,
+        pattern: &runmat_accelerate_api::SparsePatternHandle,
+    ) -> Result<()> {
+        self.sparse.free_pattern(self, pattern)
+    }
+
+    fn free_sparse_matrix(&self, matrix: &runmat_accelerate_api::SparseMatrixHandle) -> Result<()> {
+        self.sparse.free_matrix(self, matrix)
+    }
+
+    fn sparse_spmv<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparseSpmvRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        sparse::execute_spmv(self, request)
+    }
+
+    fn prepare_sparse_preconditioner<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparsePreconditionerRequest<'a>,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::SparsePreconditionerHandle> {
+        sparse::prepare_preconditioner(self, request)
+    }
+
+    fn apply_sparse_preconditioner<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparsePreconditionerApplyRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        sparse::apply_preconditioner(self, request)
+    }
+
+    fn free_sparse_preconditioner(
+        &self,
+        preconditioner: &runmat_accelerate_api::SparsePreconditionerHandle,
+    ) -> Result<()> {
+        self.sparse.free_preconditioner(self, preconditioner)
+    }
+
+    fn sparse_krylov_solve<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparseKrylovRequest<'a>,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::SparseKrylovResult> {
+        sparse::execute_krylov(self, request)
+    }
+
     fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
         // WebGPU exposes a maximum single-buffer size, not a trustworthy total
         // device-memory budget. Keep total capacity unknown rather than
         // misclassifying several legal buffers as overcommitted.
         let live_bytes = self.allocations.retained_bytes();
+        let sparse_bytes = self.sparse.resident_bytes();
         let reclaimable_bytes = self.allocations.pooled_bytes(self.element_size);
-        let allocated_bytes = live_bytes.saturating_add(reclaimable_bytes);
+        let allocated_bytes = live_bytes
+            .saturating_add(sparse_bytes)
+            .saturating_add(reclaimable_bytes);
         runmat_execution::ProviderResourceSnapshot {
             device_id: self.runtime_device_id,
             capacity_bytes: None,
@@ -1194,8 +1274,10 @@ impl AccelProvider for WgpuProvider {
             scratch_available_bytes: None,
             queue_depth: None,
             queue_limit: None,
-            lost: self.allocations.is_lost(),
-            epoch: allocated_bytes ^ reclaimable_bytes.rotate_left(32),
+            lost: self.allocations.is_lost() || self.device_health.loss_reason().is_some(),
+            epoch: allocated_bytes
+                ^ reclaimable_bytes.rotate_left(32)
+                ^ sparse_bytes.rotate_left(17),
         }
     }
 
@@ -3312,6 +3394,7 @@ impl AccelProvider for WgpuProvider {
                 .map_err(runmat_accelerate_api::ProviderExecutionError::from)
         })
     }
+
     fn reduce_integer_sum_native<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

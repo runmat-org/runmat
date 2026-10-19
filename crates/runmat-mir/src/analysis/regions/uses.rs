@@ -324,7 +324,7 @@ fn rvalue_uses(value: &MirRvalue, uses: &mut Locals, defs: &mut Locals) {
             operand_uses(base, uses);
             operand_uses(member, uses);
         }
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for argument in args {
                 match argument {
                     MirCallArg::Single(argument) => operand_uses(argument, uses),

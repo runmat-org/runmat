@@ -19,6 +19,7 @@
 mod alias;
 mod aliases;
 mod callable;
+mod composed;
 mod constant;
 mod contract;
 mod descriptor;
@@ -41,6 +42,7 @@ mod tests;
 pub use self::entries::*;
 pub use alias::*;
 pub use callable::*;
+pub use composed::*;
 pub use constant::*;
 pub use contract::*;
 pub use descriptor::*;

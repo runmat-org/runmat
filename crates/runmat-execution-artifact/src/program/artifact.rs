@@ -17,13 +17,16 @@ pub enum ExecutableForm {
     InterpreterBytecodeV1 = 0,
     InterpreterScriptV1 = 1,
     TestAttemptV1 = 2,
-    ExecutableUnitV3 = 3,
+    /// Dependency-bearing executable unit; never aliases the retired V3 discriminant.
+    ExecutableUnitV4 = 9,
     NativeObjectV1 = 4,
     MeshingWorkload = 5,
     InterpreterBytecodeV2 = 6,
     InterpreterScriptV2 = 7,
     /// Versioned region payload containing the exact source map and script.
     InterpreterRegionSourcesV1 = 8,
+    AnalysisWorkload = 10,
+    GeometryWorkload = 11,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -53,7 +56,7 @@ impl ProgramArtifact {
     pub fn executable_unit(
         &self,
     ) -> ArtifactResult<Option<runmat_execution::ExecutableUnitEnvelope>> {
-        if self.form != ExecutableForm::ExecutableUnitV3 {
+        if self.form != ExecutableForm::ExecutableUnitV4 {
             return Ok(None);
         }
         runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&self.executable_bytes)
@@ -64,7 +67,7 @@ impl ProgramArtifact {
     pub fn executable_unit_admission(
         &self,
     ) -> ArtifactResult<Option<runmat_execution::ExecutableUnitAdmission>> {
-        if self.form != ExecutableForm::ExecutableUnitV3 {
+        if self.form != ExecutableForm::ExecutableUnitV4 {
             return Ok(None);
         }
         runmat_execution::ExecutableUnitEnvelope::admission(&self.executable_bytes)

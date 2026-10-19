@@ -149,8 +149,18 @@ pub fn set_geometry_scene_presentation(
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = pickGeometrySceneRegion)]
-pub fn pick_geometry_scene_region(surface_id: u32, x: f32, y: f32) -> Result<JsValue, JsValue> {
-    let result = runtime_pick_geometry_scene_region(surface_id, x, y)
+pub fn pick_geometry_scene_region(
+    surface_id: u32,
+    x: f32,
+    y: f32,
+    mode: &str,
+) -> Result<JsValue, JsValue> {
+    let mode = match mode {
+        "edge" => runmat_plot::GeometryScenePickMode::Edge,
+        "point" => runmat_plot::GeometryScenePickMode::Point,
+        _ => runmat_plot::GeometryScenePickMode::Face,
+    };
+    let result = runtime_pick_geometry_scene_region(surface_id, x, y, mode)
         .map_err(|err| runtime_error_to_js(&err))?;
     serde_wasm_bindgen::to_value(&result).map_err(|err| js_error(&err.to_string()))
 }
@@ -279,10 +289,18 @@ pub fn get_plot_surface_camera_state(surface_id: u32) -> Result<JsValue, JsValue
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = "setPlotSurfaceCameraState")]
-pub fn set_plot_surface_camera_state(surface_id: u32, state: JsValue) -> Result<(), JsValue> {
+pub fn set_plot_surface_camera_state(
+    surface_id: u32,
+    state: JsValue,
+    expected_target: JsValue,
+) -> Result<(), JsValue> {
     let parsed: PlotSurfaceCameraState =
         serde_wasm_bindgen::from_value(state).map_err(|err| js_error(&err.to_string()))?;
-    runtime_set_surface_camera_state(surface_id, parsed).map_err(|err| runtime_error_to_js(&err))
+    let target: Option<runmat_plot::collaboration::PresenceTarget> =
+        serde_wasm_bindgen::from_value(expected_target)
+            .map_err(|err| js_error(&err.to_string()))?;
+    runtime_set_surface_camera_state(surface_id, parsed, target)
+        .map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -866,4 +884,19 @@ fn shared_webgpu_context() -> Option<SharedWgpuContext> {
             Some(shared)
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = setSurfacePresence)]
+pub fn set_surface_presence(surface_id: u32, frame: JsValue) -> Result<(), JsValue> {
+    let frame = serde_wasm_bindgen::from_value(frame).map_err(|err| js_error(&err.to_string()))?;
+    runmat_runtime::builtins::plotting::set_surface_presence(surface_id, frame)
+        .map_err(|err| runtime_error_to_js(&err))
+}
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = captureSurfacePointer)]
+pub fn capture_surface_pointer(surface_id: u32, x: f32, y: f32) -> Result<JsValue, JsValue> {
+    let point = runmat_runtime::builtins::plotting::capture_surface_pointer(surface_id, x, y)
+        .map_err(|err| runtime_error_to_js(&err))?;
+    serde_wasm_bindgen::to_value(&point).map_err(|err| js_error(&err.to_string()))
 }

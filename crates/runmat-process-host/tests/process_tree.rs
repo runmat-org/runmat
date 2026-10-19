@@ -160,3 +160,15 @@ async fn joined_helper_stays_in_ancestor_group_without_killing_its_sibling() {
     assert!(sibling.try_wait().unwrap().is_none());
     sibling.terminate_tree().await.unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn invalid_process_identities_reject_without_signalling_a_substitute_group() {
+    for process_id in [0, u32::MAX] {
+        let error = runmat_process_host::terminate_process_tree(process_id)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!is_process_alive(process_id));
+    }
+}

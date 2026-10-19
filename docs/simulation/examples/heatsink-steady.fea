@@ -1,0 +1,50 @@
+geometry heatsink {
+    file = "./geometry/electronics-heatsink.step"
+    units = mm
+    region body : solid { select id "solid_000001"; expect exactly_one }
+    region heater_face : face { select id "face_000001"; expect exactly_one }
+    region outer_surface : face { select result; expect one_or_more }
+}
+mesh heatsink on geometry.heatsink {
+    tetrahedra {
+        order = linear
+        target_size = 10 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+material aluminium {
+    mass_density = 2700 kg/m^3
+    thermal {
+        reference_temperature = 298.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.000023 K^-1
+        conductivity = 160 W/m/K
+        specific_heat = 900 J/kg/K
+    }
+}
+model cooled_heatsink {
+    thermal { reference_temperature = 298.15 K }
+    assign material.aluminium to geometry.heatsink.region.body
+    load heater {
+        thermal.heat_flux {
+            target = geometry.heatsink.region.heater_face
+            value = 2290.319 W/m^2
+        }
+    }
+    load air_cooling {
+        thermal.convection {
+            target = geometry.heatsink.region.outer_surface
+            ambient_temperature = 298.15 K
+            coefficient = 35 W/m^2/K
+        }
+    }
+}
+study heatsink_temperature {
+    geometry = geometry.heatsink
+    mesh = mesh.heatsink
+    model = model.cooled_heatsink
+    formulation = experimental
+    analysis heat { thermal steady {} }
+    output temperature = analysis.heat.field.node.temperature
+    output heat_flux = analysis.heat.field.element.heat_flux
+}

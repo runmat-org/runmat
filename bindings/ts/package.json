@@ -30,20 +30,24 @@
   "scripts": {
     "clean": "rimraf dist artifacts pkg pkg-web lsp-web ../../crates/runmat-wasm/pkg ../../crates/runmat-wasm/pkg-web ../../crates/runmat-lsp/pkg ../../crates/runmat-lsp/pkg-web",
     "generate:builtins": "node ./scripts/generate-builtins.cjs",
-    "generate:fea-contracts": "node ./scripts/generate-fea-contracts.cjs",
+    "generate:collaboration-contracts": "node ./scripts/generate-collaboration-contracts.cjs",
+    "check:collaboration-contracts": "node ./scripts/generate-collaboration-contracts.cjs --check",
+    "generate:fea-contracts": "node ./scripts/test-fea-semantic-typegen.cjs && node ./scripts/generate-fea-contracts.cjs && node ./scripts/test-fea-signal-shape.cjs && node ./scripts/test-fea-fluid-contracts.cjs && node ./scripts/generate-fea-semantic-contracts.cjs && node ./scripts/generate-fea-workspace-contracts.cjs && node ./scripts/test-fea-workspace-contracts.cjs",
     "build:registry": "node ../../scripts/regenerate-wasm-registry.mjs",
     "build:wasm:bundler": "wasm-pack build ../../crates/runmat-wasm --target bundler --out-dir ../../bindings/ts/pkg --out-name runmat_wasm --release -- --features occt-wasm-host",
     "build:wasm:web": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release -- --features occt-wasm-host",
     "build:wasm:web:core": "wasm-pack build ../../crates/runmat-wasm --target web --out-dir ../../bindings/ts/pkg-web --out-name runmat_wasm_web --release",
     "build:lsp": "wasm-pack build ../../crates/runmat-lsp --target web --out-dir ../../bindings/ts/lsp-web --out-name runmat_lsp --release -- --no-default-features --features wasm",
-    "build:types": "npm run generate:builtins && npm run generate:fea-contracts && tsc -p tsconfig.json",
+    "build:types": "npm run generate:builtins && npm run generate:fea-contracts && npm run generate:collaboration-contracts && tsc -p tsconfig.json",
     "build": "npm run clean && npm run build:registry && npm run build:wasm:web && npm run build:lsp && npm run build:types && npm run sync:wasm",
     "build:examples": "rimraf dist/pkg-web pkg-web ../../crates/runmat-wasm/pkg-web && npm run build:registry && npm run build:wasm:web:core && npm run sync:wasm",
-    "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host",
+    "ci": "npm run build && npm run lint && npm test && npm run test:fea-assessments:wasm && cargo check -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host",
     "lint": "tsc --noEmit",
     "test": "vitest run",
+    "test:pinned-wasm": "node ./scripts/test-pinned-wasm.mjs",
+    "test:fea-assessments:wasm": "node ./scripts/test-fea-assessment-authoring-wasm.mjs",
     "sync:wasm": "node ./scripts/sync-wasm-artifacts.cjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm run test:fea-assessments:wasm"
   },
   "exports": {
     ".": {
@@ -95,5 +99,10 @@
     "rimraf": "^5.0.7",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
+  },
+  "packageManager": "pnpm@10.26.1+sha512.664074abc367d2c9324fdc18037097ce0a8f126034160f709928e9e9f95d98714347044e5c3164d65bd5da6c59c6be362b107546292a8eecb7999196e5ce58fa",
+  "dependencies": {
+    "cbor-x": "^1.6.0",
+    "zod": "^3.25.76"
   }
 }

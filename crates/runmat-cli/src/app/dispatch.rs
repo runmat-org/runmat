@@ -3,8 +3,8 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{
-    accel, batch, benchmark, check, compile, config, gc, job, mex, native_interface, package, repl,
-    script, test, version,
+    accel, batch, benchmark, check, compile, config, fea, gc, job, mesh, mex, native_interface,
+    package, repl, script, test, version,
 };
 use crate::remote;
 
@@ -44,6 +44,7 @@ pub(crate) async fn dispatch_with_graphics(
                 cli,
                 config,
                 false,
+                crate::cli::ExecutionTargetArgs::default(),
                 graphics,
             )
             .await
@@ -71,7 +72,12 @@ async fn execute_command(
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
             repl::execute_repl_with_graphics(&repl_config, cli, graphics).await
         }
-        Commands::Run { file, json, args } => {
+        Commands::Run {
+            file,
+            execution,
+            json,
+            args,
+        } => {
             script::execute_script_with_graphics(
                 file,
                 args,
@@ -79,7 +85,42 @@ async fn execute_command(
                 cli,
                 config,
                 json,
+                execution,
                 graphics,
+            )
+            .await
+        }
+        Commands::Mesh {
+            source,
+            execution,
+            source_units,
+            output,
+            evidence,
+            target_size,
+            deviation,
+            element_order,
+            max_elements,
+            seed,
+            force,
+            json,
+        } => {
+            mesh::execute_with_target(
+                mesh::MeshCommand {
+                    source,
+                    source_units,
+                    output,
+                    evidence,
+                    target_size_m: target_size,
+                    maximum_deviation_m: deviation,
+                    element_order,
+                    maximum_elements: max_elements,
+                    deterministic_seed: seed,
+                    force,
+                    json,
+                },
+                execution,
+                cli,
+                config,
             )
             .await
         }
@@ -127,6 +168,7 @@ async fn execute_command(
             deny,
             search_paths,
         } => check::execute_check(file, cli, config, json, verbose, deny, search_paths).await,
+        Commands::Fea { fea_command } => fea::execute_command(fea_command, cli, config).await,
         Commands::Version { detailed } => {
             version::show_version(detailed);
             Ok(())

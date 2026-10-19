@@ -79,6 +79,18 @@ pub async fn resolve_native_project(
     )
     .await
     .map_err(|error| NativeProjectError::Resolve(error.to_string()))?;
+    if resolved.lock_decision == PathLockDecision::WriteGenerated {
+        write_lock(&lock_path, &resolved.lock)?;
+    }
+    retain_resolved_project(resolved, backend, cache_config, provider).await
+}
+
+pub(super) async fn retain_resolved_project(
+    resolved: ResolvedProject,
+    backend: Arc<SqliteCacheBackend>,
+    cache_config: NativeCacheConfig,
+    provider: NativePackageSourceProvider,
+) -> Result<NativeResolvedProject, NativeProjectError> {
     let cached_trees = resolved
         .acquired_git_sources
         .iter()
@@ -107,9 +119,6 @@ pub async fn resolve_native_project(
             .await
             .map_err(|error| NativeProjectError::Cache(error.to_string()))?;
         }
-    }
-    if resolved.lock_decision == PathLockDecision::WriteGenerated {
-        write_lock(&lock_path, &resolved.lock)?;
     }
     let cache_state = backend
         .snapshot()

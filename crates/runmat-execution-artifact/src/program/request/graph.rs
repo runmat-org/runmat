@@ -358,7 +358,7 @@ impl GraphExecutionRequest {
         }
         let admitted = self.artifact.validate_context(&self.recipe)?;
         self.artifact.target.validate_for_portable_host()?;
-        if self.artifact.form != ExecutableForm::ExecutableUnitV3
+        if self.artifact.form != ExecutableForm::ExecutableUnitV4
             || admitted.unit_admission.is_none()
             || self.requested_outputs != self.recipe.outputs.requested_outputs
             || self
@@ -745,7 +745,7 @@ impl GraphExecutionRequest {
                             ));
                         }
                         let mut matching = bundle.manifest.artifacts.iter().filter(|artifact| {
-                            artifact.form == ExecutableForm::ExecutableUnitV3
+                            artifact.form == ExecutableForm::ExecutableUnitV4
                                 && artifact.executable_bytes.as_slice() == unit_bytes.as_slice()
                         });
                         let Some(matched) = matching.next() else {

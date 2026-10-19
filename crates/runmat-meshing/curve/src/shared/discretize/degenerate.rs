@@ -37,7 +37,8 @@ pub(super) fn discretize_degenerate_edge(
             error.to_string(),
         )
     })?;
-    let witness_parameters = interval_parameters(parameter_range.start, parameter_range.end);
+    let witness_parameters = interval_parameters(parameter_range.start, parameter_range.end)
+        .map_err(|error| geometry_error(edge, error))?;
     let vertex_id = edge.start_vertex_id.as_ref().ok_or_else(|| {
         edge_error(
             edge,

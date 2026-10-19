@@ -8,7 +8,6 @@ use super::{
         discretize_edge, geometry_error, validate_options, CurveMetricField,
         SharedCurveDiscretizationOptions, SharedCurveEvaluationContext,
     },
-    validation::validate_curve_against_topology,
     SharedCurveBatch, SharedCurveError, SharedCurveMesh, SHARED_CURVE_BATCH_SCHEMA_VERSION,
     SHARED_CURVE_MESH_SCHEMA_VERSION,
 };
@@ -123,6 +122,15 @@ pub(super) fn validate_batch(
     batch: &SharedCurveBatch,
     topology: &ExactBRepTopology,
 ) -> Result<(), SharedCurveError> {
+    validate_batch_with_cancellation(batch, topology, None)
+}
+
+pub(super) fn validate_batch_with_cancellation(
+    batch: &SharedCurveBatch,
+    topology: &ExactBRepTopology,
+    cancellation: Option<&dyn runmat_meshing_core::MeshingCancellationSignal>,
+) -> Result<(), SharedCurveError> {
+    super::validation::checkpoint(cancellation)?;
     if batch.schema_version != SHARED_CURVE_BATCH_SCHEMA_VERSION || batch.edges.is_empty() {
         return Err(SharedCurveError::invalid_contract(
             "curve batch",
@@ -135,11 +143,9 @@ pub(super) fn validate_batch(
         .entity_range
         .as_ref()
         .expect("kind validated");
-    let expected = topology
-        .edges
-        .iter()
-        .filter(|edge| edge.id >= range.first && edge.id <= range.last)
-        .collect::<Vec<_>>();
+    let start = topology.edges.partition_point(|edge| edge.id < range.first);
+    let end = topology.edges.partition_point(|edge| edge.id <= range.last);
+    let expected = &topology.edges[start..end];
     if expected.len() as u64 != range.entity_count
         || batch.edges.len() != expected.len()
         || batch
@@ -154,7 +160,11 @@ pub(super) fn validate_batch(
         ));
     }
     for curve in &batch.edges {
-        validate_curve_against_topology(curve, topology)?;
+        super::validation::validate_curve_against_topology_with_cancellation(
+            curve,
+            topology,
+            cancellation,
+        )?;
     }
     Ok(())
 }

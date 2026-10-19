@@ -23,10 +23,16 @@ const mismatchedCrates = metadata.packages
   .filter((pkg) => workspaceMembers.has(pkg.id) && pkg.version !== expected)
   .map((pkg) => `${pkg.name}@${pkg.version}`)
   .sort();
+const publishableCratesMissingDescriptions = metadata.packages
+  .filter((pkg) => workspaceMembers.has(pkg.id))
+  .filter((pkg) => pkg.publish === null || pkg.publish.length > 0)
+  .filter((pkg) => typeof pkg.description !== "string" || pkg.description.trim().length === 0)
+  .map((pkg) => `${pkg.name}: missing package.description`)
+  .sort();
 
 const bindingsPackage = JSON.parse(fs.readFileSync(path.join(root, "bindings/ts/package.json"), "utf8"));
 const bindingsLock = JSON.parse(fs.readFileSync(path.join(root, "bindings/ts/package-lock.json"), "utf8"));
-const mismatches = [...mismatchedCrates];
+const mismatches = [...mismatchedCrates, ...publishableCratesMissingDescriptions];
 if (bindingsPackage.version !== expected) {
   mismatches.push(`bindings/ts/package.json=${bindingsPackage.version}`);
 }

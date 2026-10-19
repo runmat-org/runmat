@@ -12,13 +12,16 @@ mod load_case;
 mod material;
 mod material_assignment;
 mod model;
+mod model_types;
 mod plan;
 mod plot;
+mod policy_types;
 mod results;
 mod run;
 mod run_options;
 mod step;
 mod study;
+mod study_types;
 mod sweep;
 mod trends;
 mod validate;
@@ -67,4 +70,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(sweep::ENTRIES.iter().copied());
     values.extend(trends::ENTRIES.iter().copied());
     values.extend(validate::ENTRIES.iter().copied());
+    model_types::extend_entries(values);
+    policy_types::extend_entries(values);
+    study_types::extend_entries(values);
 }

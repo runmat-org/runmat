@@ -49,6 +49,16 @@ pub fn clone_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
 }
 
 #[cfg(feature = "plot-core")]
+pub fn replace_geometry_scene(
+    handle: u32,
+    scene: runmat_plot::GeometryScene,
+) -> crate::BuiltinResult<()> {
+    with_geometry_scene_mut(handle, |current| {
+        *current = scene;
+    })
+}
+
+#[cfg(feature = "plot-core")]
 pub fn append_geometry_scene_chunks(
     handle: u32,
     chunks: Vec<runmat_plot::GeometrySceneChunk>,
@@ -221,6 +231,7 @@ fn merge_geometry_scene_overlay(
     current.vertex_count = scene.vertex_count();
     current.triangle_count = scene.triangle_count();
     current.progress_percent = incoming.progress_percent;
+    current.scalar_legend = incoming.scalar_legend.or(current.scalar_legend);
 
     if current.assembly_nodes.is_empty() {
         current.assembly_nodes = incoming.assembly_nodes;

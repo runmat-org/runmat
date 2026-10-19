@@ -119,7 +119,7 @@ fn portable_function_request_invokes_the_admitted_local_registry_body() {
     };
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::ExecutableUnitV3,
+        ExecutableForm::ExecutableUnitV4,
         envelope.canonical_bytes().expect("canonical unit"),
     )
     .expect("program artifact");

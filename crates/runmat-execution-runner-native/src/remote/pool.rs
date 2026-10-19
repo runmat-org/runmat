@@ -1,25 +1,26 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::cancellation::CancellationSource;
-use runmat_execution::state::PoolState;
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
+use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::{
-    GraphExecutionRequest, ProgramExecutionRequest, ProjectRevisionRecord, WorkerProgramRequest,
+    ArtifactResult, GraphExecutionRequest, ProgramExecutionRequest, ProjectRevisionRecord,
+    WorkerProgramRequest,
 };
 use runmat_execution_runner::pool::ResizeRequest;
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
-    AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction,
-    DriverCommand, DriverConfig, PoolSpec, TaskSubmission,
+    AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction, DriverCommand,
+    DriverConfig, PoolSpec, TaskSubmission,
 };
 use runmat_execution_transport_native::control::DriverArtifactDownload;
 use tokio::sync::{oneshot, Mutex as AsyncMutex, RwLock};
 
 use super::pool_progress::RemoteTaskCompletion;
-use super::{RemoteAttempt, RemoteWorkerChannel};
+use super::RemoteWorkerChannel;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 type CompletionResult = Result<AttemptSuccess, crate::NativeProgramFailure>;
@@ -35,7 +36,51 @@ pub(super) struct SignedGraphTransfer {
     pub(super) program_length: u64,
 }
 
+mod admission;
+mod attempt_execution;
 mod completion;
+mod input_inventory;
+mod inspection;
+mod membership;
+mod object_registration;
+mod recovery;
+mod route_loss;
+
+pub use recovery::{RemotePoolCheckpoint, RemotePoolRestoreAuthority};
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) struct WorkerRouteIdentity {
+    worker_id: runmat_execution::identity::WorkerId,
+    generation: u64,
+}
+
+#[derive(Clone)]
+struct WorkerRoute {
+    identity: WorkerRouteIdentity,
+    channel: Arc<dyn RemoteWorkerChannel>,
+}
+
+enum FailedRoute {
+    Observed(WorkerRouteIdentity),
+    Missing,
+}
+
+// A terminal run checkpoint must not outrun a worker's cancellation acknowledgement.
+// Keep this guard even if the dispatch future is dropped or panics: in that case
+// ownership has not been proven quiescent and recovery must be indeterminate.
+struct CancellationDispatchGuard(Arc<RemotePoolDriver>, bool);
+
+impl Drop for CancellationDispatchGuard {
+    fn drop(&mut self) {
+        if !self.1 {
+            self.0
+                .cancellation_ownership_failed
+                .store(true, Ordering::Release);
+        }
+        self.0.cancellation_in_flight.fetch_sub(1, Ordering::AcqRel);
+        self.0.cancellation_settled.notify_waiters();
+    }
+}
 
 /// Portable scheduler composition over allocation-scoped remote worker routes.
 pub struct RemotePoolDriver {
@@ -43,8 +88,10 @@ pub struct RemotePoolDriver {
     pub(super) pool_id: PoolId,
     direct_bundle: Option<DirectPoolBundle>,
     pub(super) driver: Mutex<Driver>,
-    channels: RwLock<HashMap<runmat_execution::identity::WorkerId, Arc<dyn RemoteWorkerChannel>>>,
+    worker_registration: AsyncMutex<()>,
+    channels: RwLock<HashMap<runmat_execution::identity::WorkerId, WorkerRoute>>,
     applied_software_readiness: Mutex<HashSet<runmat_execution::identity::WorkerId>>,
+    next_route_generation: AtomicU64,
     installed_nodes: AsyncMutex<BTreeSet<String>>,
     value_scope: String,
     values: super::pool_values::RemoteValueCatalog,
@@ -56,10 +103,18 @@ pub struct RemotePoolDriver {
     // caller's bounded cancellation drain becomes indeterminate.
     _graph_stage: Mutex<Option<super::program_staging::StagedGraphProgram>>,
     attempt_cancellation: Mutex<HashMap<runmat_execution::identity::AttemptId, CancellationSource>>,
+    input_inventories: Mutex<input_inventory::InputInventories>,
     pub(super) completions: Mutex<HashMap<TaskId, oneshot::Sender<(u64, CompletionResult)>>>,
     completion_sequence: AtomicU64,
     pub(super) progress: Mutex<HashMap<TaskId, Arc<super::pool_progress::RemoteProgressBuffer>>>,
     pub(super) collectives: Arc<crate::driver::collective::ProcessCollectiveBroker>,
+    admission: Mutex<()>,
+    restored_completions: Mutex<HashMap<TaskId, RemoteTaskCompletion>>,
+    committed_task: tokio::sync::Notify,
+    committed_event_watermark: AtomicU64,
+    cancellation_in_flight: AtomicUsize,
+    cancellation_settled: tokio::sync::Notify,
+    cancellation_ownership_failed: AtomicBool,
 }
 
 /// Direct V7 admission is backed by the installed bundle. Graph V10 instead
@@ -69,6 +124,30 @@ struct DirectPoolBundle {
     identity: Digest,
     project_revision: ProjectRevisionRecord,
     bytes: Arc<[u8]>,
+}
+
+impl CacheImport for RemotePoolDriver {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.execution_objects
+            .get_by_digest_admitted(digest, maximum_bytes, admit)
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.execution_objects
+            .get_by_digest_bounded(digest, maximum_bytes)
+    }
+
+    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        self.read_verified_bounded(digest, u64::MAX)
+    }
 }
 
 impl RemotePoolDriver {
@@ -135,25 +214,38 @@ impl RemotePoolDriver {
             parent: None,
         })?;
         driver.handle(DriverCommand::CreatePool(pool))?;
+        driver.handle(DriverCommand::Tick {
+            now_millis: now_millis(),
+        })?;
         Ok(Arc::new(Self {
             scope_id,
             pool_id,
             direct_bundle,
             driver: Mutex::new(driver),
+            worker_registration: AsyncMutex::new(()),
             channels: RwLock::new(HashMap::new()),
             applied_software_readiness: Mutex::new(HashSet::new()),
+            next_route_generation: AtomicU64::new(1),
             installed_nodes: AsyncMutex::new(BTreeSet::new()),
             value_scope: value_scope.into(),
             values: super::pool_values::RemoteValueCatalog::default(),
-            execution_objects: super::pool_objects::RemoteObjectCatalog::default(),
+            execution_objects: super::pool_objects::RemoteObjectCatalog::new()?,
             programs: Mutex::new(HashMap::new()),
             graph_transfers: Mutex::new(HashMap::new()),
             _graph_stage: Mutex::new(None),
             attempt_cancellation: Mutex::new(HashMap::new()),
+            input_inventories: Mutex::new(input_inventory::InputInventories::default()),
             completions: Mutex::new(HashMap::new()),
             completion_sequence: AtomicU64::new(0),
             progress: Mutex::new(HashMap::new()),
             collectives: Arc::new(crate::driver::collective::ProcessCollectiveBroker::default()),
+            admission: Mutex::new(()),
+            restored_completions: Mutex::new(HashMap::new()),
+            committed_task: tokio::sync::Notify::new(),
+            committed_event_watermark: AtomicU64::new(0),
+            cancellation_in_flight: AtomicUsize::new(0),
+            cancellation_settled: tokio::sync::Notify::new(),
+            cancellation_ownership_failed: AtomicBool::new(false),
         }))
     }
 
@@ -166,272 +258,47 @@ impl RemotePoolDriver {
             .register(reference, encoded.into(), &self.value_scope)
     }
 
-    pub fn register_execution_object(
-        &self,
-        reference: runmat_execution::value::ValueRef,
-        encoded: impl Into<Arc<[u8]>>,
-    ) -> NativeExecutionResult<()> {
-        let encoded = encoded.into();
-        self.execution_objects
-            .register(reference, encoded, &self.value_scope)
-    }
-
-    pub fn execution_object(
+    pub(super) fn resolve_value_object(
         &self,
         reference: &runmat_execution::value::ValueRef,
-    ) -> NativeExecutionResult<Option<Arc<[u8]>>> {
-        self.execution_objects.get(reference)
+    ) -> NativeExecutionResult<runmat_execution::value::ValuePayload> {
+        self.values.resolve(reference, &self.value_scope)
     }
 
-    pub async fn add_worker(
-        self: &Arc<Self>,
-        channel: Arc<dyn RemoteWorkerChannel>,
-    ) -> NativeExecutionResult<()> {
-        let worker = channel.worker().clone();
-        if worker.pool_id != self.pool_id {
-            return Err(NativeExecutionError::Configuration(
-                "remote worker belongs to a different pool".into(),
-            ));
-        }
-        let node = channel.node_identity().to_string();
-        if let Some(bundle) = &self.direct_bundle {
-            let mut installed = self.installed_nodes.lock().await;
-            let receipt = if installed.contains(&node) {
-                channel.activate_bundle(bundle.digest).await?
-            } else {
-                channel.install_bundle(bundle.digest, &bundle.bytes).await?
-            };
-            if receipt.bundle_digest != bundle.digest
-                || receipt.bundle_identity != bundle.identity
-                || receipt.project_revision != bundle.project_revision
-                || receipt.stored_bytes != bundle.bytes.len() as u64
-            {
-                return Err(NativeExecutionError::Protocol(
-                    "remote worker did not acknowledge the exact bundle".into(),
-                ));
+    pub const fn scope_id(&self) -> ExecutionScopeId {
+        self.scope_id
+    }
+
+    pub const fn pool_id(&self) -> PoolId {
+        self.pool_id
+    }
+
+    pub fn value_scope(&self) -> &str {
+        &self.value_scope
+    }
+
+    /// Return an accepted commit event even if its notification was already consumed.
+    pub(super) async fn committed_task_after(&self, published_watermark: u64) -> u64 {
+        loop {
+            let notified = self.committed_task.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let watermark = self.committed_event_watermark.load(Ordering::Acquire);
+            if watermark > published_watermark {
+                return watermark;
             }
-            if !installed.contains(&node) {
-                installed.insert(node);
-            }
+            notified.await;
         }
-        self.channels.write().await.insert(worker.id, channel);
-        let actions = {
-            let mut driver = self.driver.lock().expect("remote driver poisoned");
-            let mut actions = driver.handle(DriverCommand::RegisterWorker(worker))?;
-            actions.extend(driver.handle(DriverCommand::RefreshPoolCapabilities {
-                pool_id: self.pool_id,
-            })?);
-            actions
-        };
-        self.dispatch(actions);
-        self.refresh_pool_state()?;
-        self.refresh_worker_software_capabilities().await?;
-        Ok(())
     }
 
-    /// Pull only readiness already authenticated by each encrypted route.
-    /// This does not query or wait for a worker and is safe on the ordinary
-    /// V10 reconciliation path.
-    pub async fn refresh_worker_software_capabilities(
-        self: &Arc<Self>,
-    ) -> NativeExecutionResult<()> {
-        let observed = self
-            .channels
-            .read()
-            .await
-            .iter()
-            .filter_map(|(id, channel)| {
-                channel
-                    .verified_software_capabilities()
-                    .map(|capabilities| (*id, capabilities))
-            })
-            .collect::<Vec<_>>();
-        if observed.is_empty() {
-            return Ok(());
-        }
-        let actions = {
-            let mut applied = self
-                .applied_software_readiness
-                .lock()
-                .expect("worker readiness registry poisoned");
-            let mut driver = self.driver.lock().expect("remote driver poisoned");
-            let mut actions = Vec::new();
-            for (worker_id, capabilities) in observed {
-                if applied.contains(&worker_id) {
-                    continue;
-                }
-                actions.extend(
-                    driver.handle(DriverCommand::AdmitWorkerSoftwareCapabilities {
-                        worker_id,
-                        capabilities,
-                    })?,
-                );
-                actions.extend(driver.handle(DriverCommand::RefreshPoolCapabilities {
-                    pool_id: self.pool_id,
-                })?);
-                applied.insert(worker_id);
-            }
-            actions
-        };
-        self.dispatch(actions);
-        Ok(())
-    }
-
-    pub fn submit(
-        self: &Arc<Self>,
-        submission: TaskSubmission,
-        program: ProgramExecutionRequest,
-    ) -> NativeExecutionResult<RemoteTaskCompletion> {
-        if self.direct_bundle.is_none() {
-            return Err(NativeExecutionError::Configuration(
-                "direct request cannot use a graph-only remote pool".into(),
-            ));
-        }
-        program.validate().map_err(|error| {
-            NativeExecutionError::Protocol(format!("remote program request is invalid: {error}"))
-        })?;
-        program
-            .recipe
-            .validate_resource_request(&submission.request.resources)
-            .map_err(|error| {
-                NativeExecutionError::Protocol(format!(
-                    "remote scheduler resources do not satisfy the program: {error}"
-                ))
-            })?;
-        self.submit_selected(submission, WorkerProgramRequest::Direct(program), None)
-    }
-
-    pub(super) fn submit_graph(
-        self: &Arc<Self>,
-        submission: TaskSubmission,
-        graph: GraphExecutionRequest,
-        encoded_bytes: usize,
-        transfer: Option<SignedGraphTransfer>,
-    ) -> NativeExecutionResult<RemoteTaskCompletion> {
-        if self.direct_bundle.is_some() {
-            return Err(NativeExecutionError::Configuration(
-                "graph request cannot use a direct-bundle remote pool".into(),
-            ));
-        }
-        graph.validate().map_err(|error| {
-            NativeExecutionError::Protocol(format!("remote graph request is invalid: {error}"))
-        })?;
-        graph
-            .recipe
-            .validate_resource_request(&submission.request.resources)
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        let demand = graph
-            .input_allocation_floor_bytes(encoded_bytes)
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        if submission.request.resources.memory_bytes < demand
-            || !submission.request.inputs.is_empty()
-            || submission.request.outputs.requested_outputs != graph.requested_outputs
-            || submission.request.invocation_context != graph.context
-        {
-            return Err(NativeExecutionError::Protocol(
-                "remote graph workload does not match its resource or invocation admission".into(),
-            ));
-        }
-        let transfer = transfer.ok_or_else(|| {
-            NativeExecutionError::Protocol(
-                "remote Graph execution has no authenticated staged transfer".into(),
-            )
-        })?;
-        if transfer.program_length != encoded_bytes as u64 {
-            return Err(NativeExecutionError::Protocol(
-                "remote Graph allocation length differs from its staged Program".into(),
-            ));
-        }
-        self.submit_selected(
-            submission,
-            WorkerProgramRequest::Graph(graph),
-            Some(transfer),
-        )
-    }
-
-    fn submit_selected(
-        self: &Arc<Self>,
-        submission: TaskSubmission,
-        program: WorkerProgramRequest,
-        graph_transfer: Option<SignedGraphTransfer>,
-    ) -> NativeExecutionResult<RemoteTaskCompletion> {
-        if submission.request.scope_id != self.scope_id
-            || submission.request.pool_id != self.pool_id
-        {
-            return Err(NativeExecutionError::Configuration(
-                "remote task is outside this driver authority".into(),
-            ));
-        }
-        let task_id = submission.request.id;
-        let (sender, receiver) = oneshot::channel();
-        let progress = Arc::new(super::pool_progress::RemoteProgressBuffer::default());
-        let mut driver = self.driver.lock().expect("remote driver poisoned");
-        let actions = driver.handle(DriverCommand::Submit(Box::new(submission)))?;
-        self.programs
+    pub(super) fn retain_graph_stage(
+        &self,
+        stage: Option<super::program_staging::StagedGraphProgram>,
+    ) {
+        *self
+            ._graph_stage
             .lock()
-            .expect("remote program catalog poisoned")
-            .insert(task_id, Arc::new(program));
-        if let Some(transfer) = graph_transfer {
-            self.graph_transfers
-                .lock()
-                .expect("remote Graph transfer registry poisoned")
-                .insert(task_id, Arc::new(transfer));
-        }
-        self.completions
-            .lock()
-            .expect("remote completion registry poisoned")
-            .insert(task_id, sender);
-        self.progress
-            .lock()
-            .expect("remote progress registry poisoned")
-            .insert(task_id, Arc::clone(&progress));
-        drop(driver);
-        self.dispatch(actions);
-        Ok(RemoteTaskCompletion::new(receiver, progress))
-    }
-
-    pub fn resize(self: &Arc<Self>, desired_workers: u32) -> NativeExecutionResult<()> {
-        let actions = self.driver.lock().expect("remote driver poisoned").handle(
-            DriverCommand::ResizePool {
-                pool_id: self.pool_id,
-                request: ResizeRequest { desired_workers },
-            },
-        )?;
-        self.dispatch(actions);
-        Ok(())
-    }
-
-    pub async fn remove_worker(
-        self: &Arc<Self>,
-        worker_id: runmat_execution::identity::WorkerId,
-        lost: bool,
-    ) -> NativeExecutionResult<()> {
-        let channel = self.channels.write().await.remove(&worker_id);
-        self.applied_software_readiness
-            .lock()
-            .expect("worker readiness registry poisoned")
-            .remove(&worker_id);
-        let actions = {
-            let mut driver = self.driver.lock().expect("remote driver poisoned");
-            let mut actions = if lost {
-                driver.handle(DriverCommand::WorkerLost(worker_id))?
-            } else {
-                driver.handle(DriverCommand::DrainWorker(worker_id))?
-            };
-            actions.extend(driver.handle(DriverCommand::RefreshPoolCapabilities {
-                pool_id: self.pool_id,
-            })?);
-            actions
-        };
-        self.dispatch(actions);
-        self.resolve_non_success_terminals();
-        if !lost {
-            if let Some(channel) = channel {
-                channel.drain().await?;
-            }
-        }
-        self.refresh_pool_state()?;
-        Ok(())
+            .expect("remote Graph stage owner poisoned") = stage;
     }
 
     pub fn cancel(self: &Arc<Self>, reason: CancellationReason) -> NativeExecutionResult<()> {
@@ -446,49 +313,17 @@ impl RemotePoolDriver {
         Ok(())
     }
 
-    pub(super) fn retain_graph_stage(
-        &self,
-        stage: Option<super::program_staging::StagedGraphProgram>,
-    ) {
-        *self
-            ._graph_stage
-            .lock()
-            .expect("remote Graph stage owner poisoned") = stage;
-    }
-
-    pub fn snapshot(&self) -> runmat_execution_runner::DriverSnapshot {
-        self.driver
-            .lock()
-            .expect("remote driver poisoned")
-            .snapshot()
-    }
-
-    fn refresh_pool_state(self: &Arc<Self>) -> NativeExecutionResult<()> {
-        let mut driver = self.driver.lock().expect("remote driver poisoned");
-        let snapshot = driver.snapshot();
-        let pool = snapshot
-            .pools
-            .get(&self.pool_id)
-            .ok_or_else(|| NativeExecutionError::Protocol("remote pool disappeared".into()))?;
-        let ready = pool
-            .workers
-            .values()
-            .filter(|worker| worker.accepts_work())
-            .count() as u32
-            >= pool.spec.min_workers;
-        let target = if ready {
-            PoolState::Ready
-        } else {
-            PoolState::Creating
-        };
-        if pool.state != target {
-            let actions = driver.handle(DriverCommand::SetPoolState {
-                pool_id: self.pool_id,
-                state: target,
-            })?;
-            drop(driver);
-            self.dispatch(actions);
-        }
+    /// Advances deadline, wall-time, and cancellation escalation state using wall-clock time.
+    pub fn tick(self: &Arc<Self>) -> NativeExecutionResult<()> {
+        let actions =
+            self.driver
+                .lock()
+                .expect("remote driver poisoned")
+                .handle(DriverCommand::Tick {
+                    now_millis: now_millis(),
+                })?;
+        self.dispatch(actions);
+        self.resolve_non_success_terminals();
         Ok(())
     }
 
@@ -511,191 +346,11 @@ impl RemotePoolDriver {
         }
     }
 
-    fn launch(self: &Arc<Self>, request: AttemptRequest) {
-        let this = Arc::clone(self);
-        let cancellation = CancellationSource::new();
-        self.attempt_cancellation
-            .lock()
-            .expect("remote attempt cancellation registry poisoned")
-            .insert(request.id, cancellation.clone());
-        tokio::spawn(async move {
-            let channel = this.channels.read().await.get(&request.worker_id).cloned();
-            let program = this
-                .programs
-                .lock()
-                .expect("remote program catalog poisoned")
-                .get(&request.task_id)
-                .map(Arc::clone);
-            let progress = this
-                .progress
-                .lock()
-                .expect("remote progress registry poisoned")
-                .get(&request.task_id)
-                .cloned();
-            let report = match (channel, program) {
-                (Some(channel), Some(program)) => {
-                    // Keep the admitted Graph in the scheduler catalog. A
-                    // retry stages its signed chunks and sends only the
-                    // worker-issued digest/length in the attempt frame.
-                    let program = program.as_ref();
-                    let collective_context = match program {
-                        WorkerProgramRequest::Direct(direct)
-                            if matches!(
-                                &direct.context,
-                                runmat_execution::ProgramInvocationContext::SpmdTask { .. }
-                            ) =>
-                        {
-                            let runmat_execution::ProgramInvocationContext::SpmdTask { task } =
-                                &direct.context
-                            else {
-                                unreachable!("SPMD route checked above")
-                            };
-                            Some(super::pool_progress::RemoteCollectiveAssignment::new(
-                                Arc::clone(&this.collectives),
-                                task.clone(),
-                            ))
-                        }
-                        _ => None,
-                    };
-                    let assignment = runmat_execution::ProgramExecutionAssignment {
-                        scope_id: request.scope_id,
-                        pool_id: request.task.pool_id,
-                        task_id: request.task_id,
-                        attempt_id: request.id,
-                        worker_id: request.worker_id,
-                        backend: runmat_execution::PoolBackend::Remote,
-                        resources: request.resource_assignment.clone(),
-                    };
-                    let transfer = match program {
-                        WorkerProgramRequest::Direct(direct) => {
-                            let mut direct = direct.clone();
-                            direct.arguments = request.task.inputs.clone();
-                            direct.assignment = Some(assignment);
-                            let objects = this
-                                .execution_objects
-                                .transfer_all(channel.as_ref(), request.worker_id)
-                                .await;
-                            let transferred = match objects {
-                                Ok(()) => {
-                                    this.values
-                                        .transfer(
-                                            channel.as_ref(),
-                                            request.worker_id,
-                                            &direct.arguments,
-                                            &this.execution_objects,
-                                        )
-                                        .await
-                                }
-                                Err(error) => Err(error),
-                            };
-                            transferred
-                                .map(|()| super::RemoteAttemptProgram::Direct(Box::new(direct)))
-                        }
-                        WorkerProgramRequest::Graph(_) => {
-                            let source = this
-                                .graph_transfers
-                                .lock()
-                                .expect("remote Graph transfer registry poisoned")
-                                .get(&request.task_id)
-                                .cloned();
-                            match source {
-                                Some(source) => {
-                                    let token = cancellation.token();
-                                    let receipt = tokio::select! {
-                                        result = channel.stage_graph_program(
-                                            request.id,
-                                            &source.encrypted_manifest,
-                                            &source.ordered_downloads,
-                                            source.maximum_program_bytes,
-                                        ) => result,
-                                        _ = token.cancelled() => {
-                                            Err(NativeExecutionError::Protocol(
-                                                "remote Graph attempt was cancelled during staging".into(),
-                                            ))
-                                        }
-                                    };
-                                    match receipt {
-                                        Ok(receipt)
-                                            if receipt.program_digest == source.program_digest
-                                                && receipt.program_length
-                                                    == source.program_length =>
-                                        {
-                                            Ok(super::RemoteAttemptProgram::GraphStaged(
-                                                super::RemoteStagedGraphReference::StagedGraphV10 {
-                                                    program_digest: receipt.program_digest,
-                                                    program_length: receipt.program_length,
-                                                },
-                                            ))
-                                        }
-                                        Ok(_) => Err(NativeExecutionError::Protocol(
-                                            "remote worker acknowledged a different Graph Program"
-                                                .into(),
-                                        )),
-                                        Err(error) => Err(error),
-                                    }
-                                }
-                                None => Err(NativeExecutionError::Protocol(
-                                    "remote Graph task lost its staged transfer authority".into(),
-                                )),
-                            }
-                        }
-                    };
-                    match transfer {
-                        Err(_) if cancellation.token().is_cancelled() => AttemptReport::Cancelled,
-                        Err(error) => AttemptReport::Failed {
-                            kind: AttemptFailureKind::Rejected,
-                            message: error.to_string(),
-                        },
-                        Ok(_) if cancellation.token().is_cancelled() => AttemptReport::Cancelled,
-                        Ok(program) => match super::pool_progress::execute(
-                            channel.as_ref(),
-                            RemoteAttempt {
-                                scheduling: request.clone(),
-                                program,
-                            },
-                            progress.as_deref(),
-                            collective_context,
-                        )
-                        .await
-                        {
-                            Ok(AttemptReport::Succeeded { result }) => {
-                                match this
-                                    .execution_objects
-                                    .receive_results(
-                                        channel.as_ref(),
-                                        result.result_objects(),
-                                        &this.value_scope,
-                                    )
-                                    .await
-                                {
-                                    Ok(()) => AttemptReport::Succeeded { result },
-                                    Err(error) => AttemptReport::Failed {
-                                        kind: AttemptFailureKind::Rejected,
-                                        message: error.to_string(),
-                                    },
-                                }
-                            }
-                            Ok(report) => report,
-                            Err(error) => AttemptReport::Lost {
-                                message: error.to_string(),
-                            },
-                        },
-                    }
-                }
-                _ => AttemptReport::Failed {
-                    kind: AttemptFailureKind::Infrastructure,
-                    message: "remote worker route or exact program is unavailable".into(),
-                },
-            };
-            this.attempt_cancellation
-                .lock()
-                .expect("remote attempt cancellation registry poisoned")
-                .remove(&request.id);
-            this.apply_report(BackendReport::for_request(&request, report));
-        });
-    }
-
     fn cancel_attempt(self: &Arc<Self>, request: AttemptRequest) {
+        // A remote Cancel acknowledgement proves delivery of a request, not
+        // that an active Graph worker has retired its foreign host or private
+        // staging. Only its eventual attempt report may close the Graph
+        // attempt; Direct keeps its immediate completion.
         let graph_attempt = matches!(
             &request.task.callable.program,
             runmat_execution::ProgramCallable::GraphTarget { .. }
@@ -709,22 +364,68 @@ impl RemotePoolDriver {
         {
             source.cancel(CancellationReason::User);
         }
+        self.cancellation_in_flight.fetch_add(1, Ordering::AcqRel);
         let this = Arc::clone(self);
         tokio::spawn(async move {
-            if let Some(channel) = this.channels.read().await.get(&request.worker_id).cloned() {
-                let _ = channel.cancel(&request).await;
+            let mut guard = CancellationDispatchGuard(Arc::clone(&this), false);
+            let channel = this
+                .channels
+                .read()
+                .await
+                .get(&request.worker_id)
+                .map(|route| Arc::clone(&route.channel));
+            match channel {
+                Some(channel) => {
+                    if channel.cancel(&request).await.is_err() {
+                        if this.remove_worker(request.worker_id, true).await.is_err() {
+                            this.apply_report(BackendReport::for_request(
+                                &request,
+                                AttemptReport::Lost {
+                                    message: "remote worker cancellation acknowledgement was lost"
+                                        .into(),
+                                },
+                            ));
+                        } else {
+                            guard.1 = true;
+                        }
+                        return;
+                    }
+                }
+                None => {
+                    if this.remove_worker(request.worker_id, true).await.is_err() {
+                        this.apply_report(BackendReport::for_request(
+                            &request,
+                            AttemptReport::Lost {
+                                message: "remote worker route disappeared during cancellation"
+                                    .into(),
+                            },
+                        ));
+                    } else {
+                        guard.1 = true;
+                    }
+                    return;
+                }
             }
-            // A remote Cancel acknowledgement proves delivery of a request,
-            // not that an active Graph worker has retired its foreign host or
-            // private staging. Only its eventual attempt report may close the
-            // Graph attempt; Direct keeps its existing immediate completion.
             if !graph_attempt {
                 this.apply_report(BackendReport::for_request(
                     &request,
                     AttemptReport::Cancelled,
                 ));
             }
+            guard.1 = true;
         });
+    }
+
+    pub(crate) async fn wait_for_cancellation_quiescence(&self) -> bool {
+        loop {
+            let notified = self.cancellation_settled.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.cancellation_in_flight.load(Ordering::Acquire) == 0 {
+                return !self.cancellation_ownership_failed.load(Ordering::Acquire);
+            }
+            notified.await;
+        }
     }
 }
 

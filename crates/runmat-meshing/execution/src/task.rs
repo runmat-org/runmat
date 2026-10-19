@@ -20,11 +20,13 @@ use runmat_meshing_core::{
 };
 
 use crate::{
-    MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
+    ArtifactAccess, MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload,
+    MESHING_HOST_INVOCATION_MEDIA_TYPE, MESHING_HOST_INVOCATION_VALUE_SCHEMA,
     MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
 pub const MESHING_EXECUTION_CALLABLE_OWNER: &str = "runmat.meshing.v2";
+pub const EXACT_CAD_ADMISSION_CAPABILITY: &str = "runmat.meshing.exact-cad-admission";
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
 const EXACT_GEOMETRY_SCHEMA: &str = "runmat.geometry.exact-manifest.v2";
 const FACETED_GEOMETRY_SCHEMA: &str = "runmat.geometry.faceted-solid.v2";
@@ -36,7 +38,7 @@ pub struct MeshingExecutionContext {
     pub pool_id: PoolId,
     pub program_artifact_id: ArtifactId,
     pub host: runmat_execution::host::ExecutionHostRequirement,
-    pub artifact_access: MeshingArtifactAccess,
+    pub artifact_access: ArtifactAccess,
     pub cpu_millicores: u32,
     pub maximum_egress_bytes: u64,
     pub maximum_relay_bytes: u64,
@@ -54,20 +56,50 @@ pub enum MeshingTaskEffectPolicy {
 }
 
 pub fn build_task_submission(
-    workload: &MeshingWorkloadRequest,
-    stage_identity: &MeshingStageIdentity,
-    resolved_request: &MeshingRequest,
-    input_roots: &[ValueRef],
+    host: &MeshingHostWorkload,
+    program_inputs: &[ValuePayload],
     dependencies: BTreeSet<TaskId>,
     context: &MeshingExecutionContext,
     effect: MeshingTaskEffectPolicy,
 ) -> MeshingExecutionResult<TaskSubmission> {
+    host.validate()?;
+    let workload = &host.workload;
+    let stage_identity = &host.stage_identity;
+    let resolved_request = &host.resolved_request;
     workload.validate()?;
     stage_identity.validate()?;
     resolved_request.validate()?;
     context.artifact_access.validate()?;
     validate_identity_binding(workload, stage_identity, resolved_request)?;
-    validate_inputs(workload, input_roots, &context.artifact_access)?;
+    let (invocation, semantic_inputs) = program_inputs.split_first().ok_or_else(|| {
+        MeshingExecutionError::Invalid("meshing task is missing its invocation descriptor".into())
+    })?;
+    let ValuePayload::Object(invocation_root) = invocation else {
+        return Err(MeshingExecutionError::Invalid(
+            "meshing task invocation must remain externalized".into(),
+        ));
+    };
+    context.artifact_access.validate_reference(
+        invocation_root,
+        ValueRefKind::DriverObject,
+        MESHING_HOST_INVOCATION_MEDIA_TYPE,
+        MESHING_HOST_INVOCATION_VALUE_SCHEMA,
+    )?;
+    if invocation_root.logical_digest != runmat_execution::Digest::sha256(host.canonical_bytes()?) {
+        return Err(MeshingExecutionError::Identity(
+            "meshing invocation descriptor differs from its task workload",
+        ));
+    }
+    let input_roots = semantic_inputs
+        .iter()
+        .map(|input| match input {
+            ValuePayload::Object(root) => Ok((**root).clone()),
+            _ => Err(MeshingExecutionError::Invalid(
+                "meshing semantic inputs must remain externalized".into(),
+            )),
+        })
+        .collect::<MeshingExecutionResult<Vec<_>>>()?;
+    validate_inputs(workload, &input_roots, &context.artifact_access)?;
     let capabilities = map_capabilities(workload, stage_identity, resolved_request)?;
     let retry = map_retry(workload.stage, effect)?;
     let partition_identity = MeshingPartitionIdentity {
@@ -99,8 +131,11 @@ pub fn build_task_submission(
         required_capabilities: capabilities,
     };
     resources.validate()?;
+    let qualified_name = stage_callable(workload.stage).to_string();
     Ok(TaskSubmission {
         request: TaskRequest {
+            console: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: task_id,
             scope_id: context.scope_id,
             pool_id: context.pool_id,
@@ -112,16 +147,12 @@ pub fn build_task_submission(
                 MESHING_EXECUTION_CALLABLE_OWNER,
                 &runmat_execution::ProgramCallable::semantic(
                     runmat_execution::ProgramFunctionId(0),
-                    None,
+                    Some(qualified_name.clone()),
                 ),
             ),
             host: context.host.clone(),
             invocation_context: runmat_execution::ProgramInvocationContext::Direct,
-            inputs: input_roots
-                .iter()
-                .cloned()
-                .map(|reference| ValuePayload::Object(Box::new(reference)))
-                .collect(),
+            inputs: program_inputs.to_vec(),
             outputs: OutputContract {
                 requested_outputs: 1,
                 owned_work: None,
@@ -155,7 +186,7 @@ fn validate_identity_binding(
 pub(crate) fn validate_inputs(
     workload: &MeshingWorkloadRequest,
     roots: &[ValueRef],
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
 ) -> MeshingExecutionResult<()> {
     if roots.len() != workload.inputs.len() {
         return Err(MeshingExecutionError::Invalid(
@@ -171,9 +202,9 @@ pub(crate) fn validate_inputs(
 pub(crate) fn validate_input(
     root: &ValueRef,
     input: &runmat_meshing_core::MeshingInputRef,
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
 ) -> MeshingExecutionResult<()> {
-    ValuePayload::Object(Box::new(root.clone())).validate(ValueLimits::default())?;
+    root.validate(ValueLimits::default())?;
     let expected_shape = match input.kind {
         MeshingInputKind::StageArtifact => {
             root.kind == ValueRefKind::ResultObject
@@ -181,14 +212,22 @@ pub(crate) fn validate_input(
                 && root.value_schema == STAGE_MANIFEST_SCHEMA
         }
         MeshingInputKind::ExactGeometry => {
-            root.kind == ValueRefKind::DriverObject
-                && root.media_type == runmat_geometry_core::EXACT_BREP_MEDIA_TYPE
+            matches!(
+                root.kind,
+                ValueRefKind::DriverObject | ValueRefKind::ResultObject
+            ) && root.media_type == runmat_geometry_core::EXACT_BREP_MEDIA_TYPE
                 && root.value_schema == EXACT_GEOMETRY_SCHEMA
         }
         MeshingInputKind::FacetedGeometry => {
             root.kind == ValueRefKind::DriverObject
                 && root.media_type == runmat_geometry_core::FACETED_SOLID_MEDIA_TYPE
                 && root.value_schema == FACETED_GEOMETRY_SCHEMA
+        }
+        MeshingInputKind::Evidence => {
+            root.kind == ValueRefKind::DriverObject
+                && root.media_type
+                    == runmat_meshing_core::MeshingChunkMediaType::MeshingEvidence.media_type()
+                && root.value_schema == crate::evidence_objects::EVIDENCE_VALUE_SCHEMA
         }
     };
     if root.logical_digest.bytes() != input.digest.bytes()
@@ -262,6 +301,93 @@ fn map_capabilities(
     Ok(mapped)
 }
 
+/// Returns the complete generic worker capability inventory for an exact-meshing DAG.
+/// This is the single product-side authority for configuring a pool before any stage is submitted.
+pub fn exact_meshing_worker_capabilities(
+    document: &runmat_geometry_core::GeometryDocument,
+    request: &MeshingRequest,
+    capability_cohort: Option<&str>,
+) -> MeshingExecutionResult<BTreeSet<Capability>> {
+    document.validate()?;
+    request.validate()?;
+    let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
+        return Err(MeshingExecutionError::Invalid(
+            "exact meshing capabilities require an exact B-rep document".into(),
+        ));
+    };
+    exact_meshing_worker_capability_inventory(
+        std::slice::from_ref(&model.kernel_abi),
+        &request.algorithms,
+        std::slice::from_ref(&request.element_order),
+        capability_cohort,
+    )
+}
+
+/// Returns the complete capability inventory implemented by a native meshing worker.
+///
+/// A worker advertises all exact-kernel ABIs, algorithm versions, element orders, and deterministic
+/// cohorts it can actually execute. Individual workloads continue to request one exact member of
+/// each category through [`exact_meshing_worker_capabilities`].
+pub fn exact_meshing_worker_capability_inventory<'a>(
+    exact_kernel_abis: &[String],
+    algorithms: &runmat_meshing_core::AlgorithmVersionSet,
+    element_orders: &[runmat_meshing_core::ElementOrder],
+    capability_cohorts: impl IntoIterator<Item = &'a str>,
+) -> MeshingExecutionResult<BTreeSet<Capability>> {
+    algorithms.validate()?;
+    if exact_kernel_abis.is_empty() || element_orders.is_empty() {
+        return Err(MeshingExecutionError::Invalid(
+            "meshing worker capability inventory is incomplete".into(),
+        ));
+    }
+    let mut capabilities = BTreeSet::from([Capability::ProcessIsolation]);
+    capabilities.insert(Capability::Custom(EXACT_CAD_ADMISSION_CAPABILITY.into()));
+    capabilities.insert(Capability::Custom(format!(
+        "runmat.meshing.host:{}",
+        crate::MESHING_HOST_ABI
+    )));
+    for abi in exact_kernel_abis {
+        if abi.is_empty() || abi.len() > 256 || abi.chars().any(char::is_control) {
+            return Err(MeshingExecutionError::Invalid(
+                "meshing exact-kernel capability is invalid".into(),
+            ));
+        }
+        capabilities.insert(Capability::Custom(format!(
+            "runmat.meshing.exact-cad:{abi}"
+        )));
+    }
+    for version in [
+        &algorithms.geometry,
+        &algorithms.curve,
+        &algorithms.surface,
+        &algorithms.plc,
+        &algorithms.tetrahedron,
+        &algorithms.optimization,
+        &algorithms.validation,
+    ] {
+        capabilities.insert(Capability::Custom(format!(
+            "runmat.meshing.algorithm:{version}"
+        )));
+    }
+    for order in element_orders {
+        capabilities.insert(Capability::Custom(format!(
+            "runmat.meshing.element-order:{}",
+            order_name(*order)
+        )));
+    }
+    for cohort in capability_cohorts {
+        if cohort.is_empty() || cohort.len() > 256 || cohort.chars().any(char::is_control) {
+            return Err(MeshingExecutionError::Invalid(
+                "meshing capability cohort is invalid".into(),
+            ));
+        }
+        capabilities.insert(Capability::Custom(format!(
+            "runmat.meshing.cohort:{cohort}"
+        )));
+    }
+    Ok(capabilities)
+}
+
 fn map_retry(
     stage: MeshingStageKind,
     effect: MeshingTaskEffectPolicy,
@@ -321,5 +447,24 @@ const fn order_name(order: ElementOrder) -> &'static str {
     match order {
         ElementOrder::Tet4 => "tet4",
         ElementOrder::Tet10 => "tet10",
+    }
+}
+
+const fn stage_callable(stage: MeshingStageKind) -> &'static str {
+    match stage {
+        MeshingStageKind::GeometryAdmission => "geometry-admission",
+        MeshingStageKind::Healing => "healing",
+        MeshingStageKind::Sizing => "sizing",
+        MeshingStageKind::CurveMesh => "curve-mesh",
+        MeshingStageKind::SurfaceMesh => "surface-mesh",
+        MeshingStageKind::ProtectedBoundaryComplex => "protected-boundary-complex",
+        MeshingStageKind::Tetrahedralization => "tetrahedralization",
+        MeshingStageKind::ConstraintRecovery => "constraint-recovery",
+        MeshingStageKind::Refinement => "refinement",
+        MeshingStageKind::Optimization => "optimization",
+        MeshingStageKind::OrderElevation => "order-elevation",
+        MeshingStageKind::Validation => "validation",
+        MeshingStageKind::Serialization => "serialization",
+        MeshingStageKind::Publication => "publication",
     }
 }

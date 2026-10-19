@@ -278,7 +278,14 @@ fn decode_task<'a>(
                 }));
         }
         InlineValue::ImmutableValueClass(value) => {
-            if value.schema_version != 1 {
+            // Registered domain value classes carry their own schema version;
+            // other immutable classes use the built-in codistributor schema.
+            let expected_schema =
+                crate::execution::value_codec::immutable_class::schema_for_type_identity(
+                    &value.type_identity,
+                )?
+                .map_or(1, |schema| schema.schema_version());
+            if value.schema_version != expected_schema {
                 return Err(ValueCodecError::unsupported(
                     &path,
                     "the immutable value-class schema version is unavailable in this runtime",

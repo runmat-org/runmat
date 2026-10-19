@@ -94,6 +94,8 @@ impl RuntimeContext {
         let mut selected = RuntimeContext {
             graphics_callback_mutation: None,
             execution: self.execution.clone(),
+            // Callbacks run in the session's own environment.
+            environment: self.environment.clone(),
             selected_graph_program: self.selected_graph_program.clone(),
             selected_graph_function_resolver: self.selected_graph_function_resolver.clone(),
             selected_static_site_resolver: self.selected_static_site_resolver.clone(),
@@ -160,6 +162,7 @@ impl RuntimeContext {
         let RuntimeContext {
             graphics_callback_mutation: _,
             execution,
+            environment,
             selected_graph_program,
             selected_graph_function_resolver,
             selected_static_site_resolver,
@@ -239,6 +242,7 @@ impl RuntimeContext {
                 Ok(RuntimeContext {
                     graphics_callback_mutation: None,
                     execution,
+                    environment: environment.clone(),
                     selected_graph_program: selected_graph_program.clone(),
                     selected_graph_function_resolver: selected_graph_function_resolver.clone(),
                     selected_static_site_resolver: selected_static_site_resolver.clone(),

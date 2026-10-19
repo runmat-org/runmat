@@ -27,7 +27,7 @@ pub struct PlcFacet {
     pub node_ids: [TopologyEntityId; 3],
     pub source_face_id: TopologyEntityId,
     #[serde(default)]
-    pub material_interface_ids: Vec<String>,
+    pub conformal_interface_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,7 +74,7 @@ pub struct PlcValidationSummary {
     pub watertight: bool,
     pub manifold: bool,
     pub shell_nesting_classified: bool,
-    pub material_interfaces_classified: bool,
+    pub conformal_interfaces_classified: bool,
 }
 
 impl PlcValidationSummary {
@@ -82,6 +82,6 @@ impl PlcValidationSummary {
         self.watertight
             && self.manifold
             && self.shell_nesting_classified
-            && self.material_interfaces_classified
+            && self.conformal_interfaces_classified
     }
 }

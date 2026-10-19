@@ -1,7 +1,7 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
-#include "runmat-geometry-io/src/occt/exact_assembly.hxx"
-#include "runmat-geometry-io/src/occt/exact_healing.hxx"
-#include "runmat-geometry-io/src/occt/exact_xcaf_healing.hxx"
+#include "exact_assembly.hxx"
+#include "exact_healing.hxx"
+#include "exact_xcaf_healing.hxx"
 
 #include <BRep_Builder.hxx>
 #include <BRepAdaptor_Curve.hxx>
@@ -68,6 +68,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
@@ -83,6 +84,10 @@
 
 namespace runmat_geometry_io {
 namespace occt_backend {
+
+rust::String exact_kernel_abi() {
+  return rust::String(std::string("occt/") + OCC_VERSION_COMPLETE + "/brep-v3");
+}
 namespace {
 
 std::string str_from_rust(rust::Str value) {
@@ -115,6 +120,13 @@ std::string format_name(OcctCadFormat format) {
       return "brep";
   }
   throw std::runtime_error("unsupported OCCT CAD format");
+}
+
+// XCAF application registration, transfer and Close share kernel state. A
+// recursive lock permits exception cleanup while the transfer boundary is held.
+std::recursive_timed_mutex& cad_exchange_mutex() {
+  static std::recursive_timed_mutex mutex;
+  return mutex;
 }
 
 struct CadDocument {
@@ -168,6 +180,7 @@ private:
     color_tool.Nullify();
     layer_tool.Nullify();
     material_tool.Nullify();
+    std::lock_guard<std::recursive_timed_mutex> lock(cad_exchange_mutex());
     Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
     app->Close(document);
     document.Nullify();
@@ -242,9 +255,20 @@ Handle(TDocStd_Document) new_xcaf_document() {
   return document;
 }
 
-CadDocument finish_xcaf_document(const Handle(TDocStd_Document)& document) {
-  CadDocument result;
-  result.document = document;
+// OCCT exchange/XCAF transfer uses process-wide application and unit state.
+// Serialize this unsafe boundary only; independent shape evaluation and meshing
+// keep their own parallelism. Waiting still observes the import's cancellation.
+std::unique_lock<std::recursive_timed_mutex> lock_cad_exchange(const OcctImportOptions& options) {
+  std::unique_lock<std::recursive_timed_mutex> lock(cad_exchange_mutex(), std::defer_lock);
+  while (!lock.try_lock_for(std::chrono::milliseconds(25))) {
+    check_cancelled(options);
+  }
+  check_cancelled(options);
+  return lock;
+}
+
+CadDocument finish_xcaf_document(CadDocument result) {
+  const Handle(TDocStd_Document)& document = result.document;
   result.shape_tool = XCAFDoc_DocumentTool::ShapeTool(document->Main());
   result.color_tool = XCAFDoc_DocumentTool::ColorTool(document->Main());
   result.layer_tool = XCAFDoc_DocumentTool::LayerTool(document->Main());
@@ -266,6 +290,7 @@ CadDocument finish_xcaf_document(const Handle(TDocStd_Document)& document) {
 CadDocument read_step_shape(const std::string& path,
                             std::istream& stream,
                             const OcctImportOptions& options) {
+  auto exchange_lock = lock_cad_exchange(options);
   check_cancelled(options);
   STEPCAFControl_Reader reader;
   reader.SetNameMode(Standard_True);
@@ -278,37 +303,62 @@ CadDocument read_step_shape(const std::string& path,
   if (status != IFSelect_RetDone) {
     throw std::runtime_error("OCCT STEP reader did not return IFSelect_RetDone");
   }
-  Handle(TDocStd_Document) document = new_xcaf_document();
+  // STEP declares physical units. Exact imports request a stable millimetre
+  // kernel representation to preserve tolerance-scale features; preview imports
+  // request their display coordinate unit. Rust projects exact contracts to SI.
+  // The target is document-local, never process-global.
+  if (!std::isfinite(options.step_coordinate_unit_m) ||
+      options.step_coordinate_unit_m <= 0.0) {
+    throw std::runtime_error("STEP transfer requires a finite positive length unit");
+  }
+  CadDocument result;
+  result.document = new_xcaf_document();
+  const Handle(TDocStd_Document)& document = result.document;
+  // XCAF transfer takes its target unit from the destination document; setting
+  // only the underlying STEP reader is overwritten by STEPCAF transfer.
+  XCAFDoc_DocumentTool::SetLengthUnit(document, options.step_coordinate_unit_m);
   RunmatCancelProgressIndicator transfer_progress(options);
   if (!reader.Transfer(document, transfer_progress.Start())) {
     check_cancelled(options);
     throw std::runtime_error("OCCT STEP XCAF transfer failed");
   }
   check_cancelled(options);
-  return finish_xcaf_document(document);
+  return finish_xcaf_document(std::move(result));
 }
 
 CadDocument read_iges_shape(const std::string& path,
                             std::istream& stream,
+                            const std::string& materialized_path,
                             const OcctImportOptions& options) {
+  auto exchange_lock = lock_cad_exchange(options);
   check_cancelled(options);
   IGESCAFControl_Reader reader;
   reader.SetNameMode(Standard_True);
   reader.SetColorMode(Standard_True);
   reader.SetLayerMode(Standard_True);
-  IFSelect_ReturnStatus status = reader.ReadStream(path.c_str(), stream);
+  // OCCT 7.8 exposes the inherited stream API for IGES but does not implement IGES stream
+  // loading. Rust provides a securely created, content-identical temporary file until the
+  // pinned kernel has native IGES stream support. The path never enters geometry identity.
+  IFSelect_ReturnStatus status = materialized_path.empty()
+                                     ? reader.ReadStream(path.c_str(), stream)
+                                     : reader.ReadFile(materialized_path.c_str());
   check_cancelled(options);
   if (status != IFSelect_RetDone) {
-    throw std::runtime_error("OCCT IGES reader did not return IFSelect_RetDone");
+    throw std::runtime_error(
+        "OCCT IGES reader did not return IFSelect_RetDone (status " +
+        std::to_string(static_cast<int>(status)) + ")");
   }
-  Handle(TDocStd_Document) document = new_xcaf_document();
+  CadDocument result;
+  result.document = new_xcaf_document();
+  const Handle(TDocStd_Document)& document = result.document;
+  XCAFDoc_DocumentTool::SetLengthUnit(document, 0.001);
   RunmatCancelProgressIndicator transfer_progress(options);
   if (!reader.Transfer(document, transfer_progress.Start())) {
     check_cancelled(options);
     throw std::runtime_error("OCCT IGES XCAF transfer failed");
   }
   check_cancelled(options);
-  return finish_xcaf_document(document);
+  return finish_xcaf_document(std::move(result));
 }
 
 CadDocument read_brep_shape(std::istream& stream, const OcctImportOptions& options) {
@@ -328,6 +378,7 @@ CadDocument read_brep_shape(std::istream& stream, const OcctImportOptions& optio
 
 CadDocument read_shape(const std::string& path,
                        rust::Slice<const std::uint8_t> bytes,
+                       const std::string& materialized_path,
                        OcctCadFormat format,
                        const OcctImportOptions& options) {
   std::string payload = bytes_to_string(bytes);
@@ -336,7 +387,7 @@ CadDocument read_shape(const std::string& path,
     case OcctCadFormat::Step:
       return read_step_shape(path, stream, options);
     case OcctCadFormat::Iges:
-      return read_iges_shape(path, stream, options);
+      return read_iges_shape(path, stream, materialized_path, options);
     case OcctCadFormat::Brep:
       return read_brep_shape(stream, options);
   }
@@ -896,11 +947,14 @@ void append_face_mesh(OcctImportPayload& result,
 
 OcctImportPayload import_cad_bytes(rust::Str path,
                                    rust::Slice<const std::uint8_t> bytes,
+                                   rust::Str materialized_path,
                                    OcctCadFormat format,
                                    OcctImportOptions options) {
   const std::string path_string = str_from_rust(path);
+  const std::string materialized_path_string = str_from_rust(materialized_path);
   check_cancelled(options);
-  CadDocument document = read_shape(path_string, bytes, format, options);
+  CadDocument document =
+      read_shape(path_string, bytes, materialized_path_string, format, options);
   check_cancelled(options);
 
   IMeshTools_Parameters mesh_parameters = mesh_parameters_from_options(options);
@@ -968,11 +1022,14 @@ OcctImportPayload import_cad_bytes(rust::Str path,
 OcctExactShapePayload import_exact_cad_bytes(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
+    rust::Str materialized_path,
     OcctCadFormat format,
     OcctImportOptions options) {
   const std::string path_string = str_from_rust(path);
+  const std::string materialized_path_string = str_from_rust(materialized_path);
   check_cancelled(options);
-  CadDocument document = read_shape(path_string, bytes, format, options);
+  CadDocument document =
+      read_shape(path_string, bytes, materialized_path_string, format, options);
   check_cancelled(options);
 
   // Polygonal data is a derived display cache. Removing it before serialization ensures the
@@ -1262,14 +1319,17 @@ OcctExactShapePayload import_exact_cad_bytes(
 OcctPreviewSessionStartPayload start_cad_preview_session(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
+    rust::Str materialized_path,
     OcctCadFormat format,
     OcctImportOptions options) {
   const std::string path_string = str_from_rust(path);
+  const std::string materialized_path_string = str_from_rust(materialized_path);
   check_cancelled(options);
   auto session = std::make_unique<CadPreviewSession>();
   session->path = path_string;
   session->format = format;
-  session->document = read_shape(path_string, bytes, format, options);
+  session->document =
+      read_shape(path_string, bytes, materialized_path_string, format, options);
   session->mesh_parameters = mesh_parameters_from_options(options);
   check_cancelled(options);
 

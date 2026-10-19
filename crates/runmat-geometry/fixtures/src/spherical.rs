@@ -121,6 +121,7 @@ fn edge(
         curve_evaluator_id: CurveEvaluatorId::new(evaluator_id).unwrap(),
         start_vertex_id: Some(start.clone()),
         end_vertex_id: Some(end.clone()),
+        tolerance_m: 1.0e-8,
         is_closed: false,
         is_periodic: false,
         is_degenerate: false,

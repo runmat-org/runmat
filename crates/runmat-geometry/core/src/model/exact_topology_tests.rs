@@ -131,6 +131,7 @@ pub(super) fn topology() -> ExactBRepTopology {
             curve_evaluator_id: curve_evaluator("curve:1"),
             start_vertex_id: Some(vertex.clone()),
             end_vertex_id: Some(vertex.clone()),
+            tolerance_m: 1.0e-8,
             is_closed: true,
             is_periodic: true,
             is_degenerate: false,
@@ -265,6 +266,7 @@ fn add_independent_contact_face(topology: &mut ExactBRepTopology) -> PersistentE
         curve_evaluator_id: curve_evaluator("curve:contact"),
         start_vertex_id: Some(vertex.clone()),
         end_vertex_id: Some(vertex.clone()),
+        tolerance_m: 1.0e-8,
         is_closed: true,
         is_periodic: true,
         is_degenerate: false,
@@ -318,6 +320,67 @@ fn assembly_occurrences_are_rooted_owned_and_affine() {
     let mut orphaned_body = topology();
     orphaned_body.assemblies[0].body_ids.clear();
     assert!(orphaned_body.validate_against(&model()).is_err());
+}
+
+#[test]
+fn large_assembly_validates_canonical_occurrence_ownership() {
+    const INSTANCE_COUNT: usize = 512;
+    let mut topology = topology();
+    let root_id = topology.root_assembly_id.clone();
+    let mut children = vec![topology.assemblies[0].clone()];
+    let mut instances = vec![topology.instances[0].clone()];
+    for index in 1..INSTANCE_COUNT {
+        let path = vec!["root".into(), format!("instance:{index:04}")];
+        let assembly_id = PersistentEntityId {
+            kind: PersistentEntityKind::Assembly,
+            source_topology_id: format!("assembly:{index:04}"),
+            assembly_path: path.clone(),
+        };
+        children.push(ExactAssembly {
+            id: assembly_id.clone(),
+            definition_digest: [(index % 251 + 1) as u8; 32],
+            body_ids: Vec::new(),
+            child_instance_ids: Vec::new(),
+        });
+        let mut transform = GeometryTransform([
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]);
+        transform.0[3] = index as f64 * 2.0;
+        instances.push(ExactInstance {
+            id: PersistentEntityId {
+                kind: PersistentEntityKind::Instance,
+                source_topology_id: format!("instance:{index:04}"),
+                assembly_path: path,
+            },
+            parent_assembly_id: root_id.clone(),
+            instantiated_assembly_id: assembly_id,
+            transform,
+        });
+    }
+    let root = topology.assemblies.pop().unwrap();
+    let mut root = ExactAssembly {
+        child_instance_ids: instances
+            .iter()
+            .map(|instance| instance.id.clone())
+            .collect(),
+        ..root
+    };
+    root.child_instance_ids.sort();
+    children.push(root);
+    children.sort_by(|left, right| left.id.cmp(&right.id));
+    topology.assemblies = children;
+    instances.sort_by(|left, right| left.id.cmp(&right.id));
+    topology.instances = instances;
+
+    let mut summary = model();
+    summary.assembly_count = INSTANCE_COUNT as u64 + 1;
+    summary.instance_count = INSTANCE_COUNT as u64;
+    topology.validate_against(&summary).unwrap();
+    assert_eq!(topology.assemblies[0].body_ids.len(), 1);
+    assert!(topology
+        .instances
+        .windows(2)
+        .all(|pair| pair[0].id < pair[1].id));
 }
 
 #[test]

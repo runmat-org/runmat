@@ -1,0 +1,89 @@
+use super::*;
+use crate::cdt::test_fixtures::allocation::AllocationBudget;
+use runmat_geometry_core::PersistentEntityKind;
+use runmat_meshing_core::NeverCancelled;
+use std::collections::BTreeSet;
+
+#[test]
+fn borrowed_parameter_images_preserve_ordered_reference_signed_zero_and_periodicity() {
+    let edge = PersistentEntityId {
+        kind: PersistentEntityKind::Edge,
+        source_topology_id: "edge".into(),
+        assembly_path: vec!["body".into()],
+    };
+    let face = PersistentEntityId {
+        kind: PersistentEntityKind::Face,
+        source_topology_id: "face".into(),
+        assembly_path: vec!["body".into()],
+    };
+    let chart = StableDigest::from_bytes([7; 32]);
+    let observations = [
+        Row {
+            node: 0,
+            parameter: Parameter::Curve(&edge, -0.0),
+        },
+        Row {
+            node: 0,
+            parameter: Parameter::Curve(&edge, 0.0),
+        },
+        Row {
+            node: 2,
+            parameter: Parameter::Curve(&edge, std::f64::consts::TAU),
+        },
+        Row {
+            node: 0,
+            parameter: Parameter::Surface(&face, chart, [0.0, 0.5]),
+        },
+        Row {
+            node: 0,
+            parameter: Parameter::Surface(&face, chart, [-0.0, 0.5]),
+        },
+    ];
+    let key = |row: &Row<'_>| match row.parameter {
+        Parameter::Curve(id, value) => (
+            row.node,
+            0,
+            id.clone(),
+            StableDigest::ZERO,
+            [value.to_bits(), 0],
+        ),
+        Parameter::Surface(id, chart, uv) => (row.node, 1, id.clone(), chart, uv.map(f64::to_bits)),
+    };
+    for repeats in [1, 64, 4096] {
+        // Repeated metadata observations; this is not a duplicate-cell mesh witness.
+        let rows = observations
+            .iter()
+            .rev()
+            .copied()
+            .cycle()
+            .take(observations.len() * repeats)
+            .collect::<Vec<_>>();
+        let expected = rows
+            .iter()
+            .map(key)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let storage = (rows.len() * std::mem::size_of::<Row<'_>>()) as u64;
+        let budget = AllocationBudget::new(storage);
+        let result = normalize_rows(
+            rows,
+            Some(&budget),
+            DelaunaySolverTopologyOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap();
+        assert_eq!(result.iter().map(key).collect::<Vec<_>>(), expected);
+        assert_eq!(budget.live_bytes(), 0);
+        assert_eq!(budget.peak_bytes(), storage);
+    }
+    let denied = AllocationBudget::new(0);
+    assert!(normalize_rows(
+        observations.to_vec(),
+        Some(&denied),
+        DelaunaySolverTopologyOptions::default(),
+        &NeverCancelled
+    )
+    .is_err());
+    assert_eq!(denied.live_bytes(), 0);
+}

@@ -5,7 +5,6 @@ use super::{
     PcurveEvaluatorId, SurfaceEvaluatorId, TrimClassifierId,
 };
 use crate::GeometryContractError;
-use std::collections::BTreeSet;
 
 pub const EXACT_EVALUATOR_REGISTRY_SCHEMA_VERSION: u16 = 4;
 
@@ -241,7 +240,7 @@ impl ExactEvaluatorRegistry {
     /// A registry cannot span representations because entity tokens are meaningful only
     /// within the representation whose digest namespaces them.
     pub fn kernel_representation_digest(&self) -> Result<Option<[u8; 32]>, GeometryContractError> {
-        let mut digests = BTreeSet::new();
+        let mut required = None;
         for digest in
             self.curves
                 .iter()
@@ -288,15 +287,15 @@ impl ExactEvaluatorRegistry {
                     },
                 ))
         {
-            digests.insert(digest);
+            if required.is_some_and(|previous| previous != digest) {
+                return Err(GeometryContractError::invalid(
+                    "kernel evaluator representation",
+                    "one exact evaluator registry cannot reference multiple kernel representations",
+                ));
+            }
+            required = Some(digest);
         }
-        if digests.len() > 1 {
-            return Err(GeometryContractError::invalid(
-                "kernel evaluator representation",
-                "one exact evaluator registry cannot reference multiple kernel representations",
-            ));
-        }
-        Ok(digests.into_iter().next())
+        Ok(required)
     }
 }
 

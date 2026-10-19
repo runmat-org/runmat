@@ -1,4 +1,6 @@
 mod coverage;
+mod dependencies;
+mod import;
 mod interop;
 mod invocation;
 #[cfg(not(target_arch = "wasm32"))]
@@ -24,4 +26,7 @@ pub(crate) use source::CapturedPrimarySource;
 pub use source::ExecutableSource;
 pub use source_map::{ExecutableSourceMap, SourceMapEntry};
 pub(crate) use unit::ExecutableUnitDraft;
-pub use unit::{reachability_requires_python, ExecutableUnit};
+pub use unit::{
+    reachability_requires_python, ExecutableFunctionInterface, ExecutableFunctionParameter,
+    ExecutableUnit,
+};

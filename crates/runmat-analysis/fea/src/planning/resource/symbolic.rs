@@ -1,0 +1,517 @@
+use std::collections::BTreeSet;
+
+use runmat_analysis_core::{AnalysisModel, StructuralElementKind};
+use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_execution::Digest;
+use runmat_meshing_core::SolverMeshArtifact;
+
+use crate::{
+    algebra::{CanonicalRealOperators, SparsePattern},
+    assembly::{
+        dofs::StructuralDofKind, dofs::StructuralDofLayout,
+        explicit_connectors::compile_model_connector_plan, mixed_dof_layout,
+    },
+    connectors::{CanonicalConnectorEntry, CanonicalStructuralConnectorPlan},
+    constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralTopologyIdentity},
+    physics::structural::topology::node_space::CanonicalStructuralNodeSpace,
+    topology::AnalysisProjection,
+};
+
+use super::ResourcePlanningError;
+
+const SYMBOLIC_PREFIX: &[u8] = b"runmat-fea-symbolic-operators/v1\0";
+const SYMBOLIC_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 64, 64, 8);
+const TRANSLATIONAL_DOF_COUNT: usize = 3;
+const REFERENCE_POINT_DOF_COUNT: usize = 6;
+
+/// Material-independent sparse storage bounds for a structural solve.
+///
+/// The stiffness pattern contains every coupling that element assembly may emit, including
+/// coefficients that happen to evaluate to zero for a particular material or geometry. Solid-only
+/// mass follows the same-axis consistent-mass element graph. Solid damping reserves the stiffness
+/// graph for Rayleigh mass/stiffness terms and axial dashpots. Mixed systems conservatively
+/// reserve the complete element-and-connector stiffness bound for all three operators because
+/// explicit consistent mass and Rayleigh damping can populate those couplings. This plan is derived
+/// before numerical assembly and therefore can be used for allocation admission without doing the
+/// work it is intended to guard.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StructuralSymbolicOperators {
+    stiffness_upper_bound: SparsePattern,
+    mass: SparsePattern,
+    damping: SparsePattern,
+    identity: Digest,
+}
+
+impl StructuralSymbolicOperators {
+    pub fn derive(
+        projection: &AnalysisProjection,
+        constraints: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+        mesh: &SolverMeshArtifact,
+    ) -> Result<Self, ResourcePlanningError> {
+        if constraints.topology.mesh_digest() != Some(projection.mesh_digest) {
+            return Err(ResourcePlanningError::Invalid(
+                "constraint plan and analysis projection name different topology".into(),
+            ));
+        }
+        if matches!(
+            constraints.topology,
+            CanonicalStructuralTopologyIdentity::ConformalMixed { .. }
+        ) {
+            return Self::derive_mixed(projection, constraints, model, mesh);
+        }
+        let mesh_dofs = projection
+            .nodes
+            .len()
+            .checked_mul(TRANSLATIONAL_DOF_COUNT)
+            .ok_or(ResourcePlanningError::Overflow("structural mesh DOFs"))?;
+        let reference_dofs = constraints
+            .reference_points
+            .len()
+            .checked_mul(REFERENCE_POINT_DOF_COUNT)
+            .ok_or(ResourcePlanningError::Overflow(
+                "structural reference-point DOFs",
+            ))?;
+        let total_dofs = mesh_dofs
+            .checked_add(reference_dofs)
+            .ok_or(ResourcePlanningError::Overflow("structural DOFs"))?;
+        if total_dofs == 0 {
+            return Err(ResourcePlanningError::Invalid(
+                "structural symbolic planning requires at least one DOF".into(),
+            ));
+        }
+
+        let mut stiffness_rows = (0..total_dofs)
+            .map(|_| BTreeSet::<usize>::new())
+            .collect::<Vec<_>>();
+        let mut mass_rows = (0..total_dofs)
+            .map(|row| BTreeSet::from([row]))
+            .collect::<Vec<_>>();
+        for element in &projection.elements {
+            for &row_node in &element.node_indices {
+                let row_offset = checked_dof_offset(row_node, projection.nodes.len())?;
+                for &column_node in &element.node_indices {
+                    let column_offset = checked_dof_offset(column_node, projection.nodes.len())?;
+                    for row_axis in 0..TRANSLATIONAL_DOF_COUNT {
+                        for column_axis in 0..TRANSLATIONAL_DOF_COUNT {
+                            stiffness_rows[row_offset + row_axis]
+                                .insert(column_offset + column_axis);
+                        }
+                        mass_rows[row_offset + row_axis].insert(column_offset + row_axis);
+                    }
+                }
+            }
+        }
+        let mass = pattern_from_rows(mass_rows, total_dofs)?;
+        if !model.connectors.is_empty() {
+            let topology = CanonicalStructuralNodeSpace::derive_solid(mesh)
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
+            if layout.total_dof_count() != total_dofs {
+                return Err(ResourcePlanningError::Invalid(
+                    "solid connector layout and symbolic DOF count differ".into(),
+                ));
+            }
+            let plan =
+                compile_model_connector_plan(model, Some(mesh), constraints.reference_points.len())
+                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            add_connector_plan_pattern(&mut stiffness_rows, &plan, constraints.topology, &layout)?;
+        }
+        let stiffness_upper_bound = pattern_from_rows(stiffness_rows, total_dofs)?;
+        Self::from_patterns(stiffness_upper_bound.clone(), mass, stiffness_upper_bound)
+    }
+
+    pub fn derive_explicit(
+        constraints: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+    ) -> Result<Self, ResourcePlanningError> {
+        let structural = model.structural.as_ref().ok_or_else(|| {
+            ResourcePlanningError::Invalid(
+                "explicit symbolic planning requires structural topology".into(),
+            )
+        })?;
+        let topology = CanonicalStructuralNodeSpace::derive_explicit(structural)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        if constraints.topology != topology.identity {
+            return Err(ResourcePlanningError::Invalid(
+                "constraint plan and explicit structural topology differ".into(),
+            ));
+        }
+        let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
+        let total_dofs = layout.total_dof_count();
+        let mut rows = (0..total_dofs)
+            .map(|_| BTreeSet::<usize>::new())
+            .collect::<Vec<_>>();
+        for element in &structural.elements {
+            let explicit_nodes = match &element.kind {
+                StructuralElementKind::Beam(beam) => beam.node_ids.as_slice(),
+                StructuralElementKind::Shell(shell) => shell.node_ids.as_slice(),
+            };
+            let mut element_dofs = Vec::new();
+            for node_id in explicit_nodes {
+                let explicit = structural
+                    .nodes
+                    .iter()
+                    .position(|node| node.node_id == *node_id)
+                    .ok_or_else(|| {
+                        ResourcePlanningError::Invalid(format!(
+                            "element `{}` references absent node {}",
+                            element.element_id, node_id
+                        ))
+                    })?;
+                let canonical = topology.explicit_node_indices[explicit];
+                element_dofs.extend(
+                    StructuralDofKind::ORDER
+                        .into_iter()
+                        .filter_map(|dof| layout.index(canonical, dof)),
+                );
+            }
+            add_dense_element_pattern(&mut rows, &element_dofs);
+        }
+        if !model.connectors.is_empty() {
+            let plan =
+                compile_model_connector_plan(model, None, constraints.reference_points.len())
+                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            add_connector_plan_pattern(&mut rows, &plan, constraints.topology, &layout)?;
+        }
+        for (row, columns) in rows.iter_mut().enumerate() {
+            columns.insert(row);
+        }
+        let stiffness_upper_bound = pattern_from_rows(rows, total_dofs)?;
+        Self::from_patterns(
+            stiffness_upper_bound.clone(),
+            stiffness_upper_bound.clone(),
+            stiffness_upper_bound,
+        )
+    }
+
+    fn derive_mixed(
+        projection: &AnalysisProjection,
+        constraints: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+        mesh: &SolverMeshArtifact,
+    ) -> Result<Self, ResourcePlanningError> {
+        let structural = model.structural.as_ref().ok_or_else(|| {
+            ResourcePlanningError::Invalid(
+                "mixed symbolic planning requires explicit structural topology".into(),
+            )
+        })?;
+        let topology = CanonicalStructuralNodeSpace::derive(mesh, structural)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        if constraints.topology != topology.identity {
+            return Err(ResourcePlanningError::Invalid(
+                "constraint plan and mixed structural topology differ".into(),
+            ));
+        }
+        let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
+        let total_dofs = layout.total_dof_count();
+        let mut rows = (0..total_dofs)
+            .map(|_| BTreeSet::<usize>::new())
+            .collect::<Vec<_>>();
+        for element in &projection.elements {
+            let element_dofs = element
+                .node_indices
+                .iter()
+                .flat_map(|node| {
+                    [
+                        StructuralDofKind::Ux,
+                        StructuralDofKind::Uy,
+                        StructuralDofKind::Uz,
+                    ]
+                    .into_iter()
+                    .filter_map(|dof| layout.index(*node, dof))
+                })
+                .collect::<Vec<_>>();
+            add_dense_element_pattern(&mut rows, &element_dofs);
+        }
+        for element in &structural.elements {
+            let explicit_nodes = match &element.kind {
+                StructuralElementKind::Beam(beam) => beam.node_ids.as_slice(),
+                StructuralElementKind::Shell(shell) => shell.node_ids.as_slice(),
+            };
+            let mut element_dofs = Vec::new();
+            for node_id in explicit_nodes {
+                let explicit = structural
+                    .nodes
+                    .iter()
+                    .position(|node| node.node_id == *node_id)
+                    .ok_or_else(|| {
+                        ResourcePlanningError::Invalid(format!(
+                            "element `{}` references absent node {}",
+                            element.element_id, node_id
+                        ))
+                    })?;
+                let canonical = topology.explicit_node_indices[explicit];
+                element_dofs.extend(
+                    StructuralDofKind::ORDER
+                        .into_iter()
+                        .filter_map(|dof| layout.index(canonical, dof)),
+                );
+            }
+            add_dense_element_pattern(&mut rows, &element_dofs);
+        }
+        if !model.connectors.is_empty() {
+            let plan =
+                compile_model_connector_plan(model, Some(mesh), constraints.reference_points.len())
+                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            add_connector_plan_pattern(&mut rows, &plan, constraints.topology, &layout)?;
+        }
+        for (row, columns) in rows.iter_mut().enumerate() {
+            columns.insert(row);
+        }
+        let stiffness_upper_bound = pattern_from_rows(rows, total_dofs)?;
+        let mass = stiffness_upper_bound.clone();
+        let damping = stiffness_upper_bound.clone();
+        Self::from_patterns(stiffness_upper_bound, mass, damping)
+    }
+
+    fn from_patterns(
+        stiffness_upper_bound: SparsePattern,
+        mass: SparsePattern,
+        damping: SparsePattern,
+    ) -> Result<Self, ResourcePlanningError> {
+        let pattern_identities = (
+            stiffness_upper_bound
+                .identity()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            mass.identity()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            damping
+                .identity()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        );
+        let encoded = encode_contract(
+            SYMBOLIC_PREFIX,
+            "structural-symbolic-operators",
+            &pattern_identities,
+            SYMBOLIC_LIMITS,
+        )
+        .map_err(ResourcePlanningError::from)?;
+        Ok(Self {
+            stiffness_upper_bound,
+            mass,
+            damping,
+            identity: Digest::sha256(encoded),
+        })
+    }
+
+    pub const fn identity(&self) -> Digest {
+        self.identity
+    }
+
+    pub fn stiffness_upper_bound(&self) -> &SparsePattern {
+        &self.stiffness_upper_bound
+    }
+
+    pub fn mass_upper_bound(&self) -> &SparsePattern {
+        &self.mass
+    }
+
+    pub fn damping_upper_bound(&self) -> &SparsePattern {
+        &self.damping
+    }
+
+    pub fn patterns(&self) -> [&SparsePattern; 3] {
+        [&self.stiffness_upper_bound, &self.mass, &self.damping]
+    }
+
+    /// Reconcile the assembled graphs against the assembly-free storage claim before solve.
+    /// This checks exact K/M/C entries, not only total nonzero counts.
+    pub(crate) fn verify_assembled(
+        &self,
+        operators: &CanonicalRealOperators,
+    ) -> Result<(), ResourcePlanningError> {
+        let actual = [
+            operators.stiffness().pattern(),
+            operators.mass().pattern(),
+            operators.damping().pattern(),
+        ];
+        for ((role, planned), assembled) in ["stiffness", "mass", "damping"]
+            .into_iter()
+            .zip(self.patterns())
+            .zip(actual)
+        {
+            match planned.first_uncovered_entry(assembled) {
+                Ok(None) => {}
+                Ok(Some((row, column))) => {
+                    return Err(ResourcePlanningError::Invalid(format!(
+                        "assembled {role} entry ({row}, {column}) exceeds symbolic storage bound"
+                    )));
+                }
+                Err(error) => {
+                    return Err(ResourcePlanningError::Invalid(format!(
+                        "assembled {role} shape differs from symbolic storage bound: {error}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn add_connector_plan_pattern(
+    rows: &mut [BTreeSet<usize>],
+    plan: &CanonicalStructuralConnectorPlan,
+    topology: CanonicalStructuralTopologyIdentity,
+    layout: &StructuralDofLayout,
+) -> Result<(), ResourcePlanningError> {
+    if plan.topology != topology || plan.node_count != layout.node_count() {
+        return Err(ResourcePlanningError::Invalid(
+            "connector plan and symbolic topology differ".into(),
+        ));
+    }
+    for connector in &plan.entries {
+        let mut connector_nodes = Vec::new();
+        match connector {
+            CanonicalConnectorEntry::AxialSpring {
+                primary, secondary, ..
+            }
+            | CanonicalConnectorEntry::AxialDashpot {
+                primary, secondary, ..
+            } => connector_nodes.extend([primary.node_index, secondary.node_index]),
+            CanonicalConnectorEntry::IsotropicGroundSpring { target, .. } => {
+                connector_nodes.push(target.node_index);
+            }
+            CanonicalConnectorEntry::SurfaceNormalFoundation { quadrature, .. } => {
+                connector_nodes.extend(
+                    quadrature
+                        .iter()
+                        .flat_map(|point| point.nodes.iter().map(|node| node.node_index)),
+                );
+            }
+        }
+        connector_nodes.sort_unstable();
+        connector_nodes.dedup();
+        if connector_nodes.is_empty() {
+            return Err(ResourcePlanningError::Invalid(format!(
+                "connector `{}` resolves to no structural nodes",
+                connector.connector_id()
+            )));
+        }
+        let mut connector_dofs = Vec::new();
+        for node in connector_nodes {
+            connector_dofs.extend(
+                [
+                    StructuralDofKind::Ux,
+                    StructuralDofKind::Uy,
+                    StructuralDofKind::Uz,
+                ]
+                .into_iter()
+                .map(|dof| {
+                    layout.index(node, dof).ok_or_else(|| {
+                        ResourcePlanningError::Invalid(format!(
+                            "connector `{}` lacks a translational DOF",
+                            connector.connector_id()
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
+        add_dense_element_pattern(rows, &connector_dofs);
+    }
+    Ok(())
+}
+
+fn add_dense_element_pattern(rows: &mut [BTreeSet<usize>], element_dofs: &[usize]) {
+    for &row in element_dofs {
+        rows[row].extend(element_dofs.iter().copied());
+    }
+}
+
+fn checked_dof_offset(
+    node_index: usize,
+    node_count: usize,
+) -> Result<usize, ResourcePlanningError> {
+    if node_index >= node_count {
+        return Err(ResourcePlanningError::Invalid(
+            "projected element references an absent node".into(),
+        ));
+    }
+    node_index
+        .checked_mul(TRANSLATIONAL_DOF_COUNT)
+        .ok_or(ResourcePlanningError::Overflow("structural DOF offset"))
+}
+
+pub(super) fn pattern_from_rows(
+    rows: Vec<BTreeSet<usize>>,
+    columns: usize,
+) -> Result<SparsePattern, ResourcePlanningError> {
+    let mut offsets = Vec::with_capacity(rows.len() + 1);
+    let mut column_indices = Vec::new();
+    offsets.push(0_u64);
+    for row in rows {
+        for column in row {
+            column_indices.push(
+                u64::try_from(column)
+                    .map_err(|_| ResourcePlanningError::Overflow("sparse column index"))?,
+            );
+        }
+        offsets.push(
+            u64::try_from(column_indices.len())
+                .map_err(|_| ResourcePlanningError::Overflow("sparse row offset"))?,
+        );
+    }
+    SparsePattern::try_new(
+        u64::try_from(offsets.len() - 1)
+            .map_err(|_| ResourcePlanningError::Overflow("sparse row count"))?,
+        u64::try_from(columns)
+            .map_err(|_| ResourcePlanningError::Overflow("sparse column count"))?,
+        offsets,
+        column_indices,
+    )
+    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algebra::{MatrixProperties, OperatorRole, RealSparseMatrix};
+
+    #[test]
+    fn assembled_operator_reconciliation_rejects_each_unplanned_role() {
+        let diagonal = SparsePattern::try_new(2, 2, vec![0, 1, 2], vec![0, 1]).unwrap();
+        let planned = StructuralSymbolicOperators::from_patterns(
+            diagonal.clone(),
+            diagonal.clone(),
+            diagonal,
+        )
+        .unwrap();
+        let matrix = |role, coupled| {
+            RealSparseMatrix::from_dense(
+                &[2.0, coupled, coupled, 2.0],
+                2,
+                role,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .unwrap()
+        };
+        for unplanned in 0..3 {
+            let operators = CanonicalRealOperators::try_new(
+                matrix(
+                    OperatorRole::Stiffness,
+                    if unplanned == 0 { 1.0 } else { 0.0 },
+                ),
+                matrix(OperatorRole::Mass, if unplanned == 1 { 1.0 } else { 0.0 }),
+                matrix(
+                    OperatorRole::Damping,
+                    if unplanned == 2 { 1.0 } else { 0.0 },
+                ),
+            )
+            .unwrap();
+            let role = ["stiffness", "mass", "damping"][unplanned];
+            assert!(matches!(
+                planned.verify_assembled(&operators),
+                Err(ResourcePlanningError::Invalid(message))
+                    if message.contains(role) && message.contains("(0, 1)")
+            ));
+        }
+        let covered = CanonicalRealOperators::try_new(
+            matrix(OperatorRole::Stiffness, 0.0),
+            matrix(OperatorRole::Mass, 0.0),
+            matrix(OperatorRole::Damping, 0.0),
+        )
+        .unwrap();
+        planned.verify_assembled(&covered).unwrap();
+    }
+}

@@ -46,6 +46,7 @@ impl AlgorithmVersionSet {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceQualityTargets {
+    pub minimum_metric_edge_length: f64,
     pub minimum_metric_angle_degrees: f64,
     pub maximum_physical_aspect_ratio: f64,
     pub maximum_chordal_deviation_m: f64,
@@ -102,6 +103,10 @@ impl SurfaceQualityTargets {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         for (field, value) in [
             (
+                "minimum surface metric edge length",
+                self.minimum_metric_edge_length,
+            ),
+            (
                 "minimum surface metric angle",
                 self.minimum_metric_angle_degrees,
             ),
@@ -120,14 +125,16 @@ impl SurfaceQualityTargets {
         ] {
             validate_finite(field, value)?;
         }
-        if !(0.0..60.0).contains(&self.minimum_metric_angle_degrees)
+        if !(0.0..=1.0).contains(&self.minimum_metric_edge_length)
+            || self.minimum_metric_edge_length == 0.0
+            || !(0.0..60.0).contains(&self.minimum_metric_angle_degrees)
             || self.maximum_physical_aspect_ratio < 1.0
             || self.maximum_chordal_deviation_m <= 0.0
             || !(0.0..=180.0).contains(&self.maximum_normal_deviation_degrees)
         {
             return Err(MeshingContractError::invalid(
                 "surface quality targets",
-                "angle, aspect, deviation, or normal bound is outside its valid range",
+                "metric edge, angle, aspect, deviation, or normal bound is outside its valid range",
             ));
         }
         Ok(())

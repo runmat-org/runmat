@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cli::{CaptureFiguresMode, Cli, FigureSize};
+use crate::cli::{CaptureFiguresMode, Cli, ExecutionTarget, ExecutionTargetArgs, FigureSize};
 use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::commands::bytecode::{emit_bytecode_with_catalog, write_bytecode_output};
 use crate::commands::fea::execute_fea_path;
@@ -33,7 +33,16 @@ pub async fn execute_script(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
-    execute_script_with_args(script, vec![], emit_bytecode_path, cli, config, false).await
+    execute_script_with_args(
+        script,
+        vec![],
+        emit_bytecode_path,
+        cli,
+        config,
+        false,
+        ExecutionTargetArgs::default(),
+    )
+    .await
 }
 
 pub async fn execute_script_with_args(
@@ -43,6 +52,7 @@ pub async fn execute_script_with_args(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
     fea_json: bool,
+    execution: ExecutionTargetArgs,
 ) -> Result<()> {
     execute_script_with_graphics(
         script,
@@ -51,6 +61,7 @@ pub async fn execute_script_with_args(
         cli,
         config,
         fea_json,
+        execution,
         &runmat_core::SessionGraphicsHost::Unavailable,
     )
     .await
@@ -63,6 +74,7 @@ pub(crate) async fn execute_script_with_graphics(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
     fea_json: bool,
+    execution: ExecutionTargetArgs,
     graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<()> {
     if script.as_path() == Path::new("-") {
@@ -71,15 +83,21 @@ pub(crate) async fn execute_script_with_graphics(
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
 
-    if runmat_runtime::analysis::is_fea_file_path(&script) {
+    if crate::commands::fea::source::is_fea_source_path(&script) {
         if emit_bytecode_path.is_some() {
             anyhow::bail!("--emit-bytecode is only supported for .m script files");
         }
         if !args.is_empty() {
             anyhow::bail!(".fea files do not accept positional script arguments");
         }
-        return execute_fea_path(script, cli, config, fea_json).await;
+        return execute_fea_path(script, cli, config, fea_json, execution).await;
     }
+
+    if !matches!(execution.resolve()?, ExecutionTarget::Local) {
+        anyhow::bail!("remote `runmat run` execution currently requires a .fea study document");
+    }
+
+    validate_local_script_arguments(&args)?;
 
     if let Some(path) = &emit_bytecode_path {
         let content = fs::read_to_string(&script)
@@ -135,6 +153,16 @@ pub(crate) async fn execute_stdin_script_with_graphics(
         graphics,
     )
     .await
+}
+
+pub(crate) fn validate_local_script_arguments(args: &[String]) -> Result<()> {
+    if !args.is_empty() {
+        anyhow::bail!(
+            "local MATLAB script execution does not accept positional arguments; \
+             invoke a typed function entrypoint through `runmat job submit --function`"
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
@@ -586,10 +614,19 @@ fn outcome_error_diagnostic(outcome: &ExecutionOutcome) -> Option<&RuntimeDiagno
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_script_input;
+    use super::{resolve_script_input, validate_local_script_arguments};
     use crate::test_support::ScopedCurrentDir;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn local_script_arguments_reject_instead_of_being_discarded() {
+        validate_local_script_arguments(&[]).unwrap();
+        let error = validate_local_script_arguments(&["input".into()]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("does not accept positional arguments"));
+    }
 
     #[test]
     fn resolves_named_entrypoint_to_manifest_path_target() {

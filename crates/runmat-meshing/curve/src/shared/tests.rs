@@ -1,3 +1,8 @@
+#[path = "tests/cancellation.rs"]
+mod cancellation;
+#[path = "tests/codec_admission.rs"]
+mod codec_admission;
+
 use std::f64::consts::{PI, TAU};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -517,9 +522,9 @@ fn resolved_curve_metric_combines_all_incident_typed_sources() {
             unit_tangent: [0.0, 1.0, 0.0],
         })
         .unwrap();
-    assert_eq!(evaluation.metric.xx, 5.0);
-    assert_eq!(evaluation.metric.yy, 5.0);
-    assert_eq!(evaluation.metric.zz, 5.0);
+    assert_eq!(evaluation.metric.xx, 1.0);
+    assert_eq!(evaluation.metric.yy, 1.0);
+    assert_eq!(evaluation.metric.zz, 1.0);
     assert_eq!(evaluation.applied_contribution_count, 4);
     assert_eq!(
         evaluation.active_sources,
@@ -593,13 +598,18 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
         })
         .unwrap();
 
-    assert!(evaluation.metric.xx > 25.0);
+    assert!((evaluation.metric.xx - 25.0).abs() <= 16.0 * f64::EPSILON * 25.0);
     assert_eq!(
         evaluation.active_sources,
-        vec![runmat_meshing_core::MetricSourceKind::Global]
+        vec![
+            runmat_meshing_core::MetricSourceKind::Global,
+            runmat_meshing_core::MetricSourceKind::Curve,
+        ]
     );
-    assert_eq!(evaluation.applied_contribution_count, 0);
-    assert_eq!(evaluation.clipped_contribution_count, 1);
+    // The shared face trace retains the adjacent curve's source provenance.
+    assert_eq!(evaluation.applied_contribution_count, 1);
+    // Edge grading and the conservatively rounded face trace each tighten once.
+    assert_eq!(evaluation.clipped_contribution_count, 2);
 }
 
 #[test]
@@ -623,6 +633,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
         maximum_metric_edge_length: 1.5,
     };
     let surface_quality = runmat_meshing_core::SurfaceQualityTargets {
+        minimum_metric_edge_length: 0.1,
         minimum_metric_angle_degrees: 20.0,
         maximum_physical_aspect_ratio: 10.0,
         maximum_chordal_deviation_m: 0.001,

@@ -1,27 +1,24 @@
-use std::collections::{BTreeMap, BTreeSet};
+use super::validation_storage::{Claims, IdIndex, ValidationWork};
 
 use super::{
-    exact_contacts::expected_contact_pair, ExactBRepTopology, GeometryContractError,
+    exact_contacts::contact_pair_matches, ExactBRepTopology, GeometryContractError,
     PersistentEntityId, PersistentEntityKind,
 };
 
 pub(super) fn validate_interfaces(
     topology: &ExactBRepTopology,
-    faces: &BTreeSet<PersistentEntityId>,
-    regions: &BTreeSet<PersistentEntityId>,
+    faces: &IdIndex<'_>,
+    regions: &IdIndex<'_>,
 ) -> Result<(), GeometryContractError> {
     let mut ordered = None;
     for interface in &topology.interfaces {
-        if ordered
-            .as_ref()
-            .is_some_and(|face| face >= &interface.face_id)
-        {
+        if ordered.is_some_and(|face| face >= &interface.face_id) {
             return Err(invalid(
                 "shared interfaces",
                 "interfaces must be canonical and unique",
             ));
         }
-        ordered = Some(interface.face_id.clone());
+        ordered = Some(&interface.face_id);
         require_reference(
             "shared interface face",
             &interface.face_id,
@@ -50,19 +47,16 @@ pub(super) fn validate_interfaces(
 
 pub(super) fn validate_contacts(
     topology: &ExactBRepTopology,
-    faces: &BTreeSet<PersistentEntityId>,
+    faces: &IdIndex<'_>,
+    work: ValidationWork<'_>,
 ) -> Result<(), GeometryContractError> {
-    let interface_faces = topology
-        .interfaces
-        .iter()
-        .map(|interface| &interface.face_id)
-        .collect::<BTreeSet<_>>();
+    let mut claimed_faces = Claims::new(faces, work)?;
     collect_ids(
         "contacts",
         PersistentEntityKind::Contact,
         topology.contacts.iter().map(|value| &value.id),
+        work,
     )?;
-    let mut claimed_faces = BTreeSet::new();
     for contact in &topology.contacts {
         require_ordered_refs(
             "contact side A faces",
@@ -84,7 +78,12 @@ pub(super) fn validate_contacts(
                 .side_a_face_ids
                 .iter()
                 .chain(&contact.side_b_face_ids)
-                .any(|face| interface_faces.contains(face))
+                .any(|face| {
+                    topology
+                        .interfaces
+                        .binary_search_by(|interface| interface.face_id.cmp(face))
+                        .is_ok()
+                })
         {
             return Err(invalid(
                 "contact pairing",
@@ -95,19 +94,14 @@ pub(super) fn validate_contacts(
             .side_a_face_ids
             .iter()
             .chain(&contact.side_b_face_ids)
-            .any(|face| !claimed_faces.insert(face.clone()))
+            .any(|face| !claimed_faces.insert(face))
         {
             return Err(invalid(
                 "contact face ownership",
                 "an exact face cannot belong to more than one contact pair",
             ));
         }
-        let expected = expected_contact_pair(
-            &topology.root_assembly_id.assembly_path,
-            &contact.side_a_face_ids,
-            &contact.side_b_face_ids,
-        );
-        if contact != &expected {
+        if !contact_pair_matches(&topology.root_assembly_id.assembly_path, contact) {
             return Err(invalid(
                 "contact pairing contract",
                 "contact identity and pairing digest must derive from the canonical source-face sides",
@@ -132,75 +126,89 @@ fn ordered_sets_are_disjoint(left: &[PersistentEntityId], right: &[PersistentEnt
 pub(super) fn collect_ids<'a>(
     field: &str,
     kind: PersistentEntityKind,
-    ids: impl Iterator<Item = &'a PersistentEntityId>,
-) -> Result<BTreeSet<PersistentEntityId>, GeometryContractError> {
-    let mut set = BTreeSet::new();
-    let mut previous = None;
-    for id in ids {
+    ids: impl ExactSizeIterator<Item = &'a PersistentEntityId>,
+    work: ValidationWork<'a>,
+) -> Result<IdIndex<'a>, GeometryContractError> {
+    let values = IdIndex::collect(ids, work)?;
+    let mut prior = None;
+    for id in values.iter() {
         require_kind(field, id, kind)?;
-        if previous.as_ref().is_some_and(|value| value >= id) || !set.insert(id.clone()) {
+        if prior.is_some_and(|value| value >= id) {
             return Err(invalid(
                 field,
                 "entities must be strictly canonical and unique",
             ));
         }
-        previous = Some(id.clone());
+        prior = Some(id);
     }
-    Ok(set)
+    Ok(values)
 }
-
 pub(super) fn require_ordered_refs(
     field: &str,
     ids: &[PersistentEntityId],
     kind: PersistentEntityKind,
-    known: &BTreeSet<PersistentEntityId>,
+    known: &IdIndex<'_>,
     nonempty: bool,
 ) -> Result<(), GeometryContractError> {
-    if nonempty && ids.is_empty() {
-        return Err(invalid(field, "reference list must not be empty"));
+    require_ordered_ref_iter(field, ids.iter(), kind, known, nonempty)
+}
+pub(super) fn require_ordered_ref_iter<'a>(
+    field: &str,
+    ids: impl Iterator<Item = &'a PersistentEntityId>,
+    kind: PersistentEntityKind,
+    known: &IdIndex<'_>,
+    nonempty: bool,
+) -> Result<(), GeometryContractError> {
+    let mut prior = None;
+    for id in ids {
+        require_reference(field, id, kind, known)?;
+        if prior.is_some_and(|value| value >= id) {
+            return Err(invalid(
+                field,
+                "entities must be strictly canonical and unique",
+            ));
+        }
+        prior = Some(id);
     }
-    let collected = collect_ids(field, kind, ids.iter())?;
-    if !collected.is_subset(known) {
-        return Err(invalid(field, "reference list contains an unknown entity"));
+    if nonempty && prior.is_none() {
+        return Err(invalid(field, "reference list must not be empty"));
     }
     Ok(())
 }
-
-/// Validates an ordered cyclic traversal without sorting away its incidence. The smallest
-/// persistent identity is the deterministic start; direction remains the topology use direction.
-pub(super) fn require_canonical_cycle_refs(
+/// Preserve cycle traversal, checking uniqueness using bounded borrowed scratch.
+pub(super) fn require_canonical_cycle_refs<'a>(
     field: &str,
-    ids: &[PersistentEntityId],
+    ids: &'a [PersistentEntityId],
     kind: PersistentEntityKind,
-    known: &BTreeSet<PersistentEntityId>,
+    known: &IdIndex<'_>,
+    work: ValidationWork<'a>,
 ) -> Result<(), GeometryContractError> {
     let Some(first) = ids.first() else {
         return Err(invalid(field, "cyclic reference list must not be empty"));
     };
-    let mut collected = BTreeSet::new();
+    let mut ordered = work.buffer(ids.len())?;
     for id in ids {
-        require_kind(field, id, kind)?;
-        if !known.contains(id) {
-            return Err(invalid(field, "cyclic reference names an unknown entity"));
-        }
-        if !collected.insert(id.clone()) {
-            return Err(invalid(field, "cyclic references must be unique"));
-        }
+        work.checkpoint()?;
+        require_reference(field, id, kind, known)?;
         if id < first {
             return Err(invalid(
                 field,
                 "cyclic traversal must start at its smallest persistent identity",
             ));
         }
+        ordered.push(id);
+    }
+    ordered.sort_unstable();
+    if ordered.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(invalid(field, "cyclic references must be unique"));
     }
     Ok(())
 }
-
 pub(super) fn require_reference(
     field: &str,
     id: &PersistentEntityId,
     kind: PersistentEntityKind,
-    known: &BTreeSet<PersistentEntityId>,
+    known: &IdIndex<'_>,
 ) -> Result<(), GeometryContractError> {
     require_kind(field, id, kind)?;
     if !known.contains(id) {
@@ -241,21 +249,10 @@ pub(super) fn require_kind(
 pub(super) fn claim_unique(
     field: &str,
     ids: &[PersistentEntityId],
-    claimed: &mut BTreeSet<PersistentEntityId>,
+    claimed: &mut Claims<'_, '_>,
 ) -> Result<(), GeometryContractError> {
-    if ids.iter().any(|id| !claimed.insert(id.clone())) {
+    if ids.iter().any(|id| !claimed.insert(id)) {
         return Err(invalid(field, "entity has multiple topology owners"));
-    }
-    Ok(())
-}
-
-pub(super) fn claim_wire(
-    owners: &mut BTreeMap<PersistentEntityId, PersistentEntityId>,
-    wire: &PersistentEntityId,
-    face: &PersistentEntityId,
-) -> Result<(), GeometryContractError> {
-    if owners.insert(wire.clone(), face.clone()).is_some() {
-        return Err(invalid("wire ownership", "wire has multiple face owners"));
     }
     Ok(())
 }
@@ -299,44 +296,4 @@ pub(super) fn invalid(field: &str, reason: impl Into<String>) -> GeometryContrac
 }
 
 #[cfg(test)]
-mod cycle_tests {
-    use super::*;
-
-    #[test]
-    fn cyclic_references_preserve_traversal_with_one_canonical_rotation() {
-        let a = id("a");
-        let b = id("b");
-        let c = id("c");
-        let known = BTreeSet::from([a.clone(), b.clone(), c.clone()]);
-
-        require_canonical_cycle_refs(
-            "cycle",
-            &[a.clone(), c.clone(), b.clone()],
-            PersistentEntityKind::Coedge,
-            &known,
-        )
-        .unwrap();
-        assert!(require_canonical_cycle_refs(
-            "cycle",
-            &[c, b.clone(), a.clone()],
-            PersistentEntityKind::Coedge,
-            &known,
-        )
-        .is_err());
-        assert!(require_canonical_cycle_refs(
-            "cycle",
-            &[a, b.clone(), b],
-            PersistentEntityKind::Coedge,
-            &known,
-        )
-        .is_err());
-    }
-
-    fn id(name: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Coedge,
-            source_topology_id: name.into(),
-            assembly_path: vec!["part".into()],
-        }
-    }
-}
+mod cycle_tests;

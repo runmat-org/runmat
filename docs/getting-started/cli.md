@@ -124,6 +124,8 @@ Use `--explain-link` to see the exact program functions, builtins, classes, meth
 
 The compiler validates that the embedded runtime matches the current target, native ABI, schema, RunMat version, runtime identity, and builtin catalog before linking. A source build made with ordinary `cargo build` intentionally lacks that large embedded archive; use the two-phase build helper described in [Build System](/docs/runtime/development/build-system) when developing the standalone workflow.
 
+See [Native Compilation](/docs/runtime/compiler/native-compilation) for entrypoint and source-closure rules, runtime composition policies, link-plan inspection, platform requirements, and failure diagnosis.
+
 ## Check
 
 Use `runmat check` before running a `.m` script or `.fea` study:
@@ -146,6 +148,8 @@ The default output is human-readable and includes diagnostic codes, source locat
 For `.fea` files, check loads geometry, resolves selectors, validates the study or sweep, and builds the solve plan without running the solver.
 
 FEA JSON mode returns structured validation and plan payloads for CI and tooling.
+
+See the [runmat check reference](/docs/runtime/getting-started/check) for worked diagnostics, project source examples, and guidance on using checks in automation.
 
 ## Pass Runtime Options
 

@@ -325,7 +325,8 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            axis_equal: true,
+            // MATLAB keeps the default aspect for image/imagesc; only imshow uses equal axes.
+            axis_equal: false,
             ..Default::default()
         },
         move |figure, axes| {

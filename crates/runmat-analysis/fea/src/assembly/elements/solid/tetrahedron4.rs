@@ -53,10 +53,10 @@ impl Tetrahedron4ElementGeometry {
         ];
         let mut gradients = [[0.0_f64; 3]; 4];
         for (node, reference) in reference_gradients.into_iter().enumerate() {
-            for axis in 0..3 {
-                gradients[node][axis] = inverse[0][axis] * reference[0]
-                    + inverse[1][axis] * reference[1]
-                    + inverse[2][axis] * reference[2];
+            for (axis, inverse_row) in inverse.iter().enumerate() {
+                gradients[node][axis] = inverse_row[0] * reference[0]
+                    + inverse_row[1] * reference[1]
+                    + inverse_row[2] * reference[2];
             }
         }
         Ok(gradients)
@@ -120,6 +120,25 @@ pub fn global_stiffness_matrix(
         }
     }
     Ok(k)
+}
+
+pub fn consistent_mass_matrix(
+    material: SolidMaterial,
+    geometry: Tetrahedron4ElementGeometry,
+) -> Result<Tetrahedron4Matrix12, Tetrahedron4ElementError> {
+    material.validate()?;
+    let scalar = material.density_kg_per_m3 * geometry.volume_m3()? / 20.0;
+    Ok(std::array::from_fn(|row| {
+        std::array::from_fn(|column| {
+            if row % TETRAHEDRON4_NODE_DOF_COUNT != column % TETRAHEDRON4_NODE_DOF_COUNT {
+                0.0
+            } else if row / TETRAHEDRON4_NODE_DOF_COUNT == column / TETRAHEDRON4_NODE_DOF_COUNT {
+                2.0 * scalar
+            } else {
+                scalar
+            }
+        })
+    }))
 }
 
 fn validate_nodes(nodes_m: [[f64; 3]; 4]) -> Result<(), Tetrahedron4ElementError> {
@@ -202,6 +221,7 @@ mod tests {
         SolidMaterial {
             youngs_modulus_pa: 200.0e9,
             poisson_ratio: 0.3,
+            density_kg_per_m3: 7_850.0,
         }
     }
 
@@ -243,6 +263,31 @@ mod tests {
                     .map(|(lhs, rhs)| lhs * rhs)
                     .sum::<f64>();
                 assert!(strain.abs() < 1.0e-14);
+            }
+        }
+    }
+
+    #[test]
+    fn skew_tetrahedron4_gradients_reproduce_physical_coordinates() {
+        let geometry = Tetrahedron4ElementGeometry {
+            nodes_m: [
+                [0.2, -0.4, 0.7],
+                [2.1, 0.3, 0.9],
+                [0.8, 1.7, 0.5],
+                [0.5, 0.2, 2.4],
+            ],
+        };
+        let gradients = geometry.shape_function_gradients().unwrap();
+        for coordinate in 0..3 {
+            for derivative in 0..3 {
+                let value = geometry
+                    .nodes_m
+                    .iter()
+                    .zip(gradients)
+                    .map(|(node, gradient)| node[coordinate] * gradient[derivative])
+                    .sum::<f64>();
+                let expected = f64::from(coordinate == derivative);
+                assert!((value - expected).abs() < 1.0e-12);
             }
         }
     }

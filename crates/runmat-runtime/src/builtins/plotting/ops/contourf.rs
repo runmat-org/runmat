@@ -411,7 +411,8 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         Some(parse_contour_args(BUILTIN_NAME, first, rest).map_err(map_contourf_invalid_argument)?);
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_contourf_invalid_argument)?;
     let opts = PlotRenderOptions {
-        axis_equal: true,
+        // MATLAB leaves the data aspect free; `axis equal` sets it.
+        axis_equal: false,
         ..Default::default()
     };
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -667,6 +668,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contourf_requires_matching_grid() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let res = contourf_builtin(
             Value::Tensor(tensor_from(&[0.0])),
@@ -860,6 +862,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_invalid_grid_uses_stable_identifier() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let err = contourf_builtin(Value::Num(0.0), Vec::new()).expect_err("invalid z");
         assert_eq!(err.identifier(), CONTOURF_ERROR_INVALID_ARGUMENT.identifier);
@@ -867,6 +870,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_returns_handle() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(
@@ -880,6 +884,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_explicit_axes_and_scalar_level_count() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -897,6 +902,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_non_square_meshgrid_axes() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(matrix_from(&[10.0, 10.0, 20.0, 20.0, 30.0, 30.0], 2, 3)),

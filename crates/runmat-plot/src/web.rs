@@ -554,7 +554,7 @@ impl WebRenderer {
     }
 
     pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
-        self.plot_renderer.theme = theme.clone();
+        self.plot_renderer.set_theme(theme.clone());
         self.render_config.theme = theme;
         self.apply_background_policy();
     }
@@ -599,6 +599,32 @@ impl WebRenderer {
         self.render_current_scene()
     }
 
+    pub fn set_presence(
+        &mut self,
+        frame: crate::collaboration::PresenceFrame,
+    ) -> Result<(), WebRendererError> {
+        self.plot_renderer
+            .set_presence(frame)
+            .map_err(WebRendererError::Render)
+    }
+
+    pub fn capture_presence_pointer(
+        &self,
+        logical_pixel: [f32; 2],
+    ) -> Option<crate::collaboration::PointerPosition> {
+        #[cfg(feature = "egui-overlay")]
+        if let Some(overlay) = &self.overlay {
+            return overlay
+                .plot_overlay
+                .presence_projections(&self.plot_renderer)
+                .iter()
+                .rev()
+                .find_map(|projection| projection.capture(logical_pixel));
+        }
+        let _ = logical_pixel;
+        None
+    }
+
     pub fn set_geometry_scene_presentation(
         &mut self,
         presentation: GeometryScenePresentation,
@@ -612,6 +638,7 @@ impl WebRenderer {
         &self,
         index: &GeometryScenePickIndex,
         position: [f32; 2],
+        mode: crate::geometry_scene::GeometryScenePickMode,
     ) -> Option<GeometryScenePickResult> {
         index.pick(GeometryScenePickRequest {
             camera: self.plot_renderer.camera().clone(),
@@ -620,6 +647,7 @@ impl WebRenderer {
                 self.surface_config.height.max(1) as f32,
             ],
             position,
+            mode,
         })
     }
 

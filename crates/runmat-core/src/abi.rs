@@ -115,6 +115,8 @@ impl ExecutionSourceContext {
 
 #[derive(Debug)]
 pub struct ExecutionResponse {
+    /// Canonical lock for the dependency graph actually used by captured execution.
+    pub dependency_lock: Option<String>,
     pub source_context: ExecutionSourceContext,
     pub result: std::result::Result<
         runmat_runtime::execution::RootedResult<ExecutionOutcome>,

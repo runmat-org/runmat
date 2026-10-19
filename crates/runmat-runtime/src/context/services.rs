@@ -471,6 +471,25 @@ pub enum HostInteraction {
 pub trait RuntimeHostService {
     fn console(&self, stream: crate::console::ConsoleStream, text: crate::console::ConsoleText);
 
+    /// A retaining host owns the normal console inventory. `evalc` is separate.
+    fn owns_console_retention(&self) -> bool {
+        false
+    }
+
+    fn console_limits(&self) -> Option<runmat_execution::console::ConsoleLimits> {
+        None
+    }
+
+    /// Sticky host failures cannot be hidden by a caught language exception.
+    fn check_execution(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    /// Portable hosts reject interaction even when an ambient response is queued.
+    fn accepts_queued_interaction(&self) -> bool {
+        true
+    }
+
     fn interact(
         &self,
         request: HostInteraction,
@@ -1455,6 +1474,81 @@ pub trait RuntimeCollectiveService {
     ) -> RuntimeServiceFuture<Result<runmat_execution::CollectiveResponse, RuntimeError>>;
 }
 
+/// Immutable analyzed callable selected from the executable active in this invocation.
+///
+/// The product contains everything a portable execution adapter needs to prove callable identity,
+/// validate static facts, and execute the exact frozen program without rediscovering source.
+#[derive(Clone, Debug)]
+pub struct RuntimeProgramCallable {
+    pub owner_identity: String,
+    pub display_name: String,
+    pub source_digest: runmat_execution::Digest,
+    pub executable_source_digest: runmat_execution::Digest,
+    pub executable: runmat_execution::ExecutableUnitEnvelope,
+}
+
+#[derive(Clone, Debug)]
+pub struct RuntimeSignalMaterializationRequest {
+    pub signal: runmat_analysis_core::PhysicalSignal,
+    pub callable: runmat_execution::value::CallableValue,
+    pub program: RuntimeProgramCallable,
+    pub maximum_wall_millis: u64,
+}
+
+/// Host-owned execution of an admitted generated physical input.
+///
+/// The runtime owns language values and the active program product. The host owns process,
+/// accelerator, and distributed execution. The returned signal is canonical solver data and
+/// contains no callback or runtime handle.
+pub trait RuntimeAnalysisService {
+    fn materialize_signal(
+        &self,
+        request: RuntimeSignalMaterializationRequest,
+    ) -> RuntimeServiceFuture<Result<runmat_analysis_core::PhysicalSignal, crate::RuntimeError>>;
+
+    /// Execute a validated study through the host's canonical placement adapter.
+    ///
+    /// The runtime retains admission and publication; the host supplies local or distributed
+    /// process placement without making language builtins depend on a native runner crate.
+    fn execute_study(
+        &self,
+        study: crate::analysis::AnalysisStudySpec,
+        context: crate::operations::OperationContext,
+    ) -> RuntimeServiceFuture<
+        Result<
+            crate::operations::OperationEnvelope<crate::analysis::AnalysisStudyRunData>,
+            crate::operations::OperationErrorEnvelope,
+        >,
+    >;
+
+    fn execute_sweep(
+        &self,
+        sweep: crate::analysis::AnalysisStudySweepSpec,
+        context: crate::operations::OperationContext,
+    ) -> RuntimeServiceFuture<
+        Result<
+            crate::operations::OperationEnvelope<crate::analysis::AnalysisStudySweepData>,
+            crate::operations::OperationErrorEnvelope,
+        >,
+    >;
+}
+
+/// Session-owned authority over the exact immutable executable active in an invocation.
+pub trait RuntimeProgramService {
+    /// Freeze this function's original product after validating its active caller.
+    fn freeze_executable(
+        &self,
+        function: runmat_types::ProgramFunctionId,
+        invocation_revision: &runmat_execution::ProgramRevision,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, crate::RuntimeError>;
+
+    fn freeze_bound_callable(
+        &self,
+        function: runmat_types::ProgramFunctionId,
+        display_name: &str,
+    ) -> Result<RuntimeProgramCallable, crate::RuntimeError>;
+}
+
 /// Narrow, typed ports composed by the host. An absent port is meaningful and
 /// produces a stable capability error through the corresponding `require_*`
 /// accessor; there is no string-keyed service locator.
@@ -1491,6 +1585,8 @@ pub struct RuntimeServicePorts {
     blocking_cpu: Option<Rc<dyn crate::execution::RuntimeBlockingCpuService>>,
     owned_builtin_work: Option<Rc<dyn crate::execution::RuntimeOwnedBuiltinWorkService>>,
     callable_artifacts: Option<Rc<dyn super::RuntimeCallableArtifactService>>,
+    program: Option<Rc<dyn RuntimeProgramService>>,
+    analysis: Option<Rc<dyn RuntimeAnalysisService>>,
 }
 
 impl Default for RuntimeServicePorts {
@@ -1530,6 +1626,8 @@ impl Default for RuntimeServicePorts {
             blocking_cpu: None,
             owned_builtin_work: None,
             callable_artifacts: None,
+            program: None,
+            analysis: None,
         }
     }
 }
@@ -1576,6 +1674,8 @@ impl std::fmt::Debug for RuntimeServicePorts {
         debug.field("blocking_cpu", &self.blocking_cpu.is_some());
         debug.field("owned_builtin_work", &self.owned_builtin_work.is_some());
         debug.field("callable_artifacts", &self.callable_artifacts.is_some());
+        debug.field("program", &self.program.is_some());
+        debug.field("analysis", &self.analysis.is_some());
         #[cfg(not(target_arch = "wasm32"))]
         debug.field("process", &self.process.is_some());
         debug.finish()
@@ -1965,6 +2065,22 @@ impl RuntimeServicePorts {
         RuntimeCollectiveService,
         Collective
     );
+    port_accessors!(
+        with_program,
+        program,
+        require_program,
+        program,
+        RuntimeProgramService,
+        Program
+    );
+    port_accessors!(
+        with_analysis,
+        analysis,
+        require_analysis,
+        analysis,
+        RuntimeAnalysisService,
+        Analysis
+    );
 }
 
 #[cfg(test)]
@@ -2116,6 +2232,8 @@ mod tests {
             missing(ports.require_local_tasks("schedule callback")),
             missing(ports.require_source_evaluation("evaluate session source")),
             missing(ports.require_graphics_presentation("flush graphics")),
+            missing(ports.require_program("freeze callable")),
+            missing(ports.require_analysis("materialize signal")),
         ];
         assert_eq!(
             failures
@@ -2143,6 +2261,8 @@ mod tests {
                 RuntimeCapability::LocalTasks,
                 RuntimeCapability::SourceEvaluation,
                 RuntimeCapability::GraphicsPresentation,
+                RuntimeCapability::Program,
+                RuntimeCapability::Analysis,
             ]
         );
         assert!(failures.iter().all(|failure| {

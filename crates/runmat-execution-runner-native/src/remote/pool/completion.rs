@@ -1,11 +1,16 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use runmat_execution::state::TaskState;
+use runmat_execution::state::{AttemptState, TaskState};
+use runmat_execution_runner::driver::DriverEventKind;
 use runmat_execution_runner::port::BackendReport;
-use runmat_execution_runner::{AttemptReport, DriverCommand};
+use runmat_execution_runner::task::TaskRecord;
+use runmat_execution_runner::{
+    AttemptFailureKind, AttemptReport, Driver, DriverAction, DriverCommand,
+};
 
 use super::RemotePoolDriver;
+use crate::NativeProgramFailure;
 
 type PendingTaskResolution = (
     tokio::sync::oneshot::Sender<(u64, super::CompletionResult)>,
@@ -23,95 +28,109 @@ impl RemotePoolDriver {
             };
         }
         let task_id = report.task_id;
+        let terminal_report = report.report.clone();
         let spmd_task = self.spmd_task_context(task_id);
-        let (actions, terminal, committed_results) = {
+        let (actions, outcome, committed_watermark) = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
-            let actions = match driver.handle(DriverCommand::BackendReport(report.clone())) {
+            let previous_events = driver.events().len();
+            let actions = match driver.handle(DriverCommand::BackendReport(report)) {
                 Ok(actions) => actions,
-                Err(_) => return,
+                Err(error) => {
+                    tracing::error!(%task_id, %error, "remote scheduler rejected backend report");
+                    return;
+                }
             };
-            let snapshot = driver.snapshot();
-            let committed_results = snapshot.tasks.get(&task_id).and_then(|task| {
-                task.committed
-                    .as_ref()
-                    .filter(|commit| commit.attempt_id == report.attempt_id)
-                    .map(|commit| commit.result.result_objects().to_vec())
-            });
-            let terminal = snapshot.tasks.get(&task_id).and_then(|task| {
-                matches!(
-                    task.state,
-                    TaskState::Succeeded
-                        | TaskState::Failed
-                        | TaskState::Cancelled
-                        | TaskState::Indeterminate
-                )
-                .then_some(task.state)
-            });
-            (actions, terminal, committed_results)
-        };
-        if let Some(results) = committed_results {
-            if let Err(error) = self.execution_objects.commit_results(&results) {
-                self.resolve_task(
-                    task_id,
-                    Err(crate::NativeProgramFailure::Infrastructure(
-                        error.to_string(),
-                    )),
-                );
-                return;
-            }
-        }
-        self.dispatch(actions);
-        if let Some(state) = terminal {
-            if self.direct_bundle.is_none()
-                && state == TaskState::Indeterminate
-                && matches!(&report.report, AttemptReport::Succeeded { .. })
-            {
-                self.resolve_task(
-                    task_id,
-                    Err(crate::NativeProgramFailure::WorkerLost(
+            let outcome = driver.task_record(task_id).ok().and_then(|task| {
+                if task.state == TaskState::Succeeded {
+                    Some(match &task.committed {
+                        Some(commit) => self
+                            .execution_objects
+                            .commit_results(commit.result.result_objects())
+                            .map(|()| commit.result.clone())
+                            .map_err(|error| {
+                                NativeProgramFailure::Infrastructure(error.to_string())
+                            }),
+                        None => Err(NativeProgramFailure::Infrastructure(
+                            "succeeded remote task has no committed result".into(),
+                        )),
+                    })
+                } else if self.direct_bundle.is_none()
+                    && task.state == TaskState::Indeterminate
+                    && matches!(&terminal_report, AttemptReport::Succeeded { .. })
+                {
+                    Some(Err(NativeProgramFailure::WorkerLost(
                         "Graph attempt reported success without verified worker retirement".into(),
-                    )),
-                );
-                return;
-            }
-            let outcome = match report.report {
-                AttemptReport::Succeeded { result } => Ok(result),
-                AttemptReport::Failed { kind, message } => match kind {
-                    runmat_execution_runner::AttemptFailureKind::Execution
-                    | runmat_execution_runner::AttemptFailureKind::Rejected => {
-                        Err(crate::NativeProgramFailure::Execution(message))
-                    }
-                    runmat_execution_runner::AttemptFailureKind::Infrastructure => {
-                        Err(crate::NativeProgramFailure::Infrastructure(message))
-                    }
-                },
-                AttemptReport::Lost { message } => {
-                    Err(crate::NativeProgramFailure::WorkerLost(message))
-                }
-                AttemptReport::RetirementUnverified { message } => {
-                    Err(crate::NativeProgramFailure::WorkerLost(message))
-                }
-                AttemptReport::GraphRetiredCancelled => Err(crate::NativeProgramFailure::Cancelled),
-                AttemptReport::RuntimeFailed { failure } => {
-                    Err(crate::NativeProgramFailure::Runtime(failure))
-                }
-                AttemptReport::Cancelled => Err(crate::NativeProgramFailure::Cancelled),
-                AttemptReport::Started => {
-                    Err(crate::NativeProgramFailure::Infrastructure(format!(
-                        "remote task reached terminal state {state:?} without a terminal report"
                     )))
+                } else {
+                    terminal_failure(&driver, task)
+                        .map(|message| Err(report_failure(&terminal_report, task.state, message)))
                 }
-            };
-            // Reserve the originating task's deterministic completion order,
-            // then fence its peers before making that completion observable.
-            // Otherwise the gang waiter can cancel a blocked peer before the
-            // collective broker has released it.
-            let resolution = self.take_task_resolution(task_id, outcome);
-            if let Some(task) = spmd_task {
-                if matches!(
-                    state,
-                    TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate
-                ) {
+            });
+            // Serialize committed-object protection and stale-result disposal with
+            // scheduler admission. Otherwise a discarded overlapping result can
+            // remove an accepted object's catalog entry before it is protected.
+            // Lock order is driver -> object catalog; neither operation calls back
+            // into the driver. Dispatch/worker calls remain outside both locks.
+            let actions = actions
+                .into_iter()
+                .filter_map(|action| match action {
+                    DriverAction::GarbageCollectResults { objects, .. } => {
+                        self.execution_objects.discard_results(&objects);
+                        None
+                    }
+                    action => Some(action),
+                })
+                .collect();
+            let committed_watermark = driver.events()[previous_events..].iter().find_map(|event| {
+                matches!(&event.kind, DriverEventKind::ResultCommitted { task_id: committed, .. }
+                    if *committed == task_id)
+                .then_some(event.sequence + 1)
+            });
+            (actions, outcome, committed_watermark)
+        };
+        self.dispatch(actions);
+        if let Some(watermark) = committed_watermark {
+            self.committed_event_watermark
+                .fetch_max(watermark, Ordering::AcqRel);
+            self.committed_task.notify_one();
+        }
+        if let Some(outcome) = outcome {
+            self.publish_ordered(task_id, spmd_task, outcome);
+        }
+    }
+
+    pub(super) fn resolve_non_success_terminals(&self) {
+        let terminal = {
+            let driver = self.driver.lock().expect("remote driver poisoned");
+            driver
+                .task_records()
+                .filter_map(|task| {
+                    terminal_failure(&driver, task)
+                        .map(|message| (task.id(), state_failure(task.state, message)))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (task_id, failure) in terminal {
+            let spmd_task = self.spmd_task_context(task_id);
+            self.publish_ordered(task_id, spmd_task, Err(failure));
+        }
+    }
+
+    /// Reserve the originating task's deterministic completion order, then
+    /// fence its SPMD peers before making that completion observable.
+    /// Otherwise the gang waiter can cancel a blocked peer before the
+    /// collective broker has released it.
+    fn publish_ordered(
+        &self,
+        task_id: runmat_execution::TaskId,
+        spmd_task: Option<runmat_execution::SpmdTaskContext>,
+        outcome: super::CompletionResult,
+    ) {
+        let failed = outcome.is_err();
+        let resolution = self.take_task_resolution(task_id, outcome);
+        match spmd_task {
+            Some(task) => {
+                if failed {
                     // Publish the originating result before releasing peers
                     // blocked in this gang's collective rounds.
                     self.collectives
@@ -119,49 +138,8 @@ impl RemotePoolDriver {
                 }
                 Self::publish_task_resolution(resolution);
                 self.collectives.rank_terminated(&task.gang, task.rank);
-            } else {
-                Self::publish_task_resolution(resolution);
             }
-        }
-    }
-
-    pub(super) fn resolve_non_success_terminals(&self) {
-        let terminal = {
-            let snapshot = self
-                .driver
-                .lock()
-                .expect("remote driver poisoned")
-                .snapshot();
-            snapshot
-                .tasks
-                .iter()
-                .filter_map(|(task_id, task)| {
-                    let message = match task.state {
-                        TaskState::Failed => "remote task failed",
-                        TaskState::Cancelled => "remote task was cancelled",
-                        TaskState::Indeterminate => "remote worker was lost",
-                        _ => return None,
-                    };
-                    Some((*task_id, task.state, message.to_string()))
-                })
-                .collect::<Vec<_>>()
-        };
-        for (task_id, state, message) in terminal {
-            let spmd_task = self.spmd_task_context(task_id);
-            let failure = match state {
-                TaskState::Cancelled => crate::NativeProgramFailure::Cancelled,
-                TaskState::Indeterminate => crate::NativeProgramFailure::WorkerLost(message),
-                _ => crate::NativeProgramFailure::Execution(message),
-            };
-            let resolution = self.take_task_resolution(task_id, Err(failure));
-            if let Some(task) = spmd_task {
-                self.collectives
-                    .fail_gang(&task.gang, "an SPMD peer terminated");
-                Self::publish_task_resolution(resolution);
-                self.collectives.rank_terminated(&task.gang, task.rank);
-            } else {
-                Self::publish_task_resolution(resolution);
-            }
+            None => Self::publish_task_resolution(resolution),
         }
     }
 
@@ -186,10 +164,6 @@ impl RemotePoolDriver {
             })
     }
 
-    fn resolve_task(&self, task_id: runmat_execution::TaskId, outcome: super::CompletionResult) {
-        Self::publish_task_resolution(self.take_task_resolution(task_id, outcome));
-    }
-
     fn take_task_resolution(
         &self,
         task_id: runmat_execution::TaskId,
@@ -204,14 +178,9 @@ impl RemotePoolDriver {
                 let order = self.completion_sequence.fetch_add(1, Ordering::AcqRel);
                 (sender, order, outcome)
             });
-        self.programs
-            .lock()
-            .expect("remote program catalog poisoned")
-            .remove(&task_id);
-        self.graph_transfers
-            .lock()
-            .expect("remote Graph transfer registry poisoned")
-            .remove(&task_id);
+        // Exact admitted programs and Graph transfer authority have the same
+        // lifetime as scheduler task records: completed-task replay and durable
+        // recovery still need them.
         self.progress
             .lock()
             .expect("remote progress registry poisoned")
@@ -225,3 +194,69 @@ impl RemotePoolDriver {
         }
     }
 }
+
+/// Typed failure for the report that made a task terminal; durable diagnostics
+/// from the scheduler record remain the message authority.
+fn report_failure(
+    report: &AttemptReport,
+    state: TaskState,
+    message: String,
+) -> NativeProgramFailure {
+    match report {
+        AttemptReport::RuntimeFailed { failure } => NativeProgramFailure::Runtime(failure.clone()),
+        AttemptReport::Failed {
+            kind: AttemptFailureKind::Infrastructure,
+            ..
+        } => NativeProgramFailure::Infrastructure(message),
+        AttemptReport::Lost { .. } | AttemptReport::RetirementUnverified { .. } => {
+            NativeProgramFailure::WorkerLost(message)
+        }
+        AttemptReport::Cancelled | AttemptReport::GraphRetiredCancelled => {
+            NativeProgramFailure::Cancelled
+        }
+        _ => state_failure(state, message),
+    }
+}
+
+fn state_failure(state: TaskState, message: String) -> NativeProgramFailure {
+    match state {
+        TaskState::Cancelled => NativeProgramFailure::Cancelled,
+        TaskState::Indeterminate => NativeProgramFailure::WorkerLost(message),
+        _ => NativeProgramFailure::Execution(message),
+    }
+}
+
+fn terminal_failure(driver: &Driver, task: &TaskRecord) -> Option<String> {
+    let task_id = task.id();
+    let message = match task.state {
+        TaskState::Failed => "remote task failed",
+        TaskState::Indeterminate => "remote worker was lost",
+        TaskState::Cancelled
+            if !driver
+                .task_attempts(task_id)
+                .expect("task is borrowed from this driver")
+                .any(|attempt| {
+                    matches!(
+                        attempt.state,
+                        AttemptState::Assigned | AttemptState::Starting | AttemptState::Running
+                    )
+                }) =>
+        {
+            "remote task was cancelled"
+        }
+        _ => return None,
+    };
+    Some(
+        driver
+            .task_attempts(task_id)
+            .expect("task is borrowed from this driver")
+            .max_by_key(|attempt| attempt.request.ordinal)
+            .and_then(|attempt| attempt.terminal.as_ref())
+            .and_then(|terminal| terminal.diagnostic.clone())
+            .unwrap_or_else(|| message.into()),
+    )
+}
+
+#[cfg(test)]
+#[path = "../pool_tests/completion_authority.rs"]
+mod tests;

@@ -1,0 +1,169 @@
+use super::*;
+mod closure_diagnostics;
+mod periodic;
+mod preconditioning;
+use crate::{
+    contracts::SolverPreconditioner,
+    fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
+    topology::test_meshes::{quadratic_slab_mesh, slab_mesh},
+};
+use runmat_analysis_core::{
+    AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
+    BoundaryOperator, FormulationMaturity, IndependentDomain, MaterialAcousticModel,
+    PrescribedValue, Pressure, PropertyRegionTarget, RegionTarget, SpecificAcousticImpedance,
+    TemporalImplementation,
+};
+
+pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    replace_fixture_excitations(&mut model, Vec::new());
+    model.constraints.clear();
+    model.boundaries.clear();
+    model.materials[0].acoustic = Some(MaterialAcousticModel {
+        speed_of_sound_m_per_s: 2.0,
+        damping_ratio: 0.0,
+    });
+    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    let mut step = ProcedureStep::acoustic_harmonic("acoustic");
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
+    model.sequence.steps = vec![step];
+    model
+        .constraints
+        .push(AnalysisConstraint::Acoustic(AcousticConstraint {
+            constraint_id: "pressure".into(),
+            kind: AcousticConstraintKind::PrescribedPressure {
+                target: RegionTarget::boundary("slab_left"),
+                value: PrescribedValue::Constant(Pressure::new(1.0)),
+            },
+        }));
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "matched".into(),
+        target: RegionTarget::boundary("slab_right"),
+        operator: BoundaryOperator::AcousticImpedance {
+            impedance: SpecificAcousticImpedance::new(6.0),
+        },
+    });
+    AcousticHarmonicWorkload {
+        model,
+        step_id: ProcedureStepId("acoustic".into()),
+        frequency: Frequency::new(0.2),
+        formulation_requirement: FormulationRequirement::Experimental,
+        solver: AcousticHarmonicPolicy {
+            uniqueness: Some(crate::solve::uniqueness::SparseUniquenessPolicy::bounded()),
+            relative_tolerance: 1e-10,
+            ..Default::default()
+        },
+        power_balance_relative_tolerance: 1e-8,
+    }
+}
+
+mod uniqueness;
+
+#[test]
+fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage() {
+    for quadratic in [false, true] {
+        let mesh = if quadratic {
+            quadratic_slab_mesh(2)
+        } else {
+            slab_mesh(4)
+        };
+        let authored = workload();
+        let bytes = authored.canonical_bytes().unwrap();
+        let cold = AcousticHarmonicWorkload::from_canonical_bytes(&bytes).unwrap();
+        let mesh: SolverMeshArtifact =
+            serde_json::from_slice(&serde_json::to_vec(&mesh).unwrap()).unwrap();
+        let result = cold.execute(&mesh).unwrap();
+        assert_eq!(
+            result.formulation().qualification(),
+            FormulationMaturity::Experimental
+        );
+        assert_eq!(
+            result.formulation().realization().temporals,
+            vec![TemporalImplementation::AcousticCanonicalHarmonicSolve]
+        );
+        let result_bytes = result.canonical_bytes().unwrap();
+        let imported = AcousticHarmonicSolverResult::from_canonical_bytes(&result_bytes).unwrap();
+        imported.validate_for(&authored, &mesh).unwrap();
+        assert_eq!(result, imported);
+        assert_eq!(
+            result.source_result_identity().unwrap(),
+            imported.source_result_identity().unwrap()
+        );
+        let mut error = 0.0;
+        for (node, p) in mesh.topology.nodes.iter().zip(imported.pressure_pa()) {
+            let phase = std::f64::consts::PI * 0.2 * node.coordinates_m[0];
+            error += (p.real - phase.cos()).powi(2) + (p.imaginary + phase.sin()).powi(2);
+        }
+        assert!((error / imported.pressure_pa().len() as f64).sqrt() < 0.01);
+        assert_eq!(imported.ordered_node_ids().len(), mesh.topology.nodes.len());
+        assert_eq!(
+            imported.ordered_element_ids().len(),
+            mesh.topology.volume_elements.len()
+        );
+        assert!(imported
+            .intensity_w_per_m2()
+            .iter()
+            .all(|i| (i[0] - 1.0 / 12.0).abs() < 0.01));
+        assert!(imported
+            .energy_density_j_per_m3()
+            .iter()
+            .all(|e| (e - 1.0 / 24.0).abs() < 0.01));
+        let mut other = cold.clone();
+        if let AnalysisConstraint::Acoustic(c) = &mut other.model.constraints[0] {
+            if let AcousticConstraintKind::PrescribedPressure { value, .. } = &mut c.kind {
+                *value = PrescribedValue::Constant(Pressure::new(2.0));
+            }
+        }
+        assert_ne!(cold.identity().unwrap(), other.identity().unwrap());
+        assert!(imported.validate_for(&other, &mesh).is_err());
+        let mut other_mesh = mesh.clone();
+        for node in &mut other_mesh.topology.nodes {
+            node.coordinates_m[0] += 1.0;
+        }
+        other_mesh.seal_canonical_digest().unwrap();
+        assert!(imported.validate_for(&cold, &other_mesh).is_err());
+    }
+}
+
+#[test]
+fn acoustic_portable_admission_and_result_import_fail_closed() {
+    let mut workload = workload();
+    let mesh = slab_mesh(2);
+    workload.formulation_requirement = FormulationRequirement::Production;
+    assert!(workload.execute(&mesh).is_err());
+    workload.formulation_requirement = FormulationRequirement::Experimental;
+    let result = workload.execute(&mesh).unwrap();
+    assert!(validate_solver_formulation_compatibility(
+        result.formulation(),
+        SolverMethod::AcousticDomainGraphHelmholtzHarmonic,
+        SolverPreconditioner::None
+    )
+    .is_err());
+    for (field, value) in [
+        ("relative_residual", serde_json::json!(0.5)),
+        ("power_relative_error", serde_json::json!(0.5)),
+        ("energy_density_j_per_m3", serde_json::json!([-1.0])),
+        ("pressure_pa", serde_json::json!([])),
+        ("ordered_node_ids", serde_json::json!([1, 1])),
+    ] {
+        let mut malformed = serde_json::to_value(&result).unwrap();
+        malformed[field] = value;
+        assert!(
+            serde_json::from_value::<AcousticHarmonicSolverResult>(malformed).is_err(),
+            "{field}"
+        );
+    }
+    workload.frequency = Frequency::new(0.3);
+    assert!(workload.validate().is_err());
+    workload.frequency = Frequency::new(0.2);
+    let mut wrong_state = workload.clone();
+    wrong_state.model.sequence.steps[0].state_outputs[0].kind = StateKind::Thermal;
+    assert!(wrong_state.validate().is_err());
+    workload
+        .model
+        .sequence
+        .steps
+        .push(workload.model.sequence.steps[0].clone());
+    assert!(workload.canonical_bytes().is_err());
+}

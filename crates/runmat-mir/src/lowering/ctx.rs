@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 pub(crate) struct MirLoweringContext {
     binding_locals: HashMap<BindingId, MirLocalId>,
     async_functions: HashSet<FunctionId>,
+    external_async_functions: HashSet<FunctionId>,
     next_local: usize,
     temp_locals: RefCell<Vec<MirLocal>>,
     function: runmat_types::ProgramFunctionId,
@@ -21,6 +22,7 @@ impl Default for MirLoweringContext {
         Self {
             binding_locals: HashMap::new(),
             async_functions: HashSet::new(),
+            external_async_functions: HashSet::new(),
             next_local: 0,
             temp_locals: RefCell::new(Vec::new()),
             function: runmat_types::ProgramFunctionId(0),
@@ -35,10 +37,12 @@ impl Default for MirLoweringContext {
 impl MirLoweringContext {
     pub(crate) fn with_async_functions(
         async_functions: HashSet<FunctionId>,
+        external_async_functions: HashSet<FunctionId>,
         function: FunctionId,
     ) -> Self {
         Self {
             async_functions,
+            external_async_functions,
             function: runmat_types::ProgramFunctionId(
                 u32::try_from(function.0).expect("HIR function IDs fit portable identities"),
             ),
@@ -102,6 +106,10 @@ impl MirLoweringContext {
 
     pub(crate) fn is_async_function(&self, function: FunctionId) -> bool {
         self.async_functions.contains(&function)
+    }
+
+    pub(crate) fn is_external_async_function(&self, function: FunctionId) -> bool {
+        self.external_async_functions.contains(&function)
     }
 
     pub(crate) fn local_for_binding(&self, binding: BindingId) -> Result<MirLocalId, HirError> {

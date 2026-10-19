@@ -59,6 +59,34 @@ impl Digest {
         Self(Sha256::digest(bytes.as_ref()).into())
     }
 
+    /// Hash ordered byte segments as one byte stream, without concatenating them.
+    /// Segment boundaries are not part of the identity.
+    pub fn sha256_parts(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> Self {
+        let mut hash = Sha256::new();
+        for part in parts {
+            hash.update(part.as_ref());
+        }
+        Self(hash.finalize().into())
+    }
+
+    /// Hash the same ordered byte stream while probing between bounded blocks.
+    /// The caller owns cancellation and resource errors; no partial digest is returned.
+    pub fn sha256_parts_with_checkpoint<E>(
+        parts: impl IntoIterator<Item = impl AsRef<[u8]>>,
+        mut checkpoint: impl FnMut() -> Result<(), E>,
+    ) -> Result<Self, E> {
+        let mut hash = Sha256::new();
+        for part in parts {
+            checkpoint()?;
+            for block in part.as_ref().chunks(1024 * 1024) {
+                checkpoint()?;
+                hash.update(block);
+            }
+        }
+        checkpoint()?;
+        Ok(Self(hash.finalize().into()))
+    }
+
     /// Hash the existing JSON identity encoding without retaining a second
     /// serialized buffer. This does not certify allocations in the caller or
     /// in a placement service consuming the resulting digest.
@@ -101,6 +129,9 @@ fn lowercase_hex(byte: u8) -> Option<u8> {
     }
 }
 
+#[cfg(test)]
+mod tests;
+
 impl Display for Digest {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("sha256:")?;
@@ -138,14 +169,7 @@ impl Serialize for Digest {
     where
         S: serde::Serializer,
     {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        let mut text = [0_u8; 71];
-        text[..7].copy_from_slice(b"sha256:");
-        for (index, byte) in self.0.iter().copied().enumerate() {
-            text[7 + index * 2] = HEX[usize::from(byte >> 4)];
-            text[8 + index * 2] = HEX[usize::from(byte & 0x0f)];
-        }
-        serializer.serialize_str(std::str::from_utf8(&text).expect("ASCII digest encoding"))
+        super::hex::serialize::<71, S>("sha256:", &self.0, serializer)
     }
 }
 
@@ -157,6 +181,22 @@ impl<'de> Deserialize<'de> for Digest {
         String::deserialize(deserializer)?
             .parse()
             .map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::Digest;
+    #[test]
+    fn fixed_wire_encoding_preserves_every_byte_and_original_lowercase_spelling() {
+        for start in 0u8..=255 {
+            let bytes = std::array::from_fn(|i| start.wrapping_add(i as u8));
+            let digest = Digest::from_bytes(bytes);
+            let expected = format!("\"{}\"", digest);
+            let wire = serde_json::to_string(&digest).unwrap();
+            assert_eq!(wire, expected);
+            assert_eq!(serde_json::from_str::<Digest>(&wire).unwrap(), digest);
+        }
     }
 }
 

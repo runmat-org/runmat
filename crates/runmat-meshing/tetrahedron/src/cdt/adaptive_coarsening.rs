@@ -172,7 +172,7 @@ fn validate_input<'a>(
         };
         if requested.contains(&lineage.node.identity) {
             admitted.insert(lineage.node.identity);
-            removals.push(lineage);
+            removals.push(lineage.as_ref());
         }
     }
     if admitted != requested {

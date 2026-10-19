@@ -16,7 +16,7 @@ mod backend;
 
 #[cfg(test)]
 pub(crate) use backend::backend_shared::host_tensor_from_value;
-pub use backend::backend_types::{WgpuProvider, WgpuProviderOptions};
+pub use backend::backend_types::{WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions};
 
 /// Read the existing registered façade without initializing a device or
 /// changing ambient provider selection.
@@ -102,3 +102,49 @@ pub async fn ensure_wgpu_provider_async() -> Result<Option<&'static WgpuProvider
         }
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod test_session {
+    use std::ops::Deref;
+    use std::sync::{LazyLock, Mutex, MutexGuard};
+
+    use super::{WgpuProvider, WgpuProviderOptions};
+
+    static TEST_PROVIDER_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    /// Exclusive access to a scoped test provider with independent state, so
+    /// one workload cannot contaminate the next.
+    pub(crate) struct WgpuTestSession {
+        provider: WgpuProvider,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Deref for WgpuTestSession {
+        type Target = WgpuProvider;
+
+        fn deref(&self) -> &Self::Target {
+            &self.provider
+        }
+    }
+
+    impl WgpuTestSession {
+        pub(crate) fn provider(&self) -> &WgpuProvider {
+            self
+        }
+    }
+
+    pub(crate) fn register_test_wgpu_provider(
+        options: WgpuProviderOptions,
+    ) -> anyhow::Result<WgpuTestSession> {
+        let guard = TEST_PROVIDER_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(WgpuTestSession {
+            provider: WgpuProvider::new(options)?,
+            _guard: guard,
+        })
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use test_session::{register_test_wgpu_provider, WgpuTestSession};

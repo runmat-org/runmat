@@ -24,6 +24,9 @@ pub(super) struct ExactProjection {
     pub evaluators: ExactEvaluatorRegistry,
     pub model: ExactBRepModel,
     pub kernel_body_shapes: BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
+    pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    pub kernel_entity_ids:
+        BTreeMap<(u64, PersistentEntityKind, u64), runmat_geometry_core::PersistentEntityId>,
 }
 
 pub(super) fn project_exact_contracts(
@@ -36,7 +39,8 @@ pub(super) fn project_exact_contracts(
     let occurrences = OccurrenceIndex::new(payload, representation_digest)?;
     let names = PersistentNameIndex::new(payload)?;
     let body_partitions = BodyPartitions::new(payload, &occurrences, &names)?;
-    let assembly_projection = occurrences.project_assemblies(&body_partitions)?;
+    let assembly_projection =
+        occurrences.project_assemblies(&body_partitions, meters_per_source_unit)?;
 
     let mut topology = ExactBRepTopology {
         schema_version: EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
@@ -104,6 +108,7 @@ pub(super) fn project_exact_contracts(
                     edge.occurrence_index,
                     path,
                 )?,
+                tolerance_m: edge.tolerance * meters_per_source_unit,
                 is_closed: edge.closed,
                 is_periodic: edge.periodic,
                 is_degenerate: edge.degenerate,
@@ -174,6 +179,7 @@ pub(super) fn project_exact_contracts(
         .coedges
         .sort_by(|left, right| left.id.cmp(&right.id));
 
+    let mut source_face_ids = BTreeMap::new();
     topology.faces = payload
         .faces
         .iter()
@@ -192,13 +198,15 @@ pub(super) fn project_exact_contracts(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             inner_wire_ids.sort();
+            let id = names.shape_id(
+                PersistentEntityKind::Face,
+                face.shape_key,
+                face.occurrence_index,
+                path,
+            )?;
+            source_face_ids.insert(face.source_face_index, id.clone());
             Ok(ExactFace {
-                id: names.shape_id(
-                    PersistentEntityKind::Face,
-                    face.shape_key,
-                    face.occurrence_index,
-                    path,
-                )?,
+                id,
                 orientation: orientation(face.reversed),
                 surface_evaluator_id: names.surface_id(face.shape_key)?,
                 trim_classifier_id: names.trim_id(face.shape_key)?,
@@ -343,12 +351,79 @@ pub(super) fn project_exact_contracts(
     topology
         .validate_solid_shell_boundaries()
         .map_err(|error| invalid_contract("projected solid shell boundaries", error))?;
+    let kernel_entity_ids = project_kernel_entity_ids(payload, &occurrences, &names)?;
     Ok(ExactProjection {
         topology,
         evaluators,
         model,
         kernel_body_shapes: body_projection.kernel_shapes,
+        source_face_ids,
+        kernel_entity_ids,
     })
+}
+
+fn project_kernel_entity_ids(
+    payload: &bridge::OcctExactShapePayload,
+    occurrences: &OccurrenceIndex,
+    names: &PersistentNameIndex,
+) -> Result<
+    BTreeMap<(u64, PersistentEntityKind, u64), runmat_geometry_core::PersistentEntityId>,
+    GeometryImportError,
+> {
+    let mut result = BTreeMap::new();
+    let inventories = [
+        (
+            PersistentEntityKind::Vertex,
+            payload
+                .vertices
+                .iter()
+                .map(|entity| (entity.occurrence_index, entity.shape_key))
+                .collect::<Vec<_>>(),
+        ),
+        (
+            PersistentEntityKind::Edge,
+            payload
+                .edges
+                .iter()
+                .map(|entity| (entity.occurrence_index, entity.shape_key))
+                .collect(),
+        ),
+        (
+            PersistentEntityKind::Face,
+            payload
+                .faces
+                .iter()
+                .map(|entity| (entity.occurrence_index, entity.shape_key))
+                .collect(),
+        ),
+        (
+            PersistentEntityKind::Solid,
+            payload
+                .solids
+                .iter()
+                .map(|entity| (entity.occurrence_index, entity.shape_key))
+                .collect(),
+        ),
+    ];
+    for (kind, entities) in inventories {
+        for (occurrence_index, shape_key) in entities {
+            let id = names.shape_id(
+                kind,
+                shape_key,
+                occurrence_index,
+                occurrences.path(occurrence_index)?,
+            )?;
+            if result
+                .insert((occurrence_index, kind, shape_key), id)
+                .is_some()
+            {
+                return Err(GeometryImportError::InvalidGeometry(
+                    "OCCT exact topology repeats a kernel entity key".into(),
+                ));
+            }
+        }
+    }
+    Ok(result)
 }
 
 fn canonicalize_cycle(ids: &mut [runmat_geometry_core::PersistentEntityId]) {

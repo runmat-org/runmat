@@ -116,7 +116,9 @@ impl ProgramTarget {
             | ExecutableForm::InterpreterRegionSourcesV1
             | ExecutableForm::TestAttemptV1
             | ExecutableForm::MeshingWorkload
-            | ExecutableForm::ExecutableUnitV3 => self.cohort == ProgramTargetCohort::Portable,
+            | ExecutableForm::AnalysisWorkload
+            | ExecutableForm::GeometryWorkload
+            | ExecutableForm::ExecutableUnitV4 => self.cohort == ProgramTargetCohort::Portable,
         };
         if compatible {
             Ok(())
@@ -204,9 +206,9 @@ mod tests {
 
     #[test]
     fn target_cohorts_reject_incompatible_forms_and_hosts() {
-        let portable = ProgramTarget::portable("portable-executable-unit-v3");
+        let portable = ProgramTarget::portable("portable-executable-unit-v4");
         portable
-            .validate_form(ExecutableForm::ExecutableUnitV3)
+            .validate_form(ExecutableForm::ExecutableUnitV4)
             .unwrap();
         assert!(portable
             .validate_form(ExecutableForm::NativeObjectV1)

@@ -20,11 +20,13 @@ mod subscript;
 
 /// Portable schema for serialized [`Bytecode`] payloads. Version 25 carries
 /// verifier-derived operand-stack geometry; older payloads cannot default a
-/// managed capacity claim.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 25;
+/// managed capacity claim. Version 26 adds external deferred targets
+/// (`CreateExternalFuture`).
+pub const BYTECODE_SCHEMA_VERSION: u16 = 26;
 /// Portable schema for serialized [`FunctionRegistry`] payloads. Version 18
 /// carries the borrowed stochastic opcode in retained function bodies.
-pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 18;
+/// Version 19 retains external deferred targets in function bodies.
+pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 19;
 
 pub use artifact::{
     decode_interpreter_program_v2, decode_interpreter_script_v2, encode_interpreter_program_v2,

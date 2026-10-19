@@ -103,6 +103,7 @@ fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
         },
         revisions,
         components,
+        dependencies: Vec::new(),
         capabilities: CapabilitySet::default(),
         regions: Vec::new(),
         interop: InteropManifest::default(),

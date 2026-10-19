@@ -589,6 +589,8 @@ async fn build_stairs_gpu_plot(
             x_span: 1.0,
             y_min: 0.0,
             y_span: 1.0,
+            x_log: false,
+            y_log: false,
             line_style: LineStyle::Solid,
             marker_size: marker.size.max(DEFAULT_LINE_MARKER_SIZE),
         };

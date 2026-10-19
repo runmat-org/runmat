@@ -73,7 +73,7 @@ fn complete_executable_unit_survives_package_archive_round_trip() {
         .unwrap()
         .with_foreign_policy_object(policy)
         .unwrap()
-        .with_materialized_program(recipe, ExecutableForm::ExecutableUnitV3, bytes.clone())
+        .with_materialized_program(recipe, ExecutableForm::ExecutableUnitV4, bytes.clone())
         .build()
         .unwrap();
     let mut archive = Vec::new();
@@ -161,6 +161,60 @@ fn meshing_host_workload_form_survives_package_archive_round_trip() {
 }
 
 #[test]
+fn analysis_host_workload_form_survives_package_archive_round_trip() {
+    let (_temp, project, revision) = support::frozen_project();
+    let mut recipe = support::recipe(revision.clone());
+    recipe.entrypoint = "analysis_workload".into();
+    recipe.execution_mode = "analysis".into();
+    recipe.target = runmat_execution_artifact::ProgramTarget::portable("portable-analysis-host-v1");
+    let bundle = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_compiled_package_closure()
+        .with_materialized_program(
+            recipe,
+            ExecutableForm::AnalysisWorkload,
+            b"canonical-analysis-host-contract".to_vec(),
+        )
+        .build()
+        .unwrap();
+    let mut archive = Vec::new();
+    write_bundle(&bundle, &mut archive, ArchiveLimits::default()).unwrap();
+    let decoded = read_bundle(archive.as_slice(), ArchiveLimits::default()).unwrap();
+    assert_eq!(decoded, bundle);
+    assert_eq!(
+        decoded.manifest.artifacts[0].form,
+        ExecutableForm::AnalysisWorkload
+    );
+}
+
+#[test]
+fn geometry_host_workload_form_survives_package_archive_round_trip() {
+    let (_temp, project, revision) = support::frozen_project();
+    let mut recipe = support::recipe(revision.clone());
+    recipe.entrypoint = "geometry_workload".into();
+    recipe.execution_mode = "geometry-materialization".into();
+    recipe.target = runmat_execution_artifact::ProgramTarget::portable("portable-geometry-host");
+    let bundle = ExecutionBundleBuilder::native(&project, revision)
+        .unwrap()
+        .with_compiled_package_closure()
+        .with_materialized_program(
+            recipe,
+            ExecutableForm::GeometryWorkload,
+            b"canonical-geometry-host-contract".to_vec(),
+        )
+        .build()
+        .unwrap();
+    let mut archive = Vec::new();
+    write_bundle(&bundle, &mut archive, ArchiveLimits::default()).unwrap();
+    let decoded = read_bundle(archive.as_slice(), ArchiveLimits::default()).unwrap();
+    assert_eq!(decoded, bundle);
+    assert_eq!(
+        decoded.manifest.artifacts[0].form,
+        ExecutableForm::GeometryWorkload
+    );
+}
+
+#[test]
 fn compiled_package_closure_round_trips_without_source_or_project_payloads() {
     let (_temp, project, revision) = support::frozen_project();
     let bytes = executable_unit_support::bytes(revision.clone());
@@ -174,7 +228,7 @@ fn compiled_package_closure_round_trips_without_source_or_project_payloads() {
         .with_compiled_package_closure()
         .with_foreign_policy_object(policy)
         .unwrap()
-        .with_materialized_program(recipe, ExecutableForm::ExecutableUnitV3, bytes)
+        .with_materialized_program(recipe, ExecutableForm::ExecutableUnitV4, bytes)
         .build()
         .unwrap();
 
@@ -379,7 +433,7 @@ fn compiled_package_closure_rejects_non_compiled_artifacts_after_decode() {
         .with_compiled_package_closure()
         .with_foreign_policy_object(policy)
         .unwrap()
-        .with_materialized_program(selected_recipe, ExecutableForm::ExecutableUnitV3, bytes)
+        .with_materialized_program(selected_recipe, ExecutableForm::ExecutableUnitV4, bytes)
         .build()
         .unwrap();
     let recipe = bundle.manifest.recipes[0].clone();
@@ -391,3 +445,6 @@ fn compiled_package_closure_rejects_non_compiled_artifacts_after_decode() {
     .unwrap();
     assert!(bundle.validate().is_err());
 }
+
+#[path = "deterministic_bundle/environment.rs"]
+mod environment;

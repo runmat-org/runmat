@@ -42,7 +42,7 @@ pub struct BeamLocalFrame {
     pub length_m: f64,
 }
 
-#[derive(Debug, Error, Clone, PartialEq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BeamElementError {
     #[error("beam element length must be positive and finite")]
     DegenerateLength,

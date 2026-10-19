@@ -69,6 +69,10 @@ pub struct Camera {
     pub zoom_sensitivity: f32,
     pub rotate_sensitivity: f32,
 
+    /// Per-axis scale from data units to the space the camera views. 3-D axes stretch each
+    /// axis to fill a cube, as MATLAB's default plot box does; `ONE` keeps data units.
+    pub axis_scale: Vec3,
+
     // Cached matrices
     view_matrix: Mat4,
     projection_matrix: Mat4,
@@ -97,6 +101,7 @@ impl Camera {
             pan_sensitivity: 0.01,
             zoom_sensitivity: 0.1,
             rotate_sensitivity: 0.005,
+            axis_scale: Vec3::ONE,
             view_matrix: Mat4::IDENTITY,
             projection_matrix: Mat4::IDENTITY,
             view_proj_dirty: true,
@@ -133,6 +138,7 @@ impl Camera {
             pan_sensitivity: 0.01,
             zoom_sensitivity: 0.1,
             rotate_sensitivity: 0.0, // Disable rotation for 2D
+            axis_scale: Vec3::ONE,
             view_matrix: Mat4::IDENTITY,
             projection_matrix: Mat4::IDENTITY,
             view_proj_dirty: true,
@@ -152,7 +158,7 @@ impl Camera {
         if self.view_proj_dirty {
             self.update_matrices();
         }
-        self.projection_matrix * self.view_matrix
+        self.projection_matrix * self.view_matrix * Mat4::from_scale(self.axis_scale)
     }
 
     /// Mark the camera matrices as dirty (call after manually modifying projection)
@@ -328,16 +334,48 @@ impl Camera {
 
     /// Fit the camera to show all data within the given bounds
     pub fn fit_bounds(&mut self, min_bounds: Vec3, max_bounds: Vec3) {
+        // Fit in the camera's (axis-scaled) view space.
+        let (min_bounds, max_bounds) = (min_bounds * self.axis_scale, max_bounds * self.axis_scale);
         let center = (min_bounds + max_bounds) / 2.0;
         let size = max_bounds - min_bounds;
 
         match &mut self.projection {
-            ProjectionType::Perspective { near, far, .. } => {
-                let max_size = size.x.max(size.y).max(size.z);
-                let distance = max_size * 2.0; // Ensure everything fits
-
+            ProjectionType::Perspective { fov, near, far } => {
+                // Keep the current viewing direction; read it before moving the target.
+                let direction = match (self.position - self.target).normalize_or_zero() {
+                    d if d == Vec3::ZERO => Vec3::new(1.0, -1.0, 1.0).normalize(),
+                    d => d,
+                };
                 self.target = center;
-                let direction = (self.position - self.target).normalize();
+                // Back off just far enough that all eight box corners project inside the
+                // view with a small margin, so the plot fills its axes like MATLAB's.
+                let up = if direction.cross(self.up).length_squared() > 1.0e-8 {
+                    self.up
+                } else {
+                    Vec3::Z
+                };
+                let right = up.cross(direction).normalize();
+                let true_up = direction.cross(right).normalize();
+                let fill = 0.92;
+                let tan_y = (*fov * 0.5).tan() * fill;
+                let tan_x = tan_y * self.aspect_ratio.max(1.0e-3);
+                let half = size * 0.5;
+                let mut distance: f32 = 1.0e-3;
+                for i in 0..8 {
+                    let corner = Vec3::new(
+                        if i & 1 == 0 { -half.x } else { half.x },
+                        if i & 2 == 0 { -half.y } else { half.y },
+                        if i & 4 == 0 { -half.z } else { half.z },
+                    );
+                    // Depth toward the camera, and offsets across the view.
+                    let toward = corner.dot(direction);
+                    let u = corner.dot(right).abs();
+                    let v = corner.dot(true_up).abs();
+                    distance = distance.max(toward + u / tan_x).max(toward + v / tan_y);
+                }
+                if !distance.is_finite() {
+                    distance = size.x.max(size.y).max(size.z) * 2.0;
+                }
                 self.position = self.target + direction * distance;
 
                 // Keep clip planes sane relative to the new view distance.
@@ -479,8 +517,9 @@ impl Camera {
             return;
         };
 
-        // View space from current pose (independent of projection).
-        let view = Mat4::look_at_rh(self.position, self.target, self.up);
+        // View space from current pose (independent of projection), after the axis scale.
+        let view =
+            Mat4::look_at_rh(self.position, self.target, self.up) * Mat4::from_scale(self.axis_scale);
         let corners = [
             Vec3::new(world_min.x, world_min.y, world_min.z),
             Vec3::new(world_max.x, world_min.y, world_min.z),
@@ -533,7 +572,8 @@ impl Camera {
         let ndc = Vec3::new(ndc_x, ndc_y, depth * 2.0 - 1.0);
 
         // Unproject to world coordinates
-        let view_proj_inv = (self.projection_matrix * self.view_matrix).inverse();
+        let view_proj_inv =
+            (self.projection_matrix * self.view_matrix * Mat4::from_scale(self.axis_scale)).inverse();
         let world_pos = view_proj_inv * ndc.extend(1.0);
 
         if world_pos.w != 0.0 {

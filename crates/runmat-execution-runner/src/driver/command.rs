@@ -58,6 +58,12 @@ pub enum DriverCommand {
     ActivateWorker(WorkerId),
     DrainWorker(WorkerId),
     WorkerLost(WorkerId),
+    /// Fence the provider before recording its original triggering loss report,
+    /// then close any other active attempts on that worker in the same command.
+    WorkerLostWithReport {
+        worker_id: WorkerId,
+        report: Box<BackendReport>,
+    },
     Submit(Box<TaskSubmission>),
     /// Atomically admit a related set of tasks before scheduling any member.
     /// This is used by gang execution so no rank can launch against a
@@ -67,6 +73,7 @@ pub enum DriverCommand {
     /// Cancel one accepted task without affecting sibling tasks in its scope.
     CancelTask {
         task_id: TaskId,
+        reason: CancellationReason,
         now_millis: u64,
     },
     CancelScope {

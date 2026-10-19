@@ -63,7 +63,7 @@ fn render(
             st.insert("Position", figure_position_value(figure.position));
             st.insert(
                 "Color",
-                Value::string(color_to_short_name(figure.background_color)),
+                rgb_triplet_value(figure.background_color),
             );
             st.insert("Tag", Value::string(tag));
             if let Some(waitbar) = waitbar {
@@ -88,7 +88,7 @@ fn render(
         Some("numbertitle") => Ok(Value::Bool(figure.number_title)),
         Some("visible") => Ok(Value::Bool(figure.visible)),
         Some("position") => Ok(figure_position_value(figure.position)),
-        Some("color") => Ok(Value::string(color_to_short_name(figure.background_color))),
+        Some("color") => Ok(rgb_triplet_value(figure.background_color)),
         Some("waitbarprogress") => Ok(Value::Num(
             waitbar.map(|state| state.progress).unwrap_or(f64::NAN),
         )),

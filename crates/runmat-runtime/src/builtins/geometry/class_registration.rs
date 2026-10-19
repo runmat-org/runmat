@@ -33,6 +33,14 @@ pub(super) fn geometry_asset_methods(
             runmat_types::StaticMethodName::new("meshes"),
             GEOMETRY_MESHES_NAME,
         ),
+        (
+            runmat_types::StaticMethodName::new("mesh"),
+            super::display::GEOMETRY_MESH_METHOD_NAME,
+        ),
+        (
+            runmat_types::StaticMethodName::new("region"),
+            super::region::GEOMETRY_REGION_NAME,
+        ),
     ]
     .into_iter()
     .map(|(name, function_name)| {

@@ -90,6 +90,8 @@ impl TestAttemptWorkload {
         let artifact = ProgramArtifact::materialize(&recipe, ExecutableForm::TestAttemptV1, bytes)
             .map_err(|error| error.to_string())?;
         let request = ProgramExecutionRequest {
+            console: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,

@@ -272,7 +272,7 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                 }
             }
         }
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for arg in args {
                 arg.visit_operands(|operand| scan_operand(body, operand, reads_captures));
             }

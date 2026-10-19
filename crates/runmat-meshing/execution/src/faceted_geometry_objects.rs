@@ -10,9 +10,10 @@ use runmat_geometry_core::{
 
 use crate::geometry_objects::{geometry_object, validate_geometry_reference};
 use crate::object_support::{
-    enforce_object_length, input_object_reference, read_exact, validate_input_root,
+    admit_import_storage, enforce_object_length, import_slots, input_object_reference, read_exact,
+    validate_input_root,
 };
-use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
+use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 const FACETED_SOLID_SCHEMA: &str = "runmat.geometry.faceted-solid.v2";
 
@@ -39,13 +40,33 @@ impl PreparedFacetedGeometryObjects {
     }
 
     pub fn revalidate(&self, limits: ObjectInventoryLimits) -> MeshingExecutionResult<()> {
-        let rebuilt =
-            prepare_faceted_geometry_objects(self.document.clone(), self.solid.clone(), limits)?;
-        if rebuilt != *self {
+        self.document.validate()?;
+        let GeometryModel::FacetedSolid { model } = &self.document.model else {
             return Err(MeshingExecutionError::Identity(
-                "prepared faceted geometry is not its canonical object closure",
+                "faceted closure has an exact document",
+            ));
+        };
+        validate_inventory(&self.objects, limits)?;
+        let bytes = runmat_geometry_core::encode_faceted_solid(&self.solid, model)?;
+        if self.objects.len() != 1 {
+            return Err(MeshingExecutionError::Identity(
+                "faceted closure has an invalid inventory",
             ));
         }
+        let object = &self.objects[0];
+        crate::object_support::check_canonical_object(
+            object,
+            runmat_execution_artifact::ObjectNamespace::InputValue,
+            "geometry/canonical/faceted-solids",
+            FACETED_SOLID_MEDIA_TYPE,
+            &bytes,
+        )?;
+        if self.root != object.descriptor {
+            return Err(MeshingExecutionError::Identity(
+                "faceted geometry root differs from its inventory",
+            ));
+        }
+        validate_geometry_reference(object, self.document.primary_artifact())?;
         Ok(())
     }
 }
@@ -73,17 +94,37 @@ impl PreparedFacetedGeometryInput {
 
 pub fn prepare_faceted_geometry_input(
     geometry_objects: PreparedFacetedGeometryObjects,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedFacetedGeometryInput> {
     access.validate()?;
     geometry_objects.revalidate(limits)?;
+    project_faceted_geometry_input(geometry_objects, access, None)
+}
+
+fn project_faceted_geometry_input(
+    geometry_objects: PreparedFacetedGeometryObjects,
+    access: ArtifactAccess,
+    control: Option<&dyn runmat_geometry_core::GeometryCanonicalControl>,
+) -> MeshingExecutionResult<PreparedFacetedGeometryInput> {
+    admit_import_storage(control, import_slots::<ValueRef>(1)?)?;
     let object = geometry_objects
         .objects
         .first()
         .ok_or(MeshingExecutionError::Identity(
             "prepared faceted geometry has no root object",
         ))?;
+    admit_import_storage(
+        control,
+        access
+            .reference_text_bytes(FACETED_SOLID_MEDIA_TYPE, FACETED_SOLID_SCHEMA)?
+            .checked_mul(2)
+            .ok_or_else(|| {
+                runmat_execution_artifact::ArtifactError::Limit(
+                    "input reference storage overflow".into(),
+                )
+            })?,
+    )?;
     let root_input = input_object_reference(
         object,
         &access,
@@ -101,8 +142,18 @@ pub fn import_faceted_geometry_input(
     source: &impl CacheImport,
     document: GeometryDocument,
     root: &ValueRef,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
+) -> MeshingExecutionResult<PreparedFacetedGeometryInput> {
+    import_faceted_geometry_input_controlled(source, document, root, access, limits, None)
+}
+pub(crate) fn import_faceted_geometry_input_controlled(
+    source: &impl CacheImport,
+    document: GeometryDocument,
+    root: &ValueRef,
+    access: ArtifactAccess,
+    limits: ObjectInventoryLimits,
+    control: Option<&dyn runmat_geometry_core::GeometryCanonicalControl>,
 ) -> MeshingExecutionResult<PreparedFacetedGeometryInput> {
     access.validate()?;
     validate_input_root(
@@ -112,7 +163,7 @@ pub fn import_faceted_geometry_input(
         FACETED_SOLID_SCHEMA,
         "faceted geometry root is outside input artifact authority",
     )?;
-    let geometry_objects = import_faceted_geometry_objects(
+    let geometry_objects = import_faceted_geometry_objects_controlled(
         source,
         document,
         FacetedGeometryObjectRoot {
@@ -120,8 +171,9 @@ pub fn import_faceted_geometry_input(
             encoded_length: root.encoded_length,
         },
         limits,
+        control,
     )?;
-    let prepared = prepare_faceted_geometry_input(geometry_objects, access, limits)?;
+    let prepared = project_faceted_geometry_input(geometry_objects, access, control)?;
     if prepared.root_input != *root {
         return Err(MeshingExecutionError::Identity(
             "imported faceted geometry root differs from its execution reference",
@@ -159,6 +211,15 @@ pub fn import_faceted_geometry_objects(
     root: FacetedGeometryObjectRoot,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedFacetedGeometryObjects> {
+    import_faceted_geometry_objects_controlled(source, document, root, limits, None)
+}
+fn import_faceted_geometry_objects_controlled(
+    source: &impl CacheImport,
+    document: GeometryDocument,
+    root: FacetedGeometryObjectRoot,
+    limits: ObjectInventoryLimits,
+    control: Option<&dyn runmat_geometry_core::GeometryCanonicalControl>,
+) -> MeshingExecutionResult<PreparedFacetedGeometryObjects> {
     document.validate()?;
     if !matches!(document.model, GeometryModel::FacetedSolid { .. }) {
         return Err(MeshingExecutionError::Invalid(
@@ -180,8 +241,36 @@ pub fn import_faceted_geometry_objects(
         .into());
     }
     let bytes = read_exact(source, root.digest, root.encoded_length)?;
-    let solid = admit_faceted_solid(&document, &bytes)?;
-    let prepared = prepare_faceted_geometry_objects(document, solid, limits)?;
+    let solid = match control {
+        Some(control) => {
+            runmat_geometry_core::admit_faceted_solid_with_control(&document, &bytes, control)?
+        }
+        None => admit_faceted_solid(&document, &bytes)?,
+    };
+    admit_import_storage(control, import_slots::<LogicalObject>(1)?)?;
+    admit_import_storage(
+        control,
+        runmat_execution_artifact::ObjectDescriptor::content_named_text_bytes(
+            "geometry/canonical/faceted-solids",
+            FACETED_SOLID_MEDIA_TYPE,
+        )?
+        .checked_mul(2)
+        .ok_or_else(|| {
+            runmat_execution_artifact::ArtifactError::Limit("input object metadata overflow".into())
+        })?,
+    )?;
+    let object = geometry_object(
+        "geometry/canonical/faceted-solids",
+        FACETED_SOLID_MEDIA_TYPE,
+        bytes,
+    )?;
+    validate_geometry_reference(&object, document.primary_artifact())?;
+    let prepared = PreparedFacetedGeometryObjects {
+        document,
+        solid,
+        root: object.descriptor.clone(),
+        objects: vec![object],
+    };
     if prepared.root.digest != root.digest || prepared.root.encoded_length != root.encoded_length {
         return Err(MeshingExecutionError::Identity(
             "imported faceted geometry differs from requested root",

@@ -108,12 +108,7 @@ pub(super) fn render_scatter_axes(
     select_axes_for_figure(figure, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
     handle_plot_render_result(render_active_plot(
         NAME,
-        PlotRenderOptions {
-            title: "Scatterhist",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         |figure, axes| {
             for item in series {
                 if item.scatter_x.is_empty() {
@@ -141,12 +136,7 @@ pub(super) fn render_x_marginal(
     select_axes_for_figure(figure, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
     handle_plot_render_result(render_active_plot(
         NAME,
-        PlotRenderOptions {
-            title: "X Marginal",
-            x_label: "X",
-            y_label: "Count",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             for plot in prepared {
                 match plot {
@@ -167,12 +157,7 @@ pub(super) fn render_y_marginal(
     select_axes_for_figure(figure, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
     handle_plot_render_result(render_active_plot(
         NAME,
-        PlotRenderOptions {
-            title: "Y Marginal",
-            x_label: "Count",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             for plot in prepared {
                 match plot {

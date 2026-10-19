@@ -19,6 +19,8 @@ pub(crate) fn task<S>(
         .expect("validated test revision must have a canonical encoding");
     TaskSubmission {
         request: TaskRequest {
+            console: None,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: session.task_id(request.test_id.as_str(), request.attempt),
             scope_id: session.scope_id,
             pool_id: session.pool_id,

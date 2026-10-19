@@ -5,7 +5,7 @@ use super::ExecutableUnit;
 #[path = "portable/parallel.rs"]
 mod parallel;
 
-const SOURCE_MAP_SCHEMA_VERSION: u16 = 2;
+pub(super) const SOURCE_MAP_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Serialize)]
 struct PortableSourceMap<'a> {
@@ -143,6 +143,56 @@ impl ExecutableUnit {
         })
     }
 
+    /// Build the complete product with an exact semantic function selected as its entrypoint.
+    pub fn portable_envelope_for_function(
+        &self,
+        function: runmat_types::ProgramFunctionId,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        let function = runmat_hir::FunctionId(
+            usize::try_from(function.0).map_err(|_| "function identity exceeds this host")?,
+        );
+        let name = self
+            .functions()
+            .get(function)
+            .ok_or_else(|| format!("executable does not define function {}", function.0))?
+            .display_name
+            .clone();
+        self.portable_envelope_for_selection(Some((name, function)))
+    }
+
+    /// Complete product including the flat original dependency inventory.
+    /// `None` selects the script entrypoint.
+    pub(super) fn portable_envelope_for_selection(
+        &self,
+        selected: Option<(String, runmat_hir::FunctionId)>,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        let local = self.portable_local_envelope_for_selection(selected)?;
+        runmat_execution::ExecutableUnitEnvelope::with_dependencies(
+            local.manifest,
+            local.payloads,
+            self.portable_dependency_products()?,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    /// This unit's own product, without its original dependency inventory.
+    pub(super) fn portable_local_envelope_for_selection(
+        &self,
+        selected: Option<(String, runmat_hir::FunctionId)>,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        self.portable_local_envelope_with_entrypoint_mode(
+            runmat_types::InteropManifest::empty(),
+            None,
+            true,
+            |unit| match selected {
+                Some((_, function)) => {
+                    super::portable_entrypoint::resolve_compiled_function(unit, function)
+                }
+                None => super::portable_entrypoint::script_entrypoint(unit),
+            },
+        )
+    }
+
     fn portable_envelope_with_entrypoint(
         &self,
         interop: runmat_types::InteropManifest,
@@ -153,6 +203,27 @@ impl ExecutableUnit {
     }
 
     fn portable_envelope_with_entrypoint_mode(
+        &self,
+        interop: runmat_types::InteropManifest,
+        included: Option<&std::collections::HashSet<runmat_hir::FunctionId>>,
+        include_script: bool,
+        resolve: impl FnOnce(&Self) -> Result<super::portable_entrypoint::PortableEntrypoint, String>,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        let local = self.portable_local_envelope_with_entrypoint_mode(
+            interop,
+            included,
+            include_script,
+            resolve,
+        )?;
+        runmat_execution::ExecutableUnitEnvelope::with_dependencies(
+            local.manifest,
+            local.payloads,
+            self.portable_dependency_products()?,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn portable_local_envelope_with_entrypoint_mode(
         &self,
         interop: runmat_types::InteropManifest,
         included: Option<&std::collections::HashSet<runmat_hir::FunctionId>>,
@@ -328,7 +399,18 @@ impl ExecutableUnit {
                 );
             }
         }
+        // A restored product keeps its original interoperability, parallel
+        // and optional-section contracts rather than re-deriving them.
+        let (interop, parallel, optional_sections) = match self.imported_contract.as_deref() {
+            Some(imported) => (
+                imported.interop.clone(),
+                imported.parallel.clone(),
+                imported.optional_sections.clone(),
+            ),
+            None => (interop, parallel, optional_sections),
+        };
         let manifest = runmat_execution::ExecutableUnitManifest {
+            dependencies: Vec::new(),
             schema_version: runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION,
             identity: runmat_execution::ExecutableIdentity {
                 program: self.revision().program_revision.clone(),

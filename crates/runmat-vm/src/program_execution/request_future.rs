@@ -32,7 +32,7 @@ pub(super) fn prepare(
     runtime: runmat_runtime::context::RuntimeContext,
     bundle: Option<Box<runmat_execution_artifact::ExecutionBundle>>,
 ) -> Result<PreparedRequest, ProgramPreparationError> {
-    if bundle.is_some() && request.artifact.form != ExecutableForm::ExecutableUnitV3 {
+    if bundle.is_some() && request.artifact.form != ExecutableForm::ExecutableUnitV4 {
         return Err(ProgramPreparationError {
             message: "worker rejected selected foreign bundle for a non-V3 program".into(),
         });
@@ -53,7 +53,7 @@ pub(super) fn prepare(
     {
         return Ok(Box::pin(execute_script_request(request, runtime)));
     }
-    if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
+    if request.artifact.form == ExecutableForm::ExecutableUnitV4 {
         return unit::prepare(request, runtime, bundle);
     }
     if matches!(

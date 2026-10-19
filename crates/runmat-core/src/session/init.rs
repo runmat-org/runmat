@@ -15,6 +15,7 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             std::rc::Rc::new(SessionLocalTaskSupervisor::new()),
             None,
+            None,
         )
     }
 
@@ -30,6 +31,24 @@ impl RunMatSession {
             verbose,
             std::rc::Rc::new(parent.create()?),
             Some(parent_context),
+            None,
+        )
+    }
+
+    /// Create a session with exactly the supplied environment. No ambient variables or
+    /// source search path are collected before the frozen context is installed.
+    pub fn with_frozen_environment(
+        enable_jit: bool,
+        verbose: bool,
+        entries: Vec<(String, String)>,
+    ) -> Result<Self> {
+        Self::initialize(
+            enable_jit,
+            verbose,
+            #[cfg(not(target_arch = "wasm32"))]
+            std::rc::Rc::new(SessionLocalTaskSupervisor::new()),
+            None,
+            Some(entries),
         )
     }
 
@@ -39,7 +58,7 @@ impl RunMatSession {
         verbose: bool,
         parent_context: &runmat_runtime::context::RuntimeContext,
     ) -> Result<Self> {
-        Self::initialize(enable_jit, verbose, Some(parent_context))
+        Self::initialize(enable_jit, verbose, Some(parent_context), None)
     }
 
     fn initialize(
@@ -47,6 +66,7 @@ impl RunMatSession {
         verbose: bool,
         #[cfg(not(target_arch = "wasm32"))] local_tasks: std::rc::Rc<SessionLocalTaskSupervisor>,
         parent_context: Option<&runmat_runtime::context::RuntimeContext>,
+        environment: Option<Vec<(String, String)>>,
     ) -> Result<Self> {
         #[cfg(not(target_arch = "wasm32"))]
         let native_tiering_enabled = enable_jit && cfg!(feature = "jit");
@@ -60,8 +80,6 @@ impl RunMatSession {
         let cancellation = cancellation::SessionCancellation::default();
         let startup_user_path_authority =
             runmat_runtime::builtins::common::path_state::CapturedUserPathAuthority::capture()?;
-        let startup_environment_path =
-            runmat_runtime::builtins::common::path_state::environment_path_string();
         let search_path =
             Arc::new(runmat_runtime::builtins::common::path_state::SearchPath::new(String::new()));
         let runtime_context = runmat_runtime::context::RuntimeContext::with_cancellation(
@@ -69,6 +87,18 @@ impl RunMatSession {
             cancellation.handle().token(),
         )
         .with_search_path(search_path);
+        // A frozen environment replaces ambient variables before any path is derived.
+        let startup_environment_path = match environment {
+            Some(entries) => {
+                runtime_context.install_environment_snapshot(entries)?;
+                runtime_context
+                    .environment_snapshot()
+                    .into_iter()
+                    .find_map(|(key, value)| (key == "RUNMAT_PATH").then_some(value))
+                    .unwrap_or_default()
+            }
+            None => runmat_runtime::builtins::common::path_state::environment_path_string(),
+        };
         let inherited_command_profiling = parent_context
             .and_then(runmat_runtime::context::RuntimeContext::command_profiling)
             .cloned();
@@ -188,6 +218,8 @@ impl RunMatSession {
                 mex,
             )
         };
+        let program_service = std::rc::Rc::new(super::program::SessionProgramService::default());
+        let runtime_services = runtime_services.with_program(program_service.clone());
         let canonical_device_route_ports = runtime_services.clone();
         let runtime_context = runtime_context.with_service_ports(runtime_services);
         let lifecycle_host = runmat_runtime::context::RuntimeLifecycleHost::new(
@@ -228,6 +260,9 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             native_tiering_enabled,
             project_handoff: None,
+            checked_fea_sources: Default::default(),
+            pinned_inputs: None,
+            captured_project: None,
             #[cfg(not(target_arch = "wasm32"))]
             private_project_root: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -252,6 +287,7 @@ impl RunMatSession {
             graphics_callbacks: None,
             local_tasks,
             lifecycle_host,
+            program_service,
             placement_session: placement,
             is_executing: false,
             async_input_handler: None,

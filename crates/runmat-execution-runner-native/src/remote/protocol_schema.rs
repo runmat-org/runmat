@@ -2,8 +2,11 @@ use serde::Deserialize;
 
 #[cfg(test)]
 pub const REMOTE_WORKER_PROTOCOL_V4: u16 = 4;
+#[cfg(test)]
 pub const REMOTE_WORKER_PROTOCOL_V5: u16 = 5;
-pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = REMOTE_WORKER_PROTOCOL_V5;
+/// V6 adds the encrypted worker description exchange to the V5 command set.
+pub const REMOTE_WORKER_PROTOCOL_V6: u16 = 6;
+pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = REMOTE_WORKER_PROTOCOL_V6;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,14 +35,23 @@ mod tests {
         let frozen =
             br#"{"schemaVersion":4,"command":{"kind":"removed_output_list","values":[1]}}"#;
         let error = admit_remote_worker_bytes(frozen).unwrap_err();
-        assert!(error.contains("unsupported remote worker protocol 4; expected 5"));
+        assert!(error.contains("unsupported remote worker protocol 4; expected 6"));
         assert!(error.contains("rebuild or upgrade"));
     }
 
     #[test]
-    fn v5_remains_the_remote_wire_version() {
-        assert_eq!(REMOTE_WORKER_PROTOCOL_V5, 5);
+    fn frozen_v5_is_rejected_before_command_deserialization() {
         let frozen = br#"{"schemaVersion":5,"command":{"kind":"drain"}}"#;
+        let error = admit_remote_worker_bytes(frozen).unwrap_err();
+        assert!(error.contains(&format!(
+            "unsupported remote worker protocol {REMOTE_WORKER_PROTOCOL_V5}; expected 6"
+        )));
+    }
+
+    #[test]
+    fn v6_remains_the_remote_wire_version() {
+        assert_eq!(REMOTE_WORKER_PROTOCOL_V6, 6);
+        let frozen = br#"{"schemaVersion":6,"command":{"kind":"drain"}}"#;
         admit_remote_worker_bytes(frozen).unwrap();
     }
 }

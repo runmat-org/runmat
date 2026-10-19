@@ -10,8 +10,8 @@ use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, EncryptionPurpose, ExecutionHpkeSuite, ExecutionRecipientKey,
     PortableExecutionEncryption, PortableExecutionPrivateKey,
 };
-use runmat_execution_artifact::ProgramExecutionResponse;
-use runmat_server_client::auth::resolve_project_id;
+use runmat_execution_artifact::ProgramExecutionOutputs;
+use runmat_server_client::auth::resolve_public_project_id;
 use runmat_server_client::execution::public_error;
 use runmat_server_client::public_api::types;
 use serde::{Deserialize, Serialize};
@@ -235,15 +235,17 @@ async fn recover(
 ) -> Result<()> {
     let key = load_key(key_path)?;
     let (client, _, config) = super::authenticated_context().await?;
-    let project_id = resolve_project_id(&config, project)?.to_string();
+    let project_id = resolve_public_project_id(&config, project)?;
     let recovery = client
         .api()
-        .get_run_recovery(&project_id, run_id)
+        .get_run_recovery(project_id.as_str(), run_id)
         .await
         .map_err(public_error)?
         .into_inner();
     if recovery.run_id != run_id
-        || recovery.project_id != project_id
+        || runmat_server_client::ids::ProjectId::parse(&recovery.project_id)
+            .context("recovery contains an invalid public project identity")?
+            != project_id
         || recovery.recipient_fingerprint != key.recipient.fingerprint
     {
         bail!("recovery metadata does not match the requested run, project, and key");
@@ -261,7 +263,11 @@ async fn recover(
     )?;
     if let Some(artifact_id) = recovery.result_artifact_id {
         let ciphertext = client
-            .download_artifact(&project_id, &artifact_id, &recovery.recipient_fingerprint)
+            .download_artifact(
+                project_id.as_str(),
+                &artifact_id,
+                &recovery.recipient_fingerprint,
+            )
             .await?;
         let plaintext = super::crypto::open_run_object(
             &run_key,
@@ -269,14 +275,20 @@ async fn recover(
             EncryptionPurpose::Result,
             &ciphertext,
         )?;
-        let result: ProgramExecutionResponse =
+        let outputs: ProgramExecutionOutputs =
             serde_json::from_slice(&plaintext).context("recovered result payload is malformed")?;
+        outputs
+            .validate()
+            .context("recovered result payload failed integrity validation")?;
+        let result_object_count = outputs.objects.len();
+        let result = outputs.response;
         if json {
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
                     "runId": run_id,
                     "result": result,
+                    "resultObjectCount": result_object_count,
                 }))?
             );
         } else {
@@ -292,7 +304,11 @@ async fn recover(
     }
     if let Some(artifact_id) = recovery.diagnostic_artifact_id {
         let ciphertext = client
-            .download_artifact(&project_id, &artifact_id, &recovery.recipient_fingerprint)
+            .download_artifact(
+                project_id.as_str(),
+                &artifact_id,
+                &recovery.recipient_fingerprint,
+            )
             .await?;
         let plaintext = super::crypto::open_run_object(
             &run_key,

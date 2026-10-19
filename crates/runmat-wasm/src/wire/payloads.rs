@@ -44,6 +44,7 @@ struct MaterializeSlicePayload {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExecutionPayload {
+    pub(crate) dependency_lock: Option<String>,
     pub(crate) flow: JsonValue,
     pub(crate) display_events: Vec<DisplayEventPayload>,
     pub(crate) value_text: Option<String>,
@@ -83,6 +84,7 @@ impl ExecutionPayload {
             .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
             .map(|diagnostic| error_payload_from_diagnostic(diagnostic, source_context));
         Self {
+            dependency_lock: None,
             flow,
             display_events: outcome
                 .display_events
