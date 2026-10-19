@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_global_root() {
-        let values = vec![Value::Num(42.0), Value::String("test".to_string())];
+        let values = vec![Value::Num(42.0), Value::String("test".to_string().into())];
 
         let root = GlobalRoot::new(values, "test global".to_string());
         assert_eq!(root.description(), "test global");
@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn test_variable_array_root() {
-        let vars = vec![Value::Num(42.0), Value::String("test".to_string())];
+        let vars = vec![Value::Num(42.0), Value::String("test".to_string().into())];
 
         let root = unsafe { VariableArrayRoot::new(NonNull::from(&vars), "test vars".to_string()) };
 

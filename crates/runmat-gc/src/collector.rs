@@ -588,7 +588,7 @@ mod tests {
         let mut collector = MarkSweepCollector::new(&config);
 
         let target = allocator
-            .allocate(Value::String("alive".to_string()), &stats)
+            .allocate(Value::String("alive".to_string().into()), &stats)
             .expect("target allocation");
         let target_addr = target.addr();
         let handle_value = Value::HandleObject(runmat_value::HandleRef {
@@ -616,10 +616,10 @@ mod tests {
         let mut collector = MarkSweepCollector::new(&config);
 
         let first_target = allocator
-            .allocate(Value::String("first".to_string()), &stats)
+            .allocate(Value::String("first".to_string().into()), &stats)
             .expect("first target allocation");
         let second_target = allocator
-            .allocate(Value::String("second".to_string()), &stats)
+            .allocate(Value::String("second".to_string().into()), &stats)
             .expect("second target allocation");
         let first_addr = first_target.addr();
         let second_addr = second_target.addr();
@@ -674,7 +674,7 @@ mod tests {
         let mut collector = MarkSweepCollector::new(&config);
 
         let stale_target = allocator
-            .allocate(Value::String("stale".to_string()), &stats)
+            .allocate(Value::String("stale".to_string().into()), &stats)
             .expect("target allocation");
         let stale_addr = stale_target.addr();
         let stale_epoch = stale_target

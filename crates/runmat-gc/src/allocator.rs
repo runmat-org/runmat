@@ -790,10 +790,10 @@ mod tests {
         let stats = GcStats::new();
 
         let first = allocator
-            .allocate(Value::String("first".to_string()), &stats)
+            .allocate(Value::String("first".to_string().into()), &stats)
             .expect("first allocation");
         let _survivor = allocator
-            .allocate(Value::String("survivor".to_string()), &stats)
+            .allocate(Value::String("survivor".to_string().into()), &stats)
             .expect("survivor allocation");
 
         let first_ptr = first.addr() as *const u8;
@@ -803,7 +803,7 @@ mod tests {
         }
 
         let reused = allocator
-            .allocate(Value::String("reused".to_string()), &stats)
+            .allocate(Value::String("reused".to_string().into()), &stats)
             .expect("dropped young slot should be reusable");
         assert_eq!(reused.addr(), first.addr());
         assert_ne!(reused.epoch(), first.epoch());

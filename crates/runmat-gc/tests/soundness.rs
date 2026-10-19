@@ -37,7 +37,7 @@ fn allocation_triggered_collection_preserves_returned_handle() {
         let mut returned = None;
         for i in 0..32 {
             returned = Some(
-                gc_allocate(Value::String(format!("value-{i}")))
+                gc_allocate(Value::String(format!("value-{i}").into()))
                     .expect("allocation should succeed"),
             );
         }
@@ -47,7 +47,7 @@ fn allocation_triggered_collection_preserves_returned_handle() {
         gc_collect_minor().expect("forced minor collection should succeed");
         assert_eq!(
             gc_clone_value(&handle).expect("allocation should not return a collected handle"),
-            Value::String("value-31".to_string())
+            Value::String("value-31".to_string().into())
         );
     });
 }
@@ -116,7 +116,7 @@ fn mutable_guard_is_rejected_while_read_guard_is_active() {
 #[test]
 fn root_traversal_keeps_handle_targets_alive() {
     gc_test_context(|| {
-        let target = gc_allocate(Value::String("target".to_string()))
+        let target = gc_allocate(Value::String("target".to_string().into()))
             .expect("target allocation should succeed");
         let holder = Value::HandleObject(HandleRef {
             class_name: "Thing".into(),
@@ -135,7 +135,7 @@ fn root_traversal_keeps_handle_targets_alive() {
 
         assert_eq!(
             gc_clone_value(&target_handle).expect("target should remain live through root trace"),
-            Value::String("target".to_string())
+            Value::String("target".to_string().into())
         );
     });
 }
@@ -179,9 +179,9 @@ fn root_traversal_scans_owned_cell_values() {
 #[test]
 fn root_traversal_scans_nested_trace_variants() {
     gc_test_context(|| {
-        let target = gc_allocate(Value::String("target".to_string()))
+        let target = gc_allocate(Value::String("target".to_string().into()))
             .expect("target allocation should succeed");
-        let callback = gc_allocate(Value::String("callback".to_string()))
+        let callback = gc_allocate(Value::String("callback".to_string().into()))
             .expect("callback allocation should succeed");
 
         let handle = Value::HandleObject(HandleRef {
@@ -226,11 +226,11 @@ fn root_traversal_scans_nested_trace_variants() {
         ));
         assert_eq!(
             gc_clone_value(&target).expect("listener target should remain live"),
-            Value::String("target".to_string())
+            Value::String("target".to_string().into())
         );
         assert_eq!(
             gc_clone_value(&callback).expect("listener callback should remain live"),
-            Value::String("callback".to_string())
+            Value::String("callback".to_string().into())
         );
     });
 }
@@ -238,14 +238,14 @@ fn root_traversal_scans_nested_trace_variants() {
 #[test]
 fn stale_survivor_handle_is_rejected_after_unrooted_collection() {
     gc_test_context(|| {
-        let root = gc_allocate_rooted(Value::String("temporary".to_string()))
+        let root = gc_allocate_rooted(Value::String("temporary".to_string().into()))
             .expect("rooted allocation should succeed");
         let handle = root.handle();
 
         gc_collect_minor().expect("first collection should keep rooted value live");
         assert_eq!(
             gc_clone_value(&handle).expect("rooted handle should remain live"),
-            Value::String("temporary".to_string())
+            Value::String("temporary".to_string().into())
         );
 
         drop(root);
