@@ -12,10 +12,11 @@ use runmat_execution::resource::ExactShared;
 
 mod value_projection;
 pub use value_projection::{RetainedArrayValue, RetainedArrayValueError};
+mod builder;
+pub use builder::ExactArrayStorageBuilder;
 
 use crate::{
-    exact_capacity_vec, ExactHostAllocationClaim, ExactHostAllocationPermit,
-    ExactHostNumericAllocationError, Value,
+    ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError, Value,
 };
 
 #[derive(Debug)]
@@ -97,6 +98,7 @@ impl std::error::Error for ExactArrayClaimPromotionError {}
 
 /// The VM's established Value-specialized exact output collection.
 pub type OutputListStorage = ExactArrayStorage<Value>;
+pub type OutputListStorageBuilder = ExactArrayStorageBuilder<Value>;
 
 #[derive(Debug)]
 pub enum ExactArrayInitializationError<E> {
@@ -341,28 +343,25 @@ impl<T> ExactArrayStorage<T> {
     ) -> Result<Self, ExactArrayInitializationError<E>> {
         use ExactArrayInitializationError::{Allocation, Element};
 
-        if count == 0 {
-            return Ok(Self(ExactArrayStorageInner::EmptyExact));
-        }
-        let claim = permit
-            .reserve_exact_claim(Self::requested_bytes(count).map_err(Allocation)?)
-            .map_err(Allocation)?;
-        let values = exact_capacity_vec(count).map_err(Allocation)?;
-        let mut payload = ExactShared::try_new(ExactArrayPayload {
-            values,
-            claim: claim_cell(Some(claim)),
-        })
-        .map_err(|_| Allocation(ExactHostNumericAllocationError::AllocationFailed))?;
-        // Allocate the header as well as the element backing before asking
-        // the producer to move any rooted source value into this owner.
-        let values = &mut payload.get_mut_unique().values;
+        let mut builder = Self::try_begin(count, permit).map_err(Allocation)?;
         for index in 0..count {
-            values.push(initialize(index).map_err(Element)?);
+            let value = initialize(index).map_err(Element)?;
+            builder
+                .try_push(value)
+                .map_err(|_| Allocation(ExactHostNumericAllocationError::LayoutOverflow))?;
         }
-        Ok(Self(ExactArrayStorageInner::SharedExact {
-            payload,
-            len: count,
-        }))
+        builder
+            .try_finish()
+            .map_err(|_| Allocation(ExactHostNumericAllocationError::LayoutOverflow))
+    }
+
+    /// Reserve the final exact collection backing before producing children.
+    /// The staged owner can be held across cooperative decode checkpoints.
+    pub fn try_begin(
+        count: usize,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<ExactArrayStorageBuilder<T>, ExactHostNumericAllocationError> {
+        ExactArrayStorageBuilder::try_new(count, permit)
     }
 
     pub fn as_slice(&self) -> &[T] {

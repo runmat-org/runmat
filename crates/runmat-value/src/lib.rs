@@ -48,9 +48,10 @@ pub use display::{
 };
 pub use exact_array_storage::{
     ExactArrayAdoptionError, ExactArrayClaimPromotionError, ExactArrayInitializationError,
-    ExactArrayIntoIter, ExactArrayMutationError, ExactArrayStorage, ExactCharIntoIter,
-    OutputListInitializationError, OutputListIntoIter, OutputListStorage, OwnedExactArrayValues,
-    OwnedOutputListValues, RetainedArrayValue, RetainedArrayValueError,
+    ExactArrayIntoIter, ExactArrayMutationError, ExactArrayStorage, ExactArrayStorageBuilder,
+    ExactCharIntoIter, OutputListInitializationError, OutputListIntoIter, OutputListStorage,
+    OutputListStorageBuilder, OwnedExactArrayValues, OwnedOutputListValues, RetainedArrayValue,
+    RetainedArrayValueError,
 };
 pub use exception::{MException, MExceptionParts};
 pub use foreign::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};

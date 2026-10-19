@@ -47,6 +47,79 @@ impl ExactHostAllocationPermit for Permit {
 }
 
 #[test]
+fn staged_exact_owner_keeps_claim_through_partial_and_shared_lifetimes() {
+    #[derive(Clone, Debug)]
+    struct Child {
+        claim_live: Arc<AtomicUsize>,
+        drops: Arc<AtomicUsize>,
+    }
+
+    impl Drop for Child {
+        fn drop(&mut self) {
+            assert!(self.claim_live.load(Ordering::SeqCst) > 0);
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let bytes = ExactArrayStorage::<Child>::requested_bytes(2).unwrap();
+    let live = Arc::new(AtomicUsize::new(0));
+    let drops = Arc::new(AtomicUsize::new(0));
+    let permit = Permit {
+        limit: bytes,
+        live: live.clone(),
+    };
+    let mut pending = ExactArrayStorage::<Child>::try_begin(2, &permit).unwrap();
+    assert_eq!(live.load(Ordering::SeqCst), bytes);
+    assert_eq!(pending.expected_len(), 2);
+    assert!(pending.initialized().is_empty());
+    pending
+        .try_push(Child {
+            claim_live: live.clone(),
+            drops: drops.clone(),
+        })
+        .unwrap();
+    let pending = pending.try_finish().unwrap_err();
+    assert_eq!(pending.initialized().len(), 1);
+    // Cancelling a partial producer retires its child before the claim.
+    drop(pending);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let mut complete = ExactArrayStorage::<Child>::try_begin(2, &permit).unwrap();
+    for _ in 0..2 {
+        complete
+            .try_push(Child {
+                claim_live: live.clone(),
+                drops: drops.clone(),
+            })
+            .unwrap();
+    }
+    let excess = complete.try_push(Child {
+        claim_live: live.clone(),
+        drops: drops.clone(),
+    });
+    assert!(excess.is_err());
+    assert_eq!(complete.initialized().len(), 2);
+    drop(excess);
+    let owner = complete.try_finish().unwrap();
+    assert!(owner.is_exact());
+    assert_eq!(owner.capacity(), 2);
+    let pointer = owner.as_slice().as_ptr();
+    let alias = owner.clone();
+    assert_eq!(alias.as_slice().as_ptr(), pointer);
+    drop(owner);
+    assert_eq!(live.load(Ordering::SeqCst), bytes);
+    drop(alias);
+    assert_eq!(drops.load(Ordering::SeqCst), 4);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let mut empty = OutputListStorage::try_begin(0, &permit).unwrap();
+    assert_eq!(empty.try_push(Value::Num(1.0)), Err(Value::Num(1.0)));
+    assert!(empty.try_finish().unwrap().is_exact());
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn shared_ordinary_promotion_claims_one_original_owner_until_final_alias() {
     let values = vec![Value::Num(3.0), Value::Num(7.0)];
     let capacity = values.capacity();
