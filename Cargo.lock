@@ -7858,15 +7858,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runmat-public-ids"
-version = "0.6.2"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
- "uuid",
-]
-
-[[package]]
 name = "runmat-python"
 version = "0.6.2"
 dependencies = [
@@ -7955,7 +7946,6 @@ dependencies = [
  "runmat-macros",
  "runmat-meshing-core",
  "runmat-mex",
- "runmat-mir",
  "runmat-native-ffi",
  "runmat-plot",
  "runmat-process-host",
@@ -8016,7 +8006,6 @@ dependencies = [
  "reqwest 0.12.28",
  "runmat-execution",
  "runmat-package",
- "runmat-public-ids",
  "runmat-types",
  "serde",
  "serde_json",
