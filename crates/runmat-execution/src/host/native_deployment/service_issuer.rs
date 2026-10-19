@@ -35,9 +35,9 @@ impl VerifiedNativeServiceIssuer {
     ) -> Result<Self, ContractError> {
         product.validate()?;
         let invalid = |message| ContractError::invalid("native.service_issuer", message);
-        if !product.required_services.contains(&kind) {
-            return Err(invalid("selected product does not require this service"));
-        }
+        // Product validation proves `services` is exactly the union of
+        // reached-effect services and explicitly required non-effect services.
+        // The latter set alone excludes legitimate reached effects.
         let binding = product
             .services
             .iter()
