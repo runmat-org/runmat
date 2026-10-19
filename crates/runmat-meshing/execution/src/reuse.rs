@@ -64,7 +64,12 @@ impl AcceptedMeshingStageReceipt {
         success: &AttemptSuccess,
         limits: ObjectInventoryLimits,
     ) -> MeshingExecutionResult<Self> {
-        let [ValuePayload::Object(root)] = success.outputs.as_slice() else {
+        let Some((outputs, result_objects)) = success.values() else {
+            return Err(MeshingExecutionError::Identity(
+                "accepted stage requires a value result",
+            ));
+        };
+        let [ValuePayload::Object(root)] = outputs else {
             return Err(MeshingExecutionError::Identity(
                 "accepted stage requires one object root",
             ));
@@ -74,7 +79,7 @@ impl AcceptedMeshingStageReceipt {
             key: meshing_stage_reuse_key(host, implementation)?,
             access: host.artifact_access.clone(),
             root: root.as_ref().clone(),
-            result_objects: success.result_objects.clone(),
+            result_objects: result_objects.to_vec(),
         };
         receipt.restore_inner(source, destination, host, implementation, limits, false)?;
         Ok(receipt)
@@ -197,7 +202,9 @@ impl AcceptedMeshingStageReceipt {
             limits,
         )?;
         let mut success = rebound.attempt_success();
-        success.result_objects.push(observation.reference);
+        success
+            .push_result_object(observation.reference)
+            .map_err(MeshingExecutionError::Invalid)?;
         Ok(success)
     }
 }

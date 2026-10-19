@@ -1,5 +1,5 @@
 use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
-use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
+use runmat_execution::value::{ValueLimits, ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;

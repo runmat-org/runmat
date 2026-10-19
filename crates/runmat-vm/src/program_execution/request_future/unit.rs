@@ -83,7 +83,7 @@ pub(super) fn prepare(
 
     match entrypoint_kind {
         runmat_execution::ExecutableEntrypointKind::Script => Ok(continuation(
-            execute_unit_script(bytecode, runtime),
+            execute_unit_script(bytecode, request.requested_outputs, runtime),
             (request, registry, layout, receipt),
         )),
         runmat_execution::ExecutableEntrypointKind::Function => {

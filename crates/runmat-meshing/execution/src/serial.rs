@@ -72,8 +72,8 @@ impl CompletedMeshingStage {
     pub fn attempt_success(&self) -> runmat_execution_runner::AttemptSuccess {
         let mut success = self.publication.attempt_success();
         success
-            .result_objects
-            .push(self.stage_evidence_reference.clone());
+            .push_result_object(self.stage_evidence_reference.clone())
+            .expect("meshing publications are value results");
         success
     }
 }
