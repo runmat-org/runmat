@@ -1484,7 +1484,6 @@ pub struct RuntimeProgramCallable {
     pub display_name: String,
     pub source_digest: runmat_execution::Digest,
     pub executable_source_digest: runmat_execution::Digest,
-    pub function: runmat_mir::analysis::FunctionAnalysis,
     pub executable: runmat_execution::ExecutableUnitEnvelope,
 }
 

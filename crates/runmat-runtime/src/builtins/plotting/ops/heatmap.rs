@@ -555,8 +555,8 @@ fn exact_integer_renderer_limits(color_data: &Tensor, limits: &Tensor) -> Option
 /// The text printed in each cell, indexed `[column][row]` like the image surface, formatted
 /// as MATLAB's default `CellLabelFormat` (`%0.4g`); integer data prints exactly.
 fn heatmap_cell_labels(tensor: &Tensor) -> Vec<Vec<String>> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     let text = |index: usize| -> String {
         if let Some(storage) = tensor.integer_storage() {
             return match storage {
@@ -583,7 +583,7 @@ fn heatmap_cell_labels(tensor: &Tensor) -> Vec<Vec<String>> {
 
 /// The matrix with its rows in reverse order (column-major data).
 fn flip_rows(tensor: &Tensor) -> Tensor {
-    let (rows, cols) = (tensor.rows, tensor.cols);
+    let (rows, cols) = (tensor.rows(), tensor.cols());
     let Some(data) = tensor.as_f64_slice() else {
         return tensor.clone();
     };
@@ -593,7 +593,7 @@ fn flip_rows(tensor: &Tensor) -> Tensor {
             flipped.push(data[row + col * rows]);
         }
     }
-    Tensor::new(flipped, tensor.shape.clone()).expect("flipped heatmap shape")
+    Tensor::new(flipped, tensor.shape().to_vec()).expect("flipped heatmap shape")
 }
 
 fn normalize_integer_color_data(tensor: &Tensor) -> Tensor {

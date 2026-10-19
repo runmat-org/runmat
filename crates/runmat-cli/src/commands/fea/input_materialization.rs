@@ -64,9 +64,17 @@ pub(crate) fn materialize_runtime_signal(
     let program = request.program;
     program.executable.validate()?;
     let identity = &program.executable.manifest.identity;
+    // The runtime carries only the frozen product; its compiler facts are
+    // re-derived here from the same envelope, never from live session state.
+    let unit = runmat_core::ExecutableUnit::from_portable_envelope(&program.executable)
+        .map_err(anyhow::Error::msg)?;
+    let function = identity
+        .entrypoint_function
+        .and_then(|entrypoint| unit.function_analysis(entrypoint))
+        .ok_or_else(|| anyhow::anyhow!("frozen signal executable has no entrypoint analysis"))?
+        .clone();
     if identity.root_package != program.owner_identity
         || identity.entrypoint != program.display_name
-        || identity.entrypoint_function != program.function.function
         || identity.source_digest != program.executable_source_digest
     {
         bail!("runtime signal callable differs from its frozen executable product");
@@ -80,7 +88,7 @@ pub(crate) fn materialize_runtime_signal(
             source_digest: program.source_digest,
         },
         program.executable_source_digest,
-        &program.function,
+        &function,
         request.callable,
         &BTreeSet::new(),
     )?;

@@ -39,7 +39,6 @@ runmat-analysis-core = { workspace = true }
 runmat-canonical-codec = { workspace = true }
 runmat-analysis-fea = { workspace = true }
 runmat-analysis-language = { workspace = true }
-runmat-mir = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }

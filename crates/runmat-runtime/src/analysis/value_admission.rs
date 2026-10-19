@@ -337,21 +337,21 @@ pub async fn admit_owned_real64_async(
     preflight_real64_admission(&source, policy)?;
     let provider = exact_provider_for_handle(&handle).ok_or(
         AnalysisValueAdmissionError::DeviceOwnerUnavailable {
-            device_id: handle.device_id,
+            device_id: handle.device_id(),
         },
     )?;
-    let element_type = handle.descriptor.element_type.ok_or_else(|| {
+    let element_type = handle.descriptor().element_type.ok_or_else(|| {
         AnalysisValueAdmissionError::DeviceDownloadFailed {
-            device_id: handle.device_id,
+            device_id: handle.device_id(),
             detail: "numeric handle is missing its durable element descriptor".to_string(),
         }
     })?;
-    let element_count = checked_element_count(&handle.shape)?;
+    let element_count = checked_element_count(handle.shape())?;
     let transfer_bytes = byte_len(element_count, element_type.element_size())?;
     let downloaded = download_value_preserving_residency_async(provider, &handle)
         .await
         .map_err(|error| AnalysisValueAdmissionError::DeviceDownloadFailed {
-            device_id: handle.device_id,
+            device_id: handle.device_id(),
             detail: error.to_string(),
         })?;
     let mut admitted = admit_owned_real64(
@@ -364,7 +364,7 @@ pub async fn admit_owned_real64_async(
     admitted.receipt.source = source;
     admitted.receipt.ownership = ValueAdmissionOwnership::Materialized;
     admitted.receipt.transfer = ValueAdmissionTransfer::DeviceToHost {
-        device_id: handle.device_id,
+        device_id: handle.device_id(),
     };
     admitted.receipt.copies.device_to_host_bytes = transfer_bytes;
     Ok(admitted)
@@ -414,7 +414,7 @@ pub fn admit_portable_real64(
                 })
             }
         },
-        ValuePayload::Object(_) => {
+        ValuePayload::Object(_) | ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
             return Err(AnalysisValueAdmissionError::InvalidPortableValue {
                 detail: "portable input must be a closed inline value".into(),
             })
@@ -428,11 +428,11 @@ fn admit_borrowed_tensor<'a>(
     source: ValueFact,
 ) -> Result<AdmittedReal64Array<'a>, AnalysisValueAdmissionError> {
     if let Some(values) = tensor.as_f64_slice() {
-        return Ok(borrowed(values, &tensor.shape, source));
+        return Ok(borrowed(values, &tensor.shape(), source));
     }
     materialized(
         tensor.materialize_f64(),
-        tensor.shape.clone(),
+        tensor.shape().to_vec(),
         source,
         Some(dtype_conversion(tensor.numeric_dtype())),
     )
@@ -442,7 +442,7 @@ fn admit_owned_tensor(
     tensor: Tensor,
     source: ValueFact,
 ) -> Result<OwnedAdmittedReal64Array, AnalysisValueAdmissionError> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|detail| AnalysisValueAdmissionError::InvalidStorage { detail })?;

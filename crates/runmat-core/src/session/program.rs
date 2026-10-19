@@ -54,7 +54,7 @@ impl RuntimeProgramService for SessionProgramService {
             .last()
             .ok_or_else(|| program_error("no executable is active"))?;
         let unit = self.resolve(caller, function)?;
-        let analysis = unit.function_analysis(function).cloned().ok_or_else(|| {
+        unit.function_analysis(function).ok_or_else(|| {
             program_error(format!(
                 "active executable does not contain callable function {}",
                 function.0
@@ -85,7 +85,6 @@ impl RuntimeProgramService for SessionProgramService {
             display_name: display_name.to_string(),
             source_digest: runmat_execution::Digest::sha256(unit.source().text.as_bytes()),
             executable_source_digest,
-            function: analysis,
             executable,
         })
     }
