@@ -46,7 +46,7 @@ impl CompiledSignalGenerator {
         let identity = &self.executable.manifest.identity;
         if identity.program != self.admission.program_revision
             || identity.root_package != self.admission.callable.owner_identity
-            || identity.entrypoint_function != self.admission.function
+            || identity.entrypoint_function != Some(self.admission.function)
             || identity.source_digest != self.admission.executable_source_digest
         {
             bail!(
@@ -163,6 +163,12 @@ fn execute_compiled_materializations(
                     GeneratorExecutionContext {
                         scope_id: session.scope_id(),
                         pool_id: session.pool_id(),
+                        host: chunk.request.artifact.execution_host_requirement(
+                            &chunk.request.recipe,
+                            BTreeSet::from([
+                                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                            ]),
+                        )?,
                         resources: resources.clone(),
                         retry: RetryPolicy::IdempotentInfrastructure,
                         deadline_unix_millis: None,
@@ -312,11 +318,11 @@ fn wait_for_outputs(
                         bail!("input materialization task failed: {message}");
                     }
                 };
-                if !success.result_objects.is_empty() || success.outputs.len() != 1 {
+                let Some(([value], [])) = success.values() else {
                     session.cancel(CancellationReason::ParentScope);
                     bail!("bounded input task returned a non-inline or non-scalar output list");
-                }
-                outputs[index] = Some(success.outputs[0].clone());
+                };
+                outputs[index] = Some(value.clone());
             }
         }
         if outputs.iter().all(Option::is_some) {

@@ -258,6 +258,7 @@ async fn execute_task(
             retry: policy.retry,
             deadline_unix_millis: policy.deadline_unix_millis,
             priority: policy.priority,
+            permitted_trust_tiers: pool.permitted_trust_tiers(),
         },
     )?;
     let task_id = submission.request.id;

@@ -19,15 +19,13 @@ impl ExecutableUnit {
         let unit = Self::decode_local_product(envelope)?;
         let unit = dependencies::restore(unit, &envelope.dependency_products)?;
         let restored = match envelope.manifest.identity.entrypoint_kind {
-            ExecutableEntrypointKind::Function => {
-                unit.portable_envelope_for_function(
-                    envelope
-                        .manifest
-                        .identity
-                        .entrypoint_function
-                        .ok_or("portable function product has no entrypoint function")?,
-                )?
-            }
+            ExecutableEntrypointKind::Function => unit.portable_envelope_for_function(
+                envelope
+                    .manifest
+                    .identity
+                    .entrypoint_function
+                    .ok_or("portable function product has no entrypoint function")?,
+            )?,
             ExecutableEntrypointKind::Script => unit.portable_envelope_for_selection(None)?,
             ExecutableEntrypointKind::DeclarationOnly => {
                 return Err("declaration-only products are not imported for invocation".into())

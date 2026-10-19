@@ -6,12 +6,10 @@ use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
-use runmat_execution::state::TaskState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{GraphRequiredSchema, ValuePayload};
 use runmat_execution::{
-    CancellationReason, Digest, ExecutionScopeId, OutputContract, PoolId, ProgramCallable,
-    ProgramInvocationContext, TaskId,
+    CancellationReason, ExecutionScopeId, OutputContract, PoolId, ProgramCallable, TaskId,
 };
 use runmat_execution_artifact::{
     GraphExecutionRequest, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor,
@@ -252,8 +250,9 @@ impl LocalDriver {
             environment,
             console,
         } = submission;
-        let context_bytes = runmat_execution::console::invocation_memory_bytes(&environment, console)
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let context_bytes =
+            runmat_execution::console::invocation_memory_bytes(&environment, console)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let memory_bytes = (1024_u64 * 1024)
             .checked_add(context_bytes)
             .ok_or_else(|| {
@@ -699,9 +698,9 @@ impl LocalDriver {
             now_millis,
         }) {
             Ok(()) => {}
-            Err(NativeExecutionError::Driver(runmat_execution_runner::RunnerError::UnknownTask(
-                id,
-            ))) if id == task_id => {
+            Err(NativeExecutionError::Driver(
+                runmat_execution_runner::RunnerError::UnknownTask(id),
+            )) if id == task_id => {
                 self.completions
                     .lock()
                     .expect("completion registry poisoned")
@@ -848,7 +847,10 @@ impl LocalDriver {
                     .get(&request.id)
                     .is_some_and(|attempt| attempt.cancellation_requested_at.is_some());
             let verified_graph_cancel = graph_cancel_registered
-                && !matches!(&observed.result, Err(TransferFailure::RetirementUnverified(_)));
+                && !matches!(
+                    &observed.result,
+                    Err(TransferFailure::RetirementUnverified(_))
+                );
             let (result, report) = observed.into_backend_report(&request, verified_graph_cancel);
             let (actions, snapshot, checkpoint) = {
                 let mut driver = this.driver.lock().expect("local driver poisoned");
@@ -869,12 +871,10 @@ impl LocalDriver {
                     this.collectives.fail_gang(&gang, "an SPMD peer failed");
                 }
             }
-            let _ = completion.launch_state.compare_exchange(
-                1,
-                0,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            );
+            let _ =
+                completion
+                    .launch_state
+                    .compare_exchange(1, 0, Ordering::AcqRel, Ordering::Acquire);
             if completion.is_cancelled() {
                 completion.complete_cancelled_if_no_active_attempt(checkpoint);
             }

@@ -92,7 +92,7 @@ async fn invoke_unit(
     cancellation: Option<Arc<AtomicBool>>,
     host: Option<&std::rc::Rc<runmat_runtime::context::PortableConsoleHost>>,
 ) -> Result<Vec<runmat_execution::value::ValuePayload>, String> {
-    let mut session = prepare_session(request, project, environment)?;
+    let mut session = prepare_session(request, project, environment).await?;
     if let Some(host) = host {
         session.install_host_service(host.clone());
     } else {
@@ -102,7 +102,9 @@ async fn invoke_unit(
     }
     let mut control = runmat_core::InvocationControl::default();
     if let Some(cancellation) = cancellation {
-        control = control.with_cancellation(cancellation);
+        control = control.with_cancellation(
+            runmat_execution::cancellation::CancellationToken::from_shared(cancellation),
+        );
     }
     let envelope = request
         .artifact
@@ -130,7 +132,7 @@ async fn invoke_unit(
     .map_err(|error| error.to_string())
 }
 
-fn prepare_session(
+async fn prepare_session(
     request: &ProgramExecutionRequest,
     project: Option<&runmat_package::FrozenProjectHandoff>,
     environment: Option<&[(String, String)]>,
@@ -144,7 +146,8 @@ fn prepare_session(
             .program_revision
             .environment()
             .compatibility_mode
-            .clone(),
+            .as_ref()
+            .to_string(),
     ))
     .map_err(|error| format!("unsupported portable language mode: {error}"))?;
     if environment.is_some_and(|entries| entries != request.environment.entries()) {
@@ -160,6 +163,7 @@ fn prepare_session(
     if let Some(project) = project {
         session
             .install_project_handoff(project.clone())
+            .await
             .map_err(|error| format!("failed to install exact portable project: {error}"))?;
     }
     Ok(session)

@@ -18,7 +18,7 @@ use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionObject,
     ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -294,10 +294,13 @@ pub fn decode_structural_study_root(
     let geometry_meshing = ProgramExecutionRequest {
         console: root.geometry_meshing.console,
         environment: root.geometry_meshing.environment,
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: root.geometry_meshing.recipe,
         artifact: root.geometry_meshing.artifact,
-        function: root.geometry_meshing.function,
+        callable: root.geometry_meshing.callable.clone(),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: geometry_arguments.to_vec(),
         requested_outputs: root.geometry_meshing.requested_outputs,
     };
@@ -316,7 +319,7 @@ pub fn decode_structural_study_root(
         .iter()
         .map(|argument| match argument {
             ValuePayload::Object(reference) => Ok((reference.id, reference.as_ref())),
-            ValuePayload::Inline(_) => Err(protocol("generator input value is not externalized")),
+            _ => Err(protocol("generator input value is not externalized")),
         })
         .collect::<NativeExecutionResult<BTreeMap<_, _>>>()?;
     if expected_materialization_references != transported_materialization_references {
@@ -357,7 +360,7 @@ fn descriptor_from_request(request: &ProgramExecutionRequest) -> ProgramExecutio
         schema_version: request.schema_version,
         recipe: request.recipe.clone(),
         artifact: request.artifact.clone(),
-        function: request.function,
+        callable: request.callable.clone(),
         requested_outputs: request.requested_outputs,
     }
 }

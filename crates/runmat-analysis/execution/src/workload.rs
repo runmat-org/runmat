@@ -20,13 +20,17 @@ const MAX_OUTPUTS: usize = 4096;
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum AnalysisCapabilityRequirement {
-    Host { abi: String },
+    Host {
+        abi: String,
+    },
     ProcessIsolation,
     DistributedRuntime,
     Accelerator {
         class: runmat_execution::resource::AcceleratorClass,
     },
-    Formulation { identity: Digest },
+    Formulation {
+        identity: Digest,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

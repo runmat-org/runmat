@@ -810,9 +810,11 @@ async fn await_graph_capability(wait: GraphCapabilityWait<'_, '_>) -> NativeExec
     } = wait;
     loop {
         pool.refresh_worker_software_capabilities().await?;
-        let supported = pool.snapshot().pools.get(&pool_id).is_some_and(|pool| {
-            pool.spec.resource_limit.capabilities.contains(required)
-        });
+        let supported = pool
+            .snapshot()
+            .pools
+            .get(&pool_id)
+            .is_some_and(|pool| pool.spec.resource_limit.capabilities.contains(required));
         if supported {
             return Ok(true);
         }

@@ -91,6 +91,10 @@ pub(crate) async fn execute_locally(
             let context = GeneratorExecutionContext {
                 scope_id: session.scope_id(),
                 pool_id: session.pool_id(),
+                host: crate::program_host::program_host(
+                    &chunk.request,
+                    crate::program_host::local_trust(),
+                )?,
                 resources: resources.clone(),
                 retry: RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 },
                 deadline_unix_millis: None,
@@ -148,15 +152,15 @@ pub(crate) async fn execute_locally(
                     return Err(protocol(error));
                 }
             };
-            if !success.result_objects.is_empty() || success.outputs.len() != 1 {
+            let Some(([value], [])) = success.values() else {
                 session.cancel(CancellationReason::ParentScope);
                 return Err(protocol(
                     "generated solver input returned a non-scalar output list",
                 ));
-            }
+            };
             outputs[*materialization_index][*chunk_index] = Some(GeneratorChunkOutput {
                 chunk_identity: *chunk_identity,
-                value: success.outputs[0].clone(),
+                value: value.clone(),
             });
             remaining -= 1;
         }

@@ -111,6 +111,7 @@ struct ActiveAttempt {
     task: tokio::task::JoinHandle<()>,
     reply: Arc<super::attempt_reply::AttemptReply>,
     resources: ResourceRequest,
+    assignment: runmat_execution::resource::ResourceAssignment,
     cancellation: Arc<super::worker_execution::AttemptCancellation>,
     collective: Option<Arc<super::collective::RemoteCollectiveChannel>>,
     cooperative: bool,
@@ -120,7 +121,7 @@ struct ActiveAttempt {
 impl WorkerState {
     fn finish_attempt(&mut self, attempt_id: AttemptId) -> Option<ActiveAttempt> {
         let active = self.attempts.remove(&attempt_id)?;
-        release(&mut self.allocated, &active.resources);
+        release(&mut self.allocated, &active.resources, &active.assignment);
         Some(active)
     }
 }
@@ -800,6 +801,7 @@ pub(super) async fn run_worker_loop(
                 let attempt_id = attempt.scheduling.id;
                 let scheduling = attempt.scheduling.clone();
                 let reserved_resources = scheduling.task.resources.clone();
+                let reserved_assignment = scheduling.resource_assignment.clone();
                 let graph_run_identity = run_identity.clone();
                 let graph_worker_resources = worker.resources.clone();
                 let graph_worker_host = worker.host.clone();
@@ -1021,6 +1023,7 @@ pub(super) async fn run_worker_loop(
                         task,
                         reply: attempt_reply,
                         resources: reserved_resources,
+                        assignment: reserved_assignment,
                         cancellation,
                         collective,
                         cooperative,
@@ -1386,6 +1389,7 @@ async fn validate_and_reserve_attempt(
         &worker.resources,
         &mut state.allocated,
         &attempt.scheduling.task.resources,
+        &attempt.scheduling.resource_assignment,
     )
     .err()
     .map(str::to_owned)
@@ -1395,6 +1399,7 @@ fn reserve_attempt_capacity(
     inventory: &runmat_execution::resource::ResourceInventory,
     allocated: &mut ResourceAllocation,
     request: &ResourceRequest,
+    assignment: &runmat_execution::resource::ResourceAssignment,
 ) -> Result<(), &'static str> {
     request
         .validate()
@@ -1404,7 +1409,8 @@ fn reserve_attempt_capacity(
     }
     // `reserve` can fail after a preceding field was updated; commit only a complete reservation.
     let mut next = allocated.clone();
-    reserve(&mut next, request).map_err(|_| "attempt resource reservation overflowed")?;
+    reserve(&mut next, request, assignment)
+        .map_err(|_| "attempt resource reservation overflowed")?;
     *allocated = next;
     Ok(())
 }

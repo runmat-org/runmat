@@ -18,12 +18,22 @@ pub(super) struct CheckedSourceCache {
 }
 
 impl CheckedSourceCache {
-    fn belongs_to(&self, provider: &Arc<dyn runmat_filesystem::FsProvider>, project: &Option<runmat_package::ProjectRevision>) -> bool {
-        self.provider.as_ref().is_some_and(|owner| Arc::ptr_eq(owner, provider))
+    fn belongs_to(
+        &self,
+        provider: &Arc<dyn runmat_filesystem::FsProvider>,
+        project: &Option<runmat_package::ProjectRevision>,
+    ) -> bool {
+        self.provider
+            .as_ref()
+            .is_some_and(|owner| Arc::ptr_eq(owner, provider))
             && &self.project == project
     }
 
-    fn admit(&mut self, provider: Arc<dyn runmat_filesystem::FsProvider>, project: Option<runmat_package::ProjectRevision>) {
+    fn admit(
+        &mut self,
+        provider: Arc<dyn runmat_filesystem::FsProvider>,
+        project: Option<runmat_package::ProjectRevision>,
+    ) {
         if !self.belongs_to(&provider, &project) {
             *self = Self::default();
             self.provider = Some(provider);
@@ -111,9 +121,16 @@ impl CheckedSourceCache {
 }
 
 impl super::RunMatSession {
-    pub(super) fn retain_checked_fea_source(&mut self, result: &FeaSourceCheckResult, source: Arc<CheckedFeaSessionSource>) {
+    pub(super) fn retain_checked_fea_source(
+        &mut self,
+        result: &FeaSourceCheckResult,
+        source: Arc<CheckedFeaSessionSource>,
+    ) {
         let provider = runmat_filesystem::current_provider();
-        let project = self.project_handoff.as_ref().map(|handoff| handoff.project.revision());
+        let project = self
+            .project_handoff
+            .as_ref()
+            .map(|handoff| handoff.project.revision());
         self.checked_fea_sources.admit(provider, project);
         self.checked_fea_sources.insert(result, source);
     }
@@ -121,7 +138,10 @@ impl super::RunMatSession {
     fn checked_fea_scope_matches(&self) -> bool {
         self.checked_fea_sources.belongs_to(
             &runmat_filesystem::current_provider(),
-            &self.project_handoff.as_ref().map(|handoff| handoff.project.revision()),
+            &self
+                .project_handoff
+                .as_ref()
+                .map(|handoff| handoff.project.revision()),
         )
     }
     /// Retrieves the checked product, never recompiles a live file as a fallback.

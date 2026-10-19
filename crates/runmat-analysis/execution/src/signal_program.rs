@@ -648,7 +648,9 @@ pub fn build_generator_task_submission(
             schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
             scope_id: context.scope_id,
             pool_id: context.pool_id,
-            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(expected_artifact),
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                expected_artifact,
+            ),
             callable: crate::named_callable::program_task_callable(
                 &admission.callable.owner_identity,
                 &chunk.request,

@@ -316,8 +316,8 @@ fn source_identity(
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
-    let logical_path = LogicalSourcePath::new(file_name.to_owned())
-        .map_err(|error| error.to_string())?;
+    let logical_path =
+        LogicalSourcePath::new(file_name.to_owned()).map_err(|error| error.to_string())?;
     Ok((source_root, requested_path.to_path_buf(), logical_path))
 }
 

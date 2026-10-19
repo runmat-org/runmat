@@ -2,13 +2,13 @@
 //! Direct V7 keeps its separate bundle/input objects; Graph V10 carries its
 //! complete selected-unit authority in the program object itself.
 
+use runmat_execution::Digest;
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     decode_encrypted_run_object, open_program_chunk_manifest, ProgramManifestAuthority,
     MAX_PROGRAM_CHUNK_MANIFEST_BYTES,
 };
 use runmat_execution_artifact::encryption::{EncryptionPurpose, RunKeyMaterial};
-use runmat_execution::Digest;
 use runmat_execution_artifact::{
     admit_remote_program_object_bytes, GraphExecutionRequest, ProgramExecutionInputs,
     ProgramExecutionObjectLocation, ProgramExecutionRequest, RemoteProgramObject,
@@ -60,7 +60,9 @@ impl AdmittedRemoteProgram {
         &self,
     ) -> super::super::checkpoint::RemoteDriverCheckpointPhase {
         match self {
-            Self::Direct(direct) => super::super::checkpoint::execution_start_phase(&direct.request),
+            Self::Direct(direct) => {
+                super::super::checkpoint::execution_start_phase(&direct.request)
+            }
             Self::Graph(_) => {
                 super::super::checkpoint::RemoteDriverCheckpointPhase::EffectsMayHaveStarted
             }

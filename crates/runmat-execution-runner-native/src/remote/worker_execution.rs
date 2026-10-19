@@ -21,7 +21,8 @@ pub(super) struct AttemptCancellation {
 impl AttemptCancellation {
     pub(super) fn cancel(&self) {
         self.flag.store(true, Ordering::Release);
-        self.source.cancel(runmat_execution::CancellationReason::User);
+        self.source
+            .cancel(runmat_execution::CancellationReason::User);
     }
 
     pub(super) fn token(&self) -> runmat_execution::cancellation::CancellationToken {
@@ -332,12 +333,14 @@ async fn execute_direct(
     drop(progress_sender);
     crate::test_workload::execute_host_program_request_in_context(
         program,
-        project.as_deref(),
-        collective,
-        bundle,
-        Some(&environment),
-        Some(cancellation.flag()),
-        Some(&resources),
+        crate::test_workload::HostProgramContext {
+            materialized: project.as_deref(),
+            collective,
+            bundle,
+            environment: Some(&environment),
+            cancellation: Some(cancellation.flag()),
+            resources: Some(&resources),
+        },
     )
     .await
 }

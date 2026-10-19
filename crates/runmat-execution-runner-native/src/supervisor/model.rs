@@ -164,9 +164,11 @@ impl ProgramBatchSubmission {
             || self.task.request.inputs != self.arguments
             || self.task.request.outputs.requested_outputs != self.requested_outputs
             || self.task.request.program_artifact_id()
-                != Some(runmat_execution::identity::ArtifactId::derive(&[
-                    self.artifact.id.0.bytes()
-                ]))
+                != Some(runmat_execution::identity::ArtifactId::derive(&[self
+                    .artifact
+                    .id
+                    .0
+                    .bytes()]))
         {
             return Err(NativeExecutionError::Protocol(
                 "durable task differs from its original program invocation".into(),

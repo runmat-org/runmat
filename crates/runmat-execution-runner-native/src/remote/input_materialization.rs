@@ -106,6 +106,10 @@ pub(super) async fn execute(
             let context = GeneratorExecutionContext {
                 scope_id: pool.scope_id(),
                 pool_id: pool.pool_id(),
+                host: crate::program_host::program_host(
+                    &chunk.request,
+                    super::pool_tasks::admitted_trust(),
+                )?,
                 resources: task_resources.clone(),
                 retry: RetryPolicy::IdempotentInfrastructure,
                 deadline_unix_millis: Some(deadline),
@@ -152,13 +156,17 @@ pub(super) async fn execute(
         .collect::<BTreeMap<_, _>>();
     for (completion, (identity, chunk_index, task_id)) in completions.into_iter().zip(task_metadata)
     {
-        let outcome = completion.wait().await.and_then(|success| {
-            if !success.result_objects.is_empty() || success.outputs.len() != 1 {
-                Err("bounded signal task returned a non-inline or non-scalar output list".into())
-            } else {
-                Ok(success.outputs[0].clone())
-            }
-        });
+        let outcome = completion
+            .wait()
+            .await
+            .map_err(|failure| failure.to_string())
+            .and_then(|success| match success.values() {
+                Some(([value], [])) => Ok(value.clone()),
+                _ => Err(
+                    "bounded signal task returned a non-inline or non-scalar output list"
+                        .to_string(),
+                ),
+            });
         chunk_results
             .get_mut(&identity)
             .and_then(|chunks| chunks.get_mut(chunk_index))

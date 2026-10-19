@@ -286,6 +286,11 @@ async fn execute_program<P: AnalysisTaskPool>(
         NamedCallableExecutionContext {
             scope_id: pool.scope_id(),
             pool_id: pool.pool_id(),
+            host: crate::program_host::program_host(
+                program.request(),
+                pool.permitted_trust_tiers(),
+            )
+            .map_err(|error| error.to_string())?,
             resources: resources.clone(),
             retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
             deadline_unix_millis: None,

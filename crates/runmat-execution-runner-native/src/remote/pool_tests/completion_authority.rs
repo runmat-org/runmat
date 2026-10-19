@@ -253,7 +253,9 @@ async fn fixture() -> Fixture {
     pool.completions.lock().unwrap().insert(task_id, sender);
     pool.programs.lock().unwrap().insert(
         task_id,
-        Arc::new(runmat_execution_artifact::WorkerProgramRequest::Direct(program)),
+        Arc::new(runmat_execution_artifact::WorkerProgramRequest::Direct(
+            program,
+        )),
     );
     Fixture {
         pool,

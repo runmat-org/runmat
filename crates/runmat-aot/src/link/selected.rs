@@ -175,6 +175,7 @@ fn plan(
         driver: LinkerDriver {
             path: driver_path,
             family,
+            environment: Vec::new(),
         },
         object: inputs.object.clone(),
         runtime_archive: inputs.runtime.clone(),

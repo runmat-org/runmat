@@ -12,7 +12,8 @@ use runmat_execution_runner_native::{
 };
 use runmat_runtime::analysis::FeaRootSelector;
 
-const SOURCE: &str = include_str!("../../../../docs/simulation/examples/small-strain-j2-experimental.fea");
+const SOURCE: &str =
+    include_str!("../../../../docs/simulation/examples/small-strain-j2-experimental.fea");
 
 pub(super) async fn run() {
     let mut original_history_failures = Vec::new();

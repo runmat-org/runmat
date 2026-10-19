@@ -167,12 +167,3 @@ pub async fn execute_and_complete_program_batch(
     drop(lease);
     Ok(completed)
 }
-
-pub async fn execute_graph_batch(
-    submission: GraphBatchSubmission,
-    job_id: runmat_execution::JobId,
-) -> WorkerResponse {
-    let mut request = submission.request;
-    request.job_id = Some(job_id);
-    crate::worker::execute(crate::protocol::WorkerRequest::Graph(request)).await
-}

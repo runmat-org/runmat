@@ -432,14 +432,20 @@ fn resolve_compute_allocation(
             .map_err(anyhow::Error::new),
         ExecutionTarget::Remote(_) => profile
             .and_then(|profile| profile.accelerator.as_ref())
-            .map(|accelerator| runmat_execution::resource::AcceleratorRequest {
-                class: accelerator.class.clone(),
-                count: 1,
-                memory_bytes_each: accelerator.memory_bytes,
-            })
             .context(
                 "remote accelerator execution requires an exact accelerator allocation in the selected execution profile",
-            ),
+            )
+            .and_then(|accelerator| {
+                Ok(runmat_execution::resource::AcceleratorRequest {
+                    class: runmat_execution::resource::AcceleratorClass::new(&accelerator.class)?,
+                    count: 1,
+                    minimum_allocation_bytes: accelerator.memory_bytes,
+                    provider: None,
+                    required_features: std::collections::BTreeSet::from([
+                        runmat_execution::resource::AcceleratorFeature::Compute,
+                    ]),
+                })
+            }),
     };
     match allocation {
         Ok(request) => {

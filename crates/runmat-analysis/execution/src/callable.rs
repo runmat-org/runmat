@@ -182,7 +182,10 @@ pub fn admit_callable_signal_generator(
         ));
     }
     let expected_owner = runmat_execution::value::CallableOwner::Bound(
-        runmat_execution::FunctionBindingOrigin::from_revision(&program_revision, function.function)?,
+        runmat_execution::FunctionBindingOrigin::from_revision(
+            &program_revision,
+            function.function,
+        )?,
     );
     if frozen_callable.owner != expected_owner
         || frozen_callable.qualified_name != callable.qualified_name

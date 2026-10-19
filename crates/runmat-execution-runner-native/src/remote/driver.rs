@@ -414,12 +414,14 @@ async fn execute_local_direct(
             let environment = bundle.manifest.portable_environment.clone();
             crate::test_workload::execute_host_program_request_in_context(
                 request,
-                materialized.as_ref(),
-                None,
-                Some(bundle),
-                Some(&environment),
-                None,
-                None,
+                crate::test_workload::HostProgramContext {
+                    materialized: materialized.as_ref(),
+                    collective: None,
+                    bundle: Some(bundle),
+                    environment: Some(&environment),
+                    cancellation: None,
+                    resources: None,
+                },
             )
             .await
         }

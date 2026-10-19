@@ -195,9 +195,7 @@ impl RunMatSession {
         self.runtime_context = self.runtime_context.clone().with_fresh_plot_receipts();
         self.configure_runtime_context();
         let runtime = self.runtime_context.clone();
-        runtime
-            .scope(self.run_in_context(input))
-            .await
+        runtime.scope(self.run_in_context(input)).await
     }
 
     async fn run_in_context(

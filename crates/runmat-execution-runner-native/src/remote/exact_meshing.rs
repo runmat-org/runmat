@@ -119,7 +119,10 @@ pub(super) async fn execute_geometry_for_composition(
                 .map(RemoteExactMeshingComposition::Terminal)
         }
     };
-    let output_reference = match materialized.outputs.as_slice() {
+    let output_reference = match materialized
+        .values()
+        .map_or(&[][..], |(outputs, _)| outputs)
+    {
         [ValuePayload::Object(reference)] if reference.kind == ValueRefKind::ResultObject => {
             reference.as_ref()
         }
@@ -129,7 +132,7 @@ pub(super) async fn execute_geometry_for_composition(
             ))
         }
     };
-    if !materialized.result_objects.contains(output_reference) {
+    if !materialized.result_objects().contains(output_reference) {
         return Err(protocol(
             "geometry materialization omitted its output root from the inventory",
         ));
@@ -143,7 +146,10 @@ pub(super) async fn execute_geometry_for_composition(
     output
         .validate_against(&geometry_request)
         .map_err(protocol)?;
-    if !materialized.result_objects.contains(&output.geometry_root) {
+    if !materialized
+        .result_objects()
+        .contains(&output.geometry_root)
+    {
         return Err(protocol(
             "geometry materialization omitted its exact geometry root",
         ));
@@ -173,7 +179,7 @@ pub(super) async fn execute_geometry_for_composition(
     .input_objects()
     .to_vec();
     expected_inventory.push(output_reference.clone());
-    validate_reference_closure(&materialized.result_objects, &expected_inventory)?;
+    validate_reference_closure(&materialized.result_objects(), &expected_inventory)?;
     let mut meshing_request = decoded.request.meshing_request;
     if !crate::exact_geometry_admission::same_requested_tolerance(
         &meshing_request.tolerance,
@@ -251,7 +257,7 @@ pub(super) async fn execute_for_composition(
                 .map(RemoteExactMeshingComposition::Terminal)
         }
     };
-    let admission_reference = match admitted.outputs.as_slice() {
+    let admission_reference = match admitted.values().map_or(&[][..], |(outputs, _)| outputs) {
         [ValuePayload::Object(reference)] if reference.kind == ValueRefKind::ResultObject => {
             reference.as_ref()
         }
@@ -270,7 +276,7 @@ pub(super) async fn execute_for_composition(
             crate::exact_meshing_root::ADMISSION_VALUE_SCHEMA,
         )
         .map_err(protocol)?;
-    if !admitted.result_objects.contains(admission_reference) {
+    if !admitted.result_objects().contains(admission_reference) {
         return Err(protocol(
             "exact geometry admission omitted its result root from the inventory",
         ));
@@ -279,7 +285,7 @@ pub(super) async fn execute_for_composition(
         .execution_object(admission_reference)?
         .ok_or_else(|| protocol("exact geometry admission object is unavailable"))?;
     let admission = crate::exact_meshing_root::decode_admission(&admission_bytes)?;
-    if !admitted.result_objects.contains(&admission.geometry_root) {
+    if !admitted.result_objects().contains(&admission.geometry_root) {
         return Err(protocol("exact geometry admission contract is invalid"));
     }
     let inventory = ObjectInventoryLimits::default();
@@ -307,7 +313,7 @@ pub(super) async fn execute_for_composition(
     .input_objects()
     .to_vec();
     expected_admission_inventory.push(admission_reference.clone());
-    validate_reference_closure(&admitted.result_objects, &expected_admission_inventory)?;
+    validate_reference_closure(&admitted.result_objects(), &expected_admission_inventory)?;
     validate_source_entities(&admission, geometry.geometry_objects())?;
     let source_edge_ids = admission.source_edge_ids.clone();
     let source_face_ids = admission.source_face_ids.clone();

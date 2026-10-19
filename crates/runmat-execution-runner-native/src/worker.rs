@@ -24,7 +24,8 @@ enum WorkerExecutionOutcome {
 }
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
-    let (reader, writer) = runmat_process_host::ipc::stdio::endpoint();
+    let (reader, writer) = runmat_process_host::ipc::stdio::endpoint()
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let limits = FrameLimits {
         max_message_bytes: WORKER_MAX_MESSAGE_BYTES,
     };
@@ -72,9 +73,12 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
         execute_launch(request, channel.clone()).await
     };
     let payload = match response {
-        Ok(WorkerExecutionOutcome::Completed { response, console }) => serde_json::to_vec(
-            &crate::protocol::WorkerProcessMessage::Completed { response, console },
-        ),
+        Ok(WorkerExecutionOutcome::Completed { response, console }) => {
+            serde_json::to_vec(&crate::protocol::WorkerProcessMessage::Completed {
+                response,
+                console,
+            })
+        }
         Ok(WorkerExecutionOutcome::RetirementUnverified { message, owner }) => {
             let _owner = owner;
             let payload = serde_json::to_vec(

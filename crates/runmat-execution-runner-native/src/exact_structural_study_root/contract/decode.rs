@@ -52,10 +52,13 @@ pub fn decode_exact_structural_study_root(
     let exact_meshing = ProgramExecutionRequest {
         console: root.exact_meshing.console,
         environment: root.exact_meshing.environment.clone(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: root.exact_meshing.recipe.clone(),
         artifact: root.exact_meshing.artifact.clone(),
-        function: root.exact_meshing.function,
+        callable: root.exact_meshing.callable.clone(),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: exact_arguments.to_vec(),
         requested_outputs: root.exact_meshing.requested_outputs,
     };
@@ -91,7 +94,7 @@ pub fn decode_exact_structural_study_root(
                     .map_err(protocol)?;
                 Ok((reference.id, reference.as_ref()))
             }
-            ValuePayload::Inline(_) => Err(protocol("signal input value is not externalized")),
+            _ => Err(protocol("signal input value is not externalized")),
         })
         .collect::<NativeExecutionResult<BTreeMap<_, _>>>()?;
     if expected_materialization_references != transported_materialization_references {

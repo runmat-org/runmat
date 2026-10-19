@@ -133,6 +133,9 @@ pub async fn submit(
     let requested_outputs = match identity.entrypoint_kind {
         runmat_execution::ExecutableEntrypointKind::Script => 0,
         runmat_execution::ExecutableEntrypointKind::Function => 1,
+        runmat_execution::ExecutableEntrypointKind::DeclarationOnly => {
+            bail!("declaration-only executables cannot be submitted as jobs")
+        }
     };
     let callable_function = identity.entrypoint_function.ok_or_else(|| {
         anyhow::anyhow!("declaration-only executables cannot be submitted as callable jobs")
@@ -305,8 +308,14 @@ where
     F: FnOnce(&str) -> Result<PreparedRemoteExecution>,
 {
     let accelerators = options.accelerator.clone().into_iter().collect();
-    submit_scoped_with_accelerators(revision, bundle_archive_size, prepare, options, accelerators)
-        .await
+    submit_scoped_with_accelerators(
+        revision,
+        bundle_archive_size,
+        prepare,
+        options,
+        accelerators,
+    )
+    .await
 }
 
 async fn submit_scoped_with_accelerators<F>(

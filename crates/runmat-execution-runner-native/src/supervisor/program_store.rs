@@ -47,9 +47,9 @@ impl JobStore {
         id: JobId,
         assignment: &DurableProgramAttempt,
     ) -> NativeExecutionResult<()> {
-        let submission = self
-            .program_submission(id)?
-            .ok_or_else(|| invalid("script or graph job cannot receive a portable program assignment"))?;
+        let submission = self.program_submission(id)?.ok_or_else(|| {
+            invalid("script or graph job cannot receive a portable program assignment")
+        })?;
         validate_assignment(assignment, &submission)?;
         immutable_json(
             &assignment_path(&self.job_dir(id), assignment.request.id),

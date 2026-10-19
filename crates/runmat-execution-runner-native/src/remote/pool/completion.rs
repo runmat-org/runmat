@@ -47,7 +47,9 @@ impl RemotePoolDriver {
                             .execution_objects
                             .commit_results(commit.result.result_objects())
                             .map(|()| commit.result.clone())
-                            .map_err(|error| NativeProgramFailure::Infrastructure(error.to_string())),
+                            .map_err(|error| {
+                                NativeProgramFailure::Infrastructure(error.to_string())
+                            }),
                         None => Err(NativeProgramFailure::Infrastructure(
                             "succeeded remote task has no committed result".into(),
                         )),
@@ -60,9 +62,8 @@ impl RemotePoolDriver {
                         "Graph attempt reported success without verified worker retirement".into(),
                     )))
                 } else {
-                    terminal_failure(&driver, task).map(|message| {
-                        Err(report_failure(&terminal_report, task.state, message))
-                    })
+                    terminal_failure(&driver, task)
+                        .map(|message| Err(report_failure(&terminal_report, task.state, message)))
                 }
             });
             // Serialize committed-object protection and stale-result disposal with
@@ -196,7 +197,11 @@ impl RemotePoolDriver {
 
 /// Typed failure for the report that made a task terminal; durable diagnostics
 /// from the scheduler record remain the message authority.
-fn report_failure(report: &AttemptReport, state: TaskState, message: String) -> NativeProgramFailure {
+fn report_failure(
+    report: &AttemptReport,
+    state: TaskState,
+    message: String,
+) -> NativeProgramFailure {
     match report {
         AttemptReport::RuntimeFailed { failure } => NativeProgramFailure::Runtime(failure.clone()),
         AttemptReport::Failed {

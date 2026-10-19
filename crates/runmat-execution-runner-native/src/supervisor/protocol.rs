@@ -113,6 +113,7 @@ mod tests {
             generation: 1,
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 2,
+                owned_work: None,
             },
         };
         let original = SupervisorCommand::CancelHandle {

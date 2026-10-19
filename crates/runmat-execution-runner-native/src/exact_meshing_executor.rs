@@ -120,6 +120,11 @@ impl NativeExactMeshingExecutor<'_> {
                 scope_id: self.session.scope_id(),
                 pool_id: self.session.pool_id(),
                 program_artifact_id: ArtifactId::derive(&[program.artifact.id.0.bytes()]),
+                host: crate::program_host::program_host(
+                    &program,
+                    crate::program_host::local_trust(),
+                )
+                .map_err(stage_error)?,
                 artifact_access: stage.host().artifact_access.clone(),
                 cpu_millicores: if stage.host().workload.stage
                     == runmat_meshing_core::MeshingStageKind::Tetrahedralization

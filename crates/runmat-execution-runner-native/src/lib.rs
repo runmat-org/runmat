@@ -74,6 +74,7 @@ mod meshing_platform;
 mod meshing_subtask_cache;
 mod metadata_identity;
 mod native_pool;
+mod program_host;
 mod process_provider;
 mod program_object_source;
 mod program_session;
@@ -224,9 +225,7 @@ pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvalu
 pub use meshing_host::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
 };
-pub use process_provider::{
-    NATIVE_ACCELERATOR_REQUESTS_ENV, NATIVE_ACCELERATOR_REQUIRED_ENV, NATIVE_OBJECT_STORE_ROOT_ENV,
-};
+pub use process_provider::NATIVE_OBJECT_STORE_ROOT_ENV;
 pub use program_object_source::NativeProgramObjectSource;
 pub use program_session::{
     NativeProgramCompletion, NativeProgramFailure, NativeProgramSession, NativeProgramTask,
@@ -259,7 +258,7 @@ pub use structural_study_root::{
 };
 pub use test_workload::{
     execute_host_graph_request_with_graphics, execute_host_program_request,
-    execute_host_program_request_with_graphics, execute_host_program_request_with_project,
+    execute_host_program_request_with_graphics,
 };
 pub use typed_fea::{
     checked_fea_artifact_access, complete_frozen_fea_assessments, complete_local_fea_assessments,

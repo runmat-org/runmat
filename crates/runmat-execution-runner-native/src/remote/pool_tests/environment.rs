@@ -110,9 +110,7 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
             let report = channel
                 .execute(RemoteAttempt {
                     scheduling,
-                    program: super::super::RemoteAttemptProgram::Direct(Box::new(
-                        program.clone(),
-                    )),
+                    program: super::super::RemoteAttemptProgram::Direct(Box::new(program.clone())),
                 })
                 .await
                 .unwrap();
@@ -122,8 +120,7 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
             let (outputs, _) = result.values().expect("value result");
             assert_eq!(outputs.len(), 1);
             assert_eq!(
-                runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0])
-                    .unwrap(),
+                runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0]).unwrap(),
                 runmat_value::Value::Num(3.0)
             );
             assert_eq!(std::env::var_os(name), host);

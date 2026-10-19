@@ -39,7 +39,6 @@ pub(crate) fn configure_local_analysis(
     config: &mut NativeExecutionConfig,
     resources: &ResourceRequest,
 ) {
-    config.worker_accelerators = resources.accelerators.clone();
     config.worker_capabilities.extend(
         resources
             .accelerators
@@ -82,6 +81,12 @@ pub(crate) fn configure_local_analysis_envelope(
 pub(crate) trait AnalysisTaskPool: CacheImport {
     fn scope_id(&self) -> ExecutionScopeId;
     fn pool_id(&self) -> PoolId;
+    /// Trust tiers this pool's workers may hold; task host requirements narrow to them.
+    fn permitted_trust_tiers(
+        &self,
+    ) -> std::collections::BTreeSet<runmat_execution::security::ExecutionTrustTier> {
+        crate::program_host::local_trust()
+    }
     fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()>;
     fn register_result_objects(
         &mut self,
@@ -141,7 +146,7 @@ pub(crate) fn planned_resource_attempt(
     }
     let success = delivered_attempt(&task.response, task.attempt.as_ref(), task.failure.as_ref())?;
     success.validate_accounting().map_err(protocol)?;
-    let accounting = success.resources.as_deref().cloned().ok_or_else(|| {
+    let accounting = success.resources().cloned().ok_or_else(|| {
         NativeExecutionError::Protocol("analysis task lacks scheduler resource accounting".into())
     })?;
     if !runmat_analysis_fea::planning::resource::allocation_matches_plan(
@@ -220,6 +225,7 @@ pub(crate) async fn execute_analysis_task_batch(
                 retry: policy.retry,
                 deadline_unix_millis: policy.deadline_unix_millis,
                 priority: policy.priority,
+                permitted_trust_tiers: pool.permitted_trust_tiers(),
             },
         )?;
         let task_id = submission.request.id;
@@ -261,7 +267,15 @@ pub(crate) async fn execute_analysis_task_batch(
 }
 
 fn success_response(success: AttemptSuccess) -> ProgramExecutionResponse {
-    ProgramExecutionResponse::from_success_outputs(success.outputs, success.result_objects)
+    match success {
+        AttemptSuccess::Values {
+            outputs,
+            result_objects,
+            ..
+        } => ProgramExecutionResponse::from_success_outputs(outputs, result_objects),
+        AttemptSuccess::Graph { graph } => ProgramExecutionResponse::GraphSuccess { graph },
+        AttemptSuccess::Spmd { outputs } => ProgramExecutionResponse::SpmdSuccess { outputs },
+    }
 }
 
 pub(crate) fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

@@ -101,12 +101,16 @@ pub fn prepare_structural_study_root(
         entrypoint: "analysis_workload".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: STRUCTURAL_STUDY_ROOT_EXECUTION_MODE.into(),
         target: ProgramTarget::portable(STRUCTURAL_STUDY_ROOT_TARGET_PROFILE),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let artifact = ProgramArtifact::materialize(
@@ -126,10 +130,16 @@ pub fn prepare_structural_study_root(
     let request = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: recipe.clone(),
         artifact: artifact.clone(),
-        function: 0,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(0),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments,
         requested_outputs: 1,
     };

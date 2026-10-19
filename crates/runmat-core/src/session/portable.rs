@@ -35,15 +35,13 @@ impl RunMatSession {
             ExecutableEntrypointKind::DeclarationOnly => {
                 return Err("declaration-only product has no invocable entrypoint".into())
             }
-            ExecutableEntrypointKind::Function => {
-                ProcedureTarget::SemanticFunction(
-                    envelope
-                        .manifest
-                        .identity
-                        .entrypoint_function
-                        .ok_or("portable function product has no entrypoint function")?,
-                )
-            }
+            ExecutableEntrypointKind::Function => ProcedureTarget::SemanticFunction(
+                envelope
+                    .manifest
+                    .identity
+                    .entrypoint_function
+                    .ok_or("portable function product has no entrypoint function")?,
+            ),
         };
         let result = self
             .invoke_executable(

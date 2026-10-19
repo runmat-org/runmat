@@ -72,6 +72,7 @@ fn native_retained_joule_source_executes_only_thermal_and_cold_imports_both_orde
                 retry: runmat_execution::task::RetryPolicy::Never,
                 deadline_unix_millis: None,
                 priority: 0,
+                permitted_trust_tiers: crate::program_host::local_trust(),
             },
         )
         .unwrap();

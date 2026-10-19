@@ -23,6 +23,7 @@ pub(crate) struct AnalysisTaskPolicy<'a> {
     pub retry: RetryPolicy,
     pub deadline_unix_millis: Option<u64>,
     pub priority: i16,
+    pub permitted_trust_tiers: BTreeSet<runmat_execution::security::ExecutionTrustTier>,
 }
 
 pub(crate) fn prepare_analysis_task(
@@ -40,7 +41,7 @@ pub(crate) fn prepare_analysis_task(
         .iter()
         .map(|argument| match argument {
             ValuePayload::Object(root) => Ok((**root).clone()),
-            ValuePayload::Inline(_) => Err(NativeExecutionError::Protocol(
+            _ => Err(NativeExecutionError::Protocol(
                 "analysis input was unexpectedly inline".into(),
             )),
         })
@@ -56,6 +57,7 @@ pub(crate) fn prepare_analysis_task(
         scope_id,
         pool_id,
         program_artifact_id: ArtifactId::derive(&[program.request.artifact.id.0.bytes()]),
+        host: crate::program_host::program_host(&program.request, policy.permitted_trust_tiers)?,
         resources,
         retry: policy.retry,
         deadline_unix_millis: policy.deadline_unix_millis,

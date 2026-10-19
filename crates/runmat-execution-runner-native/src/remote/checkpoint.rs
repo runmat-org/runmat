@@ -215,7 +215,7 @@ mod tests {
     use runmat_execution::{OutputContract, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
         ProgramArtifact, ProgramBuildRecipe, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
     };
 
     use super::*;
@@ -255,22 +255,32 @@ mod tests {
             entrypoint: entrypoint.into(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             execution_mode: "checkpoint-test".into(),
             target: ProgramTarget::portable("checkpoint-test"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let artifact = ProgramArtifact::materialize(&recipe, form, vec![1]).unwrap();
         ProgramExecutionRequest {
             console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
-            function: 0,
+            callable: runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                None,
+            ),
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
             arguments: Vec::new(),
             requested_outputs: 1,
         }

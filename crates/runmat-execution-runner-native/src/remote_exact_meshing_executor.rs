@@ -152,6 +152,11 @@ impl RemoteExactMeshingExecutor {
                 scope_id: self.pool.scope_id(),
                 pool_id: self.pool.pool_id(),
                 program_artifact_id: ArtifactId::derive(&[program.artifact.id.0.bytes()]),
+                host: crate::program_host::program_host(
+                    &program,
+                    crate::remote::pool_tasks::admitted_trust(),
+                )
+                .map_err(stage_error)?,
                 artifact_access: self.artifact_access.clone(),
                 cpu_millicores: self.policy.cpu_millicores,
                 maximum_egress_bytes: self.policy.maximum_egress_bytes,

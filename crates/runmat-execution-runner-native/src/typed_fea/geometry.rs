@@ -271,6 +271,11 @@ async fn execute_generator(
         GeneratorExecutionContext {
             scope_id: session.scope_id(),
             pool_id: session.pool_id(),
+            host: crate::program_host::program_host(
+                &chunk.request,
+                crate::program_host::local_trust(),
+            )
+            .map_err(|error| error.to_string())?,
             resources,
             retry: RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 },
             deadline_unix_millis: None,
@@ -284,15 +289,15 @@ async fn execute_generator(
     let started = Instant::now();
     loop {
         if let Some(result) = task.try_result() {
-            let success = result?;
-            if !success.result_objects.is_empty() {
+            let success = result.map_err(|failure| failure.to_string())?;
+            if !success.result_objects().is_empty() {
                 return Err("geometry generator returned an external object closure".into());
             }
-            let [value] = success.outputs.as_slice() else {
+            let Some(([value], _)) = success.values() else {
                 return Err("geometry generator returned an invalid output count".into());
             };
             return Ok(ProgramExecutionResponse::Success {
-                value: value.clone(),
+                outputs: vec![value.clone()],
             });
         }
         if started.elapsed() >= Duration::from_millis(5 * 60 * 1_000) {

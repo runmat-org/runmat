@@ -12,7 +12,7 @@ use runmat_execution_artifact::{
     ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse, ProgramTarget,
     MAX_PROGRAM_EXECUTION_ARGUMENTS, MAX_PROGRAM_EXECUTION_OBJECT_BYTES,
     MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_geometry_core::{GeometryDocument, PersistentEntityId, PersistentEntityKind};
 use runmat_geometry_io::{ExactCadImportOptions, GeometryImportContext};
@@ -454,12 +454,16 @@ pub fn prepare_exact_meshing_root(
         entrypoint: "meshing_workload".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: EXACT_MESHING_ROOT_EXECUTION_MODE.into(),
         target: ProgramTarget::portable(EXACT_MESHING_ROOT_TARGET_PROFILE),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let artifact = ProgramArtifact::materialize(
@@ -471,10 +475,16 @@ pub fn prepare_exact_meshing_root(
     let request = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function: 0,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(0),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments,
         requested_outputs: 1,
     };
@@ -504,7 +514,7 @@ pub fn decode_exact_meshing_root(
         .iter()
         .map(|argument| match argument {
             ValuePayload::Object(reference) => Ok(reference.as_ref()),
-            ValuePayload::Inline(_) => Err(protocol("exact meshing root inputs must be objects")),
+            _ => Err(protocol("exact meshing root inputs must be objects")),
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let [root_reference, manifest_reference, chunk_references @ ..] = roots.as_slice() else {
