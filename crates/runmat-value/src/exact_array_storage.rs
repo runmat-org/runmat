@@ -656,15 +656,21 @@ impl<T: PartialEq> PartialEq for ExactArrayStorage<T> {
     }
 }
 
-impl<T: PartialEq> PartialEq<Vec<T>> for ExactArrayStorage<T> {
-    fn eq(&self, other: &Vec<T>) -> bool {
+impl<T: PartialEq<U>, U> PartialEq<Vec<U>> for ExactArrayStorage<T> {
+    fn eq(&self, other: &Vec<U>) -> bool {
         self.as_slice() == other.as_slice()
     }
 }
 
-impl<T: PartialEq, const N: usize> PartialEq<[T; N]> for ExactArrayStorage<T> {
-    fn eq(&self, other: &[T; N]) -> bool {
+impl<T: PartialEq<U>, U, const N: usize> PartialEq<[U; N]> for ExactArrayStorage<T> {
+    fn eq(&self, other: &[U; N]) -> bool {
         self.as_slice() == other.as_slice()
+    }
+}
+
+impl<T: PartialEq<U>, U> PartialEq<ExactArrayStorage<U>> for &[T] {
+    fn eq(&self, other: &ExactArrayStorage<U>) -> bool {
+        *self == other.as_slice()
     }
 }
 

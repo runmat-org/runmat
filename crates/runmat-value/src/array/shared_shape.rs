@@ -237,6 +237,12 @@ impl PartialEq<[usize]> for SharedShape {
     }
 }
 
+impl PartialEq<&[usize]> for SharedShape {
+    fn eq(&self, other: &&[usize]) -> bool {
+        self.as_slice() == *other
+    }
+}
+
 impl<const N: usize> PartialEq<[usize; N]> for SharedShape {
     fn eq(&self, other: &[usize; N]) -> bool {
         self.0.get().dimensions.as_slice() == other

@@ -446,6 +446,11 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
     let ordinary = StringArray::from_texts_unbounded(ordinary_values, vec![1, 1]).unwrap();
     assert_eq!(ordinary.data().as_ptr(), outer_pointer);
     assert_eq!(ordinary.data()[0].as_str().as_ptr(), pointer);
+    assert_eq!(ordinary.data, vec!["hello"]);
+    assert_eq!(ordinary.data, ["hello"]);
+    assert_ne!(ordinary.data, ["other"]);
+    assert_eq!(ordinary.shape, [1usize, 1]);
+    assert_eq!(ordinary.shape, [1usize, 1].as_slice());
     assert_eq!(live.load(Ordering::SeqCst), text_bytes);
     assert!(!ordinary.data.is_exact());
     drop(ordinary);
