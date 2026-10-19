@@ -318,7 +318,7 @@ fn remap_rvalue(value: &mut MirRvalue, remap: &RemapContext<'_>) -> Result<(), S
         }
         MirRvalue::ExternalFuture { args, .. } => {
             for argument in args {
-                remap_call_arg(argument, remap);
+                remap_call_arg(argument, remap)?;
             }
         }
         MirRvalue::Distributed(operation) => remap_distributed(operation, remap)?,

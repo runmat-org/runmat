@@ -356,7 +356,7 @@ fn structural_accelerator_requirements(
             "GPU structural execution requires exactly one accelerator request".into(),
         ));
     };
-    if request.count != 1 || request.memory_bytes_each == 0 {
+    if request.count != 1 || request.minimum_allocation_bytes == 0 {
         return Err(ResourcePlanningError::Invalid(
             "the single-device structural envelope requires one accelerator with bounded memory"
                 .into(),
@@ -365,7 +365,7 @@ fn structural_accelerator_requirements(
     Ok(vec![super::AcceleratorRequirement {
         class: request.class.clone(),
         count: request.count,
-        memory_bytes_each: ByteCount(request.memory_bytes_each),
+        memory_bytes_each: ByteCount(request.minimum_allocation_bytes),
     }])
 }
 

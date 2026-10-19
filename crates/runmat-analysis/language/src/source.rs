@@ -167,8 +167,7 @@ pub fn operation_pattern_from_value_fact(fact: &ValueFact) -> OperationTypePatte
             match object
                 .runtime_class
                 .as_ref()
-                .and_then(runmat_types::QualifiedName::display_name)
-                .as_deref()
+                .map(runmat_types::ClassIdentity::display_name)
             {
                 Some("geometry.Generated") => {
                     OperationTypePattern::Analysis(AnalysisValueType::Geometry)

@@ -135,6 +135,8 @@ pub(crate) fn pattern_matches(pattern: &OperationTypePattern, value: &FeaType) -
             _ => false,
         },
         OperationTypePattern::Prototype | OperationTypePattern::PropertyValue => true,
+        // FEA source has no function values; callables come only from host scripts.
+        OperationTypePattern::Callable => false,
         OperationTypePattern::Analysis(expected) => analysis_pattern_matches(*expected, value),
         OperationTypePattern::List(element) => match value {
             FeaType::List(value) => pattern_matches(element, value),
@@ -236,7 +238,8 @@ fn pattern_type(pattern: &OperationTypePattern) -> FeaType {
     match pattern {
         OperationTypePattern::Any
         | OperationTypePattern::Prototype
-        | OperationTypePattern::PropertyValue => FeaType::Unknown,
+        | OperationTypePattern::PropertyValue
+        | OperationTypePattern::Callable => FeaType::Unknown,
         OperationTypePattern::NumericScalar => FeaType::Real,
         OperationTypePattern::Quantity(dimension) => FeaType::Quantity((*dimension).into()),
         OperationTypePattern::VectorQuantity { dimension, length } => FeaType::Vector {

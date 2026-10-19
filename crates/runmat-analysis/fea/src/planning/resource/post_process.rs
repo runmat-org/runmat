@@ -474,7 +474,7 @@ fn post_process_worker_with_accelerator(
         accelerator
             .validate()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        if accelerator.count != 1 || accelerator.memory_bytes_each < required_device_bytes {
+        if accelerator.count != 1 || accelerator.minimum_allocation_bytes < required_device_bytes {
             return Err(ResourcePlanningError::Invalid(
                 "observation acceleration requires one sufficient bounded allocation".into(),
             ));
@@ -485,7 +485,7 @@ fn post_process_worker_with_accelerator(
         worker.accelerators.push(AcceleratorRequirement {
             class: accelerator.class.clone(),
             count: accelerator.count,
-            memory_bytes_each: ByteCount(accelerator.memory_bytes_each),
+            memory_bytes_each: ByteCount(accelerator.minimum_allocation_bytes),
         });
     }
     Ok(worker)

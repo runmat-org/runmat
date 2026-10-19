@@ -22,7 +22,7 @@ pub(super) fn modal_accelerator_requirements(
     };
     let required =
         structural_modal_accelerator_minimum_bytes(reduced_dimension, stiffness_nonzeros)?;
-    if request.count != 1 || request.memory_bytes_each < required {
+    if request.count != 1 || request.minimum_allocation_bytes < required {
         return Err(ResourcePlanningError::Invalid(format!(
             "the modal accelerator requires one device with at least {required} bytes"
         )));
@@ -30,6 +30,6 @@ pub(super) fn modal_accelerator_requirements(
     Ok(vec![AcceleratorRequirement {
         class: request.class.clone(),
         count: request.count,
-        memory_bytes_each: ByteCount(request.memory_bytes_each),
+        memory_bytes_each: ByteCount(request.minimum_allocation_bytes),
     }])
 }

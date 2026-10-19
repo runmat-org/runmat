@@ -145,24 +145,27 @@ fn validate_non_memory_inventory(
     for request in &plan.request.accelerators {
         if !accelerator_available(request, &inventory.accelerators) {
             return Err(ResourcePlanningError::Accelerator {
-                class: request.class.clone(),
+                class: request.class.to_string(),
                 count: request.count,
-                memory_bytes_each: request.memory_bytes_each,
+                memory_bytes_each: request.minimum_allocation_bytes,
             });
         }
     }
     Ok(())
 }
 
-fn accelerator_available(request: &AcceleratorRequest, inventory: &[AcceleratorRequest]) -> bool {
-    let available = inventory
+/// Distinct physical allocation domains are the leasable unit: two provider
+/// views of one device cannot satisfy a two-device request.
+fn accelerator_available(
+    request: &AcceleratorRequest,
+    inventory: &[runmat_execution::resource::AcceleratorDevice],
+) -> bool {
+    let domains = inventory
         .iter()
-        .filter(|candidate| {
-            candidate.class == request.class
-                && candidate.memory_bytes_each >= request.memory_bytes_each
-        })
-        .try_fold(0u16, |total, candidate| total.checked_add(candidate.count));
-    available.is_some_and(|count| count >= request.count)
+        .filter(|device| request.matches(device))
+        .map(|device| &device.allocation_domain)
+        .collect::<std::collections::BTreeSet<_>>();
+    domains.len() >= usize::from(request.count)
 }
 
 fn minimum_partition_count(

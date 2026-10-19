@@ -1,4 +1,4 @@
-use crate::task::{AttemptRecord, AttemptSuccess, ResultCommit, TaskRecord};
+use crate::task::{AttemptRecord, ResultCommit, TaskRecord};
 use crate::{RunnerError, RunnerResult};
 use runmat_execution::identity::AttemptId;
 use runmat_execution::state::{AttemptState, TaskState};
