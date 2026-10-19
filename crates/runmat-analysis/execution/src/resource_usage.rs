@@ -78,7 +78,7 @@ pub fn prepare_structural_resource_usage(
     success.validate_accounting().map_err(|error| {
         AnalysisBridgeError::Invalid(format!("invalid scheduler resource accounting: {error}"))
     })?;
-    let accounting = success.resources.as_ref().ok_or_else(|| {
+    let accounting = success.resources().ok_or_else(|| {
         AnalysisBridgeError::Invalid(
             "structural result has no scheduler-bound resource accounting".into(),
         )

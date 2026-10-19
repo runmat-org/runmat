@@ -67,7 +67,7 @@ pub fn validate_signal_input_payload(
                 ))
             }
         },
-        ValuePayload::Object(_) => {
+        ValuePayload::Object(_) | ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
             return Err(AnalysisBridgeError::Invalid(
                 "immutable signal input payload is not closed".into(),
             ))

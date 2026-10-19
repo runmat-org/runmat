@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceRequest};
-use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, TaskId};
+use runmat_execution::task::{RetryPolicy, TaskRequest};
+use runmat_execution::{ExecutionScopeId, OutputContract, PoolId, TaskId};
 use runmat_execution_runner::TaskSubmission;
 
 use crate::{
@@ -19,6 +19,7 @@ pub struct GeometryExecutionContext {
     pub scope_id: ExecutionScopeId,
     pub pool_id: PoolId,
     pub program_artifact_id: ArtifactId,
+    pub host: runmat_execution::host::ExecutionHostRequirement,
     pub deadline_unix_millis: Option<u64>,
     pub priority: i16,
     pub maximum_attempts: u16,
@@ -47,6 +48,7 @@ pub fn build_geometry_task_submission(
             "geometry task context differs from its program or retry bound".into(),
         ));
     }
+    crate::named_callable::validate_program_host(&prepared.program, &context.host)?;
     let identity = prepared.request.identity()?;
     let task_id = TaskId::derive(&[
         b"runmat-geometry-materialization-task",
@@ -64,23 +66,22 @@ pub fn build_geometry_task_submission(
             console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: task_id,
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
             scope_id: context.scope_id,
             pool_id: context.pool_id,
-            program_artifact_id: context.program_artifact_id,
-            callable: Callable {
-                owner_identity: GEOMETRY_EXECUTION_CALLABLE_OWNER.into(),
-                qualified_name: "geometry_workload".into(),
-                entrypoint_digest: Digest::sha256(
-                    [
-                        b"runmat-geometry-materialization-entrypoint\0".as_slice(),
-                        identity.bytes(),
-                    ]
-                    .concat(),
-                ),
-            },
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                context.program_artifact_id,
+            ),
+            callable: crate::named_callable::program_task_callable(
+                GEOMETRY_EXECUTION_CALLABLE_OWNER,
+                &prepared.program,
+            ),
+            host: context.host,
+            invocation_context: prepared.program.context.clone(),
             inputs: prepared.program.arguments.clone(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources,
             retry: RetryPolicy::ExplicitlyIdempotent {

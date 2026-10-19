@@ -29,6 +29,7 @@ pub(super) struct HostStateInput {
     pub inputs: NativeFunctionInputs,
     pub requested_outputs: usize,
     pub runtime: RuntimeContext,
+    pub program_capture: Option<Vec<u8>>,
     pub functions: Arc<Vec<NativeFunction>>,
     pub captures: Vec<NativeCaptureInput>,
     pub lexical_environment: Option<runmat_value::LexicalEnvironment>,

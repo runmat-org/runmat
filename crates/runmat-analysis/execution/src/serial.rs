@@ -55,7 +55,7 @@ pub struct CompletedAnalysisWorkload {
 
 impl CompletedAnalysisWorkload {
     pub fn attempt_success(&self) -> runmat_execution_runner::AttemptSuccess {
-        runmat_execution_runner::AttemptSuccess {
+        runmat_execution_runner::AttemptSuccess::Values {
             outputs: vec![ValuePayload::Object(Box::new(self.output_set_root.clone()))],
             result_objects: self.result_objects.clone(),
             resources: None,

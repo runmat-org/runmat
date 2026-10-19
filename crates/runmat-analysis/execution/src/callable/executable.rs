@@ -89,7 +89,9 @@ pub(crate) fn verified_named_function(
         ));
     }
     let function = analysis
-        .function(identity.entrypoint_function)
+        .function(identity.entrypoint_function.ok_or_else(|| {
+            AnalysisBridgeError::Invalid("executable has no function entrypoint".into())
+        })?)
         .ok_or_else(|| {
             AnalysisBridgeError::Invalid(
                 "executable entrypoint has no static function facts".into(),

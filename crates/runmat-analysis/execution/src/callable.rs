@@ -181,8 +181,10 @@ pub fn admit_callable_signal_generator(
             "runtime callable function differs from the authored bound identity",
         ));
     }
-    let expected_owner = format!("bound:{}", function.function.0);
-    if frozen_callable.owner_identity != expected_owner
+    let expected_owner = runmat_execution::value::CallableOwner::Bound(
+        runmat_execution::FunctionBindingOrigin::from_revision(&program_revision, function.function)?,
+    );
+    if frozen_callable.owner != expected_owner
         || frozen_callable.qualified_name != callable.qualified_name
     {
         return Err(AnalysisBridgeError::Identity(

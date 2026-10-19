@@ -162,7 +162,12 @@ pub fn import_analysis_output_set(
         ProgramExecutionResponse::Failure { message } => {
             return Err(AnalysisBridgeError::HostExecution(message))
         }
-        ProgramExecutionResponse::Success { .. } => {
+        ProgramExecutionResponse::RuntimeFailure { failure } => {
+            return Err(AnalysisBridgeError::HostExecution(failure.message))
+        }
+        ProgramExecutionResponse::Success { .. }
+        | ProgramExecutionResponse::GraphSuccess { .. }
+        | ProgramExecutionResponse::SpmdSuccess { .. } => {
             return Err(AnalysisBridgeError::Invalid(
                 "analysis host did not return an externalized success".into(),
             ))

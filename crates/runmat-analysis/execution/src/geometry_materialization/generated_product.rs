@@ -124,11 +124,14 @@ pub fn prepare_generated_geometry_product(
     response: ProgramExecutionResponse,
     access: &ArtifactAccess,
 ) -> AnalysisBridgeResult<PreparedGeneratedGeometryProduct> {
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         return Err(AnalysisBridgeError::Invalid(
             "geometry generator did not return one inline result".into(),
         ));
     };
+    let [value] = <[_; 1]>::try_from(outputs).map_err(|_| {
+        AnalysisBridgeError::Invalid("geometry generator did not return one inline result".into())
+    })?;
     let product = decode_generated_geometry_value(&value)?;
     let bytes = encode_generated_geometry_product(&product)?;
     let object = LogicalObject::new(

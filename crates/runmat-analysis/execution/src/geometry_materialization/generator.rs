@@ -216,8 +216,7 @@ fn validate_geometry_output(output: &ValueFact) -> AnalysisBridgeResult<()> {
     if object
         .runtime_class
         .as_ref()
-        .and_then(|name| name.display_name())
-        .as_deref()
+        .map(|name| name.display_name())
         != Some(GENERATED_GEOMETRY_RUNTIME_CLASS)
         || object.handle_semantics == Some(true)
         || output.shape.element_count() != Some(1)

@@ -20,7 +20,7 @@ runmat-geometry-io = { workspace = true }
 runmat-geometry-ops = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

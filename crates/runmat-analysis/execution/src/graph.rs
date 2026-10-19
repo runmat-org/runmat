@@ -157,7 +157,7 @@ pub fn compile_analysis_sequence_graph(
             .iter()
             .map(|argument| match argument {
                 ValuePayload::Object(reference) => Ok(reference.as_ref().clone()),
-                ValuePayload::Inline(_) => Err(AnalysisBridgeError::Invalid(
+                _ => Err(AnalysisBridgeError::Invalid(
                     "analysis sequence program inputs must remain externalized".into(),
                 )),
             })

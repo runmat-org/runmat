@@ -4,7 +4,7 @@ use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 
 use crate::{
@@ -53,12 +53,16 @@ pub fn prepare_geometry_materialization_program(
         entrypoint: HOST_ENTRYPOINT.into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: GEOMETRY_MATERIALIZATION_EXECUTION_MODE.into(),
         target: ProgramTarget::portable(GEOMETRY_MATERIALIZATION_TARGET_PROFILE),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let artifact = ProgramArtifact::materialize(
@@ -77,10 +81,16 @@ pub fn prepare_geometry_materialization_program(
     let program = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function: 0,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(0),
+            Some(HOST_ENTRYPOINT.into()),
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments,
         requested_outputs: 1,
     };
@@ -144,7 +154,7 @@ pub fn decode_geometry_materialization_program(
         .iter()
         .map(|value| match value {
             ValuePayload::Object(reference) => Ok((**reference).clone()),
-            ValuePayload::Inline(_) => Err(AnalysisBridgeError::Invalid(
+            _ => Err(AnalysisBridgeError::Invalid(
                 "geometry workload source must be externalized".into(),
             )),
         })
