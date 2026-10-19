@@ -73,19 +73,71 @@ impl<L: ProcessRetirementLease> RetirementBoundChild<L> {
         &mut self.lease
     }
     pub async fn wait(&mut self) -> ProcessHostResult<ProcessExit> {
-        self.child.wait().await
+        if self.child.owns_process_tree() {
+            self.wait_and_retire_tree().await
+        } else {
+            // A joined member never retires its ancestor's tree.
+            self.child.wait().await
+        }
     }
     pub fn try_wait(&mut self) -> ProcessHostResult<Option<ProcessExit>> {
-        self.child.try_wait()
+        if !self.child.owns_process_tree() || self.retired {
+            return self.child.try_wait();
+        }
+        if self.preserved {
+            return Err(crate::ProcessHostError::Protocol(
+                "child retirement is unverified; exact private bytes are preserved".into(),
+            ));
+        }
+        match self.child.try_wait_unreaped() {
+            Ok(exit) => Ok(exit),
+            Err(error) => {
+                let _ = self.persist_unverified("child exit observation could not be verified");
+                Err(error)
+            }
+        }
     }
 
     pub async fn terminate_tree(&mut self) -> ProcessHostResult<()> {
+        if self.retired {
+            return Ok(());
+        }
+        if self.preserved {
+            return Err(crate::ProcessHostError::Protocol(
+                "child retirement is unverified; exact private bytes are preserved".into(),
+            ));
+        }
         self.child.terminate_tree().await?;
         self.retired = true;
         if let Some(flag) = &self.retirement_unverified {
             flag.mark_retired();
         }
         Ok(())
+    }
+
+    pub async fn wait_and_retire_tree(&mut self) -> ProcessHostResult<ProcessExit> {
+        if self.retired {
+            return self.child.wait().await;
+        }
+        if self.preserved {
+            return Err(crate::ProcessHostError::Protocol(
+                "child retirement is unverified; exact private bytes are preserved".into(),
+            ));
+        }
+        let exit = match self.child.wait_and_retire_tree().await {
+            Ok(exit) => exit,
+            Err(error) => {
+                // A failed observation may mean somebody already reaped the
+                // leader. Do not retry numeric group signaling during Drop.
+                let _ = self.persist_unverified("child completion could not be verified");
+                return Err(error);
+            }
+        };
+        self.retired = true;
+        if let Some(flag) = &self.retirement_unverified {
+            flag.mark_retired();
+        }
+        Ok(exit)
     }
 
     pub fn persist_unverified(&mut self, reason: &str) -> Result<(), String> {
@@ -218,6 +270,15 @@ impl<L: ProcessRetirementLease> BootstrapBoundChild<L> {
         match self {
             Self::Tree(child) => child.wait().await,
             Self::Member(child) => child.wait().await,
+        }
+    }
+
+    pub async fn wait_and_retire_tree(&mut self) -> ProcessHostResult<ProcessExit> {
+        match self {
+            Self::Tree(child) => child.wait_and_retire_tree().await,
+            Self::Member(_) => Err(crate::ProcessHostError::Configuration(
+                "joined child cannot retire its ancestor's process tree".into(),
+            )),
         }
     }
 

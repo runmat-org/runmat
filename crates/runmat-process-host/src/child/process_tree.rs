@@ -155,13 +155,12 @@ pub(super) fn contain(
     Ok(Some(ProcessContainment { job }))
 }
 
-pub(super) async fn terminate(
+pub(super) async fn await_retirement(
     child: &mut Child,
     process_id: Option<u32>,
     containment: Option<&ProcessContainment>,
     placement: ProcessGroupPlacement,
 ) -> std::io::Result<()> {
-    begin_termination(child, process_id, containment, placement)?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         if tree_retired(child, process_id, containment, placement)? {
@@ -174,13 +173,12 @@ pub(super) async fn terminate(
     }
 }
 
-pub(super) fn terminate_blocking(
+pub(super) fn await_retirement_blocking(
     child: &mut Child,
     process_id: Option<u32>,
     containment: Option<&ProcessContainment>,
     placement: ProcessGroupPlacement,
 ) -> std::io::Result<()> {
-    begin_termination(child, process_id, containment, placement)?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         if tree_retired(child, process_id, containment, placement)? {
@@ -200,11 +198,12 @@ fn retirement_timeout() -> std::io::Error {
     )
 }
 
-fn begin_termination(
+pub(super) fn begin_termination(
     child: &mut Child,
     process_id: Option<u32>,
     containment: Option<&ProcessContainment>,
     placement: ProcessGroupPlacement,
+    unreaped_exit_observed: bool,
 ) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -219,7 +218,13 @@ fn begin_termination(
         let result = unsafe { libc::kill(-group, libc::SIGKILL) };
         if result != 0 {
             let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) {
+            // Darwin can refuse signaling a group containing only an exited,
+            // unreaped leader. Its PID is still pinned by our exit observation.
+            // Proceed only to reaping/absence checks, never another signal;
+            // surviving members still prevent a retirement certificate.
+            if error.raw_os_error() != Some(libc::ESRCH)
+                && !(unreaped_exit_observed && error.raw_os_error() == Some(libc::EPERM))
+            {
                 return Err(error);
             }
         }
@@ -227,6 +232,7 @@ fn begin_termination(
     }
     #[cfg(windows)]
     {
+        let _ = unreaped_exit_observed;
         let _ = process_id;
         if placement == ProcessGroupPlacement::JoinAncestorGroup {
             if child.try_wait()?.is_none() {
@@ -247,7 +253,13 @@ fn begin_termination(
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (child, process_id, containment, placement);
+        let _ = (
+            child,
+            process_id,
+            containment,
+            placement,
+            unreaped_exit_observed,
+        );
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "owned process-tree retirement is unsupported on this platform",

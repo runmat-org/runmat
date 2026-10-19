@@ -7,6 +7,39 @@ use tokio::io::AsyncReadExt;
 
 #[cfg(unix)]
 #[tokio::test]
+async fn completion_preserves_exit_status_and_retirement_is_idempotent() {
+    struct Lease;
+    impl ProcessRetirementLease for Lease {
+        fn persist_unverified(&mut self, _: Option<u32>, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    let mut command = HostCommand::new("/bin/sh");
+    command.arguments = vec!["-c".into(), "exit 7".into()];
+    let mut child = RetirementBoundChild::new(command.spawn().await.unwrap(), Lease)
+        .unwrap_or_else(|_| panic!("owned tree"));
+    let observed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if let Some(exit) = child.try_wait().unwrap() {
+                break exit;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+    // Repeated observation must not consume the waitable process identity.
+    assert_eq!(child.try_wait().unwrap(), Some(observed));
+    let exit = child.wait().await.unwrap();
+    assert_eq!(observed, exit);
+    assert_eq!(exit.code, Some(7));
+    assert!(!exit.success);
+    child.terminate_tree().await.unwrap();
+    assert_eq!(child.wait().await.unwrap(), exit);
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn terminate_kills_the_child_process_group() {
     for leader_exited in [false, true] {
         let mut spec = HostCommand::new("/bin/sh");
@@ -29,7 +62,7 @@ async fn terminate_kills_the_child_process_group() {
         }
         let descendant: i32 = String::from_utf8(pid_line).unwrap().parse().unwrap();
         if leader_exited {
-            assert!(child.wait().await.unwrap().success);
+            assert!(child.wait_and_retire_tree().await.unwrap().success);
         }
         child.terminate_tree().await.unwrap();
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
