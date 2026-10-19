@@ -40,9 +40,16 @@ impl ExactHostLogicalTensorAllocation {
             .iter()
             .try_fold(1_usize, |count, &dim| count.checked_mul(dim))
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        Self::requested_bytes_for_dimensions(len, shape.len())
+    }
+
+    pub fn requested_bytes_for_dimensions(
+        len: usize,
+        rank: usize,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
         let payload_bytes = requested_payload_bytes(len)?;
         payload_bytes
-            .checked_add(SharedShape::requested_bytes_for_rank(shape.len())?)
+            .checked_add(SharedShape::requested_bytes_for_rank(rank)?)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
     }
 

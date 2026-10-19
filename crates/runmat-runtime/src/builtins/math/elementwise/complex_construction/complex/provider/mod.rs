@@ -91,8 +91,8 @@ async fn try_unary_provider(
     let result = owner.complex_from_real(input).await;
     drop(metadata);
     match result {
-        Ok(mut output) if output::valid_unary(&output, input, owner) => {
-            gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+        Ok(output) if output::valid_unary(&output, input, owner) => {
+            let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
             gpu_helpers::complex_gpu_value(output).map(Some)
         }
         Ok(output) => Err(gpu_helpers::reject_gpu_output(
@@ -135,7 +135,7 @@ async fn try_binary_provider(
     drop(real_metadata);
     drop(imaginary_metadata);
     match result {
-        Ok(mut output)
+        Ok(output)
             if output::valid_binary(
                 &output,
                 &real.handle,
@@ -145,7 +145,7 @@ async fn try_binary_provider(
                 owner,
             ) =>
         {
-            gpu_helpers::propagate_output_provenance(&mut output, [source])?;
+            let output = gpu_helpers::propagate_owned_output_provenance(output, [source])?;
             gpu_helpers::complex_gpu_value(output).map(Some)
         }
         Ok(output) => Err(gpu_helpers::reject_gpu_output(

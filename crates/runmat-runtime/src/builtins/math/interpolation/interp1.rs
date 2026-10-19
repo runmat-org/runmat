@@ -466,8 +466,8 @@ async fn try_interp1_gpu(
         )
     });
     match result {
-        Ok(mut output) if valid => {
-            gpu_helpers::propagate_output_provenance(&mut output, x_protected)?;
+        Ok(output) if valid => {
+            let output = gpu_helpers::propagate_owned_output_provenance(output, x_protected)?;
             gpu_helpers::resident_gpu_value(output).map(Some)
         }
         Ok(output) => Err(gpu_helpers::reject_gpu_output(

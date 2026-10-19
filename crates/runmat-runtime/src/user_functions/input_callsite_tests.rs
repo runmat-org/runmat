@@ -6,6 +6,83 @@ use std::rc::Rc;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dynamic_probe_returns_the_same_argument_owner_and_keeps_selected_outcomes_terminal() {
+    use std::ops::ControlFlow;
+
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let _entry = runtime.enter();
+    runtime.set_dynamic_function_loader(Some(Rc::new(
+        |_, _, arguments, requested_outputs, phase, _| {
+            assert_eq!(requested_outputs, 0);
+            Box::pin(async move {
+                match phase {
+                    DynamicFunctionLoadPhase::BeforeSemantic => ControlFlow::Continue(arguments),
+                    DynamicFunctionLoadPhase::AfterSemantic => ControlFlow::Break(
+                        crate::execution::RootedValueSequence::new(
+                            runmat_value::ValueSequence::empty(),
+                        )
+                        .map_err(|error| error.into_runtime_error()),
+                    ),
+                    _ => ControlFlow::Break(Err(crate::build_runtime_error(
+                        "selected source failed",
+                    )
+                    .with_identifier("RunMat:Test:SelectedSource")
+                    .build())),
+                }
+            })
+        },
+    )));
+    let text = String::from("original argument owner");
+    let payload = text.as_ptr();
+    let first = futures::executor::block_on(try_load_and_call_dynamic_function(
+        "late".into(),
+        vec![Value::String(text)],
+        0,
+        DynamicFunctionLoadPhase::BeforeSemantic,
+        None,
+    ));
+    let ControlFlow::Continue(arguments) = first else {
+        panic!("missing source returns its original arguments");
+    };
+    let [Value::String(text)] = arguments.as_slice() else {
+        panic!("original string argument retained");
+    };
+    assert_eq!(text.as_ptr(), payload);
+    let selected = futures::executor::block_on(try_load_and_call_dynamic_function(
+        "late".into(),
+        arguments,
+        0,
+        DynamicFunctionLoadPhase::AfterSemantic,
+        None,
+    ));
+    assert_eq!(
+        selected
+            .break_value()
+            .expect("selected zero-output call")
+            .expect("output")
+            .value()
+            .len(),
+        0
+    );
+    let error = futures::executor::block_on(try_load_and_call_dynamic_function(
+        "late".into(),
+        Vec::new(),
+        0,
+        DynamicFunctionLoadPhase::RegisteredConstructorSource(
+            runmat_types::ClassIdentity::new("SelectedCtor").expect("class identity"),
+        ),
+        None,
+    ))
+    .break_value()
+    .expect("selected error cannot fall through")
+    .expect_err("selected source error");
+    assert_eq!(error.identifier(), Some("RunMat:Test:SelectedSource"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn runtime_named_resolution_installs_caller_only_for_selected_user_function() {
     let _resolver = install_semantic_function_resolver(Some(Arc::new(|name| {
         (name == "late_user").then_some(17)
@@ -127,18 +204,18 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
     let _entry = runtime.enter();
     let loader_calls = Rc::new(Cell::new(0));
     let observed = Rc::clone(&loader_calls);
-    runtime.set_dynamic_function_loader(Some(Rc::new(move |_, _, _, _, phase, _| {
+    runtime.set_dynamic_function_loader(Some(Rc::new(move |_, _, arguments, _, phase, _| {
         if phase == DynamicFunctionLoadPhase::BeforeSemantic {
             observed.set(observed.get() + 1);
             Box::pin(async {
-                Some(
+                std::ops::ControlFlow::Break(
                     crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
                         44.0,
                     )),
                 )
             })
         } else {
-            Box::pin(async { None })
+            Box::pin(async move { std::ops::ControlFlow::Continue(arguments) })
         }
     })));
     let _resolver = install_semantic_function_resolver(Some(Arc::new(|name| {
@@ -214,7 +291,9 @@ fn registered_constructor_loads_only_an_unresolved_declared_source() {
         assert!(matches!(name.as_str(), "SourceCtor" | "pkg.SourceCtor"));
         observed.borrow_mut().push(phase.clone());
         Box::pin(async {
-            Some(crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(7.0)))
+            std::ops::ControlFlow::Break(
+                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(7.0)),
+            )
         })
     })));
     let register = |name: &str, constructor: bool| {

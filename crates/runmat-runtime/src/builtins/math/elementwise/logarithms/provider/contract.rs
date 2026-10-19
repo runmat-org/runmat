@@ -8,7 +8,7 @@ pub(in crate::builtins::math::elementwise::logarithms) fn validate(
     operation: LogarithmOperation,
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
-    mut output: GpuTensorHandle,
+    output: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
     if !valid(&output, input, provider) {
         let mut error = super::super::errors::internal(
@@ -18,7 +18,7 @@ pub(in crate::builtins::math::elementwise::logarithms) fn validate(
         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(output, error));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

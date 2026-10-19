@@ -167,8 +167,8 @@ async fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         if let Some(provider) = owner {
             let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
             match provider.rcond(&handle).await {
-                Ok(mut result) if valid_provider_rcond_result(provider, &handle, &result) => {
-                    gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
+                Ok(result) if valid_provider_rcond_result(provider, &handle, &result) => {
+                    let result = gpu_helpers::propagate_owned_output_provenance(result, [&handle])?;
                     return gpu_helpers::resident_gpu_value(result);
                 }
                 Ok(result) => {

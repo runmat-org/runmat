@@ -4,9 +4,8 @@
 use std::rc::Rc;
 
 use runmat_runtime::context::{
-    ForeignCall, RuntimeContext, RuntimeForeignService, RuntimeServiceFuture,
+    ForeignCall, ForeignCallCompletion, RuntimeContext, RuntimeForeignService, RuntimeServiceFuture,
 };
-use runmat_runtime::RuntimeError;
 
 use super::SelectedForeignMaterialization;
 use crate::ForeignUnitHost;
@@ -32,8 +31,7 @@ impl RuntimeForeignService for SelectedForeignService {
         &self,
         context: RuntimeContext,
         call: ForeignCall,
-    ) -> RuntimeServiceFuture<Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>>
-    {
+    ) -> RuntimeServiceFuture<ForeignCallCompletion> {
         let materialization = Rc::clone(&self.materialization);
         let invocation = self.inner.invoke(context, call);
         Box::pin(async move {

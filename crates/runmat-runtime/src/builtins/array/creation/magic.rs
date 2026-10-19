@@ -71,7 +71,7 @@ async fn parse_order_host(value: &Value) -> crate::BuiltinResult<usize> {
         if let Some(storage) = tensor.integer_storage() {
             return parse_integer_order(
                 &storage
-                    .real
+                    .real()
                     .value_at(0)
                     .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?,
             );

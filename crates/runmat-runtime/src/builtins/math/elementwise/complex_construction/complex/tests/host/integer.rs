@@ -137,8 +137,8 @@ fn unary_complex_preserves_all_integer_classes() {
             panic!("expected exact complex tensor");
         };
         let actual = result.integer_storage().expect("integer complex storage");
-        assert_eq!(actual.real, expected);
-        assert!(actual.imag.exact_values().iter().all(IntValue::is_zero));
+        assert_eq!(actual.real(), &expected);
+        assert!(actual.imag().exact_values().iter().all(IntValue::is_zero));
     }
 }
 
@@ -164,8 +164,8 @@ fn binary_complex_preserves_all_integer_classes() {
             panic!("expected exact complex tensor");
         };
         let actual = result.integer_storage().expect("integer complex storage");
-        assert_eq!(actual.real, expected);
-        assert_eq!(actual.imag, expected);
+        assert_eq!(actual.real(), &expected);
+        assert_eq!(actual.imag(), &expected);
     }
 }
 

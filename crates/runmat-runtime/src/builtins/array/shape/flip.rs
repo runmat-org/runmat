@@ -572,7 +572,7 @@ pub(crate) async fn flip_gpu_with(
                         flip_error_for(builtin, format!("{builtin}: invalid provider flip output")),
                     ));
                 }
-                gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+                output = gpu_helpers::propagate_owned_output_provenance(output, [&handle])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
             Ok(None) => {}
@@ -630,7 +630,7 @@ pub(crate) async fn flip_gpu_fallback_with(
             ))
         }
     };
-    gpu_helpers::propagate_output_provenance(&mut output, [handle])?;
+    output = gpu_helpers::propagate_owned_output_provenance(output, [handle])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -885,14 +885,14 @@ pub(crate) mod tests {
             };
             let storage = result.integer_storage().unwrap();
             assert_eq!(
-                storage.real,
-                runmat_value::IntegerStorage::U64(vec![
+                storage.real(),
+                &runmat_value::IntegerStorage::U64(vec![
                     real[1], real[0], real[3], real[2], real[5], real[4]
                 ])
             );
             assert_eq!(
-                storage.imag,
-                runmat_value::IntegerStorage::U64(vec![
+                storage.imag(),
+                &runmat_value::IntegerStorage::U64(vec![
                     imag[1], imag[0], imag[3], imag[2], imag[5], imag[4]
                 ])
             );

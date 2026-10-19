@@ -111,10 +111,10 @@ async fn rhs_to_complex_integer_assignment_scalar(
             if let Some(storage) = &tensor.integer_storage() {
                 return Ok(ComplexIntegerAssignmentValue {
                     real: IntegerAssignmentValue::Exact(
-                        storage.real.value_at(0).expect("scalar component"),
+                        storage.real().value_at(0).expect("scalar component"),
                     ),
                     imag: IntegerAssignmentValue::Exact(
-                        storage.imag.value_at(0).expect("scalar component"),
+                        storage.imag().value_at(0).expect("scalar component"),
                     ),
                 });
             }
@@ -588,8 +588,8 @@ async fn assign_typed_complex_integer_scalar(
     let storage = tensor
         .integer_storage()
         .expect("typed complex assignment requires exact storage");
-    let real = integer_assignment::scalar_value(&storage.real, &rhs.real);
-    let imag = integer_assignment::scalar_value(&storage.imag, &rhs.imag);
+    let real = integer_assignment::scalar_value(storage.real(), &rhs.real);
+    let imag = integer_assignment::scalar_value(storage.imag(), &rhs.imag);
     tensor
         .resize_and_set_integer_assignment(shape, index - 1, real, imag)
         .map_err(map_assignment_shape_error)?;
@@ -772,7 +772,7 @@ mod tests {
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
                 &IntegerStorage::I64(vec![0, i64::MIN]),
@@ -966,13 +966,12 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(grown.shape(), [1, 3]);
-        assert_eq!(
-            grown.integer_storage(),
-            Some(&IntegerComplexStorage {
-                real: IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
-                imag: IntegerStorage::U64(vec![1, 0, u64::MAX]),
-            })
-        );
+        let expected = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+            IntegerStorage::U64(vec![1, 0, u64::MAX]),
+        )
+        .expect("expected storage");
+        assert_eq!(grown.integer_storage(), Some(&expected));
     }
 
     #[test]

@@ -49,7 +49,7 @@ pub(super) fn restore(
     let protected: Vec<_> = std::iter::once(input)
         .chain(other.iter().copied())
         .collect();
-    let mut output = match value {
+    let output = match value {
         Value::Tensor(tensor) if runmat_accelerate_api::handle_is_logical(input) => {
             let data: Vec<u8> = (0..tensor.len())
                 .map(|index| {
@@ -111,12 +111,12 @@ pub(super) fn restore(
             ))
         }
     };
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
 pub(super) fn admit_read(
-    mut output: GpuTensorHandle,
+    output: GpuTensorHandle,
     input: &GpuTensorHandle,
     shape: &[usize],
 ) -> Result<runmat_value::Value, RuntimeError> {
@@ -139,7 +139,7 @@ pub(super) fn admit_read(
             ),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

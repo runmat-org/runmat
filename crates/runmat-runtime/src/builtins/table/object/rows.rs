@@ -138,7 +138,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     runmat_value::ComplexStorage::Integer(
                         runmat_value::IntegerComplexStorage::new(
                             storage
-                                .real
+                                .real()
                                 .reorder(|values| {
                                     indices
                                         .iter()
@@ -152,7 +152,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                                 })
                                 .map_err(invalid_variable)?,
                             storage
-                                .imag
+                                .imag()
                                 .reorder(|values| {
                                     indices
                                         .iter()

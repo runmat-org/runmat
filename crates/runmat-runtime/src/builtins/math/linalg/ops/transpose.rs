@@ -437,9 +437,10 @@ pub(crate) mod tests {
                 panic!("expected complex tensor for {class}");
             };
             let result_storage = complex_result.integer_storage().expect("integer storage");
-            assert_eq!(result_storage.real, expected, "{class} real");
+            assert_eq!(result_storage.real(), &expected, "{class} real");
             assert_eq!(
-                result_storage.imag, result_storage.real,
+                result_storage.imag(),
+                result_storage.real(),
                 "{class} imaginary"
             );
         }
@@ -465,10 +466,10 @@ pub(crate) mod tests {
         let storage = result.integer_storage().expect("exact integer storage");
         assert_eq!(result.shape(), [3, 2]);
         assert_eq!(
-            storage.real,
-            IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 1_u64 << 63])
+            storage.real(),
+            &IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 1_u64 << 63])
         );
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6]));
+        assert_eq!(storage.imag(), &IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6]));
     }
 
     #[test]

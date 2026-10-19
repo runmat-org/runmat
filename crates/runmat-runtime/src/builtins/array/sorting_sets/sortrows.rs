@@ -683,19 +683,19 @@ fn compare_complex_integer_rows(
         let a_index = a + spec.index * rows;
         let b_index = b + spec.index * rows;
         let a_real = storage
-            .real
+            .real()
             .value_at(a_index)
             .expect("validated complex row index");
         let a_imag = storage
-            .imag
+            .imag()
             .value_at(a_index)
             .expect("validated complex row index");
         let b_real = storage
-            .real
+            .real()
             .value_at(b_index)
             .expect("validated complex row index");
         let b_imag = storage
-            .imag
+            .imag()
             .value_at(b_index)
             .expect("validated complex row index");
         let ordering = integer_order::compare_complex(

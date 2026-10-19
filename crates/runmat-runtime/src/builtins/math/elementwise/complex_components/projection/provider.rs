@@ -40,8 +40,8 @@ async fn try_provider(
     drop(metadata);
 
     match result {
-        Ok(mut output) if valid_output(kind, &output, input, provider) => {
-            gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+        Ok(output) if valid_output(kind, &output, input, provider) => {
+            let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
             gpu_helpers::resident_gpu_value(output).map(Some)
         }
         Ok(output) => Err(gpu_helpers::reject_gpu_output(

@@ -89,12 +89,12 @@ fn complex_wide_integer_row_elements_remain_exact() {
     };
     let storage = first.integer_storage().unwrap();
     assert_eq!(
-        storage.real,
-        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993])
+        storage.real(),
+        &runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993])
     );
     assert_eq!(
-        storage.imag,
-        runmat_value::IntegerStorage::U64(vec![u64::MAX])
+        storage.imag(),
+        &runmat_value::IntegerStorage::U64(vec![u64::MAX])
     );
     let Value::StructArray(rows) =
         futures::executor::block_on(table2struct_builtin(table, Vec::new())).unwrap()
@@ -107,12 +107,12 @@ fn complex_wide_integer_row_elements_remain_exact() {
     };
     let storage = second.integer_storage().unwrap();
     assert_eq!(
-        storage.real,
-        runmat_value::IntegerStorage::U64(vec![u64::MAX])
+        storage.real(),
+        &runmat_value::IntegerStorage::U64(vec![u64::MAX])
     );
     assert_eq!(
-        storage.imag,
-        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993])
+        storage.imag(),
+        &runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993])
     );
 }
 

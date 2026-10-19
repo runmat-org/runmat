@@ -95,10 +95,9 @@ pub(super) fn try_meshgrid_gpu_from_vector_axes(
             Ok(output)
         };
 
-    // Validate each legacy reshape against the original axis before any next hook.
-    let x_row = reshape(x_handle, x_handle, &[1, nx], "X")?;
-    let y_col = reshape(y_handle, y_handle, &[ny, 1], "Y")?;
-
+    // Every returned reshape is an owned view, even when it aliases a borrowed
+    // axis. Keep exactly those six possible views until all grids are ready.
+    let mut views: [Option<GpuTensorHandle>; 6] = std::array::from_fn(|_| None);
     let mut outputs = Vec::with_capacity(if z_handle.is_some() { 3 } else { 2 });
     let protected = [Some(x_handle), Some(y_handle), z_handle];
     let expected = if z_handle.is_some() {
@@ -138,27 +137,102 @@ pub(super) fn try_meshgrid_gpu_from_vector_axes(
             return Err(gpu_helpers::reject_gpu_output(output, tiling_failure(
                 runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!("meshgrid: invalid provider grid output")))));
         }
-        gpu_helpers::propagate_output_provenance(&mut output, protected.iter().flatten().copied())?;
+        if let Err(error) = gpu_helpers::propagate_output_provenance(
+            &mut output,
+            protected.iter().flatten().copied(),
+        ) {
+            return Err(gpu_helpers::reject_gpu_output(output, error));
+        }
         Ok(output)
     };
-    if let Some(z) = z_handle {
-        let x_base = reshape(x_handle, &x_row, &[1, nx, 1], "X(3d)")?;
-        let y_base = reshape(y_handle, &y_col, &[ny, 1, 1], "Y(3d)")?;
+    let build = (|| -> crate::BuiltinResult<()> {
+        views[0] = Some(reshape(x_handle, x_handle, &[1, nx], "X")?);
+        views[1] = Some(reshape(y_handle, y_handle, &[ny, 1], "Y")?);
+        if let Some(z) = z_handle {
+            views[2] = Some(reshape(
+                x_handle,
+                views[0].as_ref().expect("X row was prepared"),
+                &[1, nx, 1],
+                "X(3d)",
+            )?);
+            views[3] = Some(reshape(
+                y_handle,
+                views[1].as_ref().expect("Y column was prepared"),
+                &[ny, 1, 1],
+                "Y(3d)",
+            )?);
 
-        let x_grid = replicate(&x_base, &[ny, 1, nz], &outputs)?;
-        outputs.push(MeshgridOutput::Gpu(x_grid));
-        let y_grid = replicate(&y_base, &[1, nx, nz], &outputs)?;
+            let x_grid = replicate(
+                views[2].as_ref().expect("X base was prepared"),
+                &[ny, 1, nz],
+                &outputs,
+            )?;
+            outputs.push(MeshgridOutput::Gpu(x_grid));
+            let y_grid = replicate(
+                views[3].as_ref().expect("Y base was prepared"),
+                &[1, nx, nz],
+                &outputs,
+            )?;
 
-        outputs.push(MeshgridOutput::Gpu(y_grid));
-        let z_axis_row = reshape(z, z, &[1, nz], "Z")?;
-        let z_base = reshape(z, &z_axis_row, &[1, 1, nz], "Z(3d)")?;
-        let z_grid = replicate(&z_base, &[ny, nx, 1], &outputs)?;
-        outputs.push(MeshgridOutput::Gpu(z_grid));
-    } else {
-        let x_grid = replicate(&x_row, &[ny, 1], &outputs)?;
-        outputs.push(MeshgridOutput::Gpu(x_grid));
-        let y_grid = replicate(&y_col, &[1, nx], &outputs)?;
-        outputs.push(MeshgridOutput::Gpu(y_grid));
+            outputs.push(MeshgridOutput::Gpu(y_grid));
+            views[4] = Some(reshape(z, z, &[1, nz], "Z")?);
+            views[5] = Some(reshape(
+                z,
+                views[4].as_ref().expect("Z row was prepared"),
+                &[1, 1, nz],
+                "Z(3d)",
+            )?);
+            let z_grid = replicate(
+                views[5].as_ref().expect("Z base was prepared"),
+                &[ny, nx, 1],
+                &outputs,
+            )?;
+            outputs.push(MeshgridOutput::Gpu(z_grid));
+        } else {
+            let x_grid = replicate(
+                views[0].as_ref().expect("X row was prepared"),
+                &[ny, 1],
+                &outputs,
+            )?;
+            outputs.push(MeshgridOutput::Gpu(x_grid));
+            let y_grid = replicate(
+                views[1].as_ref().expect("Y column was prepared"),
+                &[1, nx],
+                &outputs,
+            )?;
+            outputs.push(MeshgridOutput::Gpu(y_grid));
+        }
+
+        Ok(())
+    })();
+    if let Err(error) = build {
+        return Err(gpu_helpers::reject_gpu_outputs(
+            views
+                .into_iter()
+                .flatten()
+                .chain(outputs.into_iter().filter_map(|output| match output {
+                    MeshgridOutput::Gpu(handle) => Some(handle),
+                    MeshgridOutput::Host(_) => None,
+                })),
+            error,
+        ));
+    }
+
+    let mut remaining_views = views.into_iter().flatten();
+    while let Some(view) = remaining_views.next() {
+        if let Err(source) = view.release() {
+            let error = build_runtime_error("meshgrid: intermediate view retirement failed")
+                .with_builtin("meshgrid")
+                .with_source(source)
+                .build();
+            return Err(gpu_helpers::reject_gpu_outputs(
+                remaining_views.chain(outputs.into_iter().filter_map(|output| match output {
+                    MeshgridOutput::Gpu(handle) => Some(handle),
+                    MeshgridOutput::Host(_) => None,
+                })),
+                error,
+            ));
+        }
     }
 
     Ok(Some(outputs))

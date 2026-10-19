@@ -167,39 +167,70 @@ fn try_provider_outputs(
         }
     };
     if result.outputs.len() != parsed.output_count {
-        return Err(ndgrid_error_with_detail(
-            &NDGRID_ERROR_INTERNAL,
-            "provider returned wrong output count",
+        return Err(gpu_helpers::reject_gpu_outputs(
+            result.outputs,
+            ndgrid_error_with_detail(
+                &NDGRID_ERROR_INTERNAL,
+                "provider returned wrong output count",
+            ),
         ));
     }
 
     let protected: Vec<_> = axes.iter().map(|axis| axis.handle).collect();
-    let outputs = result
-        .outputs
-        .into_iter()
-        .enumerate()
-        .map(|(dim, handle)| {
-            let logical = parsed.axes[dim].class() == OutputClass::Logical;
-            let mut handle =
-                crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
-                    BUILTIN_NAME,
-                    provider,
-                    handle,
-                    output_shape,
-                    GpuTensorStorage::Real,
-                    if logical {
-                        None
-                    } else {
-                        runmat_accelerate_api::handle_precision(axes[dim].handle)
-                    },
-                    None,
-                    logical,
-                    &protected,
-                )?;
-            gpu_helpers::propagate_output_provenance(&mut handle, protected.iter().copied())?;
-            Ok(NdgridOutput::Gpu(handle))
-        })
-        .collect::<BuiltinResult<Vec<_>>>()?;
+    let mut outputs = Vec::with_capacity(result.outputs.len());
+    let mut remaining = result.outputs.into_iter();
+    for dim in 0..parsed.output_count {
+        let handle = remaining.next().expect("validated ndgrid output count");
+        let logical = parsed.axes[dim].class() == OutputClass::Logical;
+        let validated =
+            crate::builtins::common::random_args::validate_constructor_gpu_storage_protecting(
+                BUILTIN_NAME,
+                provider,
+                handle,
+                output_shape,
+                GpuTensorStorage::Real,
+                if logical {
+                    None
+                } else {
+                    runmat_accelerate_api::handle_precision(axes[dim].handle)
+                },
+                None,
+                logical,
+                &protected,
+            );
+        let mut handle = match validated {
+            Ok(handle) => handle,
+            Err(error) => {
+                return Err(gpu_helpers::reject_gpu_outputs(
+                    outputs
+                        .into_iter()
+                        .filter_map(|output| match output {
+                            NdgridOutput::Gpu(handle) => Some(handle),
+                            NdgridOutput::Host(_) => None,
+                        })
+                        .chain(remaining),
+                    error,
+                ))
+            }
+        };
+        if let Err(error) =
+            gpu_helpers::propagate_output_provenance(&mut handle, protected.iter().copied())
+        {
+            return Err(gpu_helpers::reject_gpu_outputs(
+                outputs
+                    .into_iter()
+                    .filter_map(|output| match output {
+                        NdgridOutput::Gpu(handle) => Some(handle),
+                        NdgridOutput::Host(_) => None,
+                    })
+                    .chain(std::iter::once(handle))
+                    .chain(remaining),
+                error,
+            ));
+        }
+        runmat_accelerate_api::mark_residency(&handle);
+        outputs.push(NdgridOutput::Gpu(handle));
+    }
     Ok(Some(outputs))
 }
 
@@ -1473,12 +1504,12 @@ mod tests {
             };
             let storage = gathered.integer_storage().expect("paired storage");
             assert_eq!(
-                storage.real,
-                IntegerStorage::U64(vec![wide, u64::MAX, wide, u64::MAX])
+                storage.real(),
+                &IntegerStorage::U64(vec![wide, u64::MAX, wide, u64::MAX])
             );
             assert_eq!(
-                storage.imag,
-                IntegerStorage::U64(vec![u64::MAX, wide, u64::MAX, wide])
+                storage.imag(),
+                &IntegerStorage::U64(vec![u64::MAX, wide, u64::MAX, wide])
             );
             drop(input);
             drop(output);

@@ -49,8 +49,8 @@ async fn try_provider(
     let result = provider.unary_conj(input).await;
     drop(metadata);
     match result {
-        Ok(Some(mut output)) if valid_output(&output, input, provider) => {
-            gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+        Ok(Some(output)) if valid_output(&output, input, provider) => {
+            let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
             let value = if storage == GpuTensorStorage::ComplexInterleaved {
                 gpu_helpers::complex_gpu_value(output)
             } else {

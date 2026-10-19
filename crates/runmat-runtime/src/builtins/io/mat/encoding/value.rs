@@ -98,11 +98,12 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                         )
                     }
                     ComplexStorage::Integer(storage) => {
-                        let class = integer_storage_mat_class(&storage.real);
+                        let class = integer_storage_mat_class(storage.real());
+                        let (real, imag) = storage.into_unbounded_components();
                         (
                             class,
-                            NumericStorage::from(storage.real),
-                            NumericStorage::from(storage.imag),
+                            NumericStorage::from(real),
+                            NumericStorage::from(imag),
                         )
                     }
                 };

@@ -15,11 +15,10 @@ pub(super) async fn invoke_selected_bound(
     let body = registry
         .get(function)
         .ok_or_else(|| mex("UnavailableBoundFunction", "selected bound body is absent"))?;
-    let owner = body.class_method_owner.clone();
-    let product = body.selected_class_product.clone();
     let (runtime, super_body) = consume_super_body(runtime, &binding, body)?;
     if super_body
-        || owner
+        || body
+            .class_method_owner
             .as_ref()
             .is_none_or(|owner| owner.role != runmat_types::ClassMethodRole::Constructor)
     {
@@ -35,14 +34,52 @@ pub(super) async fn invoke_selected_bound(
         .await
         .map(|(value, _)| value);
     }
-    let owner = owner.expect("constructor role checked above");
+    let constructor = select_constructor(&binding, body)?;
+    invoke_constructor(
+        runtime,
+        ConstructorInvocation {
+            binding,
+            args,
+            requested_outputs,
+            registry,
+            driver,
+            lexical_environment,
+        },
+        constructor,
+    )
+    .await
+}
+
+struct ConstructorInvocation {
+    binding: runmat_value::BoundFunctionBinding,
+    args: runmat_runtime::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    registry: FunctionRegistry,
+    driver: Option<ProcessDriverHandle>,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+}
+
+struct SelectedConstructor {
+    owner: runmat_types::ClassMethodOwner,
+    product: std::rc::Rc<crate::SelectedClassProduct>,
+    portable: bool,
+}
+
+fn select_constructor(
+    binding: &runmat_value::BoundFunctionBinding,
+    body: &crate::FunctionBytecode,
+) -> VmResult<SelectedConstructor> {
+    let owner = body
+        .class_method_owner
+        .as_ref()
+        .expect("constructor role checked above");
     if owner.is_static {
         return Err(mex(
             "ConstructorOwnerInvalid",
             "selected constructor has a static method owner",
         ));
     }
-    let product = product.ok_or_else(|| {
+    let product = body.selected_class_product.as_ref().ok_or_else(|| {
         mex(
             "ConstructorOwnerInvalid",
             "selected constructor lacks its exact class product",
@@ -65,6 +102,31 @@ pub(super) async fn invoke_selected_bound(
     } else {
         false
     };
+    Ok(SelectedConstructor {
+        owner: owner.clone(),
+        product: std::rc::Rc::clone(product),
+        portable,
+    })
+}
+
+async fn invoke_constructor(
+    runtime: runmat_runtime::context::RuntimeContext,
+    invocation: ConstructorInvocation,
+    constructor: SelectedConstructor,
+) -> VmResult<runmat_runtime::execution::RootedValueSequence> {
+    let ConstructorInvocation {
+        binding,
+        args,
+        requested_outputs,
+        registry,
+        driver,
+        lexical_environment,
+    } = invocation;
+    let SelectedConstructor {
+        owner,
+        product,
+        portable,
+    } = constructor;
     let runtime = product.invocation_runtime(runtime)?;
     let argument_count = args.supplied_count();
     let invocation_owner = owner.clone();

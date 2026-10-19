@@ -55,10 +55,10 @@ pub(super) fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
                 .integer_storage()
                 .cloned()
                 .expect("integer complex branch");
-            let mut real = storage.real.exact_values();
-            let mut imag = storage.imag.exact_values();
-            let real_zero = zero_int_like(&storage.real);
-            let imag_zero = zero_int_like(&storage.imag);
+            let mut real = storage.real().exact_values();
+            let mut imag = storage.imag().exact_values();
+            let real_zero = zero_int_like(storage.real());
+            let imag_zero = zero_int_like(storage.imag());
             for col in 0..tensor.cols() {
                 for row in 0..tensor.rows() {
                     let zero = match flag {
@@ -76,11 +76,11 @@ pub(super) fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
                 ComplexTensor::new_integer(
                     IntegerComplexStorage::new(
                         storage
-                            .real
+                            .real()
                             .from_exact_values_like(real)
                             .map_err(internal)?,
                         storage
-                            .imag
+                            .imag()
                             .from_exact_values_like(imag)
                             .map_err(internal)?,
                     )
@@ -169,8 +169,8 @@ pub(super) fn symmetrize_from_triangle(
                 .integer_storage()
                 .cloned()
                 .expect("integer complex branch");
-            let mut real = storage.real.exact_values();
-            let mut imag = storage.imag.exact_values();
+            let mut real = storage.real().exact_values();
+            let mut imag = storage.imag().exact_values();
             for col in 0..tensor.cols() {
                 for row in 0..tensor.rows() {
                     if row == col {
@@ -198,11 +198,11 @@ pub(super) fn symmetrize_from_triangle(
                 ComplexTensor::new_integer(
                     IntegerComplexStorage::new(
                         storage
-                            .real
+                            .real()
                             .from_exact_values_like(real)
                             .map_err(internal)?,
                         storage
-                            .imag
+                            .imag()
                             .from_exact_values_like(imag)
                             .map_err(internal)?,
                     )

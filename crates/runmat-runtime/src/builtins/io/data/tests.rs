@@ -2296,11 +2296,11 @@ fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
     };
     let storage = read_back.integer_storage().expect("paired storage");
     assert_eq!(
-        storage.real,
-        IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, u64::MAX - 1, 4])
+        storage.real(),
+        &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, u64::MAX - 1, 4])
     );
     assert_eq!(
-        storage.imag,
-        IntegerStorage::U64(vec![u64::MAX - 2, wide, 1_u64 << 63, 6])
+        storage.imag(),
+        &IntegerStorage::U64(vec![u64::MAX - 2, wide, 1_u64 << 63, 6])
     );
 }

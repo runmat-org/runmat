@@ -203,7 +203,7 @@ async fn sinc_gpu(
             return sinc_gpu_host_fallback(provider, &handle, cooperation).await;
         }
         match provider.unary_sinc(&handle).await {
-            Ok(mut out) => {
+            Ok(out) => {
                 let contract = gpu_helpers::UnaryGpuOutputContract {
                     storage: runmat_accelerate_api::handle_storage(&handle),
                     precision: runmat_accelerate_api::handle_precision(&handle),
@@ -219,7 +219,7 @@ async fn sinc_gpu(
                     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                     return Err(gpu_helpers::reject_gpu_output(out, error));
                 }
-                gpu_helpers::propagate_output_provenance(&mut out, [&handle])?;
+                let out = gpu_helpers::propagate_owned_output_provenance(out, [&handle])?;
                 return gpu_helpers::resident_gpu_value(out);
             }
             Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => {

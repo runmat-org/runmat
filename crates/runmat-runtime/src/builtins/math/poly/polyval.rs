@@ -604,22 +604,22 @@ fn parse_host_mu(value: Value) -> BuiltinResult<Mu> {
             let ((mean_re, mean_im), (scale_re, scale_im)) =
                 if let Some(storage) = tensor.integer_storage() {
                     let mean_re = storage
-                        .real
+                        .real()
                         .value_at(0)
                         .expect("complex integer mu real mean")
                         .to_f64();
                     let mean_im = storage
-                        .imag
+                        .imag()
                         .value_at(0)
                         .expect("complex integer mu imag mean")
                         .to_f64();
                     let scale_re = storage
-                        .real
+                        .real()
                         .value_at(1)
                         .expect("complex integer mu real scale")
                         .to_f64();
                     let scale_im = storage
-                        .imag
+                        .imag()
                         .value_at(1)
                         .expect("complex integer mu imag scale")
                         .to_f64();
@@ -956,10 +956,10 @@ fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
 fn complex_tensor_values(tensor: &mut ComplexTensor) -> Vec<Complex64> {
     if let Some(storage) = tensor.integer_storage() {
         return storage
-            .real
+            .real()
             .exact_values()
             .into_iter()
-            .zip(storage.imag.exact_values())
+            .zip(storage.imag().exact_values())
             .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
             .collect();
     }
@@ -973,10 +973,10 @@ fn complex_tensor_values(tensor: &mut ComplexTensor) -> Vec<Complex64> {
 fn complex_tensor_values_ref(tensor: &ComplexTensor) -> Vec<Complex64> {
     if let Some(storage) = tensor.integer_storage() {
         return storage
-            .real
+            .real()
             .exact_values()
             .into_iter()
-            .zip(storage.imag.exact_values())
+            .zip(storage.imag().exact_values())
             .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
             .collect();
     }
@@ -990,7 +990,7 @@ fn complex_tensor_values_ref(tensor: &ComplexTensor) -> Vec<Complex64> {
 fn complex_tensor_values_are_real(tensor: &ComplexTensor) -> bool {
     if let Some(storage) = tensor.integer_storage() {
         return storage
-            .imag
+            .imag()
             .exact_values()
             .iter()
             .all(|value| value.is_zero());

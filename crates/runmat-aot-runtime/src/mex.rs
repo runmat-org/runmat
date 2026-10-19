@@ -69,7 +69,7 @@ pub fn install(
             let mex_runtime = Rc::clone(&load_runtime);
             Box::pin(async move {
                 if phase != DynamicFunctionLoadPhase::BeforeSemantic {
-                    return None;
+                    return std::ops::ControlFlow::Continue(arguments);
                 }
                 mex_runtime
                     .load_and_call(&name, arguments, requested_outputs, runtime)

@@ -26,7 +26,7 @@ use super::super::{
 };
 use super::conversion::{array_from_java, invalid_conversion, scalar_from_java, value_to_java};
 use crate::builtins::common::validation::value_text_scalar_string;
-use crate::context::{ForeignCall, RuntimeContext};
+use crate::context::{ForeignCall, ForeignCallCompletion, RuntimeContext};
 use crate::{build_runtime_error, RuntimeError};
 
 #[derive(Debug, Default)]
@@ -659,16 +659,16 @@ impl ForeignAdapter for JavaAdapter {
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
         if self.retirement_requested.get() || self.project_retirement.is_pending() {
             let error = invalid_conversion("Java selected adapter is retiring");
-            return Box::pin(async move { Err(error) });
+            return Box::pin(async move { ForeignCallCompletion::invoked(Err(error)) });
         }
         if matches!(call.symbol.as_str(), "status" | "configure") {
             let result =
                 crate::foreign::runtime::root_adapter_result(self.invoke_control_now(call));
-            return Box::pin(async move { result });
+            return Box::pin(async move { ForeignCallCompletion::invoked(result) });
         }
         let Some(owner) = self.self_weak.upgrade() else {
             let error = invalid_conversion("Java adapter owner has ended");
-            return Box::pin(async move { Err(error) });
+            return Box::pin(async move { ForeignCallCompletion::invoked(Err(error)) });
         };
         Box::pin(async move { owner.invoke_in_process(context, call).await })
     }
@@ -680,6 +680,17 @@ fn string_argument(value: Option<Value>, label: &str) -> Result<String, RuntimeE
             .filter(|text| !text.trim().is_empty())
             .ok_or_else(|| invalid_conversion(format!("{label} must be non-empty text"))),
         _ => Err(invalid_conversion(format!(
+            "{label} must be non-empty text"
+        ))),
+    }
+}
+
+fn string_argument_ref(value: Option<&Value>, label: &str) -> Result<String, RuntimeError> {
+    match value {
+        Some(value) => value_text_scalar_string(value)
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| invalid_conversion(format!("{label} must be non-empty text"))),
+        None => Err(invalid_conversion(format!(
             "{label} must be non-empty text"
         ))),
     }

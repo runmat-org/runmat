@@ -2984,6 +2984,14 @@ impl AccelProvider for WgpuProvider {
         self.cat_exec(dim, inputs)
     }
 
+    fn cat_optional<'a>(
+        &'a self,
+        dim: usize,
+        inputs: &'a [GpuTensorHandle],
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.cat_optional_exec(dim, inputs).await })
+    }
+
     fn repmat(
         &self,
         handle: &GpuTensorHandle,

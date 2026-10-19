@@ -786,10 +786,22 @@ fn complex_integer_sort_permutation(
                 buffer.push((k, source));
             }
             buffer.sort_by(|a, b| {
-                let a_real = storage.real.value_at(a.1).expect("validated complex index");
-                let a_imag = storage.imag.value_at(a.1).expect("validated complex index");
-                let b_real = storage.real.value_at(b.1).expect("validated complex index");
-                let b_imag = storage.imag.value_at(b.1).expect("validated complex index");
+                let a_real = storage
+                    .real()
+                    .value_at(a.1)
+                    .expect("validated complex index");
+                let a_imag = storage
+                    .imag()
+                    .value_at(a.1)
+                    .expect("validated complex index");
+                let b_real = storage
+                    .real()
+                    .value_at(b.1)
+                    .expect("validated complex index");
+                let b_imag = storage
+                    .imag()
+                    .value_at(b.1)
+                    .expect("validated complex index");
                 integer_order::compare_complex(
                     (&a_real, &a_imag),
                     (&b_real, &b_imag),

@@ -93,47 +93,48 @@ impl RuntimeContext {
         Option<crate::source_context::SourceInfo>,
         Rc<std::collections::HashMap<runmat_types::SourceId, crate::source_context::SourceInfo>>,
     ) {
-        let active = super::super::scope::active_runtime_context()
-            .filter(|active| active.same_source_projection_owner(self));
-        let current = match &self.source_selection {
-            InvocationSourceSelection::Selected(_) | InvocationSourceSelection::Unbound(_) => {
-                active
+        super::super::scope::with_active_runtime_context(|active| {
+            let active = active.filter(|active| active.same_source_projection_owner(self));
+            let current = match &self.source_selection {
+                InvocationSourceSelection::Selected(_) | InvocationSourceSelection::Unbound(_) => {
+                    active
+                        .as_ref()
+                        .and_then(|active| active.source_current())
+                        .or(self.source_current.as_ref())
+                        .and_then(|current| current.borrow().snapshot())
+                }
+                InvocationSourceSelection::Inherited => active
                     .as_ref()
-                    .and_then(|active| active.source_current())
-                    .or(self.source_current.as_ref())
-                    .and_then(|current| current.borrow().snapshot())
-            }
-            InvocationSourceSelection::Inherited => active
+                    .and_then(|active| {
+                        active
+                            .source_current()
+                            .map(|current| current.borrow().snapshot())
+                    })
+                    .or_else(|| {
+                        self.source_current
+                            .as_ref()
+                            .map(|current| current.borrow().snapshot())
+                    })
+                    .unwrap_or_else(|| self.state.source.borrow().current.clone()),
+            };
+            let snapshot = active
                 .as_ref()
                 .and_then(|active| {
                     active
-                        .source_current()
-                        .map(|current| current.borrow().snapshot())
+                        .source_catalog_view()
+                        .map(|view| view.borrow().snapshot_catalog())
                 })
                 .or_else(|| {
-                    self.source_current
+                    self.source_catalog_view
                         .as_ref()
-                        .map(|current| current.borrow().snapshot())
+                        .map(|view| view.borrow().snapshot_catalog())
                 })
-                .unwrap_or_else(|| self.state.source.borrow().current.clone()),
-        };
-        let snapshot = active
-            .as_ref()
-            .and_then(|active| {
-                active
-                    .source_catalog_view()
-                    .map(|view| view.borrow().snapshot_catalog())
-            })
-            .or_else(|| {
-                self.source_catalog_view
-                    .as_ref()
-                    .map(|view| view.borrow().snapshot_catalog())
-            })
-            .unwrap_or_else(|| self.state.source.borrow().catalog.clone());
-        (current, snapshot)
+                .unwrap_or_else(|| self.state.source.borrow().catalog.clone());
+            (current, snapshot)
+        })
     }
 
-    pub(in crate::context) fn with_poll_source_catalog(mut self) -> Self {
+    pub(in crate::context) fn capture_poll_source_catalog(&mut self) {
         let (current, snapshot) = self.poll_source_catalog_snapshots();
         self.source_current = Some(PollProjection::legacy(
             crate::source_context::SourceCurrentProjection::new(current),
@@ -141,7 +142,6 @@ impl RuntimeContext {
         self.source_catalog_view = Some(PollProjection::legacy(
             crate::source_context::SourceCatalogProjection::new(snapshot),
         ));
-        self
     }
 
     pub(in crate::context) fn with_admitted_poll_source_catalog(

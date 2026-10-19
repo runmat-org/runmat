@@ -104,19 +104,22 @@ pub(super) fn grow_complex_tensor(
             ComplexStorage::F32(result.into())
         }
         ComplexStorage::Integer(values) => {
-            let mut real = values.real.zeros_like(target_len);
-            let mut imag = values.imag.zeros_like(target_len);
+            let mut real = values.real().zeros_like(target_len);
+            let mut imag = values.imag().zeros_like(target_len);
             for index in 0..values.len() {
                 let target = rebased_position(index, &old_shape, new_shape);
                 real.set_value(
                     target,
-                    values.real.value_at(index).expect("validated real storage"),
+                    values
+                        .real()
+                        .value_at(index)
+                        .expect("validated real storage"),
                 )
                 .expect("same-class rebased real position is admitted");
                 imag.set_value(
                     target,
                     values
-                        .imag
+                        .imag()
                         .value_at(index)
                         .expect("validated imaginary storage"),
                 )

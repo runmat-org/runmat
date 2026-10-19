@@ -586,7 +586,7 @@ async fn diff_gpu(
     }
 
     let result = provider.diff_dim(&handle, order, working_dim.saturating_sub(1));
-    if let Ok(mut device_result) = result {
+    if let Ok(device_result) = result {
         let mut expected_shape = handle.shape().to_vec();
         if expected_shape.len() < working_dim {
             expected_shape.resize(working_dim, 1);
@@ -605,7 +605,8 @@ async fn diff_gpu(
                 runmat_accelerate_api::same_provider_instance(owner, provider)
             });
         if valid {
-            gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])?;
+            let device_result =
+                gpu_helpers::propagate_owned_output_provenance(device_result, [&handle])?;
             return gpu_helpers::resident_gpu_value(device_result);
         }
         let mut error =

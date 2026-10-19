@@ -176,15 +176,27 @@ impl EigEval {
         mut result: runmat_accelerate_api::ProviderEigResult,
         input: &GpuTensorHandle,
     ) -> BuiltinResult<Self> {
-        for output in [
-            &mut result.eigenvalues,
-            &mut result.diagonal,
-            &mut result.right,
-        ]
-        .into_iter()
-        .chain(result.left.iter_mut())
-        {
-            gpu_helpers::propagate_output_provenance(output, [input])?;
+        let adoption = (|| {
+            for output in [
+                &mut result.eigenvalues,
+                &mut result.diagonal,
+                &mut result.right,
+            ]
+            .into_iter()
+            .chain(result.left.iter_mut())
+            {
+                gpu_helpers::propagate_output_provenance(output, [input])?;
+                output.allocation_lease().validate_live().map_err(|error| {
+                    build_runtime_error(format!("eig: cannot adopt provider output: {error}"))
+                        .with_source(error)
+                        .build()
+                })?;
+                runmat_accelerate_api::mark_residency(output);
+            }
+            Ok::<(), RuntimeError>(())
+        })();
+        if let Err(error) = adoption {
+            return Err(reject_provider_eig_result(result, error));
         }
         let runmat_accelerate_api::ProviderEigResult {
             eigenvalues,
@@ -193,11 +205,11 @@ impl EigEval {
             left,
         } = result;
         Ok(EigEval {
-            eigenvalues: gpu_helpers::resident_gpu_value(eigenvalues)?,
-            diagonal_matrix: gpu_helpers::resident_gpu_value(diagonal.clone())?,
-            diagonal_output: gpu_helpers::resident_gpu_value(diagonal)?,
-            right: gpu_helpers::resident_gpu_value(right)?,
-            left: left.map(gpu_helpers::resident_gpu_value).transpose()?,
+            eigenvalues: Value::GpuTensor(eigenvalues),
+            diagonal_matrix: Value::GpuTensor(diagonal.clone()),
+            diagonal_output: Value::GpuTensor(diagonal),
+            right: Value::GpuTensor(right),
+            left: left.map(Value::GpuTensor),
         })
     }
 }

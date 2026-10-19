@@ -160,8 +160,8 @@ pub fn complex_tensor_values_complex64(tensor: &ComplexTensor) -> Vec<Complex64>
         .integer_storage()
         .as_ref()
         .map(|storage| {
-            let real = storage.real.exact_values();
-            let imag = storage.imag.exact_values();
+            let real = storage.real().exact_values();
+            let imag = storage.imag().exact_values();
             real.into_iter()
                 .zip(imag)
                 .map(|(re, im)| Complex64::new(re.to_f64(), im.to_f64()))
@@ -196,12 +196,12 @@ pub fn complex_tensor_value_complex64(tensor: &ComplexTensor, index: usize) -> C
     match tensor.integer_storage() {
         Some(storage) => {
             let real = storage
-                .real
+                .real()
                 .value_at(index)
                 .expect("complex_tensor_value_complex64: real storage index is in bounds")
                 .to_f64();
             let imag = storage
-                .imag
+                .imag()
                 .value_at(index)
                 .expect("complex_tensor_value_complex64: imaginary storage index is in bounds")
                 .to_f64();

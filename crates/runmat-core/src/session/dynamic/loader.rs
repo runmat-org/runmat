@@ -16,7 +16,8 @@ pub(in crate::session) async fn load_dynamic_function(
     phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
     input_callsite: Option<runmat_runtime::callsite::CallsiteInfo>,
     environment: DynamicFunctionEnvironment,
-) -> Option<Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>> {
+) -> runmat_runtime::user_functions::DynamicFunctionLoadAttempt {
+    use std::ops::ControlFlow;
     #[cfg(target_arch = "wasm32")]
     let _ = &runtime;
     let DynamicFunctionEnvironment {
@@ -31,36 +32,34 @@ pub(in crate::session) async fn load_dynamic_function(
     #[cfg(not(target_arch = "wasm32"))]
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
         use runmat_runtime::user_functions::NativeResolutionScope;
-        let native = match runtime.native_resolution_scope() {
-            NativeResolutionScope::Selected(route)
-            | NativeResolutionScope::SelectedOrdinary { route, .. } => {
-                route
-                    .invoke(
-                        runtime.clone(),
-                        name.clone(),
-                        args.values().to_vec(),
-                        requested_outputs,
-                    )
-                    .await
-            }
-            NativeResolutionScope::SelectedClosed => None,
-            NativeResolutionScope::Session => {
-                mex_runtime
-                    .load_and_call(
-                        &name,
-                        args.values().to_vec(),
-                        requested_outputs,
-                        runtime.clone(),
-                    )
-                    .await
-            }
+        return match args
+            .with_unbounded_values_async(|arguments| async {
+                match runtime.native_resolution_scope() {
+                    NativeResolutionScope::Selected(route)
+                    | NativeResolutionScope::SelectedOrdinary { route, .. } => {
+                        route
+                            .invoke(runtime.clone(), name, arguments, requested_outputs)
+                            .await
+                    }
+                    NativeResolutionScope::SelectedClosed => ControlFlow::Continue(arguments),
+                    NativeResolutionScope::Session => {
+                        mex_runtime
+                            .load_and_call(&name, arguments, requested_outputs, runtime)
+                            .await
+                    }
+                }
+            })
+            .await
+        {
+            Ok(attempt) => attempt,
+            Err(error) => ControlFlow::Break(Err(error)),
         };
-        if let Some(result) = native {
-            return Some(result);
-        }
     }
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
-        return None;
+        return match args.with_unbounded_values(std::convert::identity) {
+            Ok(arguments) => ControlFlow::Continue(arguments),
+            Err(error) => ControlFlow::Break(Err(error)),
+        };
     }
     #[cfg(not(target_arch = "wasm32"))]
     let ordinary_mex = match runtime.native_resolution_scope() {
@@ -70,7 +69,7 @@ pub(in crate::session) async fn load_dynamic_function(
             ..
         } if source_owner.is_bound_in(&runtime) => Some(Rc::clone(mex)),
         runmat_runtime::user_functions::NativeResolutionScope::SelectedOrdinary { .. } => {
-            return Some(Err(build_runtime_error(
+            return ControlFlow::Break(Err(build_runtime_error(
                 "ordinary MEX source authority differs from the current source binding",
             )
             .with_identifier("RunMat:MEX:SourceAuthority")
@@ -106,15 +105,20 @@ pub(in crate::session) async fn load_dynamic_function(
     };
     let selected = match path_result {
         Ok(Some(selected)) => selected,
-        Ok(None) => return None,
+        Ok(None) => {
+            return match args.with_unbounded_values(std::convert::identity) {
+                Ok(arguments) => ControlFlow::Continue(arguments),
+                Err(error) => ControlFlow::Break(Err(error)),
+            }
+        }
         Err(error) => {
-            return Some(Err(build_runtime_error(error)
+            return ControlFlow::Break(Err(build_runtime_error(error)
                 .with_identifier("RunMat:FunctionResolution")
                 .build()))
         }
     };
     let path = selected.path().to_path_buf();
-    Some(
+    ControlFlow::Break(
         async move {
             let path_origin = selected.origin();
             let source_text =

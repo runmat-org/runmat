@@ -200,7 +200,8 @@ async fn invoke(
                         requested_outputs: request.requested_outputs as usize,
                     },
                 ))
-                .await?;
+                .await
+                .into_invoked_result()?;
             lifecycle.service_safepoint(context)?;
             lifecycle.drain_gracefully(context).await?;
             Ok(value)

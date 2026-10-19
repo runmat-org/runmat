@@ -324,8 +324,8 @@ pub(super) async fn execute(
         )
         .into());
     }
-    crate::builtins::common::gpu_helpers::propagate_output_provenance(
-        &mut current,
+    let current = crate::builtins::common::gpu_helpers::propagate_owned_output_provenance(
+        current,
         std::iter::once(input).chain(consumed_resident_parameters.iter()),
     )?;
     admit_cancellation(runtime, function).map_err(StageExecutionFailure::Abandoned)?;

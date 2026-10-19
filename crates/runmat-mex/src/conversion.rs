@@ -351,40 +351,44 @@ fn complex_tensor_to_mx(
     value: &ComplexTensor,
     mode: MxApiMode,
 ) -> Result<MxArray, MxConversionError> {
-    if mode == MxApiMode::InterleavedComplex {
-        let values = match value.complex_storage() {
-            ComplexStorage::F64(values) => MxInterleavedStorage::F64(values.clone()),
-            ComplexStorage::F32(values) => MxInterleavedStorage::F32(values.clone()),
-            ComplexStorage::Integer(_) => {
-                let (real, imag) = complex_components(value)?;
-                return complex_to_mx(real, imag, value.shape().to_vec(), mode);
-            }
-        };
-        return MxArray::interleaved(values, value.shape().to_vec())
-            .map_err(MxConversionError::new);
-    }
-
-    let (real, imag) = complex_components(value)?;
-    complex_to_mx(real, imag, value.shape().to_vec(), mode)
-}
-
-fn complex_components(
-    value: &ComplexTensor,
-) -> Result<(NumericStorage, NumericStorage), MxConversionError> {
+    let shape = value.shape().to_vec();
     match value.complex_storage() {
-        ComplexStorage::F64(values) => Ok((
-            NumericStorage::F64(values.iter().map(|value| value.0).collect()),
-            NumericStorage::F64(values.iter().map(|value| value.1).collect()),
-        )),
-        ComplexStorage::F32(values) => Ok((
-            NumericStorage::F32(values.iter().map(|value| value.0).collect()),
-            NumericStorage::F32(values.iter().map(|value| value.1).collect()),
-        )),
-        ComplexStorage::Integer(values) => Ok((
-            NumericStorage::from_integer_storage(values.real.clone()),
-            NumericStorage::from_integer_storage(values.imag.clone()),
-        )),
+        ComplexStorage::F64(values) => match mode {
+            MxApiMode::InterleavedComplex => {
+                MxArray::interleaved(MxInterleavedStorage::F64(values.clone()), shape)
+            }
+            MxApiMode::SeparateComplex => MxArray::numeric(
+                NumericStorage::F64(values.iter().map(|value| value.0).collect()),
+                shape,
+                Some(NumericStorage::F64(
+                    values.iter().map(|value| value.1).collect(),
+                )),
+            ),
+        },
+        ComplexStorage::F32(values) => match mode {
+            MxApiMode::InterleavedComplex => {
+                MxArray::interleaved(MxInterleavedStorage::F32(values.clone()), shape)
+            }
+            MxApiMode::SeparateComplex => MxArray::numeric(
+                NumericStorage::F32(values.iter().map(|value| value.0).collect()),
+                shape,
+                Some(NumericStorage::F32(
+                    values.iter().map(|value| value.1).collect(),
+                )),
+            ),
+        },
+        ComplexStorage::Integer(values) => {
+            let (real, imaginary) = values.clone().into_host_components();
+            match mode {
+                MxApiMode::SeparateComplex => MxArray::numeric_buffer(real, shape, Some(imaginary)),
+                MxApiMode::InterleavedComplex => {
+                    MxInterleavedStorage::from_host_components(&real, &imaginary)
+                        .and_then(|values| MxArray::interleaved(values, shape))
+                }
+            }
+        }
     }
+    .map_err(MxConversionError::new)
 }
 
 fn string_to_mx(value: &str) -> Result<MxArray, MxConversionError> {
@@ -598,6 +602,13 @@ fn complex_from_host_components(
     imag: HostNumericBuffer,
     shape: &[usize],
 ) -> Result<Value, MxConversionError> {
+    if real.numeric_dtype().integer_class().is_some() {
+        let paired =
+            IntegerComplexStorage::from_host_buffers(real, imag).map_err(MxConversionError::new)?;
+        return ComplexTensor::new_integer(paired, shape.to_vec())
+            .map(Value::ComplexTensor)
+            .map_err(MxConversionError::new);
+    }
     complex_from_components(
         real.into_numeric_storage(),
         imag.into_numeric_storage(),
@@ -1084,7 +1095,37 @@ mod tests {
         );
         for mode in [MxApiMode::SeparateComplex, MxApiMode::InterleavedComplex] {
             let boundary = value_to_mx(&original, mode).unwrap();
-            assert_eq!(value_from_mx(&boundary).unwrap(), original);
+            let decoded = value_from_mx(&boundary).unwrap();
+            assert_eq!(decoded, original);
+            if mode == MxApiMode::SeparateComplex {
+                let Value::ComplexTensor(source) = &original else {
+                    panic!("paired source");
+                };
+                let Value::ComplexTensor(output) = &decoded else {
+                    panic!("paired decoded output");
+                };
+                let (source_real, source_imaginary) = source
+                    .integer_storage()
+                    .expect("paired source")
+                    .clone()
+                    .into_host_components();
+                let MxArrayData::Numeric(values) = boundary.data() else {
+                    panic!("separate complex boundary");
+                };
+                assert!(values.real.shares_allocation_with(&source_real));
+                assert!(values
+                    .imag
+                    .as_ref()
+                    .expect("imaginary component")
+                    .shares_allocation_with(&source_imaginary));
+                let (output_real, output_imaginary) = output
+                    .integer_storage()
+                    .expect("paired output")
+                    .clone()
+                    .into_host_components();
+                assert!(output_real.shares_allocation_with(&source_real));
+                assert!(output_imaginary.shares_allocation_with(&source_imaginary));
+            }
         }
     }
 

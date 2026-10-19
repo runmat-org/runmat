@@ -109,7 +109,7 @@ pub(in crate::builtins::deep_learning) async fn forward(
             provider_failure(function, "resident learned convolution", error.into())
         })?;
     cancel().map_err(StageExecutionFailure::Abandoned)?;
-    let mut output = validation::result(
+    let output = validation::result(
         output,
         input,
         &weights,
@@ -118,8 +118,8 @@ pub(in crate::builtins::deep_learning) async fn forward(
         &request.output_shape,
         function,
     )?;
-    crate::builtins::common::gpu_helpers::propagate_output_provenance(
-        &mut output,
+    let output = crate::builtins::common::gpu_helpers::propagate_owned_output_provenance(
+        output,
         [input, &weights, &bias],
     )?;
     cancel().map_err(StageExecutionFailure::Abandoned)?;

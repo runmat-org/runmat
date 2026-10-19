@@ -217,7 +217,7 @@ pub(in crate::session) fn ordinary_native_route(
         let source_owner = source_owner.clone();
         Box::pin(async move {
             if !source_owner.is_bound_in(&runtime) {
-                return Some(Err(selected_error(
+                return std::ops::ControlFlow::Break(Err(selected_error(
                     "ordinary MEX route differs from its issued source",
                 )));
             }
@@ -227,7 +227,7 @@ pub(in crate::session) fn ordinary_native_route(
                         return installed.invoke(runtime, name, arguments, outputs).await;
                     }
                     Ok(None) => {}
-                    Err(error) => return Some(Err(selected_error(error))),
+                    Err(error) => return std::ops::ControlFlow::Break(Err(selected_error(error))),
                 }
             }
             mex.load_ordinary_admitted_and_call(&name, arguments, outputs, runtime, &source_owner)

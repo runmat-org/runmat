@@ -420,7 +420,7 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
         &vars[1],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![1, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
                         &IntegerStorage::U64(vec![1, 1]),
@@ -440,7 +440,7 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I64(vec![i64::MIN]),
                     &IntegerStorage::I64(vec![7]),
@@ -456,7 +456,7 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     assert!(matches!(
         &vars[11],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]),
                     &IntegerStorage::U64(vec![1, 1]),
@@ -472,7 +472,7 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
         &vars[13],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![2, 1]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
                         &IntegerStorage::U64(vec![1, 1]),
@@ -1010,7 +1010,7 @@ fn find_preserves_typed_complex_integer_values_through_vm_dispatch() {
         &vars[3],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![2, 1]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
                         &IntegerStorage::U64(vec![1, 2]),
@@ -1066,7 +1066,7 @@ fn typed_complex_integer_arithmetic_reductions_are_rejected_before_f64_coercion(
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![1_u64 << 63]),
                     &IntegerStorage::U64(vec![1]),
@@ -1363,8 +1363,8 @@ fn typed_complex_integer_num2cell_preserves_exact_components() {
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![1, 1]
                 && tensor.integer_storage().as_ref().is_some_and(|storage|
-                    storage.real == IntegerStorage::U64(vec![1_u64 << 63])
-                        && storage.imag == IntegerStorage::U64(vec![6]))
+                    storage.real() == &IntegerStorage::U64(vec![1_u64 << 63])
+                        && storage.imag() == &IntegerStorage::U64(vec![6]))
     ));
     assert!(matches!(
         &vars[3],
@@ -1382,8 +1382,8 @@ fn typed_complex_integer_num2cell_preserves_exact_components() {
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage().as_ref().is_some_and(|storage|
-                    storage.real == IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
-                        && storage.imag == IntegerStorage::U64(vec![5, 6]))
+                    storage.real() == &IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
+                        && storage.imag() == &IntegerStorage::U64(vec![5, 6]))
     ));
     assert!(matches!(
         &vars[8],
@@ -1405,8 +1405,8 @@ fn typed_complex_integer_cell2mat_preserves_exact_components() {
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage().as_ref().is_some_and(|storage|
-                    storage.real == IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
-                        && storage.imag == IntegerStorage::U64(vec![5, 6]))
+                    storage.real() == &IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
+                        && storage.imag() == &IntegerStorage::U64(vec![5, 6]))
     ));
     assert!(matches!(
         &vars[3],
@@ -1432,8 +1432,8 @@ fn typed_complex_integer_mat2cell_preserves_exact_components() {
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![1, 1]
                 && tensor.integer_storage().as_ref().is_some_and(|storage|
-                    storage.real == IntegerStorage::U64(vec![1_u64 << 63])
-                        && storage.imag == IntegerStorage::U64(vec![6]))
+                    storage.real() == &IntegerStorage::U64(vec![1_u64 << 63])
+                        && storage.imag() == &IntegerStorage::U64(vec![6]))
     ));
     assert!(matches!(
         &vars[3],
@@ -1523,7 +1523,7 @@ fn typed_complex_integer_truthiness_uses_exact_paired_storage() {
     assert!(matches!(
         &vars[7],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![9_223_372_036_854_775_808, 0]),
                     &IntegerStorage::U64(vec![0, 1]),
@@ -1541,7 +1541,7 @@ fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispat
     assert!(matches!(
         &vars[0],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![u64::MAX, u64::MAX, 9_223_372_036_854_775_808, 9_223_372_036_854_775_808]),
                     &IntegerStorage::U64(vec![7, 7, 8, 8]),
@@ -1561,7 +1561,7 @@ fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispat
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![u64::MAX, u64::MAX, 9_223_372_036_854_775_808, 9_223_372_036_854_775_808]),
                     &IntegerStorage::U64(vec![7, 7, 8, 8]),
@@ -1579,7 +1579,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[2],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 3, 4]),
                     &IntegerStorage::U64(vec![7, 8, 9, 10]),
@@ -1589,7 +1589,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
         &vars[3],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![4, 4]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![
                             9_223_372_036_854_775_808,
@@ -1616,7 +1616,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
         &vars[4],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![2, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 3, 4]),
                         &IntegerStorage::U64(vec![7, 8, 9, 10]),
@@ -1625,7 +1625,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[5],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808, 4, 3]),
                     &IntegerStorage::U64(vec![8, 7, 10, 9]),
@@ -1634,7 +1634,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[6],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![3, 9_223_372_036_854_775_808, 4, u64::MAX]),
                     &IntegerStorage::U64(vec![9, 7, 10, 8]),
@@ -1643,7 +1643,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[7],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![4, 3, u64::MAX, 9_223_372_036_854_775_808]),
                     &IntegerStorage::U64(vec![10, 9, 8, 7]),
@@ -1653,7 +1653,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
         &vars[8],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![3, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, u64::MAX, 3, 4, 4]),
                         &IntegerStorage::U64(vec![7, 8, 8, 9, 10, 10]),
@@ -1689,7 +1689,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
             &vars[index],
             Value::ComplexTensor(tensor)
                 if tensor.shape() == shape
-                    && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                    && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                         == Some((&IntegerStorage::U64(real), &IntegerStorage::U64(imag)))
         ));
     }
@@ -1829,7 +1829,7 @@ fn complex_integer_nonconjugate_transpose_preserves_exact_components_through_vm_
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I8(vec![1, -128, 3, 4]),
                     &IntegerStorage::I8(vec![-128, 2, 3, 4]),
@@ -1838,7 +1838,7 @@ fn complex_integer_nonconjugate_transpose_preserves_exact_components_through_vm_
     assert!(matches!(
         &vars[3],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
                     &IntegerStorage::U64(vec![0, 0]),
@@ -1899,7 +1899,7 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
     assert!(matches!(
         &vars[2],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real().clone(), storage.imag().clone()))
                 == Some((
                     IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 1, 2]),
                     IntegerStorage::U64(vec![7, 8, 3, 4]),
@@ -1909,7 +1909,7 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
         &vars[3],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![2, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real().clone(), storage.imag().clone()))
                     == Some((
                         IntegerStorage::U64(vec![9_223_372_036_854_775_808, 1, u64::MAX, 2]),
                         IntegerStorage::U64(vec![7, 3, 8, 4]),
@@ -1918,7 +1918,7 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real().clone(), storage.imag().clone()))
                 == Some((
                     IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 9, 10]),
                     IntegerStorage::U64(vec![7, 8, 0, 0]),
@@ -1927,7 +1927,7 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
     assert!(matches!(
         &vars[5],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real().clone(), storage.imag().clone()))
                 == Some((
                     IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 1, 2]),
                     IntegerStorage::U64(vec![7, 8, 3, 4]),
@@ -2023,7 +2023,7 @@ fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dis
             tensor
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((&real, &imag))
         );
     }
@@ -2034,7 +2034,7 @@ fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dis
     assert!(matches!(
         &vars[11],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I64(vec![i64::MAX, i64::MAX]),
                     &IntegerStorage::I64(vec![1, 2]),
@@ -2052,7 +2052,7 @@ fn conj_preserves_typed_complex_storage_through_vm_dispatch() {
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I8(vec![1, -2]),
                     &IntegerStorage::I8(vec![-3, i8::MAX]),
@@ -2061,7 +2061,7 @@ fn conj_preserves_typed_complex_storage_through_vm_dispatch() {
     assert!(matches!(
         &vars[3],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
                     &IntegerStorage::U64(vec![0, 0]),
@@ -2070,7 +2070,7 @@ fn conj_preserves_typed_complex_storage_through_vm_dispatch() {
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U16(vec![7]),
                     &IntegerStorage::U16(vec![0]),
@@ -2095,7 +2095,7 @@ fn typed_complex_integer_deletion_preserves_paired_exact_storage_through_vm_disp
         &vars[0],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![1, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
                         &IntegerStorage::U64(vec![7, 9]),
@@ -2105,7 +2105,7 @@ fn typed_complex_integer_deletion_preserves_paired_exact_storage_through_vm_disp
         &vars[1],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![1, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::I16(vec![1, 3]),
                         &IntegerStorage::I16(vec![-1, -3]),
@@ -2124,7 +2124,7 @@ fn typed_complex_integer_scalar_assignment_preserves_paired_exact_storage_throug
         &vars[0],
         Value::ComplexTensor(tensor)
             if tensor.shape() == vec![1, 3]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, 4]),
                         &IntegerStorage::U64(vec![7, 3, 5]),
@@ -2133,7 +2133,7 @@ fn typed_complex_integer_scalar_assignment_preserves_paired_exact_storage_throug
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I8(vec![1, i8::MIN, 2, 4]),
                     &IntegerStorage::I8(vec![-1, i8::MAX, -2, -4]),
@@ -2151,7 +2151,7 @@ fn indexed_assignment_does_not_demote_last_zeroed_complex_integer_component() {
     assert!(matches!(
         &vars[0],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U16(vec![9, 2]),
                     &IntegerStorage::U16(vec![0, 0]),

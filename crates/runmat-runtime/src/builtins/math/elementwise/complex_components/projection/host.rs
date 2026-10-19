@@ -59,11 +59,15 @@ fn project_complex_tensor(kind: ProjectionKind, tensor: ComplexTensor) -> Builti
         (ProjectionKind::Imaginary, ComplexStorage::F32(values)) => {
             NumericStorage::F32(values.into_iter().map(|(_, imaginary)| imaginary).collect())
         }
-        (ProjectionKind::Real, ComplexStorage::Integer(storage)) => {
-            NumericStorage::from_integer_storage(storage.real)
-        }
-        (ProjectionKind::Imaginary, ComplexStorage::Integer(storage)) => {
-            NumericStorage::from_integer_storage(storage.imag)
+        (kind, ComplexStorage::Integer(storage)) => {
+            let (real, imaginary) = storage.into_host_components();
+            let selected = match kind {
+                ProjectionKind::Real => real,
+                ProjectionKind::Imaginary => imaginary,
+            };
+            return Tensor::from_shared_host_buffer(selected, shape)
+                .map(tensor::tensor_into_value)
+                .map_err(|error| kind.internal(error));
         }
     };
     let tensor =

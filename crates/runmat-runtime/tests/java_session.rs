@@ -94,6 +94,7 @@ fn invoke(
             requested_outputs: 1,
         },
     )))
+    .into_invoked_result()
     .map_err(Box::new)?;
     sequence.try_map_owned(
         |sequence| {
@@ -175,6 +176,16 @@ fn java_exceptions_keep_their_public_runtime_identifier() {
     assert!(error
         .to_string()
         .contains("java.lang.NumberFormatException"));
+    let qualified = invoke(
+        &context,
+        "invoke_qualified",
+        vec![
+            Value::String("java.lang.Integer.parseInt".into()),
+            Value::String("not-a-number".into()),
+        ],
+    )
+    .expect_err("selected qualified callee exception is terminal");
+    assert_eq!(qualified.identifier(), Some("RunMat:Java:Exception"));
 }
 
 #[test]
@@ -357,10 +368,9 @@ fn java_callbacks_reenter_the_originating_runtime_call_service() {
     );
     let stream = invoke(
         &context,
-        "call_static",
+        "invoke_qualified",
         vec![
-            Value::String("java.util.stream.IntStream".into()),
-            Value::String("iterate".into()),
+            Value::String("java.util.stream.IntStream.iterate".into()),
             Value::Int(IntValue::I32(1)),
             Value::FunctionHandle("increment_callback".into()),
         ],

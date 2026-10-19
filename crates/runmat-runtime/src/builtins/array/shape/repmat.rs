@@ -455,7 +455,7 @@ async fn repmat_gpu_tensor(handle: GpuTensorHandle, reps: &[usize]) -> crate::Bu
                         repmat_internal("repmat: provider returned an invalid tiling result"),
                     ));
                 }
-                gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+                output = gpu_helpers::propagate_owned_output_provenance(output, [&handle])?;
                 return Ok(Value::GpuTensor(output));
             }
             Ok(None) => {}
@@ -1017,7 +1017,7 @@ pub(crate) mod tests {
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::U64(vec![
                     9_223_372_036_854_775_808,

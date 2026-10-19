@@ -400,7 +400,7 @@ async fn try_gpu_linsolve(
     };
 
     if let Some(ProviderLinsolveResult {
-        mut solution,
+        solution,
         reciprocal_condition,
     }) = result
     {
@@ -438,7 +438,8 @@ async fn try_gpu_linsolve(
                 builtin_error("linsolve: provider returned malformed or aliased output"),
             ));
         }
-        gpu_helpers::propagate_output_provenance(&mut solution, gpu_handles.iter().copied())?;
+        let solution =
+            gpu_helpers::propagate_owned_output_provenance(solution, gpu_handles.iter().copied())?;
         let eval = LinsolveEval::new(
             gpu_helpers::resident_gpu_value(solution)?,
             Some(reciprocal_condition),
@@ -1229,13 +1230,13 @@ fn conjugate_complex_in_place(tensor: &mut ComplexTensor) {
             }
             ComplexStorage::F32(values)
         }
-        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
-            IntegerComplexStorage::new(
-                storage.real,
-                conjugate_integer_imaginary_storage(storage.imag),
+        ComplexStorage::Integer(storage) => {
+            let (real, imag) = storage.into_unbounded_components();
+            ComplexStorage::Integer(
+                IntegerComplexStorage::new(real, conjugate_integer_imaginary_storage(imag))
+                    .expect("complex integer component classes remain matched"),
             )
-            .expect("complex integer component classes remain matched"),
-        ),
+        }
     };
     *tensor = ComplexTensor::from_complex_storage(storage, shape)
         .expect("conjugated complex storage retains shape");

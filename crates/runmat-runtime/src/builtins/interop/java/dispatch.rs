@@ -99,7 +99,8 @@ pub(super) async fn invoke_java(
                     requested_outputs: output_count,
                 },
             ))
-            .await?;
+            .await
+            .into_invoked_result()?;
         sequence.try_map_owned(
             |sequence| {
                 if output_count == 0 {

@@ -100,14 +100,13 @@ pub(super) async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> 
                 )
                 .await?;
             match result {
-                AlignedCovarianceOutput::Resident(mut result) => {
-                    gpu_helpers::propagate_output_provenance(&mut result, borrowed).map_err(
-                        |error| {
-                            cov_provider_error(
-                                runmat_accelerate_api::ProviderExecutionError::from_source(error),
-                            )
-                        },
-                    )?;
+                AlignedCovarianceOutput::Resident(result) => {
+                    let result = gpu_helpers::propagate_owned_output_provenance(result, borrowed)
+                        .map_err(|error| {
+                        cov_provider_error(
+                            runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                        )
+                    })?;
                     gpu_helpers::resident_gpu_value(result)
                         .map(Some)
                         .map_err(|error| {

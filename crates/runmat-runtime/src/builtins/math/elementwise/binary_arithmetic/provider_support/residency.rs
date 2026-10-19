@@ -6,10 +6,10 @@ use crate::builtins::common::gpu_helpers;
 pub(in crate::builtins::math::elementwise::binary_arithmetic) fn resident_output_from_sources<
     'a,
 >(
-    mut output: GpuTensorHandle,
+    output: GpuTensorHandle,
     sources: impl IntoIterator<Item = &'a GpuTensorHandle>,
 ) -> crate::BuiltinResult<Value> {
-    gpu_helpers::propagate_output_provenance(&mut output, sources)?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, sources)?;
     gpu_helpers::resident_gpu_value(output)
 }
 

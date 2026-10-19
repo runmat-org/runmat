@@ -326,11 +326,11 @@ fn leading_dimension_growth_restrides_typed_and_complex_columns() {
     assert_eq!(grown.shape(), &[3, 2]);
     let storage = grown.integer_storage().unwrap();
     assert_eq!(
-        storage.real,
-        runmat_value::IntegerStorage::U64(vec![1, 2, 0, u64::MAX, 4, 9])
+        storage.real(),
+        &runmat_value::IntegerStorage::U64(vec![1, 2, 0, u64::MAX, 4, 9])
     );
     assert_eq!(
-        storage.imag,
-        runmat_value::IntegerStorage::U64(vec![5, 6, 0, 7, 8, 0])
+        storage.imag(),
+        &runmat_value::IntegerStorage::U64(vec![5, 6, 0, 7, 8, 0])
     );
 }

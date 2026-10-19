@@ -297,7 +297,7 @@ fn tril_complex_tensor(
         }
         ComplexStorage::Integer(storage) => {
             let zero = storage
-                .real
+                .real()
                 .zeros_like(1)
                 .value_at(0)
                 .expect("one typed integer zero");

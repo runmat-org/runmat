@@ -736,8 +736,8 @@ fn upload_complex_host_value(
             };
             ComplexStorage::Integer(
                 IntegerComplexStorage::new(
-                    cast_integer_storage(&storage.real, dtype)?,
-                    cast_integer_storage(&storage.imag, dtype)?,
+                    cast_integer_storage(storage.real(), dtype)?,
+                    cast_integer_storage(storage.imag(), dtype)?,
                 )
                 .map_err(|error| gpu_array_error_with_message(error, &GPUARRAY_ERROR_CONVERSION))?,
             )

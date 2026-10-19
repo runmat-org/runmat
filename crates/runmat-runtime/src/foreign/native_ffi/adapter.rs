@@ -35,7 +35,7 @@ use super::{
     IsolatedNativeFfiClient, NativeClientRetirement, NativeFfiIsolationPolicy,
     NativeProjectLoadRequest, NativeWireError,
 };
-use crate::context::{ForeignCall, RuntimeContext};
+use crate::context::{ForeignCall, ForeignCallCompletion, RuntimeContext};
 use crate::RuntimeError;
 
 mod call;
@@ -639,36 +639,38 @@ impl ForeignAdapter for NativeFfiAdapter {
         // containment failed after OS spawn or retirement was unverified).
         if self.bootstrap_unverified.is_unverified() && self.isolated_client.borrow().is_none() {
             return Box::pin(async {
-                Err(invalid_call(
+                ForeignCallCompletion::invoked(Err(invalid_call(
                     "isolated native-library bootstrap has an unverified child",
-                ))
+                )))
             });
         }
         if self.project_retirement.is_pending() {
             return Box::pin(async {
-                Err(invalid_call("native project retirement is in progress"))
+                ForeignCallCompletion::invoked(Err(invalid_call(
+                    "native project retirement is in progress",
+                )))
             });
         }
         let policy = self.isolation_policy.get();
         if !policy.isolate {
             let result =
                 crate::foreign::runtime::root_adapter_result(self.invoke_operation(context, call));
-            return Box::pin(async move { result });
+            return Box::pin(async move { ForeignCallCompletion::invoked(result) });
         }
         if !self.project_catalog.borrow().is_empty()
             && self.project_catalog.borrow().lease.is_none()
         {
             return Box::pin(async {
-                Err(invalid_call(
+                ForeignCallCompletion::invoked(Err(invalid_call(
                     "isolated native project catalog lacks its private byte owner",
-                ))
+                )))
             });
         }
         if self.isolated_call_active.replace(true) {
             return Box::pin(async {
-                Err(invalid_call(
+                ForeignCallCompletion::invoked(Err(invalid_call(
                     "recursive entry into the active isolated native-library host is not supported",
-                ))
+                )))
             });
         }
         let client_slot = Rc::clone(&self.isolated_client);
@@ -767,7 +769,7 @@ impl ForeignAdapter for NativeFfiAdapter {
             }
             .await;
             drop(active);
-            result
+            ForeignCallCompletion::invoked(result)
         })
     }
 

@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use runmat_execution::LanguageCompatibilityMode;
 use runmat_runtime::context::{
-    ForeignCall, RuntimeContext, RuntimeForeignService, RuntimeLanguageMode, RuntimeServiceFuture,
-    RuntimeServicePorts,
+    ForeignCall, ForeignCallCompletion, RuntimeContext, RuntimeForeignService, RuntimeLanguageMode,
+    RuntimeServiceFuture, RuntimeServicePorts,
 };
 
 use super::{selected_unit_runtime, validate_selected_port_count};
@@ -15,14 +15,14 @@ impl RuntimeForeignService for ForeignFixture {
         &self,
         _context: RuntimeContext,
         _call: ForeignCall,
-    ) -> RuntimeServiceFuture<
-        Result<runmat_runtime::execution::RootedValueSequence, runmat_runtime::RuntimeError>,
-    > {
+    ) -> RuntimeServiceFuture<ForeignCallCompletion> {
         Box::pin(async {
-            runmat_runtime::execution::RootedValueSequence::new(
-                runmat_value::ValueSequence::empty(),
+            ForeignCallCompletion::invoked(
+                runmat_runtime::execution::RootedValueSequence::new(
+                    runmat_value::ValueSequence::empty(),
+                )
+                .map_err(|error| error.into_runtime_error()),
             )
-            .map_err(|error| error.into_runtime_error())
         })
     }
 }

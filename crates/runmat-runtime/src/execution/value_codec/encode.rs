@@ -517,7 +517,7 @@ fn encode_complex_storage(storage: &ComplexStorage) -> (ElementType, Vec<u8>) {
                 .collect(),
         ),
         ComplexStorage::Integer(storage) => {
-            let element_type = match &storage.real {
+            let element_type = match storage.real() {
                 IntegerStorage::I8(_) => ElementType::ComplexI8,
                 IntegerStorage::I16(_) => ElementType::ComplexI16,
                 IntegerStorage::I32(_) => ElementType::ComplexI32,
@@ -527,8 +527,8 @@ fn encode_complex_storage(storage: &ComplexStorage) -> (ElementType, Vec<u8>) {
                 IntegerStorage::U32(_) => ElementType::ComplexU32,
                 IntegerStorage::U64(_) => ElementType::ComplexU64,
             };
-            let (_, real) = encode_integer_storage(&storage.real);
-            let (_, imag) = encode_integer_storage(&storage.imag);
+            let (_, real) = encode_integer_storage(storage.real());
+            let (_, imag) = encode_integer_storage(storage.imag());
             let width = real.len().checked_div(storage.len().max(1)).unwrap_or(0);
             let mut interleaved = Vec::with_capacity(real.len() + imag.len());
             for index in 0..storage.len() {

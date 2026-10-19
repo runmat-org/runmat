@@ -94,18 +94,18 @@ fn complex_integer(
     sizes: &[usize],
 ) -> BuiltinResult<Value> {
     let real = storage
-        .real
+        .real()
         .from_exact_values_like(extract::block(
-            &storage.real.exact_values(),
+            &storage.real().exact_values(),
             shape,
             start,
             sizes,
         )?)
         .map_err(internal)?;
     let imaginary = storage
-        .imag
+        .imag()
         .from_exact_values_like(extract::block(
-            &storage.imag.exact_values(),
+            &storage.imag().exact_values(),
             shape,
             start,
             sizes,

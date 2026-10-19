@@ -8,19 +8,24 @@ use crate::{build_runtime_error, BuiltinResult};
 /// View creation remains fallible: quarantined owners cannot publish a new view.
 pub fn resident_gpu_value(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let handle = if runmat_accelerate_api::handle_provenance(&handle).is_none() {
-        handle
+        match handle
             .with_provenance(GpuHandleProvenance::Automatic)
             .map_err(|error| {
                 build_runtime_error(format!("cannot adopt resident provider result: {error}"))
                     .with_source(error)
                     .build()
-            })?
+            }) {
+            Ok(adopted) => adopted,
+            Err(error) => return Err(super::reject_gpu_output(handle, error)),
+        }
     } else {
-        handle.allocation_lease().validate_live().map_err(|error| {
-            build_runtime_error(format!("cannot adopt resident provider result: {error}"))
-                .with_source(error)
-                .build()
-        })?;
+        if let Err(source) = handle.allocation_lease().validate_live() {
+            let error =
+                build_runtime_error(format!("cannot adopt resident provider result: {source}"))
+                    .with_source(source)
+                    .build();
+            return Err(super::reject_gpu_output(handle, error));
+        }
         handle
     };
     runmat_accelerate_api::mark_residency(&handle);
@@ -32,10 +37,10 @@ pub fn logical_gpu_value(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if !runmat_accelerate_api::handle_is_logical(&handle)
         || handle.physical().storage() != GpuTensorStorage::Real
     {
-        return Err(build_runtime_error(
-            "provider result was not produced as a real logical array",
-        )
-        .build());
+        return Err(super::reject_gpu_output(
+            handle,
+            build_runtime_error("provider result was not produced as a real logical array").build(),
+        ));
     }
     resident_gpu_value(handle)
 }
@@ -45,15 +50,16 @@ pub fn complex_gpu_value(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_is_logical(&handle)
         || handle.physical().storage() != GpuTensorStorage::ComplexInterleaved
     {
-        return Err(build_runtime_error(
-            "provider result does not own complex interleaved storage",
-        )
-        .build());
+        return Err(super::reject_gpu_output(
+            handle,
+            build_runtime_error("provider result does not own complex interleaved storage").build(),
+        ));
     }
     resident_gpu_value(handle)
 }
 
-/// Explicit input intent dominates automatic intent, on a new validated view.
+/// Explicit input intent dominates automatic intent. Validate the live lease
+/// even when the existing view already has the requested provenance.
 pub(crate) fn propagate_output_provenance<'a>(
     output: &mut GpuTensorHandle,
     inputs: impl IntoIterator<Item = &'a GpuTensorHandle>,
@@ -72,8 +78,29 @@ pub(crate) fn propagate_output_provenance<'a>(
                 .with_source(error)
                 .build()
         })?;
+    } else {
+        output
+            .allocation_lease()
+            .validate_live()
+            .map_err(|source| {
+                build_runtime_error(format!("cannot propagate resident output intent: {source}"))
+                    .with_source(source)
+                    .build()
+            })?;
     }
     Ok(())
+}
+
+/// Preserve intent on an owned result, retaining physical retirement failures
+/// if its validated publication view cannot be created.
+pub(crate) fn propagate_owned_output_provenance<'a>(
+    mut output: GpuTensorHandle,
+    inputs: impl IntoIterator<Item = &'a GpuTensorHandle>,
+) -> BuiltinResult<GpuTensorHandle> {
+    match propagate_output_provenance(&mut output, inputs) {
+        Ok(()) => Ok(output),
+        Err(error) => Err(super::reject_gpu_output(output, error)),
+    }
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@ use crate::ExecutableUnit;
 pub(super) struct CompiledGenericUnit {
     pub executor: Rc<runmat_native_executor::NativeExecutor>,
     pub entrypoint: ProgramFunctionId,
+    pub compilation: runmat_jit::entry::NativeCompilationEvidence,
     #[cfg(test)]
     pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
     #[cfg(test)]
@@ -24,11 +25,13 @@ pub(super) struct PreparedGenericUnit {
     native: crate::NativeCompilationInput,
     entrypoint: ProgramFunctionId,
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
+    prepare_ns: u64,
 }
 
 pub(super) struct BackgroundCompiledGenericUnit {
     pub executor: runmat_native_executor::NativeExecutor,
     pub entrypoint: ProgramFunctionId,
+    pub compilation: runmat_jit::entry::NativeCompilationEvidence,
     #[cfg(test)]
     pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
     #[cfg(test)]
@@ -49,6 +52,7 @@ pub(super) fn compile(
     Ok(CompiledGenericUnit {
         executor: Rc::new(compiled.executor),
         entrypoint: compiled.entrypoint,
+        compilation: compiled.compilation,
         #[cfg(test)]
         safepoints: compiled.safepoints,
         #[cfg(test)]
@@ -61,18 +65,22 @@ pub(super) fn prepare(
     preferred_function: Option<&str>,
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
 ) -> Result<PreparedGenericUnit, runmat_runtime::RuntimeError> {
+    let started = std::time::Instant::now();
     let native = unit.prepare_native_compilation_for(preferred_function)?;
     let entrypoint = native.entrypoint();
+    let prepare_ns = runmat_time::duration_ns_saturating(started.elapsed());
     Ok(PreparedGenericUnit {
         native,
         entrypoint,
         specialization,
+        prepare_ns,
     })
 }
 
 pub(super) fn compile_prepared(
     prepared: PreparedGenericUnit,
 ) -> Result<BackgroundCompiledGenericUnit, runmat_runtime::RuntimeError> {
+    let started = std::time::Instant::now();
     let program_capture = prepared.native.program_capture().to_vec();
     let interpreter_resume_points = prepared.native.interpreter_resume_points().clone();
     let point_coverage = prepared.native.coverage_sites().clone();
@@ -160,6 +168,10 @@ pub(super) fn compile_prepared(
     Ok(BackgroundCompiledGenericUnit {
         executor,
         entrypoint: prepared.entrypoint,
+        compilation: runmat_jit::entry::NativeCompilationEvidence {
+            prepare_ns: prepared.prepare_ns,
+            lower_codegen_bind_ns: runmat_time::duration_ns_saturating(started.elapsed()),
+        },
         #[cfg(test)]
         safepoints,
         #[cfg(test)]

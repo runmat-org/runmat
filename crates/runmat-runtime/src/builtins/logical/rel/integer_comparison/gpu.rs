@@ -33,9 +33,9 @@ pub(crate) async fn try_gpu_equality_comparison(
         _ => unreachable!("equality helper only supports eq and ne"),
     };
     match result {
-        Ok(mut handle) if valid_equality_output(&handle, lhs, rhs, provider) => Some(
-            gpu_helpers::propagate_output_provenance(&mut handle, [lhs, rhs])
-                .and_then(|()| gpu_helpers::logical_gpu_value(handle)),
+        Ok(handle) if valid_equality_output(&handle, lhs, rhs, provider) => Some(
+            gpu_helpers::propagate_owned_output_provenance(handle, [lhs, rhs])
+                .and_then(gpu_helpers::logical_gpu_value),
         ),
         Ok(handle) => Some(Err(rejected(handle, operation))),
         Err(error) => provider_failure(error, operation),
@@ -182,9 +182,9 @@ pub(crate) async fn try_gpu_ordering_comparison(
         }
     };
     match result {
-        Ok(mut handle) if valid_ordering_output(&handle, lhs_real, rhs_real, provider) => Some(
-            gpu_helpers::propagate_output_provenance(&mut handle, [lhs, rhs])
-                .and_then(|()| gpu_helpers::logical_gpu_value(handle)),
+        Ok(handle) if valid_ordering_output(&handle, lhs_real, rhs_real, provider) => Some(
+            gpu_helpers::propagate_owned_output_provenance(handle, [lhs, rhs])
+                .and_then(gpu_helpers::logical_gpu_value),
         ),
         Ok(handle) => Some(Err(rejected(handle, operation))),
         Err(error) => provider_failure(

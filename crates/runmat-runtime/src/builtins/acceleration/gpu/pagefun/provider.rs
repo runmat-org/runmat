@@ -41,7 +41,7 @@ pub(super) fn try_pagefun_gpu(
     };
 
     match provider.pagefun(&request) {
-        Ok(mut handle) => {
+        Ok(handle) => {
             let contract = gpu_helpers::BinaryGpuOutputContract {
                 shape: request.output_shape,
                 storage: runmat_accelerate_api::GpuTensorStorage::Real,
@@ -64,7 +64,7 @@ pub(super) fn try_pagefun_gpu(
                     ),
                 ));
             }
-            gpu_helpers::propagate_output_provenance(&mut handle, handles.iter())?;
+            let handle = gpu_helpers::propagate_owned_output_provenance(handle, handles.iter())?;
             Ok(Some(gpu_helpers::resident_gpu_value(handle)?))
         }
         Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => Ok(None),

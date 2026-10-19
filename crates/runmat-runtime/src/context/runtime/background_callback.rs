@@ -147,8 +147,8 @@ impl RuntimeContext {
             prepared_host_execution: None,
             vm_fusion_selected_binding: None,
             cancellation: Rc::new(RefCell::new(self.cancellation())),
-        }
-        .with_poll_source_catalog();
+        };
+        selected.capture_poll_source_catalog();
         // A later same-session drainer is not this source selection's owner.
         selected.source_selection = if selected.program_sources.is_some() {
             InvocationSourceSelection::Selected(Rc::new(()))

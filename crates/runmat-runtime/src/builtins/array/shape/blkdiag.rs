@@ -669,16 +669,16 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
         Ok(len) => len,
         Err(error) => return Some(Err(error)),
     };
-    let mut real = prototype.real.zeros_like(len).exact_values();
-    let mut imag = prototype.imag.zeros_like(len).exact_values();
+    let mut real = prototype.real().zeros_like(len).exact_values();
+    let mut imag = prototype.imag().zeros_like(len).exact_values();
     let mut row_offset = 0usize;
     let mut col_offset = 0usize;
     for tensor in tensors {
         let storage = tensor
             .integer_storage()
             .expect("typed complex input was checked above");
-        let source_real = storage.real.exact_values();
-        let source_imag = storage.imag.exact_values();
+        let source_real = storage.real().exact_values();
+        let source_imag = storage.imag().exact_values();
         for col in 0..tensor.cols() {
             for row in 0..tensor.rows() {
                 let src = row + col * tensor.rows();
@@ -690,11 +690,11 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
         row_offset += tensor.rows();
         col_offset += tensor.cols();
     }
-    let real = match prototype.real.from_exact_values_like(real) {
+    let real = match prototype.real().from_exact_values_like(real) {
         Ok(storage) => storage,
         Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
     };
-    let imag = match prototype.imag.from_exact_values_like(imag) {
+    let imag = match prototype.imag().from_exact_values_like(imag) {
         Ok(storage) => storage,
         Err(detail) => return Some(Err(error_with_detail(&ERROR_INVALID_INPUT, detail))),
     };

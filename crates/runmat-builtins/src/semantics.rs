@@ -167,6 +167,7 @@ pub enum ShapeTransformKind {
     Flip,
     Rotate90,
     CircularShift,
+    ShiftDimensions,
     Diagonal,
     Kronecker,
     Triangular(TriangularKind),

@@ -27,7 +27,7 @@ use runmat_hir::{
     WorkspaceEffect,
 };
 use runmat_jit::{
-    entry::{EntryKey, EntryRegistry},
+    entry::{EntryKey, EntryRegistry, NativeCompilationEvidence},
     invalidation::{DependencyKey, DependencyTracker},
     GenericCompiler, JitError,
 };
@@ -58,6 +58,11 @@ use runmat_types::{
     REGION_CONTRACT_SCHEMA_VERSION,
 };
 use runmat_value::{Value, ValueSequence};
+
+const FIXTURE_COMPILATION: NativeCompilationEvidence = NativeCompilationEvidence {
+    prepare_ns: 7,
+    lower_codegen_bind_ns: 11,
+};
 
 fn rooted_sequence(
     values: ValueSequence,
@@ -136,6 +141,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
 
     let key = EntryKey("project/main".into());
     let mut registry = EntryRegistry::default();
+    let before_publication = registry.publications(&key, None);
     let stable_cell = registry.cell(key.clone());
     let first_executor = Rc::new(compile_executor(fixture()).unwrap());
     let first = registry
@@ -144,10 +150,16 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
             Rc::clone(&first_executor),
             ProgramFunctionId(0),
             first_snapshot,
+            FIXTURE_COMPILATION,
         )
         .unwrap();
     assert_eq!(first.publication, 1);
+    assert_eq!(first.compilation, FIXTURE_COMPILATION);
+    assert_eq!(first.compilation.total_ns(), Some(18));
     assert!(Rc::ptr_eq(&first.executor, &first_executor));
+    assert!(!before_publication.contains(&first));
+    let first_publication = registry.publications(&key, None);
+    assert!(first_publication.contains(&first));
 
     let first_profile = Digest::sha256(b"scalar-double");
     let second_profile = Digest::sha256(b"dense-double");
@@ -158,8 +170,13 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
             Rc::new(compile_executor(fixture()).unwrap()),
             ProgramFunctionId(0),
             dependencies.snapshot([&program, &provider]),
+            FIXTURE_COMPILATION,
         )
         .unwrap();
+    assert!(!first_publication.contains(&first_specialized));
+    let specialized_publications = registry.publications(&key, Some(first_profile));
+    assert!(specialized_publications.contains(&first));
+    assert!(specialized_publications.contains(&first_specialized));
     registry
         .publish_specialized(
             key.clone(),
@@ -167,6 +184,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
             Rc::new(compile_executor(fixture()).unwrap()),
             ProgramFunctionId(0),
             dependencies.snapshot([&program, &provider]),
+            FIXTURE_COMPILATION,
         )
         .unwrap();
     let availability = registry.availability(&key, &dependencies.snapshot_all(), 0);
@@ -206,6 +224,9 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
     assert_eq!(registry.invalidate(&current), 1);
     assert!(!stable_cell.is_published());
     assert_eq!(registry.retained_cell_count(), 1);
+    let retired_publications = registry.publications(&key, Some(first_profile));
+    assert!(!retired_publications.contains(&first));
+    assert!(!retired_publications.contains(&first_specialized));
 
     let second_executor = Rc::new(compile_executor(fixture()).unwrap());
     let second = registry
@@ -214,9 +235,15 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
             Rc::clone(&second_executor),
             ProgramFunctionId(0),
             current,
+            FIXTURE_COMPILATION,
         )
         .unwrap();
     assert_eq!(second.publication, 4);
+    assert!(!first_publication.contains(&second));
+    assert!(!specialized_publications.contains(&second));
+    assert!(registry
+        .publications(stable_cell.key(), None)
+        .contains(&second));
     assert!(stable_cell.is_published());
     assert!(Rc::ptr_eq(&second.executor, &second_executor));
     assert!(!Rc::ptr_eq(&first.executor, &second.executor));
@@ -236,6 +263,7 @@ fn completed_specialization_retires_only_replaceable_code_to_make_room() {
             Rc::new(compile_executor(fixture()).unwrap()),
             ProgramFunctionId(0),
             dependencies.snapshot([&program]),
+            FIXTURE_COMPILATION,
         )
         .unwrap();
     registry
@@ -245,6 +273,7 @@ fn completed_specialization_retires_only_replaceable_code_to_make_room() {
             Rc::new(compile_executor(fixture()).unwrap()),
             ProgramFunctionId(0),
             dependencies.snapshot([&program]),
+            FIXTURE_COMPILATION,
         )
         .unwrap();
     let replacement = compile_executor(fixture()).unwrap();

@@ -161,7 +161,7 @@ fn build_output(output: Tensor, parsed: ParsedExprnd) -> BuiltinResult<Value> {
             return Ok(exprnd_host_output(output, parsed.output_precision));
         }
         let protected: Vec<_> = parsed.borrowed_gpu.iter().collect();
-        let mut handle = gpu_helpers::upload_tensor_protecting_typed(provider, &output, &protected)
+        let handle = gpu_helpers::upload_tensor_protecting_typed(provider, &output, &protected)
             .map_err(|err| {
                 build_runtime_error(format!("exprnd: {err}"))
                     .with_builtin(BUILTIN_NAME)
@@ -185,7 +185,7 @@ fn build_output(output: Tensor, parsed: ParsedExprnd) -> BuiltinResult<Value> {
                 exprnd_internal_error("exprnd: provider upload returned malformed resident output"),
             ));
         }
-        gpu_helpers::propagate_output_provenance(&mut handle, [&source])?;
+        let handle = gpu_helpers::propagate_owned_output_provenance(handle, [&source])?;
         return gpu_helpers::resident_gpu_value(handle);
     }
     Ok(exprnd_host_output(output, parsed.output_precision))

@@ -21,10 +21,8 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
     }
 
     match provider.unary_nextpow2(&input).await {
-        Ok(mut output)
-            if output_matches(&output, &input, provider, output_representation(&input)) =>
-        {
-            gpu_helpers::propagate_output_provenance(&mut output, [&input])?;
+        Ok(output) if output_matches(&output, &input, provider, output_representation(&input)) => {
+            let output = gpu_helpers::propagate_owned_output_provenance(output, [&input])?;
             gpu_helpers::resident_gpu_value(output)
         }
         Ok(output) => {
@@ -70,13 +68,13 @@ async fn evaluate_and_restore(
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let result = operation::transform(gathered)?;
-    let mut output = gpu_helpers::upload_tensor_protecting(provider, &result, &[input])?;
+    let output = gpu_helpers::upload_tensor_protecting(provider, &result, &[input])?;
     if !output_matches(&output, input, provider, output_representation(input)) {
         let mut error = errors::internal("provider upload returned malformed fallback output");
         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(output, error));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

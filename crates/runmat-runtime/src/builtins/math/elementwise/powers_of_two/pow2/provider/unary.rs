@@ -13,8 +13,8 @@ pub(in super::super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<
         || runmat_accelerate_api::handle_is_logical(&input);
     if !typed_fallback {
         match provider.unary_pow2(&input).await {
-            Ok(mut output) if direct_output_matches(&output, &input, provider) => {
-                gpu_helpers::propagate_output_provenance(&mut output, [&input])?;
+            Ok(output) if direct_output_matches(&output, &input, provider) => {
+                let output = gpu_helpers::propagate_owned_output_provenance(output, [&input])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
@@ -55,7 +55,7 @@ async fn fallback_and_restore(
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let output = host::evaluate_host(gathered)?;
-    let (mut restored, contract) = match &output {
+    let (restored, contract) = match &output {
         Value::Tensor(tensor) => (
             gpu_helpers::upload_tensor_protecting(provider, tensor, &[input])?,
             super::unary_contract(
@@ -77,6 +77,6 @@ async fn fallback_and_restore(
         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(restored, error));
     }
-    gpu_helpers::propagate_output_provenance(&mut restored, [input])?;
+    let restored = gpu_helpers::propagate_owned_output_provenance(restored, [input])?;
     gpu_helpers::resident_gpu_value(restored)
 }

@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -427,9 +428,8 @@ impl MexRuntimeSession {
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
-    ) -> impl std::future::Future<
-        Output = Option<Result<crate::execution::RootedValueSequence, RuntimeError>>,
-    > + 'a {
+    ) -> impl std::future::Future<Output = crate::user_functions::DynamicFunctionLoadAttempt> + 'a
+    {
         self.load_with_resolution(
             name,
             arguments,
@@ -447,9 +447,8 @@ impl MexRuntimeSession {
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
-    ) -> impl std::future::Future<
-        Output = Option<Result<crate::execution::RootedValueSequence, RuntimeError>>,
-    > + 'a {
+    ) -> impl std::future::Future<Output = crate::user_functions::DynamicFunctionLoadAttempt> + 'a
+    {
         self.load_with_resolution(
             name,
             arguments,
@@ -466,19 +465,19 @@ impl MexRuntimeSession {
         requested_outputs: usize,
         runtime: RuntimeContext,
         resolution: MexResolutionScope,
-    ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    ) -> crate::user_functions::DynamicFunctionLoadAttempt {
         let input_roots = match crate::execution::RootedValueLease::for_values(arguments.iter()) {
             Ok(roots) => roots,
-            Err(error) => return Some(Err(error.into_runtime_error())),
+            Err(error) => return ControlFlow::Break(Err(error.into_runtime_error())),
         };
         if self.abandoned.get() || self.shutdown_in_progress.get() {
-            return Some(Err(runtime_error(
+            return ControlFlow::Break(Err(runtime_error(
                 "MEX:Lifecycle",
                 "MEX modules cannot be invoked while the session is shutting down",
             )));
         }
         if runtime.is_cancelled() {
-            return Some(Err(runtime_error(
+            return ControlFlow::Break(Err(runtime_error(
                 "Cancelled",
                 format!("MEX invocation '{name}' was cancelled before entering native code"),
             )));
@@ -493,21 +492,33 @@ impl MexRuntimeSession {
             MexResolutionScope::SearchPath => match self.observe_name(name).await {
                 Ok(Some(selection)) => Some(selection.path().to_path_buf()),
                 Ok(None) => None,
-                Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
+                Err(error) => {
+                    return ControlFlow::Break(Err(runtime_error("FunctionResolution", error)))
+                }
             },
         };
-        let path = path?;
+        let Some(path) = path else {
+            return ControlFlow::Continue(arguments);
+        };
         let canonical = runmat_filesystem::canonicalize_async(&path)
             .await
             .unwrap_or(path);
-        self.dispatch_admitted_path(
-            canonical,
-            arguments,
-            requested_outputs,
-            runtime,
-            input_roots,
+        ControlFlow::Break(
+            self.dispatch_admitted_path(
+                canonical,
+                arguments,
+                requested_outputs,
+                runtime,
+                input_roots,
+            )
+            .await
+            .unwrap_or_else(|| {
+                Err(runtime_error(
+                    "MEX:SelectionChanged",
+                    "selected MEX target retired during invocation",
+                ))
+            }),
         )
-        .await
     }
 
     async fn dispatch_admitted_path(
@@ -1472,10 +1483,10 @@ impl super::super::ForeignAdapter for MexRuntimeSession {
         _call: ForeignCall,
     ) -> super::super::ForeignAdapterFuture {
         Box::pin(async {
-            Err(runtime_error(
+            crate::context::ForeignCallCompletion::invoked(Err(runtime_error(
                 "MEX:InvalidDispatch",
                 "MEX modules are invoked through function resolution",
-            ))
+            )))
         })
     }
 }
@@ -1739,10 +1750,29 @@ mod tests {
             0,
             runtime,
         ))
+        .break_value()
         .expect("pre-cancelled MEX call is handled")
         .expect_err("pre-cancelled MEX call fails");
 
         assert_eq!(result.identifier(), Some("RunMat:Cancelled"));
+
+        let available = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let text = String::from("selected MEX argument owner");
+        let payload = text.as_ptr();
+        let missing =
+            futures::executor::block_on(Rc::new(MexRuntimeSession::new()).load_installed_and_call(
+                "module_not_installed_in_this_owner",
+                vec![Value::String(text)],
+                0,
+                available,
+            ));
+        let std::ops::ControlFlow::Continue(arguments) = missing else {
+            panic!("missing installed MEX returns original arguments");
+        };
+        let [Value::String(text)] = arguments.as_slice() else {
+            panic!("missing MEX returned original string argument");
+        };
+        assert_eq!(text.as_ptr(), payload);
     }
 
     #[test]

@@ -28,8 +28,8 @@ fn complex_integer_samples_reject_before_lossy_materialization() {
         unreachable!()
     };
     assert_eq!(
-        original.integer_storage().unwrap().real,
-        IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
+        original.integer_storage().unwrap().real(),
+        &IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
     );
 }
 

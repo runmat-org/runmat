@@ -40,8 +40,8 @@ fn complex_like_keeps_all_integer_payloads_exact_including_scalar_and_empty() {
             let ComplexStorage::Integer(actual) = tensor.complex_storage() else {
                 panic!("native integer complex storage")
             };
-            assert_eq!(actual.real, expected);
-            assert_eq!(actual.imag, expected.zeros_like(expected.len()));
+            assert_eq!(actual.real(), &expected);
+            assert_eq!(actual.imag(), &expected.zeros_like(expected.len()));
         }
     }
 }

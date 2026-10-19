@@ -92,8 +92,8 @@ fn stored_matrix_helpers_read_typed_complex_integer_storage_exactly() {
         panic!("expected exact complex integer tensor")
     };
     let storage = transposed.integer_storage().expect("exact storage");
-    assert_eq!(storage.real, IntegerStorage::I64(vec![wide, 3, 2, 4]));
-    assert_eq!(storage.imag, IntegerStorage::I64(vec![-5, -7, 6, 8]));
+    assert_eq!(storage.real(), &IntegerStorage::I64(vec![wide, 3, 2, 4]));
+    assert_eq!(storage.imag(), &IntegerStorage::I64(vec![-5, -7, 6, 8]));
 }
 
 #[test]

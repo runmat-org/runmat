@@ -1120,6 +1120,56 @@ pub struct ForeignCall {
     pub requested_outputs: usize,
 }
 
+/// A selected foreign operation is terminal, while a pre-effect qualified
+/// target miss returns the exact original call for language-source fallback.
+pub struct ForeignCallCompletion(ForeignCallOutcome);
+
+enum ForeignCallOutcome {
+    Invoked(Result<crate::execution::RootedValueSequence, RuntimeError>),
+    Declined(ForeignCall),
+}
+
+impl ForeignCallCompletion {
+    pub fn invoked(result: Result<crate::execution::RootedValueSequence, RuntimeError>) -> Self {
+        Self(ForeignCallOutcome::Invoked(result))
+    }
+
+    pub(crate) fn declined_before_marshalling(call: ForeignCall) -> Self {
+        Self(ForeignCallOutcome::Declined(call))
+    }
+
+    pub(crate) fn into_owner_return(
+        self,
+    ) -> Result<Result<crate::execution::RootedValueSequence, RuntimeError>, ForeignCall> {
+        match self.0 {
+            ForeignCallOutcome::Invoked(result) => Ok(result),
+            ForeignCallOutcome::Declined(call) => Err(call),
+        }
+    }
+
+    pub(crate) fn invoked_result(
+        &self,
+    ) -> Option<&Result<crate::execution::RootedValueSequence, RuntimeError>> {
+        match &self.0 {
+            ForeignCallOutcome::Invoked(result) => Some(result),
+            ForeignCallOutcome::Declined(_) => None,
+        }
+    }
+
+    /// Direct foreign calls have no language-source fallback owner.
+    pub fn into_invoked_result(
+        self,
+    ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+        match self.0 {
+            ForeignCallOutcome::Invoked(result) => result,
+            ForeignCallOutcome::Declined(_) => Err(crate::runtime_error::semantic_error(
+                "RunMat:Foreign:TargetUnavailable",
+                "foreign target was not selected for a direct call",
+            )),
+        }
+    }
+}
+
 pub trait RuntimeForeignService {
     /// Complete adapter-owned Values, including retained callback captures.
     fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
@@ -1133,7 +1183,7 @@ pub trait RuntimeForeignService {
         &self,
         context: super::RuntimeContext,
         call: ForeignCall,
-    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>>;
+    ) -> RuntimeServiceFuture<ForeignCallCompletion>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

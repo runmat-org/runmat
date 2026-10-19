@@ -742,10 +742,13 @@ fn data_values_from_value(
                     let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
                     (DataArrayValues::F32(real), DataArrayValues::F32(imag))
                 }
-                ComplexStorage::Integer(storage) => (
-                    DataArrayValues::from_integer_storage(storage.real),
-                    DataArrayValues::from_integer_storage(storage.imag),
-                ),
+                ComplexStorage::Integer(storage) => {
+                    let (real, imag) = storage.into_unbounded_components();
+                    (
+                        DataArrayValues::from_integer_storage(real),
+                        DataArrayValues::from_integer_storage(imag),
+                    )
+                }
             };
             Ok((shape, real, Some(imag)))
         }

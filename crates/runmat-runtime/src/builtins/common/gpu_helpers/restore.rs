@@ -318,7 +318,7 @@ pub fn restore_class_preserving_value_with_operands(
         Value::ComplexTensor(tensor) => {
             let expected_integer = tensor
                 .integer_storage()
-                .map(|storage| integer_element_type(&storage.real));
+                .map(|storage| integer_element_type(storage.real()));
             let expected_precision =
                 expected_integer
                     .is_none()

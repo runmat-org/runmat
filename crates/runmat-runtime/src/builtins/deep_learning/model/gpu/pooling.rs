@@ -1,6 +1,6 @@
 use super::*;
 use crate::builtins::common::gpu_helpers::{
-    propagate_output_provenance, reject_gpu_output, unary_gpu_output_matches_shape,
+    propagate_owned_output_provenance, reject_gpu_output, unary_gpu_output_matches_shape,
     GpuOutputAliasPolicy, UnaryGpuOutputContract,
 };
 use runmat_accelerate_api::{
@@ -166,7 +166,7 @@ pub(super) async fn forward(
         )?;
     }
     cancel().map_err(super::stage_failure::StageExecutionFailure::Abandoned)?;
-    propagate_output_provenance(&mut current, [input])?;
+    let current = propagate_owned_output_provenance(current, [input])?;
     Ok(Some(current))
 }
 

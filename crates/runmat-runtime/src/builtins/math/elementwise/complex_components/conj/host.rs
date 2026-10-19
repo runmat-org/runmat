@@ -44,13 +44,13 @@ fn conjugate_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
                 .map(|(real, imaginary)| (real, -imaginary))
                 .collect(),
         ),
-        ComplexStorage::Integer(storage) => ComplexStorage::Integer(
-            IntegerComplexStorage::new(
-                storage.real,
-                conjugate_integer_imaginary_storage(storage.imag),
+        ComplexStorage::Integer(storage) => {
+            let (real, imag) = storage.into_unbounded_components();
+            ComplexStorage::Integer(
+                IntegerComplexStorage::new(real, conjugate_integer_imaginary_storage(imag))
+                    .map_err(|error| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, error))?,
             )
-            .map_err(|error| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, error))?,
-        ),
+        }
     };
     ComplexTensor::from_complex_storage(storage, shape)
         .map(Value::ComplexTensor)

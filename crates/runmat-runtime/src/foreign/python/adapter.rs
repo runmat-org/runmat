@@ -46,7 +46,7 @@ use super::super::{
 use super::conversion::{value_from_python, value_to_python};
 use super::{IsolatedPythonClient, NestedPythonCall, NestedPythonQueue, PythonClientRetirement};
 use crate::builtins::common::validation::value_text_scalar_string;
-use crate::context::{ForeignCall, RuntimeContext};
+use crate::context::{ForeignCall, ForeignCallCompletion, RuntimeContext};
 use crate::execution::RetainedValueReadLease;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -1181,7 +1181,7 @@ impl ForeignAdapter for PythonAdapter {
     fn invoke(&self, context: RuntimeContext, call: ForeignCall) -> ForeignAdapterFuture {
         if self.retirement_requested.get() || self.project_retirement.is_pending() {
             let error = invalid_call("Python selected adapter is retiring");
-            return Box::pin(async move { Err(error) });
+            return Box::pin(async move { ForeignCallCompletion::invoked(Err(error)) });
         }
         let mode = self.configuration.borrow().execution_mode;
         if matches!(call.symbol.as_str(), "status" | "configure")
@@ -1189,14 +1189,16 @@ impl ForeignAdapter for PythonAdapter {
         {
             let result =
                 crate::foreign::runtime::root_adapter_result(self.invoke_control_now(call));
-            return Box::pin(async move { result });
+            return Box::pin(async move { ForeignCallCompletion::invoked(result) });
         }
         if mode == PythonExecutionMode::InProcess {
             let Some(owner) = self.self_weak.upgrade() else {
                 let error = invalid_call("Python adapter owner is unavailable");
-                return Box::pin(async move { Err(error) });
+                return Box::pin(async move { ForeignCallCompletion::invoked(Err(error)) });
             };
-            return Box::pin(async move { owner.invoke_in_process(context, call).await });
+            return Box::pin(async move {
+                ForeignCallCompletion::invoked(owner.invoke_in_process(context, call).await)
+            });
         }
         if call.symbol == "terminate" {
             let state = self.isolated_state();
@@ -1205,11 +1207,13 @@ impl ForeignAdapter for PythonAdapter {
                 let result = terminate_isolated(state, arguments)
                     .await
                     .and_then(super::super::single_output_sequence);
-                crate::foreign::runtime::root_adapter_result(result)
+                ForeignCallCompletion::invoked(crate::foreign::runtime::root_adapter_result(result))
             });
         }
         let state = self.isolated_state();
-        Box::pin(invoke_isolated(state, context, call))
+        Box::pin(async move {
+            ForeignCallCompletion::invoked(invoke_isolated(state, context, call).await)
+        })
     }
 
     fn is_isolated(&self) -> bool {
@@ -1720,6 +1724,7 @@ mod tests {
                     requested_outputs: 1,
                 },
             ))
+            .into_invoked_result()
             .expect("construct Python object"),
         );
         let Value::Foreign(reference) = object else {
@@ -1738,6 +1743,7 @@ mod tests {
                 requested_outputs: 0,
             },
         ))
+        .into_invoked_result()
         .expect("set Python attribute");
         let answer = only_output(
             futures::executor::block_on(adapter.invoke(
@@ -1749,6 +1755,7 @@ mod tests {
                     requested_outputs: 1,
                 },
             ))
+            .into_invoked_result()
             .expect("get Python attribute"),
         );
         assert_eq!(answer, Value::Int(runmat_value::IntValue::I64(42)));

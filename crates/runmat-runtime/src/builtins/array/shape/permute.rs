@@ -15,6 +15,8 @@ use runmat_value::{
     StringArray, Tensor, Value,
 };
 
+mod managed;
+
 fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
@@ -240,6 +242,11 @@ pub(crate) fn permute_tensor(
     tensor: Tensor,
     order: &[usize],
 ) -> crate::BuiltinResult<Tensor> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        if let Some(output) = managed::tensor(&runtime, builtin, &tensor, order)? {
+            return Ok(output);
+        }
+    }
     let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
@@ -299,6 +306,11 @@ pub(crate) fn permute_complex_tensor(
     ct: ComplexTensor,
     order: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        if let Some(output) = managed::complex(&runtime, builtin, &ct, order)? {
+            return Ok(output);
+        }
+    }
     let (storage, shape) = ct.into_complex_storage_and_shape();
     let (storage, new_shape) = match storage {
         ComplexStorage::F64(values) => {
@@ -310,8 +322,9 @@ pub(crate) fn permute_complex_tensor(
             (ComplexStorage::F32(values.into()), shape)
         }
         ComplexStorage::Integer(storage) => {
-            let (real, new_shape) = permute_integer_storage(builtin, storage.real, &shape, order)?;
-            let (imag, imag_shape) = permute_integer_storage(builtin, storage.imag, &shape, order)?;
+            let (source_real, source_imag) = storage.into_unbounded_components();
+            let (real, new_shape) = permute_integer_storage(builtin, source_real, &shape, order)?;
+            let (imag, imag_shape) = permute_integer_storage(builtin, source_imag, &shape, order)?;
             debug_assert_eq!(new_shape, imag_shape);
             let storage = IntegerComplexStorage::new(real, imag)
                 .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))?;
@@ -327,6 +340,11 @@ pub(crate) fn permute_logical_array(
     la: LogicalArray,
     order: &[usize],
 ) -> crate::BuiltinResult<LogicalArray> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        if let Some(output) = managed::logical(&runtime, builtin, &la, order)? {
+            return Ok(output);
+        }
+    }
     let LogicalArray { data, shape } = la;
     let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
     LogicalArray::new(out, new_shape).map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
@@ -379,7 +397,7 @@ pub(crate) async fn permute_gpu(
         let native = provider.permute(&handle, &zero_based);
 
         match native {
-            Ok(Some(mut out)) => {
+            Ok(Some(out)) => {
                 if !gpu_helpers::permutation_output_matches(&handle, &out, provider, &zero_based) {
                     return Err(gpu_helpers::reject_gpu_output(
                         out,
@@ -389,7 +407,7 @@ pub(crate) async fn permute_gpu(
                         ),
                     ));
                 }
-                gpu_helpers::propagate_output_provenance(&mut out, [&handle])?;
+                let out = gpu_helpers::propagate_owned_output_provenance(out, [&handle])?;
                 return Ok(Value::GpuTensor(out));
             }
             Ok(None) => {}
@@ -787,7 +805,7 @@ pub(crate) mod tests {
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 2, u64::MAX]),
                 &IntegerStorage::U64(vec![5, 7, 6, 8]),

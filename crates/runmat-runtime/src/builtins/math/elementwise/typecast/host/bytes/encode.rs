@@ -85,11 +85,11 @@ fn complex(storage: ComplexStorage) -> Vec<u8> {
             let mut bytes = Vec::new();
             for index in 0..values.len() {
                 bytes.extend(integer(
-                    values.real.value_at(index).expect("validated real lane"),
+                    values.real().value_at(index).expect("validated real lane"),
                 ));
                 bytes.extend(integer(
                     values
-                        .imag
+                        .imag()
                         .value_at(index)
                         .expect("validated imaginary lane"),
                 ));

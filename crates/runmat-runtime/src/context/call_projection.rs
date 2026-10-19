@@ -934,6 +934,7 @@ mod tests {
                     None,
                 )
                 .await
+                .break_value()
                 .unwrap()
                 .unwrap();
                 assert_eq!(output.value().as_slice(), &[Value::Num(99.0)]);
@@ -949,7 +950,7 @@ mod tests {
         assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
         let loader: Rc<DynamicFunctionLoader> = Rc::new(|_, _, _, _, _, _| {
             Box::pin(async {
-                Some(
+                std::ops::ControlFlow::Break(
                     crate::execution::RootedValueSequence::new(
                         ValueSequence::single(Value::Num(99.0)).unwrap(),
                     )

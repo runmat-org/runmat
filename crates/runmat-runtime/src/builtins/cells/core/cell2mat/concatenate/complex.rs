@@ -55,17 +55,15 @@ pub(super) fn copy_integer(
         };
         destination::for_each(entry, coordinates, plan, |source, destination| {
             let real = storage
-                .real
+                .real()
                 .value_at(source)
                 .expect("validated real storage bounds");
             let imaginary = storage
-                .imag
+                .imag()
                 .value_at(source)
                 .expect("validated imaginary storage bounds");
             output
-                .real
-                .set_value(destination, real)
-                .and_then(|_| output.imag.set_value(destination, imaginary))
+                .set_exact_assignment(destination, real, imaginary)
                 .map_err(|error| {
                     cell2mat_error_with_message(
                         format!("cell2mat: {error}"),

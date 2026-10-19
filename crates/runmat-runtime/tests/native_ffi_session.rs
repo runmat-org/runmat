@@ -131,6 +131,7 @@ fn invoke_outputs(
             requested_outputs,
         },
     )))
+    .into_invoked_result()
     .map_err(Box::new)?
     .with_owned_sequence(|sequence| {
         runmat_runtime::execution::RootedValues::from_output_storage(sequence.into_output_storage())
@@ -683,6 +684,7 @@ async fn isolated_add(context: &RuntimeContext) -> Value {
             },
         ))
         .await
+        .into_invoked_result()
         .expect("isolated native fixture call")
         .with_owned_sequence(|sequence| {
             sequence

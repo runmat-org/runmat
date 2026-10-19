@@ -194,12 +194,12 @@ fn exact_complex_scalar(input: &NumericInput) -> ExactComplexScalar {
         NumericInput::Complex(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 let real = storage
-                    .real
+                    .real()
                     .value_at(0)
                     .map(|value| int_value_to_i128(&value))
                     .unwrap_or(0);
                 let imag = storage
-                    .imag
+                    .imag()
                     .value_at(0)
                     .map(|value| int_value_to_i128(&value))
                     .unwrap_or(0);
@@ -234,23 +234,23 @@ fn centered_complex_values(tensor: &ComplexTensor, rows: usize, cols: usize) -> 
     for col in 0..cols {
         let start = col * rows;
         let real_anchor = storage
-            .real
+            .real()
             .value_at(start)
             .map(|value| int_value_to_i128(&value))
             .unwrap_or(0);
         let imag_anchor = storage
-            .imag
+            .imag()
             .value_at(start)
             .map(|value| int_value_to_i128(&value))
             .unwrap_or(0);
         for index in start..start + rows {
             let real = storage
-                .real
+                .real()
                 .value_at(index)
                 .map(|value| int_value_to_i128(&value))
                 .unwrap_or(real_anchor);
             let imag = storage
-                .imag
+                .imag()
                 .value_at(index)
                 .map(|value| int_value_to_i128(&value))
                 .unwrap_or(imag_anchor);

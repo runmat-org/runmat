@@ -46,13 +46,13 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                         let index = row + col * rows;
                         real.push(
                             storage
-                                .real
+                                .real()
                                 .value_at(index)
                                 .expect("integer tensor storage matches tensor shape"),
                         );
                         imag.push(
                             storage
-                                .imag
+                                .imag()
                                 .value_at(index)
                                 .expect("integer tensor storage matches tensor shape"),
                         );
@@ -60,11 +60,11 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                     ComplexTensor::new_integer(
                         runmat_value::IntegerComplexStorage::new(
                             storage
-                                .real
+                                .real()
                                 .from_exact_values_like(real)
                                 .map_err(invalid_variable)?,
                             storage
-                                .imag
+                                .imag()
                                 .from_exact_values_like(imag)
                                 .map_err(invalid_variable)?,
                         )

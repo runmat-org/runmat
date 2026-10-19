@@ -84,7 +84,9 @@ impl RunMatSession {
                     let args = match runmat_runtime::execution::RootedValues::new(args) {
                         Ok(args) => args,
                         Err(error) => {
-                            return Box::pin(async move { Some(Err(error.into_runtime_error())) });
+                            return Box::pin(async move {
+                                std::ops::ControlFlow::Break(Err(error.into_runtime_error()))
+                            });
                         }
                     };
                     Box::pin(super::dynamic::load_dynamic_function(
@@ -736,6 +738,8 @@ impl RunMatSession {
         let mut completed_vm_root = None;
         #[cfg(not(target_arch = "wasm32"))]
         let mut completed_native_root = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut ready_route_selection = None;
         let mut suppressed_value: Option<Value> = None; // Track value for type info when suppressed
         let mut error = None;
         let mut workspace_updates: Vec<WorkspaceEntry> = Vec::new();
@@ -800,10 +804,16 @@ impl RunMatSession {
                     &bytecode.function_registry,
                     workspace,
                     profile.as_ref(),
+                    !(is_expression_stmt
+                        && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)),
                 )
                 .await
             {
-                Ok(super::executable::TieredInteractiveInvocation::Native(Ok(native))) => {
+                Ok(super::executable::TieredInteractiveInvocation::Native(
+                    Ok(native),
+                    selected,
+                )) => {
+                    ready_route_selection = selected;
                     native_loop_backedges = native.loop_backedges.clone();
                     if is_expression_stmt {
                         if let Some(expression) = native.expression.clone() {
@@ -850,8 +860,14 @@ impl RunMatSession {
                         }
                     }
                 }
-                Ok(super::executable::TieredInteractiveInvocation::Cold) => {}
-                Ok(super::executable::TieredInteractiveInvocation::Native(Err(native_error))) => {
+                Ok(super::executable::TieredInteractiveInvocation::Cold(selected)) => {
+                    ready_route_selection = selected;
+                }
+                Ok(super::executable::TieredInteractiveInvocation::Native(
+                    Err(native_error),
+                    selected,
+                )) => {
+                    ready_route_selection = selected;
                     used_jit = true;
                     execution_completed = true;
                     error = Some(*native_error);
@@ -1098,6 +1114,16 @@ impl RunMatSession {
                 execution_time,
                 &native_loop_backedges,
             );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(selected) = ready_route_selection {
+            selected.observe(if execution_runtime.is_cancelled() {
+                runmat_execution::WholeWorkObservationOutcome::Cancelled
+            } else if error.is_none() {
+                runmat_execution::WholeWorkObservationOutcome::Success
+            } else {
+                runmat_execution::WholeWorkObservationOutcome::OperationalFailure
+            });
         }
         let execution_time_ms = execution_time.as_millis() as u64;
 

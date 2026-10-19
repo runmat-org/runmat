@@ -58,8 +58,8 @@ pub(super) async fn evaluate(
         ExponentialOperation::Expm1 => provider.unary_expm1(&handle).await,
     };
     match provider_result {
-        Ok(mut output) if valid_real(&output, &handle, provider, contract::precision(&handle)) => {
-            gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+        Ok(output) if valid_real(&output, &handle, provider, contract::precision(&handle)) => {
+            let output = gpu_helpers::propagate_owned_output_provenance(output, [&handle])?;
             return gpu_helpers::resident_gpu_value(output);
         }
         Ok(output) => {

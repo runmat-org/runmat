@@ -371,7 +371,7 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
             if let Some(mut out) = rot90_gpu_via_provider(provider, &handle, steps).await? {
-                gpu_helpers::propagate_output_provenance(&mut out, [&handle])?;
+                out = gpu_helpers::propagate_owned_output_provenance(out, [&handle])?;
                 return Ok(Value::GpuTensor(out));
             }
         }
@@ -442,7 +442,7 @@ async fn rot90_gpu_via_provider(
             ),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut permuted, [handle])?;
+    permuted = gpu_helpers::propagate_owned_output_provenance(permuted, [handle])?;
     let axes = [if steps == 1 { 0 } else { 1 }];
     let stage_failure = |source: runmat_accelerate_api::ProviderExecutionError| {
         failure(if permuted.shares_allocation_with(handle) {

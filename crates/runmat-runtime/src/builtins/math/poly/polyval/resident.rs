@@ -87,8 +87,8 @@ impl Request {
         }
     }
 
-    fn adopt(&self, mut output: GpuTensorHandle) -> BuiltinResult<Value> {
-        gpu_helpers::propagate_output_provenance(&mut output, self.originals.iter())?;
+    fn adopt(&self, output: GpuTensorHandle) -> BuiltinResult<Value> {
+        let output = gpu_helpers::propagate_owned_output_provenance(output, self.originals.iter())?;
         gpu_helpers::resident_gpu_value(output)
     }
 

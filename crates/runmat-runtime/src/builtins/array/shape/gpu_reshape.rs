@@ -67,7 +67,7 @@ pub(super) fn reshape(
             error("provider returned an invalid materialized reshape"),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [&source])?;
+    output = gpu_helpers::propagate_owned_output_provenance(output, [&source])?;
     Ok(output)
 }
 

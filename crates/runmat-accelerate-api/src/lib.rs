@@ -4414,6 +4414,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn cat(&self, _dim: usize, _inputs: &[GpuTensorHandle]) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("cat not supported by provider"))
     }
+    /// Concatenate resident tensors. Only a certified pre-effect Unsupported
+    /// response permits the caller to retry through a host implementation.
+    fn cat_optional<'a>(
+        &'a self,
+        _dim: usize,
+        _inputs: &'a [GpuTensorHandle],
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("cat not supported by provider")
+    }
     /// Tile storage without changing its numerical class. None certifies that
     /// no staging, allocation or submission was attempted for this request.
     /// Failures retain their cause and effect phase; they are not no-attempt.

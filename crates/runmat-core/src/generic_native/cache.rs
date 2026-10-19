@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use runmat_execution::Digest;
 use runmat_hir::FunctionId;
 use runmat_jit::{
-    entry::{EntryKey, EntryRegistry, PublishedEntry},
+    entry::{EntryKey, EntryPublications, EntryRegistry, PublishedEntry},
     invalidation::{
         DependencyKey, DependencyTracker, PreparedDependencyObservation, ReadyDependencyObservation,
     },
@@ -134,6 +134,52 @@ impl Default for GenericNativeCache {
 }
 
 impl GenericNativeCache {
+    pub(crate) fn has_retained_entries(&self) -> bool {
+        self.entries.retained_cell_count() != 0
+    }
+
+    /// Snapshot products that existed before this invocation's tiering decision
+    /// can compile synchronously. Only those products have zero ready compile
+    /// charge and are eligible for a ready-route placement comparison.
+    pub(crate) fn ready_publications(
+        &self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        profile: Option<&RepresentationProfile>,
+    ) -> Result<EntryPublications, runmat_runtime::RuntimeError> {
+        let key = entry_key(unit, preferred_function)?;
+        Ok(self
+            .entries
+            .publications(&key, profile.map(|profile| profile.digest)))
+    }
+
+    /// Recheck the product selected by whole-work placement immediately before
+    /// arguments enter either executor. A placement receipt never pins code or
+    /// its source dependencies by itself.
+    pub(crate) fn ready_entry_is_current(
+        &mut self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        selected: &PublishedEntry,
+    ) -> Result<bool, runmat_runtime::RuntimeError> {
+        self.observe_unit_dependencies(unit, preferred_function)?;
+        let current = self.dependencies.snapshot_all();
+        let key = entry_key(unit, preferred_function)?;
+        let ready = match selected.tier {
+            runmat_jit::entry::PublishedTier::Generic => self.entries.resolve(&key, &current),
+            runmat_jit::entry::PublishedTier::Specialized { profile } => {
+                self.entries.resolve_specialized(&key, profile, &current)
+            }
+        };
+        Ok(ready.is_some_and(|ready| {
+            ready.publication == selected.publication
+                && ready.tier == selected.tier
+                && ready.entrypoint == selected.entrypoint
+                && ready.dependencies == selected.dependencies
+                && Rc::ptr_eq(&ready.executor, &selected.executor)
+        }))
+    }
+
     #[cfg(test)]
     pub(crate) fn with_tiering_config(config: runmat_jit::tiering::TieringConfig) -> Self {
         Self {
@@ -161,7 +207,13 @@ impl GenericNativeCache {
         }
         let snapshot = self.dependencies.snapshot(dependency_keys.iter());
         self.entries
-            .publish(key, compiled.executor, compiled.entrypoint, snapshot)
+            .publish(
+                key,
+                compiled.executor,
+                compiled.entrypoint,
+                snapshot,
+                compiled.compilation,
+            )
             .map_err(|error| super::error::stage("NativePublication", error))
     }
 
@@ -259,7 +311,13 @@ impl GenericNativeCache {
                         }
                         let snapshot = self.dependencies.snapshot(dependency_keys.iter());
                         self.entries
-                            .publish(key, compiled.executor, compiled.entrypoint, snapshot)
+                            .publish(
+                                key,
+                                compiled.executor,
+                                compiled.entrypoint,
+                                snapshot,
+                                compiled.compilation,
+                            )
                             .map(Some)
                             .map_err(|error| super::error::stage("NativePublication", error))
                     }
@@ -506,6 +564,7 @@ impl GenericNativeCache {
                 Rc::new(compiled.executor),
                 compiled.entrypoint,
                 snapshot,
+                compiled.compilation,
             )
             .map(Some)
             .map_err(|error| super::error::stage("NativePublication", error))
@@ -572,6 +631,7 @@ impl GenericNativeCache {
                     Rc::new(compiled.executor),
                     compiled.entrypoint,
                     pending.dependencies,
+                    compiled.compilation,
                 ),
                 CompilationTier::Specialized(profile) => self.entries.publish_specialized(
                     key.entry,
@@ -579,6 +639,7 @@ impl GenericNativeCache {
                     Rc::new(compiled.executor),
                     compiled.entrypoint,
                     pending.dependencies,
+                    compiled.compilation,
                 ),
             };
             published.map_err(|error| super::error::stage("NativePublication", error))?;

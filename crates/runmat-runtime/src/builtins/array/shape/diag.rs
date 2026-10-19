@@ -462,7 +462,7 @@ fn upload_diag_result(
             ))
         }
     };
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -555,7 +555,7 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
                 template,
             ) && (parsed.vector_mode || !output.shares_allocation_with(&handle)) =>
         {
-            gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+            output = gpu_helpers::propagate_owned_output_provenance(output, [&handle])?;
             Ok(Some(Value::GpuTensor(output)))
         }
         Ok(output) => Err(gpu_helpers::reject_gpu_output(
@@ -736,12 +736,12 @@ fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResu
         }
         ComplexStorage::Integer(storage) => {
             let zero = storage
-                .real
+                .real()
                 .zeros_like(1)
                 .value_at(0)
                 .expect("one typed integer zero");
             let (_, shape) = evaluate_column_major_diag(
-                &storage.real.exact_values(),
+                &storage.real().exact_values(),
                 &input_shape,
                 args,
                 zero.clone(),
@@ -1091,7 +1091,7 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
         }
         Value::ComplexTensor(proto_tensor) => {
             if let Some(storage) = proto_tensor.integer_storage() {
-                let target = storage.real.integer_class();
+                let target = storage.real().integer_class();
                 integer_value_from_value(value, target)
             } else {
                 complex_tensor_from_value_with_dtype(value, proto_tensor.numeric_dtype())
@@ -1278,10 +1278,10 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
         Value::ComplexTensor(tensor) => {
             let data: Vec<u8> = if let Some(storage) = &tensor.integer_storage() {
                 storage
-                    .real
+                    .real()
                     .exact_values()
                     .into_iter()
-                    .zip(storage.imag.exact_values())
+                    .zip(storage.imag().exact_values())
                     .map(|(re, im)| if re.is_zero() && im.is_zero() { 0 } else { 1 })
                     .collect()
             } else {
@@ -1435,8 +1435,8 @@ fn ensure_integer_exact_for_complex_float(value: &Value, dtype: NumericDType) ->
             .integer_storage()
             .is_none_or(|storage| storage.exact_values().iter().all(exact)),
         Value::ComplexTensor(tensor) => tensor.integer_storage().is_none_or(|storage| {
-            storage.real.exact_values().iter().all(exact)
-                && storage.imag.exact_values().iter().all(exact)
+            storage.real().exact_values().iter().all(exact)
+                && storage.imag().exact_values().iter().all(exact)
         }),
         _ => true,
     };
@@ -1814,8 +1814,8 @@ mod tests {
         };
         assert_eq!(tensor.shape(), &[2, 2]);
         let storage = tensor.integer_storage().expect("complex integer storage");
-        assert_eq!(storage.real, IntegerStorage::U8(vec![2, 0, 0, u8::MAX]));
-        assert_eq!(storage.imag, IntegerStorage::U8(vec![0, 0, 0, 5]));
+        assert_eq!(storage.real(), &IntegerStorage::U8(vec![2, 0, 0, u8::MAX]));
+        assert_eq!(storage.imag(), &IntegerStorage::U8(vec![0, 0, 0, 5]));
     }
 
     #[test]
@@ -2050,12 +2050,12 @@ mod tests {
             assert_eq!(result.shape(), &[2, 2]);
             let storage = result.integer_storage().unwrap();
             assert_eq!(
-                storage.real,
-                IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
+                storage.real(),
+                &IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
             );
             assert_eq!(
-                storage.imag,
-                IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
+                storage.imag(),
+                &IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
             );
             let Value::ComplexTensor(original) =
                 block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(input))).unwrap()
@@ -2116,12 +2116,12 @@ mod tests {
             };
             let storage = gathered.integer_storage().expect("paired storage");
             assert_eq!(
-                storage.real,
-                IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
+                storage.real(),
+                &IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
             );
             assert_eq!(
-                storage.imag,
-                IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
+                storage.imag(),
+                &IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
             );
 
             drop(prototype);

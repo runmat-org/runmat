@@ -176,7 +176,7 @@ pub(in crate::builtins::deep_learning::model::gpu) async fn adjoint(
         .await
         .map_err(|error| provider_failure(function, "resident pooling adjoint", error.into()))?;
     cancel()?;
-    let mut output = validate(
+    let output = validate(
         output,
         &seed,
         input,
@@ -186,6 +186,6 @@ pub(in crate::builtins::deep_learning::model::gpu) async fn adjoint(
         GpuOutputAliasPolicy::RequireDistinctAllocation,
         function,
     )?;
-    propagate_output_provenance(&mut output, [input, upstream])?;
+    let output = propagate_owned_output_provenance(output, [input, upstream])?;
     Ok(output)
 }

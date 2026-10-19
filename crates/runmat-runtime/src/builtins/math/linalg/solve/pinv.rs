@@ -176,8 +176,8 @@ async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Va
         }
         let options = ProviderPinvOptions { tolerance: tol };
         match provider.pinv(&handle, options).await {
-            Ok(mut result) if valid_pinv_gpu_output(&handle, &result, provider) => {
-                gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
+            Ok(result) if valid_pinv_gpu_output(&handle, &result, provider) => {
+                let result = gpu_helpers::propagate_owned_output_provenance(result, [&handle])?;
                 return gpu_helpers::resident_gpu_value(result);
             }
             Ok(result) => {

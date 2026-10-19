@@ -546,25 +546,44 @@ async fn gradient_gpu_outputs(
                         complex_storage,
                     ) =>
                 {
-                    gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])?;
-                    if complex_storage
-                        || runmat_accelerate_api::handle_storage(&device_result)
-                            == GpuTensorStorage::ComplexInterleaved
-                    {
-                        outputs.push(gpu_helpers::complex_gpu_value(device_result)?);
-                    } else {
-                        outputs.push(gpu_helpers::resident_gpu_value(device_result)?);
+                    let adoption =
+                        gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])
+                            .and_then(|()| {
+                                device_result
+                                    .allocation_lease()
+                                    .validate_live()
+                                    .map_err(|source| {
+                                        crate::build_runtime_error(format!(
+                                            "gradient: cannot adopt provider output: {source}"
+                                        ))
+                                        .with_source(source)
+                                        .build()
+                                    })
+                            });
+                    if let Err(error) = adoption {
+                        let error = gpu_helpers::reject_gpu_output(device_result, error);
+                        return Err(reject_gradient_outputs(outputs, error));
                     }
+                    runmat_accelerate_api::mark_residency(&device_result);
+                    outputs.push(Value::GpuTensor(device_result));
                 }
                 Ok(device_result) => {
                     let mut error = gradient_internal_error(
                         "provider returned malformed or aliased gradient output",
                     );
                     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                    return Err(gpu_helpers::reject_gpu_output(device_result, error));
+                    let error = gpu_helpers::reject_gpu_output(device_result, error);
+                    return Err(reject_gradient_outputs(outputs, error));
                 }
                 Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                    drop(outputs);
+                    if !outputs.is_empty() {
+                        let mut failure = gradient_internal_error(
+                            "provider declined gradient after producing an earlier output",
+                        );
+                        failure = kernel_error::with_provider_source(failure, error.into());
+                        failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        return Err(reject_gradient_outputs(outputs, failure));
+                    }
                     return gradient_host_fallback(&handle, owner, requested_dims, all_spacings)
                         .await;
                 }
@@ -573,7 +592,7 @@ async fn gradient_gpu_outputs(
                         gradient_internal_error(format!("provider gradient failed: {source}"));
                     error = kernel_error::with_provider_source(error, source.into());
                     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                    return Err(error);
+                    return Err(reject_gradient_outputs(outputs, error));
                 }
             }
         }
@@ -607,6 +626,16 @@ fn gradient_output_handle(value: &Value) -> Option<&GpuTensorHandle> {
         Value::GpuTensor(handle) => Some(handle),
         _ => None,
     }
+}
+
+fn reject_gradient_outputs(outputs: Vec<Value>, error: RuntimeError) -> RuntimeError {
+    gpu_helpers::reject_gpu_outputs(
+        outputs.into_iter().filter_map(|output| match output {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        }),
+        error,
+    )
 }
 
 fn valid_gradient_provider_result(

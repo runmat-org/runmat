@@ -108,3 +108,55 @@ fn callback_proxy_reuses_only_the_same_callable_instance() {
         );
     });
 }
+
+#[test]
+fn missing_qualified_target_leaves_callback_unregistered() {
+    let Some(home) = std::env::var_os("RUNMAT_TEST_JAVA_HOME") else {
+        return;
+    };
+    runmat_gc::gc_test_context(|| {
+        let foreign = Rc::new(crate::foreign::ForeignRuntime::new(
+            crate::foreign::ForeignPlatform::Native,
+        ));
+        let adapter = JavaAdapter::with_configuration(
+            foreign.handles().clone(),
+            JavaDiscoveryRequest {
+                explicit_home: Some(home.into()),
+                search_system: false,
+                ..JavaDiscoveryRequest::default()
+            },
+            JvmConfig::default(),
+        )
+        .expect("Java adapter");
+        foreign
+            .register_adapter(adapter.clone())
+            .expect("registered Java adapter");
+        let context =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(
+                    crate::context::RuntimeServicePorts::default().with_foreign(foreign),
+                );
+        let callback = Value::function_handle("callback".into());
+        let arguments = vec![
+            Value::String("no.such.RunMatMissingClass.callback".into()),
+            callback,
+        ];
+        let original_backing = arguments.as_ptr();
+        let completion = futures::executor::block_on(adapter.clone().invoke_in_process(
+            context,
+            ForeignCall {
+                adapter: JAVA_ADAPTER_ID.into(),
+                symbol: "invoke_qualified".into(),
+                arguments,
+                requested_outputs: 1,
+            },
+        ));
+        let call = match completion.into_owner_return() {
+            Err(call) => call,
+            Ok(_) => panic!("missing class must decline before callback marshalling"),
+        };
+        assert_eq!(call.arguments.as_ptr(), original_backing);
+        assert_eq!(call.arguments.len(), 2);
+        assert!(adapter.callbacks.borrow().is_empty());
+    });
+}

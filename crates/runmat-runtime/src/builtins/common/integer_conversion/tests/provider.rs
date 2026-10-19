@@ -37,9 +37,9 @@ fn typed_complex_gpu_conversion_stays_exact_and_resident() {
         };
         let storage = gathered.integer_storage().expect("storage");
         assert_eq!(
-            storage.real,
-            IntegerStorage::I64(vec![9_007_199_254_740_993, i64::MAX])
+            storage.real(),
+            &IntegerStorage::I64(vec![9_007_199_254_740_993, i64::MAX])
         );
-        assert_eq!(storage.imag, IntegerStorage::I64(vec![1, i64::MAX]));
+        assert_eq!(storage.imag(), &IntegerStorage::I64(vec![1, i64::MAX]));
     });
 }

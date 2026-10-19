@@ -76,7 +76,7 @@ pub(in super::super) fn publish_pair(
     rhs: &GpuTensorHandle,
     shape: &[usize],
     domain: PowerResultDomain,
-    mut output: GpuTensorHandle,
+    output: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
     if !valid_output(&output, lhs, rhs, provider, shape, domain) {
         return Err(gpu_helpers::reject_gpu_output(
@@ -84,7 +84,7 @@ pub(in super::super) fn publish_pair(
             builtin_error("power: provider returned malformed domain-preserving output"),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [lhs, rhs])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [lhs, rhs])?;
     if domain == PowerResultDomain::Complex {
         gpu_helpers::complex_gpu_value(output)
     } else {

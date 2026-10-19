@@ -1112,8 +1112,8 @@ fn find_values_for_complex_tensor(
         };
     };
     let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
-    let real = select_integer_values(&storage.real, &selected);
-    let imag = select_integer_values(&storage.imag, &selected);
+    let real = select_integer_values(storage.real(), &selected);
+    let imag = select_integer_values(storage.imag(), &selected);
     let storage = IntegerComplexStorage::new(real, imag)
         .expect("paired typed complex storage preserves class and length through find");
     FindValues::IntegerComplex(storage)
@@ -2105,8 +2105,8 @@ pub(crate) mod tests {
             panic!("expected typed complex tensor values");
         };
         let storage = values.integer_storage().expect("typed complex values");
-        assert_eq!(storage.real, IntegerStorage::I16(vec![-7, 0, 9]));
-        assert_eq!(storage.imag, IntegerStorage::I16(vec![0, 5, 0]));
+        assert_eq!(storage.real(), &IntegerStorage::I16(vec![-7, 0, 9]));
+        assert_eq!(storage.imag(), &IntegerStorage::I16(vec![0, 5, 0]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

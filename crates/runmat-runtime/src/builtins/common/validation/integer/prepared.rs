@@ -235,8 +235,8 @@ pub async fn prepare_direct_integer_f64_boundary<'a>(
         },
         Value::ComplexTensor(tensor) => match tensor.integer_storage() {
             Some(storage) => {
-                scan_storage(&storage.real, &mut cooperation).await?
-                    && scan_storage(&storage.imag, &mut cooperation).await?
+                scan_storage(storage.real(), &mut cooperation).await?
+                    && scan_storage(storage.imag(), &mut cooperation).await?
             }
             None => true,
         },

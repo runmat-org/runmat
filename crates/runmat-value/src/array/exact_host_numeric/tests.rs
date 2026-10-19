@@ -1,5 +1,5 @@
 use super::*;
-use crate::Tensor;
+use crate::{ComplexStorage, Tensor};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug)]
@@ -498,6 +498,79 @@ fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation
     );
     drop(tensor);
     assert_eq!(integer_quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn paired_integer_owner_retains_both_payloads_and_shape_through_aliases() {
+    let bytes = ExactHostIntegerComplexTensorAllocation::requested_bytes_for_dimensions(
+        NumericDType::U64,
+        2,
+        2,
+    )
+    .expect("paired quote");
+    let quota = permit(bytes);
+    let mut output =
+        ExactHostIntegerComplexTensorAllocation::new(NumericDType::U64, &[1, 2], &quota)
+            .expect("paired owner");
+    output
+        .set(
+            0,
+            NumericScalar::U64(9_007_199_254_740_993),
+            NumericScalar::U64(u64::MAX),
+        )
+        .expect("first pair");
+    output
+        .set(1, NumericScalar::U64(u64::MAX), NumericScalar::U64(7))
+        .expect("second pair");
+    let tensor = output.into_tensor().expect("paired tensor");
+    let storage = tensor.integer_storage().expect("paired storage");
+    let real_pointer = unsafe { storage.real_buffer().foreign_data_pointer() };
+    let imag_pointer = unsafe { storage.imag_buffer().foreign_data_pointer() };
+    let mut alias = tensor.clone();
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 3);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), bytes);
+    let alias_storage = alias.integer_storage().expect("paired alias");
+    assert_eq!(
+        unsafe { alias_storage.real_buffer().foreign_data_pointer() },
+        real_pointer
+    );
+    assert_eq!(
+        unsafe { alias_storage.imag_buffer().foreign_data_pointer() },
+        imag_pointer
+    );
+    assert!(alias.set_f64_assignment_at(0, 3.0, 4.0).is_err());
+    drop(tensor);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), bytes);
+    alias
+        .set_f64_assignment_at(0, 3.0, 4.0)
+        .expect("unique retained pair mutates in place");
+    assert!(alias.resize_zeroed_for_shape(vec![1, 3]).is_err());
+    assert_eq!(alias.shape(), &[1, 2]);
+    let (storage, shape) = alias.into_complex_storage_and_shape();
+    let ComplexStorage::Integer(storage) = storage else {
+        panic!("paired integer output");
+    };
+    let (real, imaginary) = storage.into_host_components();
+    assert_eq!(unsafe { real.foreign_data_pointer() }, real_pointer);
+    assert_eq!(unsafe { imaginary.foreign_data_pointer() }, imag_pointer);
+    drop(imaginary);
+    let projected = Tensor::from_shared_host_buffer(real, shape).expect("zero-copy component");
+    assert_eq!(
+        projected.integer_storage(),
+        Some(&IntegerStorage::U64(vec![3, u64::MAX]))
+    );
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 2);
+    drop(projected);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 0);
+
+    let denied = permit(bytes - 1);
+    assert!(matches!(
+        ExactHostIntegerComplexTensorAllocation::new(NumericDType::U64, &[1, 2], &denied,),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    assert_eq!(denied.retained.load(Ordering::SeqCst), 0);
+    assert_eq!(denied.claims.load(Ordering::SeqCst), 0);
 }
 
 #[test]

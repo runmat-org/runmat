@@ -11,7 +11,7 @@ pub(super) fn ensure_histc_input_extensions(value: &Value) -> BuiltinResult<()> 
         value,
         Value::Int(runmat_value::IntValue::I64(_) | runmat_value::IntValue::U64(_))
     ) || matches!(value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::I64 | NumericDType::U64))
-        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| matches!(storage.real.numeric_dtype(), NumericDType::I64 | NumericDType::U64)));
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| matches!(storage.real().numeric_dtype(), NumericDType::I64 | NumericDType::U64)));
     if wide {
         crate::compatibility::ensure_builtin_extension_enabled(
             &HISTC_WIDE_INTEGER_EXTENSION,
@@ -54,7 +54,7 @@ pub(super) fn complex_real_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor
     let (storage, shape) = tensor.into_complex_storage_and_shape();
     let data = match storage {
         runmat_value::ComplexStorage::Integer(storage) => storage
-            .real
+            .real()
             .exact_values()
             .into_iter()
             .map(|value| value.to_f64())

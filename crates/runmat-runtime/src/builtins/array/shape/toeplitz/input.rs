@@ -132,8 +132,8 @@ impl InputVector {
             },
             Self::TypedComplex(storage) => Self::TypedComplex(
                 IntegerComplexStorage::new(
-                    storage.real.clone(),
-                    conjugate_integer_imaginary_storage(storage.imag.clone()),
+                    storage.real().clone(),
+                    conjugate_integer_imaginary_storage(storage.imag().clone()),
                 )
                 .expect("existing typed complex storage has matching components"),
             ),

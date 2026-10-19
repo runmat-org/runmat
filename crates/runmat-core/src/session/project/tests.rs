@@ -42,6 +42,7 @@ fn project_foreign_integer(
                 requested_outputs: 1,
             },
         )))
+        .into_invoked_result()
         .expect("invoke started project foreign host");
     sequence.with_owned(|sequence| {
         let values = runmat_runtime::sequence::ResolveValueSequence::resolve(

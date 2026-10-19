@@ -18,12 +18,28 @@ impl AdamUpdateGpuEval {
             request.average_grad,
             request.average_sq_grad,
         ];
-        for output in [
-            &mut result.parameters,
-            &mut result.average_grad,
-            &mut result.average_sq_grad,
-        ] {
-            gpu_helpers::propagate_output_provenance(output, inputs.iter().copied().flatten())?;
+        let adoption = (|| {
+            for output in [
+                &mut result.parameters,
+                &mut result.average_grad,
+                &mut result.average_sq_grad,
+            ] {
+                gpu_helpers::propagate_output_provenance(output, inputs.iter().copied().flatten())?;
+                output
+                    .allocation_lease()
+                    .validate_live()
+                    .map_err(|source| {
+                        crate::build_runtime_error("adamupdate: cannot adopt provider output")
+                            .with_builtin("adamupdate")
+                            .with_source(source)
+                            .build()
+                    })?;
+                runmat_accelerate_api::mark_residency(output);
+            }
+            Ok::<(), crate::RuntimeError>(())
+        })();
+        if let Err(error) = adoption {
+            return Err(reject_adam_result(result, error));
         }
         Ok(Self {
             parameters: result.parameters,
@@ -33,26 +49,63 @@ impl AdamUpdateGpuEval {
     }
 
     pub(super) fn output(self) -> BuiltinResult<Value> {
-        match crate::output_count::current_output_count() {
-            None => gpu_helpers::resident_gpu_value(self.parameters),
-            Some(0) => Ok(Value::output_list(Vec::new())),
-            Some(1) => Ok(Value::output_list(vec![gpu_helpers::resident_gpu_value(
-                self.parameters,
-            )?])),
-            Some(2) => Ok(Value::output_list(vec![
-                gpu_helpers::resident_gpu_value(self.parameters)?,
-                gpu_helpers::resident_gpu_value(self.average_grad)?,
-            ])),
-            Some(3) => Ok(Value::output_list(vec![
-                gpu_helpers::resident_gpu_value(self.parameters)?,
-                gpu_helpers::resident_gpu_value(self.average_grad)?,
-                gpu_helpers::resident_gpu_value(self.average_sq_grad)?,
-            ])),
-            Some(requested) => Err(deep_learning_error(
-                "adamupdate",
-                format!("adamupdate: requested {requested} outputs, but at most 3 are supported"),
-            )),
+        let count = crate::output_count::current_output_count();
+        let requested = count.unwrap_or(1);
+        if requested > 3 {
+            return Err(gpu_helpers::reject_gpu_outputs(
+                [self.parameters, self.average_grad, self.average_sq_grad],
+                deep_learning_error(
+                    "adamupdate",
+                    format!(
+                        "adamupdate: requested {requested} outputs, but at most 3 are supported"
+                    ),
+                ),
+            ));
         }
+        let mut remaining = [self.parameters, self.average_grad, self.average_sq_grad]
+            .into_iter()
+            .enumerate();
+        if count.is_none() {
+            let (_, parameters) = remaining.next().expect("adam result has parameters");
+            while let Some((_, unused)) = remaining.next() {
+                if let Err(source) = unused.release() {
+                    return Err(gpu_helpers::reject_gpu_outputs(
+                        std::iter::once(parameters).chain(remaining.map(|(_, handle)| handle)),
+                        crate::build_runtime_error(
+                            "adamupdate: unused provider output retirement failed",
+                        )
+                        .with_builtin("adamupdate")
+                        .with_source(source)
+                        .build(),
+                    ));
+                }
+            }
+            return Ok(Value::GpuTensor(parameters));
+        }
+        let mut outputs = Vec::with_capacity(requested);
+        while let Some((index, handle)) = remaining.next() {
+            if index < requested {
+                outputs.push(Value::GpuTensor(handle));
+            } else if let Err(source) = handle.release() {
+                let error = crate::build_runtime_error(
+                    "adamupdate: unused provider output retirement failed",
+                )
+                .with_builtin("adamupdate")
+                .with_source(source)
+                .build();
+                return Err(gpu_helpers::reject_gpu_outputs(
+                    outputs
+                        .into_iter()
+                        .filter_map(|value| match value {
+                            Value::GpuTensor(handle) => Some(handle),
+                            _ => None,
+                        })
+                        .chain(remaining.map(|(_, handle)| handle)),
+                    error,
+                ));
+            }
+        }
+        Ok(Value::output_list(outputs))
     }
 }
 
@@ -168,12 +221,28 @@ pub(super) fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpd
 
     match provider.adam_update(&request) {
         Ok(result) => {
-            validate_adam_gpu_result(&result, &request, provider)?;
+            if let Err(error) = validate_adam_gpu_result(&result, &request, provider) {
+                return Err(reject_adam_result(result, error));
+            }
             Ok(Some(AdamUpdateGpuEval::from_provider(result, &request)?))
         }
         Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => Ok(None),
         Err(err) => Err(adam_provider_error(err)),
     }
+}
+
+fn reject_adam_result(
+    result: ProviderAdamUpdateResult,
+    error: crate::RuntimeError,
+) -> crate::RuntimeError {
+    gpu_helpers::reject_gpu_outputs(
+        [
+            result.parameters,
+            result.average_grad,
+            result.average_sq_grad,
+        ],
+        error,
+    )
 }
 
 pub(super) fn adam_provider_error(error: anyhow::Error) -> crate::RuntimeError {
@@ -185,8 +254,8 @@ pub(super) fn adam_provider_error(error: anyhow::Error) -> crate::RuntimeError {
 }
 
 /// Validate the complete provider result before any view is published into
-/// runtime residency. The owned result is dropped as a unit on failure, so
-/// physical leases—not a second ad hoc release protocol—perform cleanup.
+/// runtime residency. The caller explicitly retires the complete owned cohort
+/// on failure, including any cleanup errors.
 pub(super) fn validate_adam_gpu_result(
     result: &ProviderAdamUpdateResult,
     request: &ProviderAdamUpdateRequest<'_>,

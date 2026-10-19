@@ -824,8 +824,8 @@ fn format_integer_complex(
     index: usize,
     options: &FormatOptions,
 ) -> String {
-    let real_raw = integer_storage_decimal(&storage.real, index);
-    let imag_raw = integer_storage_decimal(&storage.imag, index);
+    let real_raw = integer_storage_decimal(storage.real(), index);
+    let imag_raw = integer_storage_decimal(storage.imag(), index);
     let real_is_zero = real_raw == "0";
     let real_str = format_integer(real_raw, &options.spec, options.decimal);
     let Some(imag_abs_raw) = integer_abs_decimal(&imag_raw) else {

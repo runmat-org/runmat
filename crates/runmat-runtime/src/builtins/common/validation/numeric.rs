@@ -45,7 +45,7 @@ pub fn value_is_real(value: &Value) -> bool {
             .integer_storage()
             .as_ref()
             .expect("checked integer complex storage")
-            .imag
+            .imag()
             .exact_values()
             .iter()
             .all(IntValue::is_zero),

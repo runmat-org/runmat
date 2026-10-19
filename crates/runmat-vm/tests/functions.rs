@@ -4119,7 +4119,7 @@ fn compiled_colon_to_cond_integer_cohort_preserves_exact_values_and_boundaries()
         matches!(value, runmat_value::Value::Tensor(tensor) if tensor.integer_storage() == Some(&runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, 9_007_199_254_740_994, 9_007_199_254_740_995])))
     }));
     assert!(vars.iter().any(|value| {
-        matches!(value, runmat_value::Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.real == runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]) && storage.imag == runmat_value::IntegerStorage::U64(vec![7])))
+        matches!(value, runmat_value::Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.real() == &runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993]) && storage.imag() == &runmat_value::IntegerStorage::U64(vec![7])))
     }));
     assert!(has_object_class(&vars, "table"));
     assert!(vars.iter().any(|value| {

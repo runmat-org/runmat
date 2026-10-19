@@ -66,10 +66,10 @@ fn complex_wgpu_typed_uint64_composition_preserves_wide_components() {
     };
     let storage = gathered.integer_storage().expect("integer storage");
     assert_eq!(
-        storage.real,
-        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
+        storage.real(),
+        &IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
     );
-    assert_eq!(storage.imag, IntegerStorage::U64(vec![13, 17]));
+    assert_eq!(storage.imag(), &IntegerStorage::U64(vec![13, 17]));
 }
 
 #[cfg(feature = "wgpu")]

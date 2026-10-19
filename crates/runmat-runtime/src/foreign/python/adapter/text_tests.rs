@@ -178,6 +178,7 @@ fn invalid_python_controls_do_not_discover_or_start_an_interpreter() {
                 requested_outputs: 1,
             },
         ))
+        .into_invoked_result()
         .expect_err("invalid control must precede interpreter discovery");
         assert_eq!(
             error.identifier(),

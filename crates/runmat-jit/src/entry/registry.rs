@@ -6,7 +6,7 @@ use runmat_types::ProgramFunctionId;
 use crate::{invalidation::DependencySnapshot, tiering::TierAvailability};
 use runmat_native_executor::NativeExecutor;
 
-use super::{EntryCell, EntryKey, PublishedEntry};
+use super::{EntryCell, EntryKey, EntryPublications, NativeCompilationEvidence, PublishedEntry};
 
 /// JIT-owned stable entry publication and retirement registry.
 #[derive(Default)]
@@ -15,6 +15,16 @@ pub struct EntryRegistry {
 }
 
 impl EntryRegistry {
+    /// Inspect only the requested entry without cloning dependency maps or
+    /// scanning unrelated entries. Later resolution authenticates freshness.
+    pub fn publications(&self, key: &EntryKey, profile: Option<Digest>) -> EntryPublications {
+        self.cells
+            .get(key)
+            .map_or_else(EntryPublications::default, |cell| {
+                cell.publications(profile)
+            })
+    }
+
     pub fn cell(&mut self, key: EntryKey) -> EntryCell {
         self.cells
             .entry(key.clone())
@@ -32,8 +42,10 @@ impl EntryRegistry {
         executor: Rc<NativeExecutor>,
         entrypoint: ProgramFunctionId,
         dependencies: DependencySnapshot,
+        compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
-        self.cell(key).publish(executor, entrypoint, dependencies)
+        self.cell(key)
+            .publish(executor, entrypoint, dependencies, compilation)
     }
 
     pub fn resolve_specialized(
@@ -52,9 +64,10 @@ impl EntryRegistry {
         executor: Rc<NativeExecutor>,
         entrypoint: ProgramFunctionId,
         dependencies: DependencySnapshot,
+        compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
         self.cell(key)
-            .publish_specialized(profile, executor, entrypoint, dependencies)
+            .publish_specialized(profile, executor, entrypoint, dependencies, compilation)
     }
 
     pub fn availability(

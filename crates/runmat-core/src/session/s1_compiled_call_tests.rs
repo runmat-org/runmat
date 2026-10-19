@@ -14,6 +14,18 @@ struct RecordingPlacement {
 }
 
 impl RuntimePlacementService for RecordingPlacement {
+    fn whole_work_host_service_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        host_service: runmat_execution::Digest,
+    ) -> Option<PlacementRevision> {
+        RuntimePlacementService::whole_work_host_service_revision(
+            self.actual.as_ref(),
+            program,
+            host_service,
+        )
+    }
+
     fn whole_work_runtime_binding_session_revision(
         &self,
         program: Option<runmat_execution::ProgramRevision>,
@@ -149,4 +161,86 @@ fn interpreted_compiled_strcmp_preserves_and_learns_one_session_key() {
 #[test]
 fn forced_generic_native_compiled_strcmp_preserves_and_learns_one_session_key() {
     compiled_strcmp_reuses_session_feedback(true);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn ready_native_and_interpreter_share_one_complete_call_receipt() {
+    let mut session = RunMatSession::with_options(true, false).expect("Core session");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 100,
+        deterministic: true,
+        ..Default::default()
+    });
+    let unit = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new(
+            "core-ready-placement@1",
+            "readyPlacement.m",
+            "function y = readyPlacement(x)\ny = x + 1;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile ready-route fixture");
+    let probe = Rc::new(RecordingPlacement {
+        actual: session.placement_session.clone(),
+        decisions: RefCell::new(Vec::new()),
+    });
+    let ports = session
+        .runtime_context
+        .service_ports()
+        .clone()
+        .with_placement(probe.clone());
+    session.runtime_context = session.runtime_context.clone().with_service_ports(ports);
+    for _ in 0..8 {
+        let output = futures::executor::block_on(session.invoke_executable(
+            &unit,
+            crate::ProcedureInvocation {
+                target: crate::ProcedureTarget::Function("readyPlacement".into()),
+                arguments: vec![Value::Num(4.0)],
+                requested_outputs: 1,
+            },
+            &crate::InvocationControl::default(),
+        ))
+        .expect("ready interpreter/native route");
+        assert_eq!(output.as_slice(), &[Value::Num(5.0)]);
+    }
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+    let decisions = probe.decisions.borrow();
+    let ready = decisions
+        .iter()
+        .filter(|decision| decision.signature.operation == "core.ready-invocation")
+        .collect::<Vec<_>>();
+    assert!(
+        !ready.is_empty(),
+        "ready code must enter whole-work placement"
+    );
+    assert_eq!(
+        ready[0].kind,
+        runmat_execution::WholeWorkDecisionKind::Exploratory,
+        "unknown ready-route costs need an actual first observation"
+    );
+    assert!(ready.iter().all(|decision| matches!(
+        decision.selected.kind,
+        runmat_execution::ExecutionCandidateKind::SharedRuntime
+            | runmat_execution::ExecutionCandidateKind::GenericNativeCpu
+            | runmat_execution::ExecutionCandidateKind::SpecializedNativeCpu
+    )));
+    for kind in [
+        runmat_execution::ExecutionCandidateKind::SharedRuntime,
+        runmat_execution::ExecutionCandidateKind::GenericNativeCpu,
+    ] {
+        let decision = ready
+            .iter()
+            .find(|decision| decision.selected.kind == kind)
+            .expect("both actual ready interpreter and native routes were explored");
+        assert!(matches!(
+            probe.actual.observed_candidate_duration(
+                &decision.signature,
+                &decision.selected.candidate,
+                decision.selected.kind,
+            ),
+            CandidateObservationEvidence::Observed(_)
+        ));
+    }
 }

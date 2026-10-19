@@ -170,7 +170,7 @@ pub(super) fn like(
             })?
         }
     };
-    let mut output = validate_constructor_gpu_output_protecting(
+    let output = validate_constructor_gpu_output_protecting(
         name,
         provider,
         output,
@@ -181,7 +181,7 @@ pub(super) fn like(
         logical_input,
         &[prototype],
     )?;
-    gpu_helpers::propagate_output_provenance(&mut output, [prototype])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [prototype])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

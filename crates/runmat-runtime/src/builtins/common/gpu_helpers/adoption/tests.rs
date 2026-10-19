@@ -40,7 +40,10 @@ fn checked_adoption_rejects_relabeling_and_preserves_other_owners() {
         } else {
             logical_gpu_value(allocation.handle)
         };
-        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().gpu_gather_retry,
+            crate::GpuGatherRetry::Never
+        );
         assert_eq!(allocation.probe.retirements(), 0);
         assert!(!runmat_accelerate_api::handle_is_logical(&borrowed));
         assert_eq!(borrowed.physical().storage(), GpuTensorStorage::Real);
@@ -61,6 +64,36 @@ fn checked_adoption_rejects_relabeling_and_preserves_other_owners() {
         .unwrap();
     drop(complex_gpu_value(complex.handle).unwrap());
     assert_eq!(complex.probe.retirements(), 1);
+
+    let adopters: [fn(GpuTensorHandle) -> BuiltinResult<Value>; 4] = [
+        resident_gpu_value,
+        logical_gpu_value,
+        complex_gpu_value,
+        |output| propagate_owned_output_provenance(output, []).map(Value::GpuTensor),
+    ];
+    for prelabelled in [false, true] {
+        for adopt in adopters {
+            let allocation = owner
+                .allocate_zeroed(vec![1, 1], NumericElementType::F32, GpuTensorStorage::Real)
+                .unwrap();
+            let handle = if prelabelled {
+                allocation
+                    .handle
+                    .with_provenance(GpuHandleProvenance::Automatic)
+                    .unwrap()
+            } else {
+                allocation.handle.clone()
+            };
+            drop(allocation.handle);
+            allocation.probe.mark_unavailable();
+            allocation.probe.fail_retirement("retained adoption owner");
+            let error = adopt(handle).unwrap_err();
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert!(error.message().contains("retained adoption owner"));
+            assert!(std::error::Error::source(&error).is_some());
+            assert_eq!(allocation.probe.retirements(), 1);
+        }
+    }
 }
 
 #[test]
@@ -73,8 +106,8 @@ fn explicit_output_intent_is_a_distinct_view_not_input_mutation() {
         .handle
         .with_provenance(GpuHandleProvenance::Explicit)
         .unwrap();
-    let mut output = allocation.handle.clone();
-    propagate_output_provenance(&mut output, [&explicit]).unwrap();
+    let mut output =
+        propagate_owned_output_provenance(allocation.handle.clone(), [&explicit]).unwrap();
     assert!(runmat_accelerate_api::handle_is_explicit(&output));
     assert_eq!(
         runmat_accelerate_api::handle_provenance(&allocation.handle),

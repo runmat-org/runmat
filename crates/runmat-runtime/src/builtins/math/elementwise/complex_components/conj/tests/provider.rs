@@ -97,7 +97,10 @@ fn conj_typed_complex_integer_gpu_stays_exact_and_resident() {
             panic!("expected complex integer");
         };
         let storage = gathered.integer_storage().expect("integer storage");
-        assert_eq!(storage.real, IntegerStorage::I64(vec![i64::MIN, i64::MAX]));
-        assert_eq!(storage.imag, IntegerStorage::I64(vec![i64::MAX, -17]));
+        assert_eq!(
+            storage.real(),
+            &IntegerStorage::I64(vec![i64::MIN, i64::MAX])
+        );
+        assert_eq!(storage.imag(), &IntegerStorage::I64(vec![i64::MAX, -17]));
     });
 }

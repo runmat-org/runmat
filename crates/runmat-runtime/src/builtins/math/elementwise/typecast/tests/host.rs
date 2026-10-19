@@ -103,8 +103,8 @@ fn like_complex_integer_groups_adjacent_components_exactly() {
     };
     assert_eq!(output.shape(), &[1, 2]);
     let storage = output.integer_storage().expect("integer complex");
-    assert_eq!(storage.real, IntegerStorage::I16(vec![-1, i16::MIN]));
-    assert_eq!(storage.imag, IntegerStorage::I16(vec![2, i16::MAX]));
+    assert_eq!(storage.real(), &IntegerStorage::I16(vec![-1, i16::MIN]));
+    assert_eq!(storage.imag(), &IntegerStorage::I16(vec![2, i16::MAX]));
 }
 
 #[test]

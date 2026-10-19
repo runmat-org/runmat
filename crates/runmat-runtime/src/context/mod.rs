@@ -144,12 +144,12 @@ pub(crate) use services::test_managed_selection;
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::RuntimeProcessService;
 pub use services::{
-    ForeignCall, HostInteraction, NativeCapability, ParallelCapability, RuntimeAccelerationService,
-    RuntimeBaseWorkspaceService, RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter,
-    RuntimeCallService, RuntimeCollectiveService, RuntimeDistributedCallRequest,
-    RuntimeDistributedInvocation, RuntimeDistributedRetirement, RuntimeDistributedService,
-    RuntimeDistributedSnapshot, RuntimeErrorService, RuntimeForeignService,
-    RuntimeGraphObservationPermit, RuntimeGraphPlacementSelection,
+    ForeignCall, ForeignCallCompletion, HostInteraction, NativeCapability, ParallelCapability,
+    RuntimeAccelerationService, RuntimeBaseWorkspaceService, RuntimeBuiltinService,
+    RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService, RuntimeCollectiveService,
+    RuntimeDistributedCallRequest, RuntimeDistributedInvocation, RuntimeDistributedRetirement,
+    RuntimeDistributedService, RuntimeDistributedSnapshot, RuntimeErrorService,
+    RuntimeForeignService, RuntimeGraphObservationPermit, RuntimeGraphPlacementSelection,
     RuntimeHostEffectResourceService, RuntimeHostService, RuntimeHttpService,
     RuntimeManagedWholeWorkSelection, RuntimeNativeService, RuntimeObjectService,
     RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackDelivery,

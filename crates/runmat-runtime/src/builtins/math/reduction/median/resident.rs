@@ -108,7 +108,7 @@ fn admit(
     shape: Vec<usize>,
     outcome: anyhow::Result<GpuTensorHandle>,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let mut output = match outcome {
+    let output = match outcome {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
         Err(error) => return Err(provider_error(error.into())),
@@ -143,8 +143,8 @@ fn admit(
             provider_error(ProviderExecutionError::from_source(error)),
         ));
     }
-    gpu_helpers::propagate_output_provenance(
-        &mut output,
+    let output = gpu_helpers::propagate_owned_output_provenance(
+        output,
         std::iter::once(original).chain(protected.iter().copied()),
     )
     .map_err(|error| provider_error(ProviderExecutionError::from_source(error)))?;

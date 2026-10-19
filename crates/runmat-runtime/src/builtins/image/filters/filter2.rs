@@ -581,7 +581,7 @@ async fn filter2_gpu(
     )
     .await;
     match provider_result {
-        Ok(mut output) => {
+        Ok(output) => {
             drop(uploaded_kernel);
             let valid = output.shape() == expected_shape
                 && output.device_id() == image_handle.device_id()
@@ -616,8 +616,8 @@ async fn filter2_gpu(
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(output, error));
             }
-            let result = gpu_helpers::propagate_output_provenance(&mut output, [&image_handle])
-                .and_then(|()| gpu_helpers::resident_gpu_value(output));
+            let result = gpu_helpers::propagate_owned_output_provenance(output, [&image_handle])
+                .and_then(gpu_helpers::resident_gpu_value);
             if let Some(selection) = selected {
                 selection.finish(if result.is_ok() { Ok(true) } else { Err(runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed) });
             }

@@ -266,10 +266,10 @@ fn ensure_integer_exact(value: &Value) -> BuiltinResult<()> {
             .integer_storage()
             .is_none_or(|s| s.exact_values().iter().all(ok)),
         Value::ComplexTensor(t) => t.integer_storage().is_none_or(|s| {
-            s.real
+            s.real()
                 .exact_values()
                 .iter()
-                .chain(s.imag.exact_values().iter())
+                .chain(s.imag().exact_values().iter())
                 .all(ok)
         }),
         Value::SparseTensor(s) => s

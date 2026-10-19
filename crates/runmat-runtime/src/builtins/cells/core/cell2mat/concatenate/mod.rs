@@ -66,8 +66,8 @@ fn complex(entries: &[CellEntry], plan: &AssemblyPlan) -> BuiltinResult<Value> {
 fn typed_complex_integer(entries: &[CellEntry], plan: &AssemblyPlan) -> BuiltinResult<Value> {
     let prototype = input::typed_complex_integer(entries)?;
     let mut storage = IntegerComplexStorage::new(
-        prototype.real.zeros_like(plan.output_len),
-        prototype.imag.zeros_like(plan.output_len),
+        prototype.real().zeros_like(plan.output_len),
+        prototype.imag().zeros_like(plan.output_len),
     )
     .map_err(|error| internal(error.to_string()))?;
     complex::copy_integer(entries, plan, &mut storage)?;

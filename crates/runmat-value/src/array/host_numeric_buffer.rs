@@ -205,6 +205,75 @@ impl HostNumericBuffer {
         }
     }
 
+    pub(crate) fn has_retained_allocation(&self) -> bool {
+        storage_is_adopted(self.storage.get())
+    }
+
+    pub(crate) fn retained_integer_is_uniquely_mutable(&self) -> bool {
+        self.has_retained_allocation()
+            && !self.storage.is_shared()
+            && matches!(self.storage.get(), HostNumericStorage::Integer(_))
+    }
+
+    pub(crate) fn retained_integer_can_resize_without_reallocation(&self, len: usize) -> bool {
+        self.retained_integer_is_uniquely_mutable()
+            && self
+                .integer_storage()
+                .is_some_and(|storage| len <= integer_storage_capacity(storage))
+    }
+
+    /// Mutates an exact integer backing only when this handle is its unique
+    /// owner. Unlike ordinary copy-on-write mutation, this never detaches the
+    /// payload from its retained-allocation claim.
+    pub(crate) fn set_exact_integer_value_unique(
+        &mut self,
+        index: usize,
+        value: NumericScalar,
+    ) -> Result<(), String> {
+        let storage = self
+            .storage
+            .try_get_mut_unique()
+            .ok_or_else(|| "retained integer component is still aliased".to_string())?;
+        let HostNumericStorage::Integer(storage) = storage else {
+            return Err("retained integer component has a non-integer class".into());
+        };
+        if storage._reservation.is_none() {
+            return Err("integer component has no retained allocation".into());
+        }
+        let exact = match value {
+            NumericScalar::F64(value) => storage.values.cast_f64_assignment(value),
+            NumericScalar::F32(value) => storage.values.cast_f64_assignment(f64::from(value)),
+            value => storage.values.cast_exact_assignment(
+                &value
+                    .into_int_value()
+                    .expect("non-floating numeric scalar is integer"),
+            ),
+        };
+        storage.values.set_value(index, exact)
+    }
+
+    /// Resizes an exact integer backing without moving its physical block.
+    /// Growth beyond the originally claimed Vec capacity is rejected.
+    pub(crate) fn resize_exact_integer_zeroed_unique(&mut self, len: usize) -> Result<(), String> {
+        let storage = self
+            .storage
+            .try_get_mut_unique()
+            .ok_or_else(|| "retained integer component is still aliased".to_string())?;
+        let HostNumericStorage::Integer(storage) = storage else {
+            return Err("retained integer component has a non-integer class".into());
+        };
+        if storage._reservation.is_none() {
+            return Err("integer component has no retained allocation".into());
+        }
+        if len > integer_storage_capacity(&storage.values) {
+            return Err(
+                "retained integer component cannot grow beyond its admitted capacity".into(),
+            );
+        }
+        resize_integer_zeroed(&mut storage.values, len);
+        Ok(())
+    }
+
     /// Borrow a unique native payload without implicit copy-on-write.
     pub fn try_as_f64_slice_mut_unique(&mut self) -> Option<&mut [f64]> {
         match self.storage.try_get_mut_unique()? {
@@ -431,6 +500,19 @@ fn storage_is_adopted(storage: &HostNumericStorage) -> bool {
         HostNumericStorage::F64(values) => values.is_adopted(),
         HostNumericStorage::F32(values) => values.is_adopted(),
         HostNumericStorage::Integer(storage) => storage._reservation.is_some(),
+    }
+}
+
+fn integer_storage_capacity(storage: &IntegerStorage) -> usize {
+    match storage {
+        IntegerStorage::I8(values) => values.capacity(),
+        IntegerStorage::I16(values) => values.capacity(),
+        IntegerStorage::I32(values) => values.capacity(),
+        IntegerStorage::I64(values) => values.capacity(),
+        IntegerStorage::U8(values) => values.capacity(),
+        IntegerStorage::U16(values) => values.capacity(),
+        IntegerStorage::U32(values) => values.capacity(),
+        IntegerStorage::U64(values) => values.capacity(),
     }
 }
 

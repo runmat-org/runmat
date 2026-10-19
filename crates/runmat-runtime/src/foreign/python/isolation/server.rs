@@ -204,7 +204,8 @@ async fn invoke_request(
                         requested_outputs: request.requested_outputs as usize,
                     },
                 ))
-                .await?;
+                .await
+                .into_invoked_result()?;
             lifecycle.service_safepoint(context)?;
             lifecycle.drain_gracefully(context).await?;
             Ok(value)
@@ -507,6 +508,7 @@ fn invoke_nested_request(
                     requested_outputs: request.requested_outputs as usize,
                 },
             )))
+            .into_invoked_result()
             .map_err(runtime_wire_error)?;
             value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))
         })

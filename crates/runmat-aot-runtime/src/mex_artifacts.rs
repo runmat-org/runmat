@@ -133,6 +133,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 let value = session
                     .load_and_call("embedded_fixture", Vec::new(), 1, runtime.clone())
                     .await
+                    .break_value()
                     .expect("installed artifact resolves")
                     .expect("embedded artifact executes");
                 value.with_owned_sequence(|value| {

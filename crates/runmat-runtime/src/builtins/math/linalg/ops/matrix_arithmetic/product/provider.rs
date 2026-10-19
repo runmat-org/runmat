@@ -72,7 +72,7 @@ fn invoke_scalar_product(
     operand: &PreparedOperand,
     scalar: f64,
 ) -> BuiltinResult<Option<Value>> {
-    let mut output = match provider.scalar_mul(operand.handle(), scalar) {
+    let output = match provider.scalar_mul(operand.handle(), scalar) {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             return Ok(None);
@@ -92,7 +92,7 @@ fn invoke_scalar_product(
             alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     ) {
-        gpu_helpers::propagate_output_provenance(&mut output, [operand.handle()])
+        let output = gpu_helpers::propagate_owned_output_provenance(output, [operand.handle()])
             .map_err(super::errors::map_control_flow)?;
         return gpu_helpers::resident_gpu_value(output)
             .map(Some)

@@ -37,8 +37,8 @@ pub enum ComplexStorage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegerComplexStorage {
-    pub real: IntegerStorage,
-    pub imag: IntegerStorage,
+    real: HostNumericBuffer,
+    imag: HostNumericBuffer,
 }
 
 impl IntegerComplexStorage {
@@ -46,7 +46,75 @@ impl IntegerComplexStorage {
         if real.numeric_dtype() != imag.numeric_dtype() || real.len() != imag.len() {
             return Err("complex integer components must have matching class and length".into());
         }
+        Ok(Self {
+            real: HostNumericBuffer::from_numeric_storage(NumericStorage::from_integer_storage(
+                real,
+            )),
+            imag: HostNumericBuffer::from_numeric_storage(NumericStorage::from_integer_storage(
+                imag,
+            )),
+        })
+    }
+
+    /// Retain matching native integer component owners without copying their
+    /// payloads or releasing their allocation claims.
+    pub fn from_host_buffers(
+        real: HostNumericBuffer,
+        imag: HostNumericBuffer,
+    ) -> Result<Self, String> {
+        if real.numeric_dtype().integer_class().is_none()
+            || real.numeric_dtype() != imag.numeric_dtype()
+            || real.len() != imag.len()
+        {
+            return Err("complex integer components must have matching class and length".into());
+        }
         Ok(Self { real, imag })
+    }
+
+    pub fn real(&self) -> &IntegerStorage {
+        self.real
+            .integer_storage()
+            .expect("integer complex real component")
+    }
+
+    pub fn imag(&self) -> &IntegerStorage {
+        self.imag
+            .integer_storage()
+            .expect("integer complex imaginary component")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn real_buffer(&self) -> &HostNumericBuffer {
+        &self.real
+    }
+
+    #[cfg(test)]
+    pub(crate) fn imag_buffer(&self) -> &HostNumericBuffer {
+        &self.imag
+    }
+
+    /// Transfer the native component owners without materializing payloads or
+    /// detaching their retained allocation claims.
+    pub fn into_host_components(self) -> (HostNumericBuffer, HostNumericBuffer) {
+        (self.real, self.imag)
+    }
+
+    /// Materializes ordinary component storage. Exact/shared backing is copied
+    /// so a bare `Vec` can never escape with retained-allocation authority.
+    /// Finite managed producers must instead build a separately admitted
+    /// destination owner.
+    pub fn into_unbounded_components(self) -> (IntegerStorage, IntegerStorage) {
+        let real = self
+            .real
+            .into_numeric_storage()
+            .into_integer_storage()
+            .expect("integer complex real component");
+        let imag = self
+            .imag
+            .into_numeric_storage()
+            .into_integer_storage()
+            .expect("integer complex imaginary component");
+        (real, imag)
     }
 
     pub fn len(&self) -> usize {
@@ -58,7 +126,7 @@ impl IntegerComplexStorage {
     }
 
     pub fn class_name(&self) -> &'static str {
-        self.real.class_name()
+        self.real.numeric_dtype().class_name()
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {
@@ -68,8 +136,8 @@ impl IntegerComplexStorage {
     /// Tests a paired complex integer element without consulting its lossy
     /// floating compatibility representation.
     pub fn is_nonzero_at(&self, index: usize) -> Option<bool> {
-        let real = self.real.value_at(index)?;
-        let imag = self.imag.value_at(index)?;
+        let real = self.real().value_at(index)?;
+        let imag = self.imag().value_at(index)?;
         Some(!real.is_zero() || !imag.is_zero())
     }
 
@@ -79,12 +147,77 @@ impl IntegerComplexStorage {
         reorder: impl Fn(&[IntValue]) -> Result<Vec<IntValue>, String>,
     ) -> Result<Self, String> {
         let real = self
-            .real
-            .from_exact_values_like(reorder(&self.real.exact_values())?)?;
+            .real()
+            .from_exact_values_like(reorder(&self.real().exact_values())?)?;
         let imag = self
-            .imag
-            .from_exact_values_like(reorder(&self.imag.exact_values())?)?;
+            .imag()
+            .from_exact_values_like(reorder(&self.imag().exact_values())?)?;
         Self::new(real, imag)
+    }
+
+    pub(crate) fn set_f64_assignment(
+        &mut self,
+        index: usize,
+        real: f64,
+        imag: f64,
+    ) -> Result<(), String> {
+        if self.real.has_retained_allocation() || self.imag.has_retained_allocation() {
+            if !self.real.retained_integer_is_uniquely_mutable()
+                || !self.imag.retained_integer_is_uniquely_mutable()
+            {
+                return Err("retained complex integer components are still aliased".into());
+            }
+            self.real
+                .set_exact_integer_value_unique(index, NumericScalar::F64(real))?;
+            return self
+                .imag
+                .set_exact_integer_value_unique(index, NumericScalar::F64(imag));
+        }
+        self.real.set_value(index, NumericScalar::F64(real))?;
+        self.imag.set_value(index, NumericScalar::F64(imag))
+    }
+
+    pub(crate) fn resize_zeroed(&mut self, len: usize) -> Result<(), String> {
+        if self.real.has_retained_allocation() || self.imag.has_retained_allocation() {
+            if !self
+                .real
+                .retained_integer_can_resize_without_reallocation(len)
+                || !self
+                    .imag
+                    .retained_integer_can_resize_without_reallocation(len)
+            {
+                return Err("retained complex integer components cannot resize in place".into());
+            }
+            self.real.resize_exact_integer_zeroed_unique(len)?;
+            return self.imag.resize_exact_integer_zeroed_unique(len);
+        }
+        self.real.resize_zeroed(len);
+        self.imag.resize_zeroed(len);
+        Ok(())
+    }
+
+    /// Assign both components through their canonical owners. Retained backing
+    /// must be uniquely mutable; aliases are rejected before either write.
+    pub fn set_exact_assignment(
+        &mut self,
+        index: usize,
+        real: IntValue,
+        imag: IntValue,
+    ) -> Result<(), String> {
+        if self.real.has_retained_allocation() || self.imag.has_retained_allocation() {
+            if !self.real.retained_integer_is_uniquely_mutable()
+                || !self.imag.retained_integer_is_uniquely_mutable()
+            {
+                return Err("retained complex integer components are still aliased".into());
+            }
+            self.real
+                .set_exact_integer_value_unique(index, NumericScalar::from(real))?;
+            return self
+                .imag
+                .set_exact_integer_value_unique(index, NumericScalar::from(imag));
+        }
+        self.real.set_value(index, NumericScalar::from(real))?;
+        self.imag.set_value(index, NumericScalar::from(imag))
     }
 }
 
@@ -140,8 +273,8 @@ impl ComplexTensor {
         shape: SharedShape,
     ) -> Result<Self, String> {
         if let ComplexStorage::Integer(integer) = &storage {
-            if integer.real.numeric_dtype() != integer.imag.numeric_dtype()
-                || integer.real.len() != integer.imag.len()
+            if integer.real().numeric_dtype() != integer.imag().numeric_dtype()
+                || integer.real().len() != integer.imag().len()
             {
                 return Err(
                     "complex integer components must have matching class and length".into(),
@@ -264,8 +397,8 @@ impl ComplexTensor {
     pub fn numeric_value_at(&self, index: usize) -> Option<(NumericScalar, NumericScalar)> {
         if let Some(storage) = self.integer_storage() {
             return Some((
-                NumericScalar::from(storage.real.value_at(index)?),
-                NumericScalar::from(storage.imag.value_at(index)?),
+                NumericScalar::from(storage.real().value_at(index)?),
+                NumericScalar::from(storage.imag().value_at(index)?),
             ));
         }
         match &self.storage {
@@ -310,8 +443,7 @@ impl ComplexTensor {
                 *destination = ComplexElement(real as f32, imag as f32);
             }
             ComplexStorage::Integer(storage) => {
-                storage.real.set_f64_assignment(index, real)?;
-                storage.imag.set_f64_assignment(index, imag)?;
+                storage.set_f64_assignment(index, real, imag)?;
             }
         }
         Ok(())
@@ -361,7 +493,7 @@ impl ComplexTensor {
             format!("complex {class} tensor shape {shape:?} overflows usize")
         })?;
         let target_len = shape.elements();
-        self.storage.resize_zeroed(target_len);
+        self.storage.resize_zeroed(target_len)?;
         self.apply_validated_shape(shape);
         Ok(())
     }
@@ -401,15 +533,9 @@ impl ComplexTensor {
         let ComplexStorage::Integer(storage) = &mut self.storage else {
             unreachable!("integer storage checked before mutation")
         };
-        storage.real.resize_zeroed(shape.elements());
-        storage.imag.resize_zeroed(shape.elements());
+        storage.resize_zeroed(shape.elements())?;
         storage
-            .real
-            .set_value(index, real)
-            .expect("destination class and index validated before mutation");
-        storage
-            .imag
-            .set_value(index, imag)
+            .set_exact_assignment(index, real, imag)
             .expect("destination class and index validated before mutation");
         self.apply_validated_shape(shape);
         Ok(())
@@ -444,11 +570,11 @@ impl ComplexTensor {
         match &self.storage {
             ComplexStorage::Integer(storage) => {
                 let real = storage
-                    .real
+                    .real()
                     .value_at(index)
                     .expect("complex integer real storage must match tensor shape");
                 let imag = storage
-                    .imag
+                    .imag()
                     .value_at(index)
                     .expect("complex integer imaginary storage must match tensor shape");
                 format_integer_complex_value(&real, &imag)
@@ -478,22 +604,20 @@ impl ComplexStorage {
         self.len() == 0
     }
 
-    fn resize_zeroed(&mut self, len: usize) {
+    fn resize_zeroed(&mut self, len: usize) -> Result<(), String> {
         match self {
             Self::F64(values) => values.resize(len, ComplexElement(0.0, 0.0)),
             Self::F32(values) => values.resize(len, ComplexElement(0.0, 0.0)),
-            Self::Integer(storage) => {
-                storage.real.resize_zeroed(len);
-                storage.imag.resize_zeroed(len);
-            }
+            Self::Integer(storage) => return storage.resize_zeroed(len),
         }
+        Ok(())
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {
         match self {
             Self::F64(_) => NumericDType::F64,
             Self::F32(_) => NumericDType::F32,
-            Self::Integer(storage) => storage.real.numeric_dtype(),
+            Self::Integer(storage) => storage.numeric_dtype(),
         }
     }
 
@@ -521,10 +645,10 @@ impl ComplexStorage {
                 .map(|&ComplexElement(real, imag)| (f64::from(real), f64::from(imag)))
                 .collect(),
             Self::Integer(storage) => storage
-                .real
+                .real()
                 .to_f64_vec()
                 .into_iter()
-                .zip(storage.imag.to_f64_vec())
+                .zip(storage.imag().to_f64_vec())
                 .collect(),
         }
     }
@@ -556,7 +680,7 @@ impl ComplexStorage {
                     .iter()
                     .map(|&index| {
                         storage
-                            .real
+                            .real()
                             .value_at(index)
                             .ok_or_else(|| format!("complex storage index {index} out of bounds"))
                     })
@@ -565,13 +689,13 @@ impl ComplexStorage {
                     .iter()
                     .map(|&index| {
                         storage
-                            .imag
+                            .imag()
                             .value_at(index)
                             .ok_or_else(|| format!("complex storage index {index} out of bounds"))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let real = storage.real.from_exact_values_like(real)?;
-                let imag = storage.imag.from_exact_values_like(imag)?;
+                let real = storage.real().from_exact_values_like(real)?;
+                let imag = storage.imag().from_exact_values_like(imag)?;
                 IntegerComplexStorage::new(real, imag).map(Self::Integer)
             }
         }

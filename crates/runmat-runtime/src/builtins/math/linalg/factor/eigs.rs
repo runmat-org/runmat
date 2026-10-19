@@ -1366,10 +1366,7 @@ fn tensor_element_len(tensor: &Tensor) -> usize {
 }
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
-    tensor
-        .integer_storage()
-        .as_ref()
-        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
+    tensor.len()
 }
 
 #[cfg(test)]

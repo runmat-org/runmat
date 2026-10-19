@@ -1393,7 +1393,7 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
                 .unwrap_or_else(|| gathered.numeric_dtype());
             let dtype = weighted_computation_dtype(input_dtype, &args.output);
             let reduced = weighted_complex_mean(&gathered, dim, args.nan_mode, weights, dtype)?;
-            let mut uploaded =
+            let uploaded =
                 gpu_helpers::upload_complex_tensor_protecting(provider, &reduced, &[&handle])
                     .map_err(|source| {
                         let mut error = mean_internal_error(format!(
@@ -1402,7 +1402,7 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
                         error.source = Some(Box::new(source));
                         error
                     })?;
-            gpu_helpers::propagate_output_provenance(&mut uploaded, [&handle])?;
+            let uploaded = gpu_helpers::propagate_owned_output_provenance(uploaded, [&handle])?;
             return gpu_helpers::complex_gpu_value(uploaded);
         }
         let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
@@ -1411,7 +1411,7 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
             .unwrap_or_else(|| gathered.numeric_dtype());
         let dtype = weighted_computation_dtype(input_dtype, &args.output);
         let reduced = weighted_real_mean(&gathered, dim, args.nan_mode, weights, dtype)?;
-        let mut uploaded = gpu_helpers::upload_tensor_protecting(provider, &reduced, &[&handle])
+        let uploaded = gpu_helpers::upload_tensor_protecting(provider, &reduced, &[&handle])
             .map_err(|source| {
                 let mut error = mean_internal_error(format!(
                     "mean: failed to upload weighted GPU result: {source}"
@@ -1419,7 +1419,7 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
                 error.source = Some(Box::new(source));
                 error
             })?;
-        gpu_helpers::propagate_output_provenance(&mut uploaded, [&handle])?;
+        let uploaded = gpu_helpers::propagate_owned_output_provenance(uploaded, [&handle])?;
         return gpu_helpers::resident_gpu_value(uploaded);
     }
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
@@ -1427,8 +1427,9 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
             provider_execution::execute(provider, &handle, &args.axes, args.nan_mode, &args.output)
                 .await?
         {
-            let mut device_result = publish_mean_gpu_shape(device_result)?;
-            gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])?;
+            let device_result = publish_mean_gpu_shape(device_result)?;
+            let device_result =
+                gpu_helpers::propagate_owned_output_provenance(device_result, [&handle])?;
             return gpu_helpers::resident_gpu_value(device_result);
         }
     }

@@ -314,7 +314,7 @@ fn upload_scalar(
         runmat_accelerate_api::ProviderPrecision::F64 => Tensor::new(vec![value], shape.to_vec()),
     }
     .map_err(builtin_error)?;
-    let mut handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype])?;
+    let handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype])?;
     let valid = handle.shape() == shape
         && handle.device_id() == prototype.device_id()
         && !handle.shares_allocation_with(prototype)
@@ -333,8 +333,7 @@ fn upload_scalar(
             )),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut handle, [prototype])?;
-    Ok(handle)
+    gpu_helpers::propagate_owned_output_provenance(handle, [prototype])
 }
 
 async fn det_gpu_via_provider(

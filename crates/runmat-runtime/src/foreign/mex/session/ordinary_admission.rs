@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::{Read as _, Write as _};
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -12,7 +13,7 @@ use runmat_process_host::private_bytes::PrivateByteLease;
 use runmat_value::Value;
 
 use super::{artifact_catalog, runtime_error, MexNameSelection, MexRuntimeSession};
-use crate::builtins::common::path_search::FileCandidateOrigin;
+use crate::builtins::common::path_search::{FileCandidate, FileCandidateOrigin};
 use crate::context::{RuntimeContext, RuntimeExecutionStack};
 use crate::foreign::{admit_interop_manifest, ForeignAdapter, ForeignPlatform};
 use crate::source_context::SelectedProgramSourceOwner;
@@ -144,6 +145,77 @@ impl MexRuntimeSession {
         requested_outputs: usize,
         runtime: RuntimeContext,
         source_owner: &SelectedProgramSourceOwner,
+    ) -> crate::user_functions::DynamicFunctionLoadAttempt {
+        if !source_owner.is_bound_in(&runtime) {
+            return ControlFlow::Break(Err(runtime_error(
+                "MEX:SourceAuthority",
+                "ordinary MEX invocation differs from its issued session source",
+            )));
+        }
+        let input_roots = match crate::execution::RootedValueLease::for_values(arguments.iter()) {
+            Ok(roots) => roots,
+            Err(error) => return ControlFlow::Break(Err(error.into_runtime_error())),
+        };
+        if self.abandoned.get() || self.shutdown_in_progress.get() {
+            return ControlFlow::Break(Err(runtime_error(
+                "MEX:Lifecycle",
+                "MEX modules cannot be invoked while the session is shutting down",
+            )));
+        }
+        if runtime.is_cancelled() {
+            return ControlFlow::Break(Err(runtime_error(
+                "Cancelled",
+                format!("MEX invocation '{name}' was cancelled before admission"),
+            )));
+        }
+        if runtime.execution_stack() != RuntimeExecutionStack::Process {
+            return ControlFlow::Break(Err(runtime_error(
+                "Foreign:ExecutionStackViolation",
+                "ordinary MEX invocation requires the process thread stack",
+            )));
+        }
+        let selected = match self.observe_search_path_name(name).await {
+            Ok(Some(MexNameSelection::SearchPath(selected))) => selected,
+            Ok(None) => return ControlFlow::Continue(arguments),
+            Ok(Some(MexNameSelection::Installed { .. })) => {
+                return ControlFlow::Break(Err(runtime_error(
+                    "MEX:SourceAuthority",
+                    "ordinary source selected an installed module",
+                )))
+            }
+            Err(error) => {
+                return ControlFlow::Break(Err(runtime_error("FunctionResolution", error)))
+            }
+        };
+        ControlFlow::Break(
+            self.load_ordinary_selected_and_call(
+                name,
+                arguments,
+                requested_outputs,
+                runtime,
+                source_owner,
+                selected,
+                input_roots,
+            )
+            .await
+            .unwrap_or_else(|| {
+                Err(runtime_error(
+                    "MEX:SearchPathChanged",
+                    "selected ordinary MEX target retired during invocation",
+                ))
+            }),
+        )
+    }
+
+    async fn load_ordinary_selected_and_call(
+        self: &Rc<Self>,
+        name: &str,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+        source_owner: &SelectedProgramSourceOwner,
+        expected_selection: FileCandidate,
+        input_roots: crate::execution::RootedValueLease,
     ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         if !source_owner.is_bound_in(&runtime) {
             return Some(Err(runtime_error(
@@ -151,10 +223,6 @@ impl MexRuntimeSession {
                 "ordinary MEX invocation differs from its issued session source",
             )));
         }
-        let input_roots = match crate::execution::RootedValueLease::for_values(arguments.iter()) {
-            Ok(roots) => roots,
-            Err(error) => return Some(Err(error.into_runtime_error())),
-        };
         if self.abandoned.get() || self.shutdown_in_progress.get() {
             return Some(Err(runtime_error(
                 "MEX:Lifecycle",
@@ -176,10 +244,21 @@ impl MexRuntimeSession {
         let path_revision = runtime.search_path().map(|path| path.generation());
         let selection = match self.observe_search_path_name(name).await {
             Ok(Some(MexNameSelection::SearchPath(candidate))) => candidate,
-            Ok(None) => return None,
+            Ok(None) => {
+                return Some(Err(runtime_error(
+                    "MEX:SearchPathChanged",
+                    "selected ordinary MEX target retired before invocation",
+                )))
+            }
             Ok(Some(MexNameSelection::Installed { .. })) => unreachable!("search-path-only owner"),
             Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
         };
+        if selection != expected_selection {
+            return Some(Err(runtime_error(
+                "MEX:SearchPathChanged",
+                "ordinary MEX selection changed before invocation",
+            )));
+        }
         let source = match std::fs::canonicalize(selection.path()) {
             Ok(source) => source,
             Err(error) => return Some(Err(runtime_error("MEX:Artifact", error.to_string()))),

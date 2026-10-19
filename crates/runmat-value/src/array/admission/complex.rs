@@ -20,8 +20,8 @@ pub struct ValidatedComplexTensorParts {
 impl ComplexTensorAdmission {
     pub fn new(storage: ComplexStorage, shape: Vec<usize>) -> Result<Self, String> {
         if let ComplexStorage::Integer(integer) = &storage {
-            if integer.real.numeric_dtype() != integer.imag.numeric_dtype()
-                || integer.real.len() != integer.imag.len()
+            if integer.real().numeric_dtype() != integer.imag().numeric_dtype()
+                || integer.real().len() != integer.imag().len()
             {
                 return Err(
                     "complex integer components must have matching class and length".into(),
@@ -167,15 +167,10 @@ mod tests {
     }
 
     #[test]
-    fn integer_pair_error_precedes_shape_overflow_and_length_errors() {
-        let mismatched = IntegerComplexStorage {
-            real: IntegerStorage::I8(vec![1]),
-            imag: IntegerStorage::U8(Vec::new()),
-        };
+    fn integer_pair_constructor_precedes_shape_admission() {
         let error =
-            ComplexTensorAdmission::new(ComplexStorage::Integer(mismatched), vec![usize::MAX, 2])
-                .err()
-                .expect("invalid integer pair");
+            IntegerComplexStorage::new(IntegerStorage::I8(vec![1]), IntegerStorage::U8(Vec::new()))
+                .expect_err("invalid integer pair");
         assert_eq!(
             error,
             "complex integer components must have matching class and length"

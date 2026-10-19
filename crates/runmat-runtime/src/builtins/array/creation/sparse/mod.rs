@@ -3372,7 +3372,7 @@ pub(crate) mod tests {
         let output =
             nonzeros_builtin(Value::ComplexTensor(integer)).expect("integer complex nonzeros");
         assert!(
-            matches!(output, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.real == IntegerStorage::U64(vec![u64::MAX, 0]) && storage.imag == IntegerStorage::U64(vec![0, u64::MAX])))
+            matches!(output, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| storage.real() == &IntegerStorage::U64(vec![u64::MAX, 0]) && storage.imag() == &IntegerStorage::U64(vec![0, u64::MAX])))
         );
     }
 

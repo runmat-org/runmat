@@ -12,7 +12,7 @@ use runmat_value::{
 };
 
 fn admit_binary_provider_result(
-    mut output: runmat_accelerate_api::GpuTensorHandle,
+    output: runmat_accelerate_api::GpuTensorHandle,
     left: &runmat_accelerate_api::GpuTensorHandle,
     right: &runmat_accelerate_api::GpuTensorHandle,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
@@ -75,7 +75,7 @@ fn admit_binary_provider_result(
         .build();
         return Err(gpu_helpers::reject_gpu_output(output, error));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [left, right])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [left, right])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

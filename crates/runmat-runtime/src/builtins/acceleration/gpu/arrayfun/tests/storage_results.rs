@@ -72,12 +72,12 @@ fn uniform_collector_preserves_exact_complex_integer_storage() {
     };
     let storage = output.integer_storage().expect("exact component storage");
     assert_eq!(
-        storage.real,
-        IntegerStorage::I64(vec![9_007_199_254_740_993, i64::MAX])
+        storage.real(),
+        &IntegerStorage::I64(vec![9_007_199_254_740_993, i64::MAX])
     );
     assert_eq!(
-        storage.imag,
-        IntegerStorage::I64(vec![-9_007_199_254_740_993, i64::MIN])
+        storage.imag(),
+        &IntegerStorage::I64(vec![-9_007_199_254_740_993, i64::MIN])
     );
 }
 

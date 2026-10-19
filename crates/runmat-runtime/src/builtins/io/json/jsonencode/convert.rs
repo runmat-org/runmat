@@ -209,11 +209,11 @@ fn complex_tensor_value_to_json(
         return Ok(JsonValue::Object(vec![
             (
                 "real".to_string(),
-                JsonValue::Number(integer_storage_number(&storage.real, offset)),
+                JsonValue::Number(integer_storage_number(storage.real(), offset)),
             ),
             (
                 "imag".to_string(),
-                JsonValue::Number(integer_storage_number(&storage.imag, offset)),
+                JsonValue::Number(integer_storage_number(storage.imag(), offset)),
             ),
         ]));
     }

@@ -428,10 +428,10 @@ async fn dispatch_name_handle(meta: DispatchMeta<'_>, state: DispatchState<'_>) 
                 .with_identifier("RunMat:SelectedHandle:SelectionChanged")
                 .build());
             }
-            Ok(selected)
+            Ok(Some(selected))
         })
         .await?;
-    if let Some(result) = selected {
+    if let Some(std::ops::ControlFlow::Break(result)) = selected {
         let rooted = result?;
         rooted.with_owned(|sequence| {
             if sequence.len() != 1

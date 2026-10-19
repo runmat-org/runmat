@@ -637,14 +637,14 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
                         spacing.as_provider_spacing(),
                     );
                     match native_result {
-                        Ok(mut result)
+                        Ok(result)
                             if native_result_is_valid(&result, handle, provider, &shape)
                                 && spacing.handle().is_none_or(|spacing| {
                                     !result.shares_allocation_with(spacing)
                                 }) =>
                         {
-                            gpu_helpers::propagate_output_provenance(
-                                &mut result,
+                            let result = gpu_helpers::propagate_owned_output_provenance(
+                                result,
                                 protected.iter(),
                             )?;
                             return gpu_helpers::resident_gpu_value(result);

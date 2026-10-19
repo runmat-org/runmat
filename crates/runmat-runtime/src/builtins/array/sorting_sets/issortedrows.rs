@@ -626,19 +626,19 @@ fn check_complex_integer(
         let left = row + column * rows;
         let right = row + 1 + column * rows;
         let left_real = storage
-            .real
+            .real()
             .value_at(left)
             .expect("validated complex row index");
         let left_imag = storage
-            .imag
+            .imag()
             .value_at(left)
             .expect("validated complex row index");
         let right_real = storage
-            .real
+            .real()
             .value_at(right)
             .expect("validated complex row index");
         let right_imag = storage
-            .imag
+            .imag()
             .value_at(right)
             .expect("validated complex row index");
         integer_order::compare_complex(

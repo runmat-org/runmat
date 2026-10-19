@@ -433,14 +433,14 @@ fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerCla
                 .integer_storage()
                 .expect("typed complex integer storage");
             if !storage
-                .imag
+                .imag()
                 .value_at(0)
                 .expect("scalar imaginary value")
                 .is_zero()
             {
                 return Err(colon_error(&COLON_ERROR_COMPLEX_IMAGINARY_NONZERO));
             }
-            Ok(Some(IntegerClass::from_storage(&storage.real)))
+            Ok(Some(IntegerClass::from_storage(storage.real())))
         }
         _ => Ok(None),
     }
@@ -490,20 +490,20 @@ fn integer_colon_value(
                 .integer_storage()
                 .expect("typed complex integer storage");
             if !storage
-                .imag
+                .imag()
                 .value_at(0)
                 .expect("scalar imaginary value")
                 .is_zero()
             {
                 return Err(colon_error(&COLON_ERROR_COMPLEX_IMAGINARY_NONZERO));
             }
-            if IntegerClass::from_storage(&storage.real) != target {
+            if IntegerClass::from_storage(storage.real()) != target {
                 return Err(colon_error_with_message(
                     "colon: integer operands must have the same integer class",
                     &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
                 ));
             }
-            int_value_to_i128(&storage.real.value_at(0).expect("scalar real value"))
+            int_value_to_i128(&storage.real().value_at(0).expect("scalar real value"))
         }
         Value::Num(value) => float_to_integral_i128(*value)?,
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
@@ -767,10 +767,11 @@ fn validated_sequence_output(
             ),
         ));
     }
-    let mut output = output;
-    if source.is_some() {
-        gpu_helpers::propagate_output_provenance(&mut output, protected.iter().copied())?;
-    }
+    let output = if source.is_some() {
+        gpu_helpers::propagate_owned_output_provenance(output, protected.iter().copied())?
+    } else {
+        output
+    };
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -1029,12 +1030,12 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
     }
     if let Some(storage) = tensor.integer_storage() {
         let re = storage
-            .real
+            .real()
             .value_at(0)
             .expect("scalar complex integer tensor has one real value")
             .to_f64();
         let im = storage
-            .imag
+            .imag()
             .value_at(0)
             .expect("scalar complex integer tensor has one imaginary value")
             .to_f64();
@@ -1045,10 +1046,7 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
 }
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
-    tensor
-        .integer_storage()
-        .as_ref()
-        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
+    tensor.len()
 }
 
 fn char_scalar(name: &str, array: &CharArray) -> crate::BuiltinResult<f64> {

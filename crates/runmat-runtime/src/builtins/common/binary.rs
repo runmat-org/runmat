@@ -34,7 +34,6 @@ pub(crate) fn validate_resident_output(
         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
         return Err(super::gpu_helpers::reject_gpu_output(output, error));
     }
-    let mut output = output;
-    super::gpu_helpers::propagate_output_provenance(&mut output, [left, right])?;
+    let output = super::gpu_helpers::propagate_owned_output_provenance(output, [left, right])?;
     super::gpu_helpers::resident_gpu_value(output)
 }

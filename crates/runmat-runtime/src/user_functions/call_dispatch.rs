@@ -413,9 +413,13 @@ pub async fn try_load_and_call_dynamic_function(
     requested_outputs: usize,
     phase: DynamicFunctionLoadPhase,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
-) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
-    let context = crate::context::legacy::active()?;
-    let loader = context.state().call.borrow().dynamic_loader.clone()?;
+) -> super::DynamicFunctionLoadAttempt {
+    let Some(context) = crate::context::legacy::active() else {
+        return std::ops::ControlFlow::Continue(args);
+    };
+    let Some(loader) = context.state().call.borrow().dynamic_loader.clone() else {
+        return std::ops::ControlFlow::Continue(args);
+    };
     loader(
         context,
         name,
@@ -451,10 +455,10 @@ pub async fn select_observed_source_binding_in_context(
         None,
     )
     .await;
-    let Some(result) = result else {
-        return Ok(None);
+    let sequence = match result {
+        std::ops::ControlFlow::Break(result) => result?,
+        std::ops::ControlFlow::Continue(_) => return Ok(None),
     };
-    let sequence = result?;
     let [Value::BoundFunctionHandle(handle)] = sequence.value().as_slice() else {
         return Err(crate::build_runtime_error(
             "selected source handle did not return one bound callable",
@@ -514,7 +518,7 @@ pub async fn try_call_semantic_descriptor(
         identity,
         bound,
         fallback_policy,
-        args,
+        mut args,
         requested_outputs,
         function_input_callsite,
         selected_runtime,
@@ -563,32 +567,34 @@ pub async fn try_call_semantic_descriptor(
     let name = fallback_policy.resolution_name_for(&identity)?;
     if matches!(identity, CallableIdentity::ExternalName(_)) {
         if let Some(context) = crate::context::legacy::active() {
-            if let Some(result) = crate::foreign::try_invoke_clibgen(
+            args = match crate::foreign::try_invoke_clibgen(
                 context.clone(),
                 &name,
-                args.clone(),
+                args,
                 requested_outputs,
             )
             .await
             {
-                return Some(result);
-            }
-            if let Some(result) = crate::foreign::try_invoke_clib(
+                crate::foreign::ForeignAttempt::Break(result) => return Some(result),
+                crate::foreign::ForeignAttempt::Continue(args) => args,
+            };
+            args = match crate::foreign::try_invoke_clib(
                 context.clone(),
                 &name,
-                args.clone(),
+                args,
                 requested_outputs,
             )
             .await
             {
-                return Some(result);
-            }
-            if let Some(result) =
-                crate::foreign::try_invoke_python(context, &name, args.clone(), requested_outputs)
-                    .await
+                crate::foreign::ForeignAttempt::Break(result) => return Some(result),
+                crate::foreign::ForeignAttempt::Continue(args) => args,
+            };
+            args = match crate::foreign::try_invoke_python(context, &name, args, requested_outputs)
+                .await
             {
-                return Some(result);
-            }
+                crate::foreign::ForeignAttempt::Break(result) => return Some(result),
+                crate::foreign::ForeignAttempt::Continue(args) => args,
+            };
         }
     }
     let registered_constructor = matches!(
@@ -636,7 +642,7 @@ pub async fn try_call_semantic_descriptor(
             if resolve_semantic_function_by_name(declared).is_none()
                 && resolve_semantic_function_by_name(&owner_qualified).is_none()
             {
-                if let Some(result) = try_load_and_call_dynamic_function(
+                if let std::ops::ControlFlow::Break(result) = try_load_and_call_dynamic_function(
                     name,
                     args,
                     requested_outputs,
@@ -703,17 +709,18 @@ pub async fn try_call_semantic_descriptor(
                 return Some(result);
             }
         }
-        if let Some(result) = try_load_and_call_dynamic_function(
+        args = match try_load_and_call_dynamic_function(
             name.clone(),
-            args.clone(),
+            args,
             requested_outputs,
             DynamicFunctionLoadPhase::BeforeSemantic,
             function_input_callsite.clone(),
         )
         .await
         {
-            return Some(result);
-        }
+            std::ops::ControlFlow::Break(result) => return Some(result),
+            std::ops::ControlFlow::Continue(args) => args,
+        };
     }
     if let Some(function) = resolve_semantic_function_by_name(&name) {
         if let Some(result) = flatten_callsite_result(
@@ -738,24 +745,25 @@ pub async fn try_call_semantic_descriptor(
             | CallableIdentity::Imported(_)
             | CallableIdentity::ExternalName(_)
     ) {
-        if let Some(result) = try_load_and_call_dynamic_function(
+        args = match try_load_and_call_dynamic_function(
             name.clone(),
-            args.clone(),
+            args,
             requested_outputs,
             DynamicFunctionLoadPhase::AfterSemantic,
             function_input_callsite,
         )
         .await
         {
-            return Some(result);
-        }
+            std::ops::ControlFlow::Break(result) => return Some(result),
+            std::ops::ControlFlow::Continue(args) => args,
+        };
     }
     if matches!(
         identity,
         CallableIdentity::ExternalName(_) | CallableIdentity::Imported(_)
     ) {
         if let Some(context) = crate::context::legacy::active() {
-            if let Some(result) =
+            if let crate::foreign::ForeignAttempt::Break(result) =
                 crate::foreign::try_invoke_java(context, &name, args, requested_outputs).await
             {
                 return Some(result);

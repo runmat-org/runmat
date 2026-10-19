@@ -278,12 +278,13 @@ pub(in crate::builtins::stats::summary::statistical_means) async fn try_rmse(
     )
     .await;
     match outcome {
-        Ok(mut output) => {
+        Ok(output) => {
             if output.shares_allocation_with(forecast) || output.shares_allocation_with(actual) {
                 let error = invalid(kind, "resident RMSE aliased an input allocation");
                 return Err(gpu_helpers::reject_gpu_output(output, error));
             }
-            gpu_helpers::propagate_output_provenance(&mut output, [forecast, actual])?;
+            let output =
+                gpu_helpers::propagate_owned_output_provenance(output, [forecast, actual])?;
             gpu_helpers::resident_gpu_value(output).map(Some)
         }
         Err(Failure::Unsupported) => Ok(None),

@@ -162,17 +162,17 @@ pub(super) async fn evaluate_network_gpu(
             .into_iter()
             .filter_map(move |role| resident_parameter_handle(layer, role))
     });
-    crate::builtins::common::gpu_helpers::propagate_output_provenance(
-        &mut current,
+    let current = crate::builtins::common::gpu_helpers::propagate_owned_output_provenance(
+        current,
         std::iter::once(input).chain(resident_parameters),
     )?;
     if layout == GpuForwardLayout::ChannelsBatch && output_layout == NetworkOutputLayout::Preserve {
         let restored = provider
             .transpose(&current)
             .map_err(|error| provider_failure(function, "output layout transpose", error.into()))?;
-        let mut restored = validate_layout_transpose(restored, &current, provider, function)?;
-        crate::builtins::common::gpu_helpers::propagate_output_provenance(
-            &mut restored,
+        let restored = validate_layout_transpose(restored, &current, provider, function)?;
+        let restored = crate::builtins::common::gpu_helpers::propagate_owned_output_provenance(
+            restored,
             [input, &current],
         )?;
         Ok(Some(restored))

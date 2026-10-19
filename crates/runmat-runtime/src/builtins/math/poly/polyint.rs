@@ -212,7 +212,7 @@ fn try_polyint_gpu(
                         .with_source(error)
                         .build()
                 })?;
-            gpu_helpers::propagate_output_provenance(&mut result, [handle])?;
+            let result = gpu_helpers::propagate_owned_output_provenance(result, [handle])?;
             Ok(Some(result))
         }
         Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => Ok(None),

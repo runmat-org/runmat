@@ -19,6 +19,7 @@ mod diag;
 mod kron;
 mod tril;
 mod triu;
+mod shiftdim;
 
 pub use self::circshift::*;
 pub use self::concatenation::*;
@@ -32,6 +33,7 @@ pub use self::permute::*;
 pub use self::repmat::*;
 pub use self::reshape::*;
 pub use self::rot90::*;
+pub use self::shiftdim::*;
 pub use self::squeeze::*;
 pub use self::toeplitz::*;
 pub use self::transform_facts::{
@@ -57,4 +59,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(kron::ENTRIES.iter().copied());
     values.extend(tril::ENTRIES.iter().copied());
     values.extend(triu::ENTRIES.iter().copied());
+    values.extend(shiftdim::ENTRIES.iter().copied());
 }

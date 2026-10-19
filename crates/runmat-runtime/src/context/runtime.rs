@@ -466,6 +466,14 @@ impl RuntimeContext {
             self.constructor_receiver = None;
             return Ok(self);
         }
+        self.constructor_receiver = self.capture_constructor_receiver(owner)?;
+        Ok(self)
+    }
+
+    fn capture_constructor_receiver(
+        &self,
+        owner: &runmat_types::ClassMethodOwner,
+    ) -> Result<Option<crate::execution::RootedValue>, crate::RuntimeError> {
         if owner.is_static {
             return Err(crate::build_runtime_error(
                 "a static method cannot own the constructor instance",
@@ -473,15 +481,15 @@ impl RuntimeContext {
             .with_identifier("RunMat:ConstructorOwnerInvalid")
             .build());
         }
-        let rooted = if let Some(receiver) =
-            crate::constructor_receiver_in_context(&self, &owner.declaring_class)
+        if let Some(receiver) = crate::constructor_receiver_in_context(self, &owner.declaring_class)
         {
-            Some(
+            Ok(Some(
                 crate::execution::RootedValue::new(receiver)
                     .map_err(|error| error.into_runtime_error())?,
-            )
+            ))
         } else {
-            self.constructor_receiver
+            Ok(self
+                .constructor_receiver
                 .as_ref()
                 .filter(|rooted| {
                     crate::constructor_receiver_matches_class(
@@ -489,10 +497,8 @@ impl RuntimeContext {
                         &owner.declaring_class,
                     )
                 })
-                .cloned()
-        };
-        self.constructor_receiver = rooted;
-        Ok(self)
+                .cloned())
+        }
     }
 
     /// The call-local constructor instance remains rooted by this context.
@@ -1246,10 +1252,17 @@ impl RuntimeContext {
             }
     }
 
-    pub(super) fn with_poll_debug_frames(mut self) -> Self {
+    pub(super) fn capture_poll_projections(&mut self) {
+        self.capture_poll_source_catalog();
+        self.capture_poll_debug_frames();
+        self.capture_poll_call_projection();
+        self.capture_poll_console_capture_projection();
+        self.capture_poll_output_projection();
+    }
+
+    fn capture_poll_debug_frames(&mut self) {
         let snapshot = self.debug_projection.borrow().snapshot();
         self.debug_projection = super::poll_projection::PollProjection::legacy(snapshot);
-        self
     }
 
     pub(in crate::context) fn poll_source_debug_quote(
@@ -1288,21 +1301,22 @@ impl RuntimeContext {
         Ok(self)
     }
 
-    pub(super) fn with_poll_output_projection(mut self) -> Self {
+    fn capture_poll_output_projection(&mut self) {
         let owner = self.selected_output_projection();
         let snapshot = owner.borrow().snapshot();
         self.output_projection = super::poll_projection::PollProjection::legacy(snapshot);
-        self
     }
 
     pub(crate) fn selected_output_projection(
         &self,
     ) -> super::poll_projection::PollProjection<super::output_projection::InvocationOutputProjection>
     {
-        super::scope::active_runtime_context()
-            .filter(|active| Rc::ptr_eq(active.state(), self.state()))
-            .map(|active| active.output_projection().clone())
-            .unwrap_or_else(|| self.output_projection.clone())
+        super::scope::with_active_runtime_context(|active| {
+            active
+                .filter(|active| Rc::ptr_eq(active.state(), self.state()))
+                .map(|active| active.output_projection().clone())
+                .unwrap_or_else(|| self.output_projection.clone())
+        })
     }
 
     pub(super) fn poll_local_projection_quote(
@@ -1391,49 +1405,51 @@ impl RuntimeContext {
         &self.console_capture_projection
     }
 
-    pub(super) fn with_poll_console_capture_projection(mut self) -> Self {
+    fn capture_poll_console_capture_projection(&mut self) {
         let snapshot = self
             .selected_console_capture_projection()
             .borrow()
             .snapshot();
         self.console_capture_projection = super::poll_projection::PollProjection::legacy(snapshot);
-        self
     }
 
     pub(crate) fn selected_console_capture_projection(
         &self,
     ) -> super::poll_projection::PollProjection<crate::console::ConsoleCaptureProjection> {
-        super::scope::active_runtime_context()
-            .filter(|active| {
-                Rc::ptr_eq(active.state(), &self.state)
-                    && Rc::ptr_eq(
-                        &active.call_projection_lineage,
-                        &self.call_projection_lineage,
-                    )
-            })
-            .map(|active| active.console_capture_projection().clone())
-            .unwrap_or_else(|| self.console_capture_projection.clone())
+        super::scope::with_active_runtime_context(|active| {
+            active
+                .filter(|active| {
+                    Rc::ptr_eq(active.state(), &self.state)
+                        && Rc::ptr_eq(
+                            &active.call_projection_lineage,
+                            &self.call_projection_lineage,
+                        )
+                })
+                .map(|active| active.console_capture_projection().clone())
+                .unwrap_or_else(|| self.console_capture_projection.clone())
+        })
     }
 
-    pub(super) fn with_poll_call_projection(mut self) -> Self {
+    fn capture_poll_call_projection(&mut self) {
         let snapshot = self.selected_call_projection().borrow().snapshot();
         self.call_projection = super::poll_projection::PollProjection::legacy(snapshot);
-        self
     }
 
     pub(crate) fn selected_call_projection(
         &self,
     ) -> super::poll_projection::PollProjection<super::call_projection::CallProjection> {
-        super::scope::active_runtime_context()
-            .filter(|active| {
-                Rc::ptr_eq(active.state(), &self.state)
-                    && Rc::ptr_eq(
-                        &active.call_projection_lineage,
-                        &self.call_projection_lineage,
-                    )
-            })
-            .map(|active| active.call_projection().clone())
-            .unwrap_or_else(|| self.call_projection.clone())
+        super::scope::with_active_runtime_context(|active| {
+            active
+                .filter(|active| {
+                    Rc::ptr_eq(active.state(), &self.state)
+                        && Rc::ptr_eq(
+                            &active.call_projection_lineage,
+                            &self.call_projection_lineage,
+                        )
+                })
+                .map(|active| active.call_projection().clone())
+                .unwrap_or_else(|| self.call_projection.clone())
+        })
     }
 
     pub(crate) fn debug_projection(

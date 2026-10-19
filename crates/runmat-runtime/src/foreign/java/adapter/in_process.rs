@@ -10,6 +10,13 @@ struct PendingReleases {
     remaining: std::collections::VecDeque<u64>,
 }
 
+#[derive(Clone, Copy)]
+enum QualifiedSelection {
+    Selected,
+    Missing,
+    Failed,
+}
+
 impl Drop for PendingReleases {
     fn drop(&mut self) {
         let mut queue = self
@@ -26,68 +33,212 @@ impl JavaAdapter {
         self: Rc<Self>,
         context: RuntimeContext,
         call: ForeignCall,
-    ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
-        let _input_roots = crate::execution::RootedValueLease::for_values(call.arguments.iter())
-            .map_err(|error| error.into_runtime_error())?;
+    ) -> ForeignCallCompletion {
+        let _input_roots =
+            match crate::execution::RootedValueLease::for_values(call.arguments.iter()) {
+                Ok(roots) => roots,
+                Err(error) => {
+                    return ForeignCallCompletion::invoked(Err(error.into_runtime_error()))
+                }
+            };
         let cancellation = context.cancellation();
         let operation = async {
-            if self.retirement_requested.get() || self.project_retirement.is_pending() {
-                return Err(invalid_conversion("Java selected adapter is retiring"));
-            }
-            if call.symbol == "usejava" {
-                let feature = string_argument(call.arguments.into_iter().next(), "Java feature")?;
-                let parsed = runmat_builtins::JavaFeature::parse(&feature).ok_or_else(|| {
-                    invalid_conversion("Java feature must be 'jvm', 'awt', 'swing', or 'desktop'")
-                })?;
-                if matches!(
-                    parsed,
-                    runmat_builtins::JavaFeature::Jvm | runmat_builtins::JavaFeature::Desktop
-                ) {
-                    return self.root_single(self.usejava_value(vec![Value::String(feature)])?);
+            if call.symbol == "invoke_qualified" {
+                if self.retirement_requested.get() || self.project_retirement.is_pending() {
+                    return ForeignCallCompletion::invoked(Err(invalid_conversion(
+                        "Java selected adapter is retiring",
+                    )));
                 }
-                let session = self.started_lane()?;
-                let result = self
-                    .run_lane(&session, &context, |owner| {
-                        super::lane_call::JavaLaneCall::Headless.execute(owner)
-                    })
-                    .await?;
-                let JavaLaneResult::Headless(headless) = result else {
-                    return Err(invalid_conversion(
-                        "Java graphics capability response is invalid",
-                    ));
-                };
-                return self.root_single(Value::Bool(!headless));
+                return self.invoke_qualified_in_process(&context, call).await;
             }
-            if matches!(call.symbol.as_str(), "classpath" | "has_classpath") && !self.is_running() {
-                let snapshot = self.initial_classpath.borrow().snapshot();
-                let value = if call.symbol == "classpath" {
-                    self.classpath_value(call.arguments, snapshot)?
-                } else {
-                    Value::Bool(
-                        !snapshot.bootstrap.is_empty()
-                            || !snapshot.project.is_empty()
-                            || !snapshot.dynamic.is_empty(),
-                    )
-                };
-                return self.root_single(value);
-            }
-            let prepared = self.prepare_java_call(&context, call)?;
-            let session = self.started_lane()?;
-            self.drain_releases_async(&session, &context).await?;
-            let super::prepare::PreparedJavaCall { command, output } = prepared;
-            let result = self
-                .run_lane(&session, &context, move |owner| command.execute(owner))
-                .await?;
-            self.complete_java_call(output, result)
+            ForeignCallCompletion::invoked(
+                async {
+                    if self.retirement_requested.get() || self.project_retirement.is_pending() {
+                        return Err(invalid_conversion("Java selected adapter is retiring"));
+                    }
+                    if call.symbol == "usejava" {
+                        let feature =
+                            string_argument(call.arguments.into_iter().next(), "Java feature")?;
+                        let parsed =
+                            runmat_builtins::JavaFeature::parse(&feature).ok_or_else(|| {
+                                invalid_conversion(
+                                    "Java feature must be 'jvm', 'awt', 'swing', or 'desktop'",
+                                )
+                            })?;
+                        if matches!(
+                            parsed,
+                            runmat_builtins::JavaFeature::Jvm
+                                | runmat_builtins::JavaFeature::Desktop
+                        ) {
+                            return self
+                                .root_single(self.usejava_value(vec![Value::String(feature)])?);
+                        }
+                        let session = self.started_lane()?;
+                        let result = self
+                            .run_lane(&session, &context, |owner| {
+                                super::lane_call::JavaLaneCall::Headless.execute(owner)
+                            })
+                            .await?;
+                        let JavaLaneResult::Headless(headless) = result else {
+                            return Err(invalid_conversion(
+                                "Java graphics capability response is invalid",
+                            ));
+                        };
+                        return self.root_single(Value::Bool(!headless));
+                    }
+                    if matches!(call.symbol.as_str(), "classpath" | "has_classpath")
+                        && !self.is_running()
+                    {
+                        let snapshot = self.initial_classpath.borrow().snapshot();
+                        let value = if call.symbol == "classpath" {
+                            self.classpath_value(call.arguments, snapshot)?
+                        } else {
+                            Value::Bool(
+                                !snapshot.bootstrap.is_empty()
+                                    || !snapshot.project.is_empty()
+                                    || !snapshot.dynamic.is_empty(),
+                            )
+                        };
+                        return self.root_single(value);
+                    }
+                    let prepared = self.prepare_java_call(&context, call)?;
+                    let session = self.started_lane()?;
+                    self.drain_releases_async(&session, &context).await?;
+                    let super::prepare::PreparedJavaCall { command, output } = prepared;
+                    let result = self
+                        .run_lane(&session, &context, move |owner| command.execute(owner))
+                        .await?;
+                    self.complete_java_call(output, result)
+                }
+                .await,
+            )
         };
         let operation = operation.fuse();
         let cancelled = cancellation.cancelled().fuse();
         futures::pin_mut!(operation, cancelled);
         futures::select! {
             result = operation => result,
-            _ = cancelled => Err(java_invocation_error(JavaInvocationError::Callback(
+            _ = cancelled => ForeignCallCompletion::invoked(Err(java_invocation_error(JavaInvocationError::Callback(
                 "Java operation was cancelled; lane retirement remains unverified until physical completion".into(),
-            ))),
+            )))),
+        }
+    }
+
+    /// Keep target selection and the selected invocation in one admitted JNI
+    /// lane operation. A missing class returns before argument conversion or
+    /// callback registration; selected calls are terminal even when a callee
+    /// subsequently throws a Java ClassNotFoundException.
+    async fn invoke_qualified_in_process(
+        self: &Rc<Self>,
+        context: &RuntimeContext,
+        call: ForeignCall,
+    ) -> ForeignCallCompletion {
+        let name = match super::string_argument_ref(call.arguments.first(), "qualified Java name") {
+            Ok(name) => name,
+            Err(error) => return ForeignCallCompletion::invoked(Err(error)),
+        };
+        let session = match self.started_lane() {
+            Ok(session) => session,
+            Err(error) => return ForeignCallCompletion::invoked(Err(error)),
+        };
+        if let Err(error) = self.drain_releases_async(&session, context).await {
+            return ForeignCallCompletion::invoked(Err(error));
+        }
+        let (selected_sender, selected_receiver) = futures::channel::oneshot::channel();
+        let (values_sender, values_receiver) = std::sync::mpsc::channel();
+        let admitted = self.submit_lane(&session, context, move |owner| {
+            let target = super::lane_call::select_qualified(owner, &name);
+            match target {
+                Ok(target) => {
+                    if selected_sender.send(QualifiedSelection::Selected).is_err() {
+                        return Err(JavaInvocationError::Callback(
+                            "qualified Java caller ended before target selection".into(),
+                        ));
+                    }
+                    let values = values_receiver.recv().map_err(|_| {
+                        JavaInvocationError::Callback(
+                            "qualified Java caller ended before argument transfer".into(),
+                        )
+                    })?;
+                    super::lane_call::execute_selected_qualified(owner, target, values)
+                }
+                Err(error) => {
+                    let selection = if matches!(error, JavaInvocationError::ClassNotFound(_)) {
+                        QualifiedSelection::Missing
+                    } else {
+                        QualifiedSelection::Failed
+                    };
+                    let missing = matches!(selection, QualifiedSelection::Missing);
+                    let _ = selected_sender.send(selection);
+                    if missing {
+                        Ok(JavaLaneResult::Empty)
+                    } else {
+                        Err(error)
+                    }
+                }
+            }
+        });
+        let admitted = match admitted {
+            Ok(admitted) => admitted,
+            Err(error) => return ForeignCallCompletion::invoked(Err(error)),
+        };
+        let selected = selected_receiver.await.map_err(|_| {
+            java_invocation_error(JavaInvocationError::Callback(
+                "qualified Java lane ended before target selection".into(),
+            ))
+        });
+        let selected = match selected {
+            Ok(selected) => selected,
+            Err(error) => return ForeignCallCompletion::invoked(Err(error)),
+        };
+        if !matches!(selected, QualifiedSelection::Selected) {
+            drop(values_sender);
+            let outcome = self.drive_java_events(admitted, context.clone()).await;
+            return match (selected, outcome) {
+                (QualifiedSelection::Missing, Ok(JavaLaneResult::Empty)) => {
+                    ForeignCallCompletion::declined_before_marshalling(call)
+                }
+                (_, outcome) => ForeignCallCompletion::invoked(
+                    outcome.and_then(|result| self.complete_java_call(JavaOutput::Empty, result)),
+                ),
+            };
+        }
+        let first_new_callback = self.next_callback.get();
+        let prepared = match self.prepare_java_call(context, call) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.retire_unpublished_callbacks(first_new_callback);
+                return ForeignCallCompletion::invoked(Err(error));
+            }
+        };
+        let super::prepare::PreparedJavaCall { command, output } = prepared;
+        let super::lane_call::JavaLaneCall::Qualified { values, .. } = command else {
+            self.retire_unpublished_callbacks(first_new_callback);
+            return ForeignCallCompletion::invoked(Err(invalid_conversion(
+                "qualified Java preparation changed target",
+            )));
+        };
+        if values_sender.send(values).is_err() {
+            self.retire_unpublished_callbacks(first_new_callback);
+            return ForeignCallCompletion::invoked(Err(java_invocation_error(
+                JavaInvocationError::Callback(
+                    "qualified Java lane ended before argument transfer".into(),
+                ),
+            )));
+        }
+        ForeignCallCompletion::invoked(
+            self.drive_java_events(admitted, context.clone())
+                .await
+                .and_then(|result| self.complete_java_call(output, result)),
+        )
+    }
+
+    /// Newly prepared callback tokens have not reached the lane. Remove them
+    /// one at a time so each captured generation retires off the map borrow.
+    fn retire_unpublished_callbacks(&self, first: u64) {
+        for token in first..self.next_callback.get() {
+            let retired = self.callbacks.borrow_mut().remove(&token);
+            drop(retired);
         }
     }
 
@@ -185,6 +336,18 @@ impl JavaAdapter {
             + Send
             + 'static,
     ) -> Result<T, RuntimeError> {
+        let admitted = self.submit_lane(lane, context, operation)?;
+        self.drive_java_events(admitted, (*context).clone()).await
+    }
+
+    fn submit_lane<T: Send + 'static>(
+        self: &Rc<Self>,
+        lane: &JavaLane,
+        context: &RuntimeContext,
+        operation: impl FnOnce(&runmat_java::JavaLaneSession<'_>) -> Result<T, JavaInvocationError>
+            + Send
+            + 'static,
+    ) -> Result<runmat_java::JavaLaneOperation<T>, RuntimeError> {
         let profiling = crate::foreign::native_lane_profiling::NativeLaneProfiling::admit(context);
         let operation =
             move |owner: &runmat_java::JavaLaneSession<'_>| profiling.execute(|| operation(owner));
@@ -192,10 +355,9 @@ impl JavaAdapter {
             let admitted = lane
                 .submit_reentry(authority, operation)
                 .map_err(java_invocation_error)?;
-            return self.drive_java_events(admitted, (*context).clone()).await;
+            return Ok(admitted);
         }
-        let admitted = lane.submit(operation).map_err(java_invocation_error)?;
-        self.drive_java_events(admitted, (*context).clone()).await
+        lane.submit(operation).map_err(java_invocation_error)
     }
 
     async fn drive_java_events<T: Send + 'static>(

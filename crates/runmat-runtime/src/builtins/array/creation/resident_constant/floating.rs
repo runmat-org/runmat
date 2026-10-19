@@ -71,7 +71,7 @@ pub(in super::super) fn floating_constant(
             }
         }
     };
-    let mut output = validate_constructor_gpu_output_protecting(
+    let output = validate_constructor_gpu_output_protecting(
         name,
         provider,
         output,
@@ -82,6 +82,6 @@ pub(in super::super) fn floating_constant(
         false,
         &protected,
     )?;
-    gpu_helpers::propagate_output_provenance(&mut output, prototype)?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, prototype)?;
     Ok(output)
 }

@@ -15,25 +15,25 @@ mod native {
             &self,
             _context: crate::context::RuntimeContext,
             call: crate::context::ForeignCall,
-        ) -> crate::context::RuntimeServiceFuture<
-            Result<crate::execution::RootedValueSequence, crate::RuntimeError>,
-        > {
+        ) -> crate::context::RuntimeServiceFuture<crate::context::ForeignCallCompletion> {
             let sink = matches!(
                 call.symbol.as_str(),
                 "add_classpath" | "remove_classpath" | "set_classpath"
             );
             self.calls.borrow_mut().push(call);
             Box::pin(async move {
-                if sink {
+                let result = if sink {
                     crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
                         .map_err(|error| error.into_runtime_error())
                 } else {
-                    let sequence =
-                        runmat_value::ValueSequence::single(Value::String("returned".into()))
-                            .map_err(|error| invalid_call(error.to_string()))?;
-                    crate::execution::RootedValueSequence::new(sequence)
-                        .map_err(|error| error.into_runtime_error())
-                }
+                    runmat_value::ValueSequence::single(Value::String("returned".into()))
+                        .map_err(|error| invalid_call(error.to_string()))
+                        .and_then(|sequence| {
+                            crate::execution::RootedValueSequence::new(sequence)
+                                .map_err(|error| error.into_runtime_error())
+                        })
+                };
+                crate::context::ForeignCallCompletion::invoked(result)
             })
         }
     }

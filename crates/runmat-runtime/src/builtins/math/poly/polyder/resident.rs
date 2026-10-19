@@ -99,7 +99,7 @@ fn adopt(
                     .build()
             })?;
     }
-    gpu_helpers::propagate_output_provenance(&mut output, inputs.iter().copied())?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, inputs.iter().copied())?;
     gpu_helpers::resident_gpu_value(output)
 }
 

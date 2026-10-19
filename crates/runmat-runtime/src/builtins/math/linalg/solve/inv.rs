@@ -147,7 +147,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
         let options = ProviderInvOptions::default();
         match provider.inv(&handle, options).await {
-            Ok(mut result)
+            Ok(result)
                 if valid_inv_gpu_output(
                     &handle,
                     &result,
@@ -156,7 +156,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     expected_precision,
                 ) =>
             {
-                gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
+                let result = gpu_helpers::propagate_owned_output_provenance(result, [&handle])?;
                 return gpu_helpers::resident_gpu_value(result);
             }
             Ok(result) => {

@@ -931,19 +931,19 @@ fn compare_complex_integer_at(
     comparison: ComparisonMethod,
 ) -> Ordering {
     let a_real = storage
-        .real
+        .real()
         .value_at(a)
         .expect("validated complex integer index");
     let a_imag = storage
-        .imag
+        .imag()
         .value_at(a)
         .expect("validated complex integer index");
     let b_real = storage
-        .real
+        .real()
         .value_at(b)
         .expect("validated complex integer index");
     let b_imag = storage
-        .imag
+        .imag()
         .value_at(b)
         .expect("validated complex integer index");
     integer_order::compare_complex(

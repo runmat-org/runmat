@@ -11,7 +11,7 @@ pub(super) fn complex_real_values_all(
         Value::Complex(real, _) => Some(float_pred(*real)),
         Value::ComplexTensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
-                Some(integer_storage_all(&storage.real, integer_pred))
+                Some(integer_storage_all(storage.real(), integer_pred))
             } else {
                 Some(
                     tensor
@@ -41,10 +41,10 @@ pub(super) fn exact_integer_values_all(
         }),
         Value::ComplexTensor(tensor) => tensor.integer_storage().map(|storage| {
             (0..storage.len()).all(|index| {
-                let Some(real) = storage.real.value_at(index) else {
+                let Some(real) = storage.real().value_at(index) else {
                     return false;
                 };
-                let Some(imag) = storage.imag.value_at(index) else {
+                let Some(imag) = storage.imag().value_at(index) else {
                     return false;
                 };
                 imag.is_zero() && pred(&real)
@@ -148,11 +148,11 @@ pub(super) fn numeric_values_all(value: &Value, pred: impl Fn(f64) -> bool) -> b
                 .expect("integer storage was checked above");
             (0..storage.len()).all(|index| {
                 let real = storage
-                    .real
+                    .real()
                     .value_at(index)
                     .expect("complex integer real storage length is consistent");
                 let imag = storage
-                    .imag
+                    .imag()
                     .value_at(index)
                     .expect("complex integer imaginary storage length is consistent");
                 imag.is_zero() && pred(real.to_f64())

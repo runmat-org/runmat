@@ -4,6 +4,7 @@ use runmat_types::{CallableFallbackPolicy, CallableIdentity, SourceId};
 use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
+use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,9 +15,14 @@ pub mod test_support;
 
 pub type UserFunctionFuture =
     Pin<Box<dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>>>>;
-pub type DynamicFunctionLoadFuture = Pin<
-    Box<dyn Future<Output = Option<Result<crate::execution::RootedValueSequence, RuntimeError>>>>,
->;
+/// A missing pre-effect target returns the exact argument owner to the next
+/// resolution tier. A selected target is terminal even for zero outputs.
+/// Host selectors may return `Continue` only before invocation effects and
+/// must return the original argument vector, not a replacement or a clone.
+/// After selection, retirement, cancellation and invocation errors are `Break`.
+pub type DynamicFunctionLoadAttempt =
+    ControlFlow<Result<crate::execution::RootedValueSequence, RuntimeError>, Vec<Value>>;
+pub type DynamicFunctionLoadFuture = Pin<Box<dyn Future<Output = DynamicFunctionLoadAttempt>>>;
 pub type DynamicFunctionClearFuture = Pin<Box<dyn Future<Output = Result<(), RuntimeError>>>>;
 pub type FunctionInvoker =
     dyn Fn(Option<crate::context::RuntimeContext>, usize, &[Value], usize) -> UserFunctionFuture;
@@ -109,6 +115,8 @@ pub type NativeNameObserverFuture =
     Pin<Box<dyn Future<Output = Result<Option<NativeNameFact>, String>>>>;
 pub type NativeNameObserver = dyn Fn(String) -> NativeNameObserverFuture;
 
+/// Trusted selected-host resolution and invocation. An absent target follows
+/// the same original-owner, pre-effect contract as [`DynamicFunctionLoadAttempt`].
 pub type SelectedNativeInvoker =
     dyn Fn(crate::context::RuntimeContext, String, Vec<Value>, usize) -> DynamicFunctionLoadFuture;
 

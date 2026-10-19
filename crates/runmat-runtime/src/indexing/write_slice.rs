@@ -158,9 +158,10 @@ pub(crate) fn delete_integer_complex_storage_positions(
     storage: IntegerComplexStorage,
     positions: &[usize],
 ) -> IntegerComplexStorage {
+    let (real, imag) = storage.into_unbounded_components();
     IntegerComplexStorage::new(
-        delete_integer_storage_positions(storage.real, positions),
-        delete_integer_storage_positions(storage.imag, positions),
+        delete_integer_storage_positions(real, positions),
+        delete_integer_storage_positions(imag, positions),
     )
     .expect("paired integer complex storage must retain matching classes and lengths")
 }
@@ -664,13 +665,13 @@ fn materialize_complex_integer_rhs_for_plan_host(
                     .map(|index| ComplexIntegerAssignmentValue {
                         real: IntegerAssignmentValue::Exact(
                             storage
-                                .real
+                                .real()
                                 .value_at(index)
                                 .expect("typed complex storage length was validated"),
                         ),
                         imag: IntegerAssignmentValue::Exact(
                             storage
-                                .imag
+                                .imag()
                                 .value_at(index)
                                 .expect("typed complex storage length was validated"),
                         ),
@@ -1127,8 +1128,7 @@ pub fn assign_complex_with_plan_host(
             rhs_values.iter().map(|value| value.real.clone()).collect();
         let imag_values: Vec<IntegerAssignmentValue> =
             rhs_values.iter().map(|value| value.imag.clone()).collect();
-        let mut real = storage.real;
-        let mut imag = storage.imag;
+        let (mut real, mut imag) = storage.into_unbounded_components();
         integer_assignment::scatter(&mut real, plan, &real_values)?;
         integer_assignment::scatter(&mut imag, plan, &imag_values)?;
         return IntegerComplexStorage::new(real, imag)
@@ -1994,7 +1994,7 @@ mod tests {
                 assert_eq!(
                     output
                         .integer_storage()
-                        .map(|storage| (&storage.real, &storage.imag)),
+                        .map(|storage| (storage.real(), storage.imag())),
                     Some((
                         &IntegerStorage::$storage(vec![$real; 4]),
                         &IntegerStorage::$storage(vec![$imag; 4]),
@@ -2072,7 +2072,7 @@ mod tests {
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::U64(vec![u64::MAX; 4]),
                 &IntegerStorage::U64(vec![9_223_372_036_854_775_809; 4]),
@@ -2162,7 +2162,7 @@ mod tests {
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::I8(vec![i8::MAX, i8::MAX]),
                 &IntegerStorage::I8(vec![i8::MIN, i8::MIN]),

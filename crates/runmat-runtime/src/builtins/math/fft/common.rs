@@ -484,15 +484,19 @@ pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<
 }
 
 pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
-    let shape = tensor.shape().to_vec();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => {
             NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
         }
         ComplexStorage::F32(values) => {
             NumericStorage::F32(values.into_iter().map(|(real, _)| real).collect())
         }
-        ComplexStorage::Integer(storage) => NumericStorage::from(storage.real),
+        ComplexStorage::Integer(storage) => {
+            return Tensor::from_shared_host_buffer(storage.into_host_components().0, shape)
+                .map(Value::Tensor)
+                .map_err(|error| builtin_error(builtin, format!("{builtin}: {error}")));
+        }
     };
     let real = Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;

@@ -79,8 +79,7 @@ pub(super) fn validate_provider_output_with_storage(
         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(output, error));
     }
-    let mut output = output;
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

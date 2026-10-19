@@ -13,13 +13,13 @@ mod native {
             &self,
             _context: crate::context::RuntimeContext,
             _call: crate::context::ForeignCall,
-        ) -> crate::context::RuntimeServiceFuture<
-            Result<crate::execution::RootedValueSequence, crate::RuntimeError>,
-        > {
+        ) -> crate::context::RuntimeServiceFuture<crate::context::ForeignCallCompletion> {
             self.0.set(self.0.get() + 1);
             Box::pin(async {
-                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
-                    .map_err(|error| error.into_runtime_error())
+                crate::context::ForeignCallCompletion::invoked(
+                    crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                        .map_err(|error| error.into_runtime_error()),
+                )
             })
         }
     }

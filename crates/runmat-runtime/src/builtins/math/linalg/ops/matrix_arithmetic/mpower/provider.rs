@@ -49,7 +49,7 @@ fn identity(
     provider: &'static dyn AccelProvider,
     prototype: &GpuTensorHandle,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let mut output = match provider.eye_like(prototype) {
+    let output = match provider.eye_like(prototype) {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             let identity = crate::builtins::common::matrix::matrix_eye(prototype.shape()[0]);
@@ -65,7 +65,7 @@ fn identity(
         alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if gpu_helpers::unary_gpu_output_matches(&output, prototype, provider, contract) {
-        gpu_helpers::propagate_output_provenance(&mut output, [prototype])?;
+        let output = gpu_helpers::propagate_owned_output_provenance(output, [prototype])?;
         return Ok(Some(output));
     }
     Err(gpu_helpers::reject_gpu_output(
@@ -111,7 +111,7 @@ async fn multiply(
     lhs: &GpuTensorHandle,
     rhs: &GpuTensorHandle,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let mut output = match provider.matmul(lhs, rhs).await {
+    let output = match provider.matmul(lhs, rhs).await {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             return Ok(None);
@@ -127,7 +127,7 @@ async fn multiply(
         alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if gpu_helpers::binary_gpu_output_matches(&output, lhs, rhs, provider, &contract) {
-        gpu_helpers::propagate_output_provenance(&mut output, [lhs, rhs])?;
+        let output = gpu_helpers::propagate_owned_output_provenance(output, [lhs, rhs])?;
         return Ok(Some(output));
     }
     Err(gpu_helpers::reject_gpu_output(

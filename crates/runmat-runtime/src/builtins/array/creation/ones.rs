@@ -508,9 +508,11 @@ fn ones_complex_integer_like(
     shape: &[usize],
 ) -> crate::BuiltinResult<Value> {
     let len = tensor::element_count(shape);
-    let storage =
-        IntegerComplexStorage::new(storage.real.ones_like(len), storage.imag.zeros_like(len))
-            .map_err(|e| builtin_error(format!("ones: {e}")))?;
+    let storage = IntegerComplexStorage::new(
+        storage.real().ones_like(len),
+        storage.imag().zeros_like(len),
+    )
+    .map_err(|e| builtin_error(format!("ones: {e}")))?;
     ComplexTensor::new_integer(storage, shape.to_vec())
         .map(Value::ComplexTensor)
         .map_err(|e| builtin_error(format!("ones: {e}")))

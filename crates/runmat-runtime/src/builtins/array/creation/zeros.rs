@@ -460,9 +460,11 @@ fn zeros_complex_integer_like(
     shape: &[usize],
 ) -> crate::BuiltinResult<Value> {
     let len = tensor::element_count(shape);
-    let storage =
-        IntegerComplexStorage::new(storage.real.zeros_like(len), storage.imag.zeros_like(len))
-            .map_err(|e| builtin_error(format!("zeros: {e}")))?;
+    let storage = IntegerComplexStorage::new(
+        storage.real().zeros_like(len),
+        storage.imag().zeros_like(len),
+    )
+    .map_err(|e| builtin_error(format!("zeros: {e}")))?;
     ComplexTensor::new_integer(storage, shape.to_vec())
         .map(Value::ComplexTensor)
         .map_err(|e| builtin_error(format!("zeros: {e}")))

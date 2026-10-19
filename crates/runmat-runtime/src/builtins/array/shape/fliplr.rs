@@ -294,8 +294,8 @@ pub(crate) mod tests {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape(), vec![2, 2]);
                 let storage = out.integer_storage().expect("typed complex integer output");
-                assert_eq!(storage.real, IntegerStorage::I16(vec![3, 4, 1, 2]));
-                assert_eq!(storage.imag, IntegerStorage::I16(vec![7, 8, 5, 6]));
+                assert_eq!(storage.real(), &IntegerStorage::I16(vec![3, 4, 1, 2]));
+                assert_eq!(storage.imag(), &IntegerStorage::I16(vec![7, 8, 5, 6]));
             }
             other => panic!("expected typed complex integer tensor, got {other:?}"),
         }

@@ -553,8 +553,8 @@ fn zero_like(prototype: &Value, shape: &[usize]) -> Result<Value, RuntimeError> 
                 ),
                 ComplexStorage::Integer(value) => ComplexStorage::Integer(
                     IntegerComplexStorage::new(
-                        value.real.zeros_like(length),
-                        value.imag.zeros_like(length),
+                        value.real().zeros_like(length),
+                        value.imag().zeros_like(length),
                     )
                     .map_err(error)?,
                 ),

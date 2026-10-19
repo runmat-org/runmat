@@ -1035,7 +1035,7 @@ async fn moving_gpu_provider(
         normalization: provider_normalization(parsed.normalization),
     };
     match provider.moving_window(&request).await {
-        Ok(mut output) => {
+        Ok(output) => {
             let source_integer = runmat_accelerate_api::handle_integer_type(handle);
             let expected_integer = if matches!(op, MovingOp::Min | MovingOp::Max | MovingOp::Median)
             {
@@ -1067,7 +1067,7 @@ async fn moving_gpu_provider(
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(output, error));
             }
-            gpu_helpers::propagate_output_provenance(&mut output, [handle])?;
+            let output = gpu_helpers::propagate_owned_output_provenance(output, [handle])?;
             Ok(Some(output))
         }
         Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => Ok(None),

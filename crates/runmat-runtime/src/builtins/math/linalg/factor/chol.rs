@@ -315,8 +315,7 @@ fn reupload_factor(
             )))
         }
     }?;
-    let mut uploaded = uploaded;
-    gpu_helpers::propagate_output_provenance(&mut uploaded, [input])?;
+    let uploaded = gpu_helpers::propagate_owned_output_provenance(uploaded, [input])?;
     eval.factor = gpu_helpers::resident_gpu_value(uploaded)?;
     Ok(eval)
 }

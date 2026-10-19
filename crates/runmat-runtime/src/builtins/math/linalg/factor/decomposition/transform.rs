@@ -42,22 +42,22 @@ pub(super) fn conjugate_transpose(value: Value) -> BuiltinResult<Value> {
             }
             if let Some(storage) = tensor.integer_storage().cloned() {
                 let real = storage
-                    .real
+                    .real()
                     .from_exact_values_like(
                         indices
                             .iter()
                             .map(|&index| {
                                 storage
-                                    .real
+                                    .real()
                                     .value_at(index)
                                     .expect("transpose index is in bounds")
                             })
                             .collect(),
                     )
                     .map_err(internal)?;
-                let imag_values = storage.imag.exact_values();
+                let imag_values = storage.imag().exact_values();
                 let imag = storage
-                    .imag
+                    .imag()
                     .from_exact_values_like(
                         indices
                             .iter()

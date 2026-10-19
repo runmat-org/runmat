@@ -39,8 +39,9 @@ pub use copy_accounting::{host_copy_metrics, record_host_copy, HostCopyMetrics, 
 pub use dense::Tensor;
 pub use exact_host_numeric::{
     ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostAllocationReservation,
-    ExactHostComplexTensorAllocation, ExactHostLogicalTensorAllocation, ExactHostNumericAllocation,
-    ExactHostNumericAllocationError, ExactHostTensor2dAllocation, ExactHostTensorAllocation,
+    ExactHostComplexTensorAllocation, ExactHostIntegerComplexTensorAllocation,
+    ExactHostLogicalTensorAllocation, ExactHostNumericAllocation, ExactHostNumericAllocationError,
+    ExactHostTensor2dAllocation, ExactHostTensorAllocation,
 };
 pub use exact_vec::{exact_capacity_vec, exact_capacity_vec_from_slice, exact_capacity_vec_with};
 pub(crate) use format::{format_integer_complex_value, should_expand_nd_display, write_nd_pages};

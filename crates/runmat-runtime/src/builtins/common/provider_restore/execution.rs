@@ -49,8 +49,7 @@ pub(crate) fn validate_real_unary_provider_output_protecting(
             .build(),
         ));
     }
-    let mut output = output;
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

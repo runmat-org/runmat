@@ -966,13 +966,13 @@ fn read_integer_complex_slice_from_plan(
     let mut imag_values = Vec::with_capacity(plan.indices.len());
     for &linear_index in &plan.indices {
         let index = linear_index as usize;
-        let real = storage.real.value_at(index).ok_or_else(|| {
+        let real = storage.real().value_at(index).ok_or_else(|| {
             crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
             )
         })?;
-        let imag = storage.imag.value_at(index).ok_or_else(|| {
+        let imag = storage.imag().value_at(index).ok_or_else(|| {
             crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
@@ -983,11 +983,11 @@ fn read_integer_complex_slice_from_plan(
     }
 
     let real = storage
-        .real
+        .real()
         .from_same_class_values(real_values)
         .map_err(map_slice_shape_error)?;
     let imag = storage
-        .imag
+        .imag()
         .from_same_class_values(imag_values)
         .map_err(map_slice_shape_error)?;
     let result = ComplexTensor::new_integer(

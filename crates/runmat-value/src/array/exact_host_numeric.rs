@@ -17,11 +17,13 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 
 mod adopted_vec;
-mod integer;
 mod complex;
+mod integer;
+mod integer_complex;
 mod logical;
 pub use complex::ExactHostComplexTensorAllocation;
 use integer::{allocate_integer, integer_layout, ExactIntegerStorage};
+pub use integer_complex::ExactHostIntegerComplexTensorAllocation;
 pub use logical::ExactHostLogicalTensorAllocation;
 
 macro_rules! integer_slice_mut {

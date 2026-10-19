@@ -72,11 +72,11 @@ pub(crate) fn cast_complex_value(value: Value, target: IntegerClass) -> Result<V
             let shape = tensor.shape().to_vec();
             if let Some(storage) = tensor.integer_storage() {
                 (
-                    integer_values(storage.real.clone())
+                    integer_values(storage.real().clone())
                         .iter()
                         .map(|value| target.cast_int(value))
                         .collect(),
-                    integer_values(storage.imag.clone())
+                    integer_values(storage.imag().clone())
                         .iter()
                         .map(|value| target.cast_int(value))
                         .collect(),

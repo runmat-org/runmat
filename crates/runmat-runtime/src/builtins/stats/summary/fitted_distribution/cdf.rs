@@ -224,15 +224,16 @@ pub(super) fn finish_cdf(
                 "cdf: no acceleration provider registered for GPU output",
             )
         })?;
-        let mut handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &protected)
+        let handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &protected)
             .map_err(|err| {
                 crate::runtime_error::with_provider_execution_source(
                     invalid_for(CDF_NAME, format!("cdf: {err}")),
                     runmat_accelerate_api::ProviderExecutionError::from_source(err),
                 )
             })?;
-        gpu_helpers::propagate_output_provenance(&mut handle, protected.iter().copied())
-            .map_err(|error| with_fitted_context(CDF_NAME, error))?;
+        let handle =
+            gpu_helpers::propagate_owned_output_provenance(handle, protected.iter().copied())
+                .map_err(|error| with_fitted_context(CDF_NAME, error))?;
         return gpu_helpers::resident_gpu_value(handle)
             .map_err(|error| with_fitted_context(CDF_NAME, error));
     }

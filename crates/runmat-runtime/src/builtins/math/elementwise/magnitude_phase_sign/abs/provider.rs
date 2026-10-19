@@ -18,8 +18,8 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let result = provider.unary_abs(&handle).await;
         match result {
-            Ok(mut output) if valid_output(&output, &handle, provider) => {
-                gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+            Ok(output) if valid_output(&output, &handle, provider) => {
+                let output = gpu_helpers::propagate_owned_output_provenance(output, [&handle])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
@@ -56,7 +56,7 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     )?;
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, host)
         .map_err(|error| OPERATION.error(&ABS_ERROR_INTERNAL, error))?;
-    let mut output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[&handle])?;
+    let output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[&handle])?;
     let expected_precision = if integer.is_some() {
         None
     } else if logical {
@@ -73,7 +73,7 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             ),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [&handle])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

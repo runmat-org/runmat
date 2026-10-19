@@ -173,32 +173,32 @@ fn toeplitz_typed_complex(
             let storage = if row >= col { &c } else { &r };
             real.push(
                 storage
-                    .real
+                    .real()
                     .value_at(index)
                     .expect("toeplitz index is in bounds"),
             );
             imag.push(
                 storage
-                    .imag
+                    .imag()
                     .value_at(index)
                     .expect("toeplitz index is in bounds"),
             );
         }
     }
     if one_input && !real.is_empty() {
-        let diagonal_real = r.real.value_at(0).expect("nonempty diagonal");
-        let diagonal_imag = r.imag.value_at(0).expect("nonempty diagonal");
+        let diagonal_real = r.real().value_at(0).expect("nonempty diagonal");
+        let diagonal_imag = r.imag().value_at(0).expect("nonempty diagonal");
         for index in 0..rows.min(cols) {
             real[index + index * rows] = diagonal_real.clone();
             imag[index + index * rows] = diagonal_imag.clone();
         }
     }
     let real = c
-        .real
+        .real()
         .from_exact_values_like(real)
         .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
     let imag = c
-        .imag
+        .imag()
         .from_exact_values_like(imag)
         .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
     let storage = IntegerComplexStorage::new(real, imag)

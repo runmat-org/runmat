@@ -554,6 +554,26 @@ impl WgpuProvider {
         dim: usize,
         inputs: &[GpuTensorHandle],
     ) -> Result<GpuTensorHandle> {
+        self.cat_exec_inner(dim, inputs, &std::cell::Cell::new(false), None)
+    }
+
+    pub(crate) async fn cat_optional_exec(
+        &self,
+        dim: usize,
+        inputs: &[GpuTensorHandle],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let effected = std::cell::Cell::new(false);
+        self.cat_exec_inner(dim, inputs, &effected, None)
+            .map_err(|error| structural_execution_error(error, effected.get()))
+    }
+
+    fn cat_exec_inner(
+        &self,
+        dim: usize,
+        inputs: &[GpuTensorHandle],
+        effected: &std::cell::Cell<bool>,
+        post_buffer_fault: Option<anyhow::Error>,
+    ) -> Result<GpuTensorHandle> {
         ensure!(
             inputs.len() >= 2,
             "cat: at least two input arrays are required"
@@ -563,15 +583,30 @@ impl WgpuProvider {
 
         let mut entries = Vec::with_capacity(inputs.len());
         for handle in inputs {
-            entries.push(self.get_entry(handle)?);
+            if handle.view().layout() != runmat_accelerate_api::GpuTensorLayout::Contiguous {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "cat: native copy requires contiguous input layout",
+                ));
+            }
+            let entry = self.get_entry_for_bitwise_move(handle, "cat")?;
+            if entry.storage != GpuTensorStorage::Real
+                || entry.integer_type().is_some()
+                || entry.logical
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "cat: provider copy requires real floating storage",
+                ));
+            }
+            entries.push(entry);
         }
 
-        let precision = entries[0].precision;
+        let element_type = entries[0].element_type;
         for entry in &entries {
-            ensure!(
-                entry.precision == precision,
-                "cat: input precision mismatch"
-            );
+            if entry.element_type != element_type {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "cat: provider copy requires matching physical element types",
+                ));
+            }
         }
 
         let mut shapes: Vec<Vec<usize>> = entries.iter().map(|e| e.shape.clone()).collect();
@@ -637,11 +672,27 @@ impl WgpuProvider {
 
         let normalized_shape = normalize_concat_shape(output_shape.clone(), dim_zero);
 
+        effected.set(true);
         let out_buffer = self.with_emission(|emission, _| {
-            self.create_storage_buffer_checked(emission, total_len, "runmat-cat-out")
+            self.create_storage_buffer_checked_with_element_size(
+                emission,
+                total_len,
+                "runmat-cat-out",
+                crate::backend::wgpu::residency::BufferUsageClass::Generic,
+                element_type.element_size(),
+            )
         })??;
+        if let Some(error) = post_buffer_fault {
+            return Err(error);
+        }
         if total_len == 0 {
-            return self.register_existing_buffer(out_buffer, normalized_shape, 0);
+            return self.register_storage_move_buffer(
+                out_buffer.clone(),
+                &entries[0],
+                normalized_shape,
+                0,
+                out_buffer.size(),
+            );
         }
 
         let inner = product_checked(&output_shape[..dim_zero])
@@ -671,13 +722,13 @@ impl WgpuProvider {
                         .checked_mul(chunk)
                         .ok_or_else(|| anyhow!("cat: source offset overflow"))?;
                     let bytes = chunk
-                        .checked_mul(self.element_size)
+                        .checked_mul(element_type.element_size())
                         .ok_or_else(|| anyhow!("cat: copy size overflow"))?;
                     let src_bytes = src_offset
-                        .checked_mul(self.element_size)
+                        .checked_mul(element_type.element_size())
                         .ok_or_else(|| anyhow!("cat: source offset overflow"))?;
                     let dst_bytes = dst_offset_elems
-                        .checked_mul(self.element_size)
+                        .checked_mul(element_type.element_size())
                         .ok_or_else(|| anyhow!("cat: destination offset overflow"))?;
                     encoder.copy_buffer_to_buffer(
                         entry.buffer.as_ref(),
@@ -698,7 +749,13 @@ impl WgpuProvider {
             Ok(())
         })??;
 
-        self.register_existing_buffer(out_buffer, normalized_shape, total_len)
+        self.register_storage_move_buffer(
+            out_buffer.clone(),
+            &entries[0],
+            normalized_shape,
+            total_len,
+            out_buffer.size(),
+        )
     }
     pub(crate) async fn kron_exec(
         &self,
@@ -1800,6 +1857,23 @@ mod tests {
         }
 
         drop(provider.kron_exec(&input, &input));
+        drop(provider.cat_optional_exec(2, &[input.clone(), input.clone()]));
+        input.allocation_lease().validate_live().unwrap();
+        assert_eq!(provider.allocations.retained_bytes(), retained);
+
+        let fault = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            runmat_accelerate_api::unsupported_provider_operation(
+                "injected cat failure after actual output allocation",
+            ),
+        ));
+        let effected = std::cell::Cell::new(false);
+        let failure = provider
+            .cat_exec_inner(2, &[input.clone(), input.clone()], &effected, Some(fault))
+            .map_err(|error| structural_execution_error(error, effected.get()))
+            .unwrap_err();
+        assert!(failure.is_after_effect());
+        assert!(!failure.is_unsupported());
         input.allocation_lease().validate_live().unwrap();
         assert_eq!(provider.allocations.retained_bytes(), retained);
         let fault = anyhow::Error::new(std::io::Error::new(
@@ -1847,9 +1921,21 @@ mod tests {
             let lower = block_on(provider.tril_exec(&source, 0)).expect("selected tril");
             let upper = block_on(provider.triu_exec(&source, 0)).expect("selected triu");
             let product = block_on(provider.kron_exec(&source, &source)).expect("selected kron");
+            let concat = block_on(provider.cat_optional_exec(2, &[source.clone(), source.clone()]))
+                .expect("selected cat");
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&concat),
+                Some(selected)
+            );
+            assert_eq!(concat.shape(), &[2, 4]);
             for (handle, shape, expected) in [
                 (&lower, vec![2, 2], vec![1.0, 2.0, 0.0, 4.0]),
                 (&upper, vec![2, 2], vec![1.0, 0.0, 3.0, 4.0]),
+                (
+                    &concat,
+                    vec![2, 4],
+                    vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0],
+                ),
                 (
                     &product,
                     vec![4, 4],

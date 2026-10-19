@@ -42,6 +42,16 @@ pub use python::*;
 pub use runtime::*;
 pub use telemetry::*;
 
+/// Foreign routing either returns the untouched argument owner for semantic
+/// fallback, or has selected a terminal adapter operation. An empty selected
+/// result is not a routing decline.
+/// `Continue` transfers the original arguments to the next resolver;
+/// `Break` stops resolution with the selected operation's result.
+pub type ForeignAttempt = std::ops::ControlFlow<
+    Result<crate::execution::RootedValueSequence, crate::RuntimeError>,
+    Vec<runmat_value::Value>,
+>;
+
 pub(crate) fn single_output_sequence(
     value: runmat_value::Value,
 ) -> Result<runmat_value::ValueSequence, crate::RuntimeError> {
@@ -184,6 +194,7 @@ async fn invoke_foreign(
             },
         ))
         .await
+        .into_invoked_result()
 }
 
 fn require_foreign_single(
@@ -210,19 +221,19 @@ pub async fn try_invoke_clib(
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Option<Result<crate::execution::RootedValueSequence, crate::RuntimeError>> {
+) -> ForeignAttempt {
     let segments = name.split('.').collect::<Vec<_>>();
     if segments.len() < 3 || segments[0] != "clib" {
-        return None;
+        return ForeignAttempt::Continue(arguments);
     }
     if segments.iter().any(|segment| segment.trim().is_empty()) {
-        return Some(Err(foreign_error(
+        return ForeignAttempt::Break(Err(foreign_error(
             ForeignErrorKind::InvalidCall,
             "clib namespace contains an empty segment",
         )));
     }
     let Some(service) = context.service_ports().foreign().cloned() else {
-        return Some(Err(foreign_error(
+        return ForeignAttempt::Break(Err(foreign_error(
             ForeignErrorKind::UnsupportedOnWasm,
             format!(
                 "native interface `{}` is unavailable on this host",
@@ -234,7 +245,7 @@ pub async fn try_invoke_clib(
     call_arguments.push(runmat_value::Value::String(segments[1].into()));
     call_arguments.push(runmat_value::Value::String(segments[2..].join(".")));
     call_arguments.extend(arguments);
-    Some(
+    ForeignAttempt::Break(
         context
             .scope(service.invoke(
                 context.clone(),
@@ -245,7 +256,8 @@ pub async fn try_invoke_clib(
                     requested_outputs,
                 },
             ))
-            .await,
+            .await
+            .into_invoked_result(),
     )
 }
 
@@ -255,17 +267,17 @@ pub async fn try_invoke_clibgen(
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Option<Result<crate::execution::RootedValueSequence, crate::RuntimeError>> {
+) -> ForeignAttempt {
     if name != "clibgen.buildInterface" {
-        return None;
+        return ForeignAttempt::Continue(arguments);
     }
     let Some(service) = context.service_ports().foreign().cloned() else {
-        return Some(Err(foreign_error(
+        return ForeignAttempt::Break(Err(foreign_error(
             ForeignErrorKind::UnsupportedOnWasm,
             "native interface generation is unavailable on this host",
         )));
     };
-    Some(
+    ForeignAttempt::Break(
         context
             .scope(service.invoke(
                 context.clone(),
@@ -276,7 +288,8 @@ pub async fn try_invoke_clibgen(
                     requested_outputs,
                 },
             ))
-            .await,
+            .await
+            .into_invoked_result(),
     )
 }
 
@@ -288,17 +301,19 @@ pub async fn try_invoke_java(
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Option<Result<crate::execution::RootedValueSequence, crate::RuntimeError>> {
+) -> ForeignAttempt {
     if !is_java_qualified_candidate(name) {
-        return None;
+        return ForeignAttempt::Continue(arguments);
     }
     let Some(service) = context.service_ports().foreign().cloned() else {
-        return (name.starts_with("java.") || name.starts_with("javax.")).then(|| {
-            Err(foreign_error(
+        return if name.starts_with("java.") || name.starts_with("javax.") {
+            ForeignAttempt::Break(Err(foreign_error(
                 ForeignErrorKind::UnsupportedOnWasm,
                 format!("Java call `{name}` is unavailable on this host"),
-            ))
-        });
+            )))
+        } else {
+            ForeignAttempt::Continue(arguments)
+        };
     };
     if !name.starts_with("java.") && !name.starts_with("javax.") {
         let configured = context
@@ -313,15 +328,14 @@ pub async fn try_invoke_java(
             ))
             .await;
         if !matches!(
-            configured.and_then(require_foreign_single),
+            configured.into_invoked_result().and_then(require_foreign_single),
             Ok(value) if matches!(value.value(), runmat_value::Value::Bool(true))
         ) {
-            return None;
+            return ForeignAttempt::Continue(arguments);
         }
     }
-    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
-    call_arguments.push(runmat_value::Value::String(name.into()));
-    call_arguments.extend(arguments);
+    let mut call_arguments = arguments;
+    call_arguments.insert(0, runmat_value::Value::String(name.into()));
     let result = context
         .scope(service.invoke(
             context.clone(),
@@ -333,13 +347,18 @@ pub async fn try_invoke_java(
             },
         ))
         .await;
-    if result
-        .as_ref()
-        .is_err_and(|error| error.identifier() == Some("RunMat:Java:ClassNotFound"))
-    {
-        None
-    } else {
-        Some(result)
+    match result.into_owner_return() {
+        Ok(result) => ForeignAttempt::Break(result),
+        Err(mut call) => {
+            if call.arguments.is_empty() {
+                return ForeignAttempt::Break(Err(crate::runtime_error::semantic_error(
+                    "ForeignDeclineIdentity",
+                    "qualified Java decline lost its selected name argument",
+                )));
+            }
+            let _qualified_name = call.arguments.remove(0);
+            ForeignAttempt::Continue(call.arguments)
+        }
     }
 }
 
@@ -350,12 +369,12 @@ pub async fn try_invoke_python(
     name: &str,
     arguments: Vec<runmat_value::Value>,
     requested_outputs: usize,
-) -> Option<Result<crate::execution::RootedValueSequence, crate::RuntimeError>> {
+) -> ForeignAttempt {
     if !name.starts_with("py.") || name.len() <= 3 {
-        return None;
+        return ForeignAttempt::Continue(arguments);
     }
     let Some(service) = context.service_ports().foreign().cloned() else {
-        return Some(Err(foreign_error(
+        return ForeignAttempt::Break(Err(foreign_error(
             ForeignErrorKind::UnsupportedOnWasm,
             format!("Python call `{name}` is unavailable on this host"),
         )));
@@ -363,7 +382,7 @@ pub async fn try_invoke_python(
     let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
     call_arguments.push(runmat_value::Value::String(name.into()));
     call_arguments.extend(arguments);
-    Some(
+    ForeignAttempt::Break(
         context
             .scope(service.invoke(
                 context.clone(),
@@ -374,7 +393,8 @@ pub async fn try_invoke_python(
                     requested_outputs,
                 },
             ))
-            .await,
+            .await
+            .into_invoked_result(),
     )
 }
 

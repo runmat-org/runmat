@@ -595,8 +595,7 @@ fn validated_sequence_output(
             )),
         ));
     }
-    let mut output = output;
-    gpu_helpers::propagate_output_provenance(&mut output, protected.iter().copied())?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, protected.iter().copied())?;
     gpu_helpers::resident_gpu_value(output)
 }
 

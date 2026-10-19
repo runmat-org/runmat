@@ -159,10 +159,10 @@ fn paired_complex_input_stays_complex_for_every_identity() {
             panic!("{name} must preserve the complex domain");
         };
         let storage = output.integer_storage().expect("integer complex storage");
-        assert_eq!(storage.real.integer_class(), class);
-        assert_eq!(storage.imag.integer_class(), class);
-        assert_eq!(storage.real.value_at(0), Some(class.cast_scalar(1.0)));
-        assert_eq!(storage.imag.value_at(0), Some(class.cast_scalar(0.0)));
+        assert_eq!(storage.real().integer_class(), class);
+        assert_eq!(storage.imag().integer_class(), class);
+        assert_eq!(storage.real().value_at(0), Some(class.cast_scalar(1.0)));
+        assert_eq!(storage.imag().value_at(0), Some(class.cast_scalar(0.0)));
     }
 }
 

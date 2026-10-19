@@ -77,24 +77,24 @@ fn complex_tensor_scalar_value(
     index: usize,
 ) -> Result<Value, RuntimeError> {
     if let Some(storage) = &tensor.integer_storage() {
-        let real = storage.real.value_at(index).ok_or_else(|| {
+        let real = storage.real().value_at(index).ok_or_else(|| {
             indexing_error_with_identifier(
                 "Complex integer scalar index out of bounds",
                 "RunMat:IndexOutOfBounds",
             )
         })?;
-        let imag = storage.imag.value_at(index).ok_or_else(|| {
+        let imag = storage.imag().value_at(index).ok_or_else(|| {
             indexing_error_with_identifier(
                 "Complex integer scalar index out of bounds",
                 "RunMat:IndexOutOfBounds",
             )
         })?;
         let real = storage
-            .real
+            .real()
             .from_same_class_values(vec![real])
             .map_err(indexing_error)?;
         let imag = storage
-            .imag
+            .imag()
             .from_same_class_values(vec![imag])
             .map_err(indexing_error)?;
         let scalar = ComplexTensor::new_integer(

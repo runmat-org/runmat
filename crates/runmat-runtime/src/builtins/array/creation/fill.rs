@@ -175,11 +175,11 @@ impl FillScalar {
                         return Err("fill: fill value must be a scalar".to_string());
                     }
                     let re = storage
-                        .real
+                        .real()
                         .value_at(0)
                         .ok_or_else(|| "fill: fill value must be a scalar".to_string())?;
                     let im = storage
-                        .imag
+                        .imag()
                         .value_at(0)
                         .ok_or_else(|| "fill: fill value must be a scalar".to_string())?;
                     return Ok(FillScalar::ComplexInteger(re, im));
@@ -616,7 +616,7 @@ fn upload_created_output(
 ) -> crate::BuiltinResult<Value> {
     let provider = gpu_helpers::exact_provider_for_handle(owner)
         .ok_or("createArray: GPU FillValue has no registered owning provider")?;
-    let mut handle = match output {
+    let handle = match output {
         Value::Tensor(tensor) => {
             gpu_helpers::upload_tensor_protecting(provider, &tensor, &[owner])?
         }
@@ -658,7 +658,7 @@ fn upload_created_output(
             crate::RuntimeError::from("createArray: invalid uploaded output owner, shape or alias"),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut handle, [owner])?;
+    let handle = gpu_helpers::propagate_owned_output_provenance(handle, [owner])?;
     gpu_helpers::resident_gpu_value(handle)
 }
 
@@ -802,26 +802,26 @@ fn fill_complex_integer_like(
 ) -> Result<Value, String> {
     let (real, imag) = match fill {
         FillScalar::Integer(value) => (
-            prototype.real.cast_exact_assignment(value),
-            prototype.imag.cast_f64_assignment(0.0),
+            prototype.real().cast_exact_assignment(value),
+            prototype.imag().cast_f64_assignment(0.0),
         ),
         FillScalar::Complex(real, imag) => (
-            prototype.real.cast_f64_assignment(*real),
-            prototype.imag.cast_f64_assignment(*imag),
+            prototype.real().cast_f64_assignment(*real),
+            prototype.imag().cast_f64_assignment(*imag),
         ),
         FillScalar::ComplexInteger(real, imag) => (
-            prototype.real.cast_exact_assignment(real),
-            prototype.imag.cast_exact_assignment(imag),
+            prototype.real().cast_exact_assignment(real),
+            prototype.imag().cast_exact_assignment(imag),
         ),
         _ => (
-            prototype.real.cast_f64_assignment(fill.as_real()?),
-            prototype.imag.cast_f64_assignment(0.0),
+            prototype.real().cast_f64_assignment(fill.as_real()?),
+            prototype.imag().cast_f64_assignment(0.0),
         ),
     };
     let count = tensor::element_count(shape);
     let storage = IntegerComplexStorage::new(
-        prototype.real.from_same_class_values(vec![real; count])?,
-        prototype.imag.from_same_class_values(vec![imag; count])?,
+        prototype.real().from_same_class_values(vec![real; count])?,
+        prototype.imag().from_same_class_values(vec![imag; count])?,
     )?;
     ComplexTensor::new_integer(storage, shape.to_vec())
         .map(Value::ComplexTensor)
@@ -865,11 +865,11 @@ fn fill_like_gpu(
     if let Some(attempt) = attempt {
         match attempt {
             Ok(Some(output)) => {
-                let mut output = crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+                let output = crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
                     "createArray", provider, output, shape, GpuTensorStorage::Real,
                     if logical { None } else { precision }, None, logical, &[prototype],
                 )?;
-                gpu_helpers::propagate_output_provenance(&mut output, [prototype])?;
+                let output = gpu_helpers::propagate_owned_output_provenance(output, [prototype])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
             Ok(None) => {}
@@ -1413,8 +1413,8 @@ pub(crate) mod tests {
                 panic!("expected exact paired tensor");
             };
             let storage = gathered.integer_storage().expect("paired integer storage");
-            assert_eq!(storage.real, IntegerStorage::U64(vec![wide; 4]));
-            assert_eq!(storage.imag, IntegerStorage::U64(vec![u64::MAX; 4]));
+            assert_eq!(storage.real(), &IntegerStorage::U64(vec![wide; 4]));
+            assert_eq!(storage.imag(), &IntegerStorage::U64(vec![u64::MAX; 4]));
             drop(prototype);
             drop(output);
         });
@@ -1783,8 +1783,8 @@ pub(crate) mod tests {
             panic!("expected complex integer tensor");
         };
         let storage = tensor.integer_storage().expect("complex integer storage");
-        assert_eq!(storage.real, IntegerStorage::U64(vec![wide; 4]));
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![u64::MAX; 4]));
+        assert_eq!(storage.real(), &IntegerStorage::U64(vec![wide; 4]));
+        assert_eq!(storage.imag(), &IntegerStorage::U64(vec![u64::MAX; 4]));
     }
 
     #[test]
@@ -1804,8 +1804,8 @@ pub(crate) mod tests {
         };
         let storage = tensor.integer_storage().expect("integer storage");
         assert_eq!(tensor.shape(), &[2, 2]);
-        assert_eq!(storage.real, IntegerStorage::U64(vec![0; 4]));
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![0; 4]));
+        assert_eq!(storage.real(), &IntegerStorage::U64(vec![0; 4]));
+        assert_eq!(storage.imag(), &IntegerStorage::U64(vec![0; 4]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

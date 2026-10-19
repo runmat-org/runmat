@@ -108,8 +108,8 @@ pub fn select_resident_output_source(
 pub use runmat_accelerate_api::ResidencyRestoreGuard;
 
 mod adoption;
-pub(crate) use adoption::propagate_output_provenance;
 pub use adoption::{complex_gpu_value, logical_gpu_value, resident_gpu_value};
+pub(crate) use adoption::{propagate_output_provenance, propagate_owned_output_provenance};
 mod rejection;
 pub(crate) use rejection::{reject_gpu_output, reject_gpu_outputs};
 #[path = "gpu_helpers/structural.rs"]
@@ -798,7 +798,7 @@ fn interleaved_complex_data(tensor: &ComplexTensor) -> Result<HostNumericDataOwn
         ComplexStorage::F32(values) => {
             complex_transfer::interleave(values).map(HostNumericDataOwned::F32)
         }
-        ComplexStorage::Integer(storage) => match (&storage.real, &storage.imag) {
+        ComplexStorage::Integer(storage) => match (storage.real(), storage.imag()) {
             (IntegerStorage::I8(real), IntegerStorage::I8(imag)) => {
                 Ok(integer_interleaved!(real, imag, I8))
             }

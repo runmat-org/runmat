@@ -212,7 +212,14 @@ pub(super) async fn try_blsprice_gpu(
     }
     let mut call = result.call;
     let mut put = result.put;
-    gpu_helpers::propagate_output_provenance(&mut call, borrowed.iter().copied())?;
-    gpu_helpers::propagate_output_provenance(&mut put, borrowed.iter().copied())?;
+    if let Err(error) =
+        gpu_helpers::propagate_output_provenance(&mut call, borrowed.iter().copied())
+    {
+        return Err(gpu_helpers::reject_gpu_outputs([call, put], error));
+    }
+    if let Err(error) = gpu_helpers::propagate_output_provenance(&mut put, borrowed.iter().copied())
+    {
+        return Err(gpu_helpers::reject_gpu_outputs([call, put], error));
+    }
     Ok(Some(BlsPriceGpuEval { call, put }))
 }

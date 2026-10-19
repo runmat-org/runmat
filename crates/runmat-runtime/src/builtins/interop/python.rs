@@ -72,7 +72,8 @@ async fn invoke_python(
                     requested_outputs: crate::current_requested_outputs(),
                 },
             ))
-            .await?;
+            .await
+            .into_invoked_result()?;
         sequence.try_map_owned(
             |sequence| {
                 Ok::<_, crate::RuntimeError>(

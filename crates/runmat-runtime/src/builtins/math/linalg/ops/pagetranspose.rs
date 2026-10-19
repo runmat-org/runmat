@@ -310,12 +310,12 @@ mod tests {
         let storage = result.integer_storage().expect("exact integer storage");
         assert_eq!(result.shape(), [3, 2, 2]);
         assert_eq!(
-            storage.real,
-            IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 1_u64 << 63,])
+            storage.real(),
+            &IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 1_u64 << 63,])
         );
         assert_eq!(
-            storage.imag,
-            IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 12])
+            storage.imag(),
+            &IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 12])
         );
     }
 

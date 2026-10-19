@@ -58,6 +58,47 @@ pub(super) enum JavaLaneResult {
     Headless(bool),
 }
 
+/// The selected target is borrowed from the lane-owned qualified name. It is
+/// resolved before the origin marshals arguments or registers callbacks, and
+/// remains on this same submitted lane operation until invocation completes.
+pub(super) enum QualifiedTarget<'a> {
+    Constructor(&'a str),
+    Static { class: &'a str, method: &'a str },
+}
+
+pub(super) fn select_qualified<'a>(
+    owner: &runmat_java::JavaLaneSession<'_>,
+    name: &'a str,
+) -> Result<QualifiedTarget<'a>, JavaInvocationError> {
+    let session = owner.session();
+    if session.class_exists(name)? {
+        return Ok(QualifiedTarget::Constructor(name));
+    }
+    let (class, method) = name
+        .rsplit_once('.')
+        .ok_or(JavaInvocationError::InvalidQualifiedName)?;
+    if !session.class_exists(class)? {
+        return Err(JavaInvocationError::ClassNotFound(class.into()));
+    }
+    Ok(QualifiedTarget::Static { class, method })
+}
+
+pub(super) fn execute_selected_qualified(
+    owner: &runmat_java::JavaLaneSession<'_>,
+    target: QualifiedTarget<'_>,
+    values: Vec<JavaValue>,
+) -> Result<JavaLaneResult, JavaInvocationError> {
+    let values = owner.materialize_values(values)?;
+    let session = owner.session();
+    let result = match target {
+        QualifiedTarget::Constructor(name) => session.construct_resolved(name, &values)?,
+        QualifiedTarget::Static { class, method } => {
+            session.call_static_resolved(class, method, &values)?
+        }
+    };
+    Ok(JavaLaneResult::Value(result))
+}
+
 impl JavaLaneCall {
     pub(super) fn execute(
         self,
@@ -89,21 +130,8 @@ impl JavaLaneCall {
                 Ok(JavaLaneResult::Value(result))
             }
             Self::Qualified { name, values } => {
-                let values = owner.materialize_values(values)?;
-                if session.class_exists(&name)? {
-                    return session
-                        .construct_resolved(&name, &values)
-                        .map(JavaLaneResult::Value);
-                }
-                let (class, method) = name
-                    .rsplit_once('.')
-                    .ok_or(JavaInvocationError::InvalidQualifiedName)?;
-                if !session.class_exists(class)? {
-                    return Err(JavaInvocationError::ClassNotFound(class.into()));
-                }
-                session
-                    .call_static_resolved(class, method, &values)
-                    .map(JavaLaneResult::Value)
+                let target = select_qualified(owner, &name)?;
+                execute_selected_qualified(owner, target, values)
             }
             Self::Method {
                 handle,

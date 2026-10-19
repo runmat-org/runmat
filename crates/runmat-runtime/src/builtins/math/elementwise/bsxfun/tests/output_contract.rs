@@ -48,8 +48,8 @@ fn bsxfun_output_collector_preserves_complex_integer_storage() {
         panic!("expected complex tensor");
     };
     let storage = result.integer_storage().expect("integer complex storage");
-    assert_eq!(storage.real, IntegerStorage::I16(vec![8, i16::MAX]));
-    assert_eq!(storage.imag, IntegerStorage::I16(vec![-3, i16::MIN]));
+    assert_eq!(storage.real(), &IntegerStorage::I16(vec![8, i16::MAX]));
+    assert_eq!(storage.imag(), &IntegerStorage::I16(vec![-3, i16::MIN]));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

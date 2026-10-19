@@ -13,11 +13,10 @@ use super::{
     ForeignHandleRegistry, ForeignPlatform, ForeignTelemetryEvent, ForeignTelemetryOutcome,
     ForeignTelemetrySink, InteropAdmissionPlan, NoopForeignTelemetry,
 };
-use crate::context::{ForeignCall, RuntimeContext, RuntimeForeignService};
+use crate::context::{ForeignCall, ForeignCallCompletion, RuntimeContext, RuntimeForeignService};
 use crate::RuntimeError;
 
-pub type ForeignAdapterFuture =
-    Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>> + 'static>>;
+pub type ForeignAdapterFuture = Pin<Box<dyn Future<Output = ForeignCallCompletion> + 'static>>;
 
 pub(super) fn root_adapter_result(
     result: Result<ValueSequence, RuntimeError>,
@@ -258,55 +257,63 @@ impl RuntimeForeignService for ForeignRuntime {
         let adapter = self.adapters.borrow().get(call.adapter.as_str()).cloned();
         let telemetry = Rc::clone(&self.telemetry);
         Box::pin(async move {
-            let adapter = adapter.ok_or_else(|| {
-                foreign_error(
-                    ForeignErrorKind::AdapterUnavailable,
-                    format!("foreign adapter {} is not registered", call.adapter),
-                )
-            })?;
+            let adapter = match adapter {
+                Some(adapter) => adapter,
+                None => {
+                    return ForeignCallCompletion::invoked(Err(foreign_error(
+                        ForeignErrorKind::AdapterUnavailable,
+                        format!("foreign adapter {} is not registered", call.adapter),
+                    )))
+                }
+            };
             if context.is_cancelled() {
-                return Err(foreign_error(
+                return ForeignCallCompletion::invoked(Err(foreign_error(
                     ForeignErrorKind::CallbackFailed,
                     format!("foreign call {} was cancelled", call.symbol),
-                ));
+                )));
             }
             for argument in &call.arguments {
-                runmat_value::validate_no_transient_sequence(argument).map_err(|_| {
-                    crate::runtime_error::semantic_error(
-                        "TransientSequenceNotPortable",
-                        "transient output sequences cannot cross a foreign adapter boundary",
-                    )
-                })?;
+                if let Err(error) =
+                    runmat_value::validate_no_transient_sequence(argument).map_err(|_| {
+                        crate::runtime_error::semantic_error(
+                            "TransientSequenceNotPortable",
+                            "transient output sequences cannot cross a foreign adapter boundary",
+                        )
+                    })
+                {
+                    return ForeignCallCompletion::invoked(Err(error));
+                }
             }
             let descriptor = adapter.descriptor();
             if descriptor.execution_stack == runmat_types::ExecutionStackRequirement::Process
                 && context.execution_stack() != crate::context::RuntimeExecutionStack::Process
             {
-                return Err(foreign_error(
+                return ForeignCallCompletion::invoked(Err(foreign_error(
                     ForeignErrorKind::ExecutionStackViolation,
                     format!(
                         "foreign adapter {} requires the process thread stack",
                         descriptor.adapter
                     ),
-                ));
+                )));
             }
             let isolated = adapter.is_isolated();
             let operation = call.symbol.clone();
             let result = context.scope(adapter.invoke(context.clone(), call)).await;
+            let (outcome, error_identifier) = match result.invoked_result() {
+                Some(Ok(_)) => (ForeignTelemetryOutcome::Succeeded, None),
+                Some(Err(error)) => (
+                    ForeignTelemetryOutcome::Failed,
+                    error.identifier().map(str::to_owned),
+                ),
+                None => (ForeignTelemetryOutcome::Rejected, None),
+            };
             telemetry.record(ForeignTelemetryEvent {
                 adapter: descriptor.adapter.to_string(),
                 operation,
                 capability: Some(runmat_types::ForeignCapability::Invoke),
                 isolated,
-                outcome: if result.is_ok() {
-                    ForeignTelemetryOutcome::Succeeded
-                } else {
-                    ForeignTelemetryOutcome::Failed
-                },
-                error_identifier: result
-                    .as_ref()
-                    .err()
-                    .and_then(|error| error.identifier().map(str::to_owned)),
+                outcome,
+                error_identifier,
             });
             result
         })
@@ -341,10 +348,10 @@ mod tests {
 
         fn invoke(&self, _context: RuntimeContext, _call: ForeignCall) -> ForeignAdapterFuture {
             Box::pin(async {
-                root_adapter_result(
+                ForeignCallCompletion::invoked(root_adapter_result(
                     ValueSequence::single(runmat_value::Value::Num(1.0))
                         .map_err(|error| RuntimeError::new(error.to_string())),
-                )
+                ))
             })
         }
     }
@@ -368,6 +375,7 @@ mod tests {
                 requested_outputs: 1,
             },
         ))
+        .into_invoked_result()
         .expect_err("segmented stack must be rejected");
 
         assert_eq!(
@@ -396,7 +404,9 @@ mod tests {
 
         fn invoke(&self, _context: RuntimeContext, _call: ForeignCall) -> ForeignAdapterFuture {
             self.invoked.set(true);
-            Box::pin(async { root_adapter_result(Ok(ValueSequence::empty())) })
+            Box::pin(async {
+                ForeignCallCompletion::invoked(root_adapter_result(Ok(ValueSequence::empty())))
+            })
         }
     }
 
@@ -426,6 +436,7 @@ mod tests {
                 requested_outputs: 0,
             },
         ))
+        .into_invoked_result()
         .expect_err("nested transient sequence must be rejected");
 
         assert_eq!(

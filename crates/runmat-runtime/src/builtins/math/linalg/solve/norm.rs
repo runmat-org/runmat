@@ -205,8 +205,8 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
         let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let provider_result = provider.norm(&handle, provider_order).await;
         match provider_result {
-            Ok(mut result) if valid_provider_norm_result(provider, &handle, &result) => {
-                gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
+            Ok(result) if valid_provider_norm_result(provider, &handle, &result) => {
+                let result = gpu_helpers::propagate_owned_output_provenance(result, [&handle])?;
                 return gpu_helpers::resident_gpu_value(result);
             }
             Ok(result) => {

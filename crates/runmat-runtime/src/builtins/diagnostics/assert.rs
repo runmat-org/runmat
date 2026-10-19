@@ -225,8 +225,8 @@ fn evaluate_complex_tensor(tensor: &ComplexTensor) -> crate::BuiltinResult<Condi
             return Ok(ConditionOutcome::Fail);
         }
         for idx in 0..storage.len() {
-            let real = storage.real.value_at(idx);
-            let imag = storage.imag.value_at(idx);
+            let real = storage.real().value_at(idx);
+            let imag = storage.imag().value_at(idx);
             if real.is_none_or(|value| value.is_zero()) && imag.is_none_or(|value| value.is_zero())
             {
                 return Ok(ConditionOutcome::Fail);

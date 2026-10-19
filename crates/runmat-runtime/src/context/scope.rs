@@ -21,6 +21,12 @@ pub(super) fn active_runtime_context() -> Option<RuntimeContext> {
     ACTIVE_CONTEXTS.with(|contexts| contexts.borrow().last().cloned())
 }
 
+/// Read poll-local owners without cloning the complete invocation context.
+/// The reader must not enter another runtime scope while the stack is borrowed.
+pub(super) fn with_active_runtime_context<T>(read: impl FnOnce(Option<&RuntimeContext>) -> T) -> T {
+    ACTIVE_CONTEXTS.with(|contexts| read(contexts.borrow().last()))
+}
+
 pub(super) fn execution_provider_authorization(
     admission: runmat_accelerate_api::ExecutionProviderAdmission<'_>,
 ) -> runmat_accelerate_api::ExecutionProviderAuthorization {
@@ -166,14 +172,10 @@ pub struct ContextFuture<F> {
 }
 
 impl<F> ContextFuture<F> {
-    pub(super) fn new(context: RuntimeContext, future: Pin<Box<F>>) -> Self {
+    pub(super) fn new(mut context: RuntimeContext, future: Pin<Box<F>>) -> Self {
+        context.capture_poll_projections();
         Self {
-            context: context
-                .with_poll_source_catalog()
-                .with_poll_debug_frames()
-                .with_poll_call_projection()
-                .with_poll_console_capture_projection()
-                .with_poll_output_projection(),
+            context,
             future: Some(future),
             _future_scratch: None,
         }
@@ -298,67 +300,77 @@ impl RuntimeContext {
             scope_allocation_error(self, "poll scope authority is unavailable", source)
         })?;
         if policy == HostAllocationPolicy::Unbounded {
-            return Ok(PreparedRuntimeScope {
-                context: self
-                    .clone()
-                    .with_poll_source_catalog()
-                    .with_poll_debug_frames()
-                    .with_poll_call_projection()
-                    .with_poll_console_capture_projection()
-                    .with_poll_output_projection(),
-            });
+            return Ok(prepare_unbounded_poll_scope(self));
         }
 
-        let quote = self
-            .poll_source_debug_quote()
-            .and_then(|source| {
-                self.poll_local_projection_quote()
-                    .and_then(|local| source.checked_add(local))
-            })
-            .ok_or_else(|| {
-                scope_allocation_error(
-                    self,
-                    "poll scope allocation geometry overflowed",
-                    HostAllocationError::Overflow,
-                )
-            })?;
-        let retained = HostAllocationPlan::retained_exact_output_bytes(
-            quote.retained_bytes,
-            quote.retained_claims,
-        )
-        .map_err(|source| {
-            scope_allocation_error(self, "poll scope allocation geometry overflowed", source)
-        })?;
-        let plan = HostAllocationPlan::new(quote.scratch_bytes, retained).map_err(|source| {
-            scope_allocation_error(self, "poll scope allocation geometry overflowed", source)
-        })?;
-        let receipt = HostAllocationReceipt::admit(Some(self), plan)
-            .map_err(|source| scope_allocation_error(self, "poll scope admission failed", source))?
-            .ok_or_else(|| {
-                scope_allocation_error(
-                    self,
-                    "managed poll scope lost its allocation authority",
-                    HostAllocationError::MissingManagedOwner,
-                )
-            })?;
-        let permit = receipt.output_permit(self).map_err(|source| {
-            scope_allocation_error(self, "poll scope output authority changed", source)
-        })?;
-        let scratch = receipt.retain_scratch_for_cpu_work();
-        let context = self
-            .clone()
-            .with_admitted_poll_source_catalog(&permit, scratch.clone())
-            .and_then(|context| context.with_admitted_poll_debug_frames(&permit, scratch.clone()))
-            .map_err(HostAllocationError::Numeric)
-            .and_then(|context| context.with_admitted_poll_local_projections(&permit, scratch));
-        receipt.checkpoint(self).map_err(|source| {
-            scope_allocation_error(self, "poll scope authority changed", source)
-        })?;
-        let context = context.map_err(|source| {
-            scope_allocation_error(self, "poll scope projection allocation failed", source)
-        })?;
-        Ok(PreparedRuntimeScope { context })
+        prepare_managed_poll_scope(self)
     }
+}
+
+/// Keep the ordinary projection snapshot independent of the substantially
+/// larger managed admission state. This function still runs synchronously at
+/// the caller's queue boundary, before the child future is constructed.
+fn prepare_unbounded_poll_scope(context: &RuntimeContext) -> PreparedRuntimeScope {
+    let mut context = context.clone();
+    context.capture_poll_projections();
+    PreparedRuntimeScope { context }
+}
+
+/// Managed preparation retains its complete exact quote/fence behavior while
+/// no longer inflating every ordinary caller's active frame.
+fn prepare_managed_poll_scope(
+    context: &RuntimeContext,
+) -> Result<PreparedRuntimeScope, RuntimeError> {
+    let quote = context
+        .poll_source_debug_quote()
+        .and_then(|source| {
+            context
+                .poll_local_projection_quote()
+                .and_then(|local| source.checked_add(local))
+        })
+        .ok_or_else(|| {
+            scope_allocation_error(
+                context,
+                "poll scope allocation geometry overflowed",
+                HostAllocationError::Overflow,
+            )
+        })?;
+    let retained = HostAllocationPlan::retained_exact_output_bytes(
+        quote.retained_bytes,
+        quote.retained_claims,
+    )
+    .map_err(|source| {
+        scope_allocation_error(context, "poll scope allocation geometry overflowed", source)
+    })?;
+    let plan = HostAllocationPlan::new(quote.scratch_bytes, retained).map_err(|source| {
+        scope_allocation_error(context, "poll scope allocation geometry overflowed", source)
+    })?;
+    let receipt = HostAllocationReceipt::admit(Some(context), plan)
+        .map_err(|source| scope_allocation_error(context, "poll scope admission failed", source))?
+        .ok_or_else(|| {
+            scope_allocation_error(
+                context,
+                "managed poll scope lost its allocation authority",
+                HostAllocationError::MissingManagedOwner,
+            )
+        })?;
+    let permit = receipt.output_permit(context).map_err(|source| {
+        scope_allocation_error(context, "poll scope output authority changed", source)
+    })?;
+    let scratch = receipt.retain_scratch_for_cpu_work();
+    let prepared = context
+        .clone()
+        .with_admitted_poll_source_catalog(&permit, scratch.clone())
+        .and_then(|context| context.with_admitted_poll_debug_frames(&permit, scratch.clone()))
+        .map_err(HostAllocationError::Numeric)
+        .and_then(|context| context.with_admitted_poll_local_projections(&permit, scratch));
+    receipt.checkpoint(context).map_err(|source| {
+        scope_allocation_error(context, "poll scope authority changed", source)
+    })?;
+    let context = prepared.map_err(|source| {
+        scope_allocation_error(context, "poll scope projection allocation failed", source)
+    })?;
+    Ok(PreparedRuntimeScope { context })
 }
 
 fn scope_allocation_error(

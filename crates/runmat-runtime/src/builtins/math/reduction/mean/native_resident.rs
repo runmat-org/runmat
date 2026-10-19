@@ -24,7 +24,7 @@ pub(super) async fn evaluate(
             }
         };
         let result = weighted_integer_mean(&storage, gathered.shape(), dim, weights)?;
-        let mut uploaded = gpu_helpers::upload_tensor_protecting(provider, &result, &[&handle])
+        let uploaded = gpu_helpers::upload_tensor_protecting(provider, &result, &[&handle])
             .map_err(|source| {
                 let mut error = mean_internal_error(format!(
                     "mean: failed to upload weighted native result: {source}"
@@ -32,7 +32,7 @@ pub(super) async fn evaluate(
                 error.source = Some(Box::new(source));
                 error
             })?;
-        gpu_helpers::propagate_output_provenance(&mut uploaded, [&handle])?;
+        let uploaded = gpu_helpers::propagate_owned_output_provenance(uploaded, [&handle])?;
         return gpu_helpers::resident_gpu_value(uploaded);
     }
     let dims = resolve_native_dims(handle.shape(), &parsed.axes)?;
@@ -42,7 +42,7 @@ pub(super) async fn evaluate(
     let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
     })?;
-    let mut result = if dims.len() == handle.shape().len() {
+    let result = if dims.len() == handle.shape().len() {
         provider.reduce_integer_mean_native(&handle).await
     } else if dims.len() == 1 {
         provider
@@ -65,7 +65,7 @@ pub(super) async fn evaluate(
         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(result, error));
     }
-    gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
+    let result = gpu_helpers::propagate_owned_output_provenance(result, [&handle])?;
     gpu_helpers::resident_gpu_value(result)
 }
 

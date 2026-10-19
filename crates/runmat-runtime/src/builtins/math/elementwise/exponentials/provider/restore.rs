@@ -52,7 +52,7 @@ pub(super) fn real(
     tensor: Tensor,
     expected_precision: Option<ProviderPrecision>,
 ) -> BuiltinResult<Value> {
-    let mut output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])?;
+    let output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])?;
     if !contract::valid_real(&output, input, provider, expected_precision) {
         return Err(gpu_helpers::reject_gpu_output(
             output,
@@ -62,7 +62,7 @@ pub(super) fn real(
             ),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -72,7 +72,7 @@ fn complex(
     input: &GpuTensorHandle,
     tensor: ComplexTensor,
 ) -> BuiltinResult<Value> {
-    let mut output = gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])?;
+    let output = gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])?;
     let contract = gpu_helpers::UnaryGpuOutputContract {
         storage: GpuTensorStorage::ComplexInterleaved,
         precision: contract::precision(input),
@@ -89,6 +89,6 @@ fn complex(
             ),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::complex_gpu_value(output)
 }

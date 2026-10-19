@@ -100,8 +100,9 @@ pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     } else {
                         Some(result)
                     };
-                    if let Some(mut result) = result {
-                        gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
+                    if let Some(result) = result {
+                        let result =
+                            gpu_helpers::propagate_owned_output_provenance(result, [&handle])?;
                         return Ok(Value::GpuTensor(result));
                     }
                 }

@@ -265,8 +265,11 @@ async fn try_gpu_ind2sub(
     match result {
         Ok(mut handles) => {
             if handles.len() != dims.len() {
-                return Err(ind2sub_provider_error(
-                    "ind2sub: provider returned an unexpected number of outputs.",
+                return Err(gpu_helpers::reject_gpu_outputs(
+                    handles,
+                    ind2sub_provider_error(
+                        "ind2sub: provider returned an unexpected number of outputs.",
+                    ),
                 ));
             }
             let valid = handles.iter().enumerate().all(|(index, output)| {
@@ -292,13 +295,18 @@ async fn try_gpu_ind2sub(
                         .all(|prior| !output.shares_allocation_with(prior))
             });
             if !valid {
-                return Err(ind2sub_provider_error(
-                    "ind2sub: provider returned an invalid output handle.",
+                return Err(gpu_helpers::reject_gpu_outputs(
+                    handles,
+                    ind2sub_provider_error("ind2sub: provider returned an invalid output handle."),
                 ));
             }
-            for output in &mut handles {
-                gpu_helpers::propagate_output_provenance(output, [handle])?;
-                runmat_accelerate_api::mark_residency(output);
+            for index in 0..handles.len() {
+                if let Err(error) =
+                    gpu_helpers::propagate_output_provenance(&mut handles[index], [handle])
+                {
+                    return Err(gpu_helpers::reject_gpu_outputs(handles, error));
+                }
+                runmat_accelerate_api::mark_residency(&handles[index]);
             }
             let values: Vec<Value> = handles.into_iter().map(Value::GpuTensor).collect();
             finish_outputs(values).map(Some)

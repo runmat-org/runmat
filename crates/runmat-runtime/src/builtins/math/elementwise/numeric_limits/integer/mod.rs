@@ -49,7 +49,7 @@ fn like(prototype: &Value, kind: IntegerLimitKind, builtin: &'static str) -> Bui
                 return Err(super::errors::invalid_integer_prototype(builtin));
             };
             let real = IntegerStorage::from_scalar(value::scalar(
-                storage.real.integer_class().into(),
+                storage.real().integer_class().into(),
                 kind,
             ));
             let imaginary = real.zeros_like(1);

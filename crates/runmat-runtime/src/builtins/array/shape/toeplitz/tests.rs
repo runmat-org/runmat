@@ -251,12 +251,12 @@ fn toeplitz_typed_complex_integer_vector_shape_uses_storage_len_not_mirror() {
     assert_eq!(output.shape(), [3, 3]);
     let storage = output.integer_storage().expect("typed complex storage");
     assert_eq!(
-        storage.real,
-        IntegerStorage::I16(vec![1, 2, 3, 2, 1, 2, 3, 2, 1])
+        storage.real(),
+        &IntegerStorage::I16(vec![1, 2, 3, 2, 1, 2, 3, 2, 1])
     );
     assert_eq!(
-        storage.imag,
-        IntegerStorage::I16(vec![4, -5, -6, 5, 4, -5, 6, 5, 4])
+        storage.imag(),
+        &IntegerStorage::I16(vec![4, -5, -6, 5, 4, -5, 6, 5, 4])
     );
 }
 

@@ -182,10 +182,10 @@ fn complex_typed_integer_gpu_composition_stays_exact_and_resident() {
         };
         let storage = gathered.integer_storage().expect("integer storage");
         assert_eq!(
-            storage.real,
-            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
+            storage.real(),
+            &IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX])
         );
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![7, 11]));
+        assert_eq!(storage.imag(), &IntegerStorage::U64(vec![7, 11]));
     });
 }
 

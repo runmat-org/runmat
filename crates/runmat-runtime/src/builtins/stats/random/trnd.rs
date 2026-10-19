@@ -241,14 +241,14 @@ fn build_output(
                 "trnd: no acceleration provider registered for GPU output",
             )
         })?;
-        let mut handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[&source])
+        let handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[&source])
             .map_err(|err| {
                 crate::runtime_error::with_provider_execution_source(
                     trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")),
                     runmat_accelerate_api::ProviderExecutionError::from_source(err),
                 )
             })?;
-        gpu_helpers::propagate_output_provenance(&mut handle, [&source])?;
+        let handle = gpu_helpers::propagate_owned_output_provenance(handle, [&source])?;
         return gpu_helpers::resident_gpu_value(handle);
     }
 

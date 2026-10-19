@@ -28,8 +28,8 @@ pub(super) fn ensure_exact_integer_scalar_boundary(
             .integer_storage()
             .map_or_else(Vec::new, IntegerStorage::exact_values),
         Value::ComplexTensor(tensor) => tensor.integer_storage().map_or_else(Vec::new, |storage| {
-            let mut values = storage.real.exact_values();
-            values.extend(storage.imag.exact_values());
+            let mut values = storage.real().exact_values();
+            values.extend(storage.imag().exact_values());
             values
         }),
         _ => Vec::new(),
@@ -66,12 +66,12 @@ pub(super) fn complex_scalar(value: &Value, label: &str) -> BuiltinResult<(f64, 
         Value::ComplexTensor(tensor) if complex_tensor_element_len(tensor) == 1 => {
             if let Some(storage) = tensor.integer_storage() {
                 let re = storage
-                    .real
+                    .real()
                     .value_at(0)
                     .expect("one-element complex integer real storage")
                     .to_f64();
                 let im = storage
-                    .imag
+                    .imag()
                     .value_at(0)
                     .expect("one-element complex integer imaginary storage")
                     .to_f64();
@@ -93,10 +93,7 @@ pub(super) fn tensor_element_len(tensor: &Tensor) -> usize {
 }
 
 pub(super) fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
-    tensor
-        .integer_storage()
-        .as_ref()
-        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
+    tensor.len()
 }
 
 pub(super) fn real_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {

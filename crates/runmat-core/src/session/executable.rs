@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 mod selection;
+#[cfg(not(target_arch = "wasm32"))]
+mod ready_route;
 
 type InvocationResult =
     std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError>;
@@ -17,9 +19,10 @@ type CoveredInvocationResult = std::result::Result<
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) enum TieredInteractiveInvocation {
-    Cold,
+    Cold(Option<crate::generic_native::placement::ReadyRouteSelection>),
     Native(
         std::result::Result<Box<crate::generic_native::RootedNativeExecution>, Box<RuntimeError>>,
+        Option<crate::generic_native::placement::ReadyRouteSelection>,
     ),
 }
 
@@ -212,7 +215,22 @@ impl RunMatSession {
         runtime_functions: &runmat_vm::FunctionRegistry,
         workspace: &runmat_native_executor::execute::NativeWorkspaceInput,
         profile: Option<&runmat_jit::tiering::RepresentationProfile>,
+        interpreter_bytecode_unchanged: bool,
     ) -> std::result::Result<TieredInteractiveInvocation, RuntimeError> {
+        let route_admission = if profile.is_some()
+            && interpreter_bytecode_unchanged
+            && self.generic_native_cache.has_retained_entries()
+        {
+            crate::generic_native::placement::ReadyRouteAdmission::prepare(runtime)?
+        } else {
+            None
+        };
+        let ready_at_start = if route_admission.is_some() {
+            self.generic_native_cache
+                .ready_publications(unit, None, profile)?
+        } else {
+            Default::default()
+        };
         let published = self
             .generic_native_cache
             .resolve_or_schedule(unit, None, profile)?;
@@ -225,8 +243,29 @@ impl RunMatSession {
         } else {
             None
         };
+        let eligible = osr.is_none()
+            && profile.is_some()
+            && interpreter_bytecode_unchanged
+            && published
+                .as_ref()
+                .is_some_and(|entry| ready_at_start.contains(entry));
+        let selected = self.select_ready_native_route(
+            runtime,
+            crate::generic_native::placement::ReadyInvocation {
+                unit,
+                preferred_function: None,
+                arguments: &[],
+                requested_outputs: 0,
+                profile: profile.map(|profile| profile.digest),
+            },
+            published,
+            eligible,
+            route_admission,
+        )?;
+        let published = selected.published;
+        let placement = selected.receipt;
         let Some(published) = published else {
-            return Ok(TieredInteractiveInvocation::Cold);
+            return Ok(TieredInteractiveInvocation::Cold(placement));
         };
         self.stats.jit_compiled += 1;
         let execution = crate::generic_native::invoke(
@@ -253,6 +292,7 @@ impl RunMatSession {
         }
         Ok(TieredInteractiveInvocation::Native(
             execution.map(Box::new).map_err(Box::new),
+            placement,
         ))
     }
 
@@ -294,6 +334,17 @@ impl RunMatSession {
         }
         let profile = self.generic_native_cache.representation_profile(&[]);
         let started = std::time::Instant::now();
+        let route_admission = if self.generic_native_cache.has_retained_entries() {
+            crate::generic_native::placement::ReadyRouteAdmission::prepare(runtime)?
+        } else {
+            None
+        };
+        let ready_at_start = if route_admission.is_some() {
+            self.generic_native_cache
+                .ready_publications(unit, None, profile.as_ref())?
+        } else {
+            Default::default()
+        };
         let published =
             self.generic_native_cache
                 .resolve_or_schedule(unit, None, profile.as_ref())?;
@@ -306,6 +357,28 @@ impl RunMatSession {
         } else {
             None
         };
+        // An OSR target is an additional ready product with its own route
+        // identity. Until the complete pair is represented, retain the
+        // existing tiering route rather than quote a one-product candidate.
+        let eligible = osr.is_none()
+            && published
+                .as_ref()
+                .is_some_and(|entry| ready_at_start.contains(entry));
+        let selected = self.select_ready_native_route(
+            runtime,
+            crate::generic_native::placement::ReadyInvocation {
+                unit,
+                preferred_function: None,
+                arguments: &[],
+                requested_outputs: 0,
+                profile: profile.as_ref().map(|profile| profile.digest),
+            },
+            published,
+            eligible,
+            route_admission,
+        )?;
+        let published = selected.published;
+        let placement = selected.receipt;
         let (result, backedges, osr_entry, vectorized_regions) = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
@@ -372,6 +445,15 @@ impl RunMatSession {
         {
             log::warn!("native loop feedback was not recorded: {error}");
         }
+        if let Some(selected) = placement {
+            selected.observe(if runtime.is_cancelled() {
+                runmat_execution::WholeWorkObservationOutcome::Cancelled
+            } else if result.is_ok() {
+                runmat_execution::WholeWorkObservationOutcome::Success
+            } else {
+                runmat_execution::WholeWorkObservationOutcome::OperationalFailure
+            });
+        }
         result
     }
 
@@ -400,6 +482,17 @@ impl RunMatSession {
         }
         let profile = self.generic_native_cache.representation_profile(&arguments);
         let started = std::time::Instant::now();
+        let route_admission = if self.generic_native_cache.has_retained_entries() {
+            crate::generic_native::placement::ReadyRouteAdmission::prepare(runtime)?
+        } else {
+            None
+        };
+        let ready_at_start = if route_admission.is_some() {
+            self.generic_native_cache
+                .ready_publications(unit, Some(name), profile.as_ref())?
+        } else {
+            Default::default()
+        };
         let published =
             self.generic_native_cache
                 .resolve_or_schedule(unit, Some(name), profile.as_ref())?;
@@ -412,6 +505,25 @@ impl RunMatSession {
         } else {
             None
         };
+        let eligible = osr.is_none()
+            && published
+                .as_ref()
+                .is_some_and(|entry| ready_at_start.contains(entry));
+        let selected = self.select_ready_native_route(
+            runtime,
+            crate::generic_native::placement::ReadyInvocation {
+                unit,
+                preferred_function: Some(name),
+                arguments: &arguments,
+                requested_outputs,
+                profile: profile.as_ref().map(|profile| profile.digest),
+            },
+            published,
+            eligible,
+            route_admission,
+        )?;
+        let published = selected.published;
+        let placement = selected.receipt;
         let (result, backedges, osr_entry, vectorized_regions) = match published {
             Some(published) => {
                 self.stats.jit_compiled += 1;
@@ -484,6 +596,15 @@ impl RunMatSession {
                 .observe_loop_backedges(unit, Some(name), &backedges)
         {
             log::warn!("native loop feedback was not recorded: {error}");
+        }
+        if let Some(selected) = placement {
+            selected.observe(if runtime.is_cancelled() {
+                runmat_execution::WholeWorkObservationOutcome::Cancelled
+            } else if result.is_ok() {
+                runmat_execution::WholeWorkObservationOutcome::Success
+            } else {
+                runmat_execution::WholeWorkObservationOutcome::OperationalFailure
+            });
         }
         result
     }

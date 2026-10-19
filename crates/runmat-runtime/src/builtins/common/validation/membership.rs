@@ -108,11 +108,11 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
                     .map(|index| {
                         ValidationAtom::ComplexInteger(
                             storage
-                                .real
+                                .real()
                                 .value_at(index)
                                 .expect("validated real storage"),
                             storage
-                                .imag
+                                .imag()
                                 .value_at(index)
                                 .expect("validated imaginary storage"),
                         )

@@ -190,19 +190,25 @@ impl LuEval {
         pivot_mode: PivotMode,
         provenance: runmat_accelerate_api::GpuHandleProvenance,
     ) -> BuiltinResult<Self> {
-        for handle in [
-            &mut result.combined,
-            &mut result.lower,
-            &mut result.upper,
-            &mut result.perm_matrix,
-            &mut result.perm_vector,
-        ] {
-            *handle = handle.with_provenance(provenance).map_err(|error| {
-                build_runtime_error(format!("lu: cannot adopt provider output: {error}"))
-                    .with_source(error)
-                    .build()
-            })?;
-            runmat_accelerate_api::mark_residency(handle);
+        let adoption = (|| {
+            for handle in [
+                &mut result.combined,
+                &mut result.lower,
+                &mut result.upper,
+                &mut result.perm_matrix,
+                &mut result.perm_vector,
+            ] {
+                *handle = handle.with_provenance(provenance).map_err(|error| {
+                    build_runtime_error(format!("lu: cannot adopt provider output: {error}"))
+                        .with_source(error)
+                        .build()
+                })?;
+                runmat_accelerate_api::mark_residency(handle);
+            }
+            Ok::<(), RuntimeError>(())
+        })();
+        if let Err(error) = adoption {
+            return Err(reject_provider_lu_result(result, error));
         }
         Ok(Self {
             combined: Value::GpuTensor(result.combined),
@@ -284,28 +290,31 @@ fn restore_lu_eval_to_provider(
         &eval.perm_matrix,
         &eval.perm_vector,
     ] {
-        let protected = std::iter::once(input)
-            .chain(uploaded.iter())
-            .collect::<Vec<_>>();
-        let handle = upload(owner, value, &protected)?;
+        let handle = {
+            let protected = std::iter::once(input)
+                .chain(uploaded.iter())
+                .collect::<Vec<_>>();
+            upload(owner, value, &protected)
+        };
+        let handle = match handle {
+            Ok(handle) => handle,
+            Err(error) => return Err(gpu_helpers::reject_gpu_outputs(uploaded, error)),
+        };
         uploaded.push(handle);
     }
-    let mut uploaded = uploaded.into_iter();
-    let mut combined = uploaded.next().expect("combined upload");
-    let mut lower = uploaded.next().expect("lower upload");
-    let mut upper = uploaded.next().expect("upper upload");
-    let mut perm_matrix = uploaded.next().expect("permutation upload");
-    let mut perm_vector = uploaded.next().expect("pivot upload");
-    for handle in [
-        &mut combined,
-        &mut lower,
-        &mut upper,
-        &mut perm_matrix,
-        &mut perm_vector,
-    ] {
-        gpu_helpers::propagate_output_provenance(handle, [input])?;
-        runmat_accelerate_api::mark_residency(handle);
+    for index in 0..uploaded.len() {
+        if let Err(error) = gpu_helpers::propagate_output_provenance(&mut uploaded[index], [input])
+        {
+            return Err(gpu_helpers::reject_gpu_outputs(uploaded, error));
+        }
+        runmat_accelerate_api::mark_residency(&uploaded[index]);
     }
+    let mut uploaded = uploaded.into_iter();
+    let combined = uploaded.next().expect("combined upload");
+    let lower = uploaded.next().expect("lower upload");
+    let upper = uploaded.next().expect("upper upload");
+    let perm_matrix = uploaded.next().expect("permutation upload");
+    let perm_vector = uploaded.next().expect("pivot upload");
     Ok(LuEval {
         combined: Value::GpuTensor(combined),
         lower: Value::GpuTensor(lower),

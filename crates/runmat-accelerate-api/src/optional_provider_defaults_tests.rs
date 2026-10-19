@@ -133,6 +133,8 @@ fn structural_defaults_are_pre_effect_unsupported_and_preserve_the_input() {
         ready_default(provider.tril(&input.handle, -1)).unwrap_err(),
         ready_default(provider.triu(&input.handle, 1)).unwrap_err(),
         ready_default(provider.kron(&input.handle, &input.handle)).unwrap_err(),
+        ready_default(provider.cat_optional(1, &[input.handle.clone(), input.handle.clone()]))
+            .unwrap_err(),
     ] {
         assert!(failure.is_unsupported());
         assert!(!failure.is_after_effect());

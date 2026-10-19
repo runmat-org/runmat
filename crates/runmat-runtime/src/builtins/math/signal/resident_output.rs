@@ -69,7 +69,7 @@ impl OutputContext<'_> {
 
     pub(super) fn admit(
         &self,
-        mut output: GpuTensorHandle,
+        output: GpuTensorHandle,
         contract: &BinaryGpuOutputContract,
         siblings: &[&GpuTensorHandle],
         error: impl FnOnce() -> RuntimeError,
@@ -100,8 +100,8 @@ impl OutputContext<'_> {
             return Err(gpu_helpers::reject_gpu_output(output, error));
         }
         // Protected siblings are alias exclusions, not caller intent authorities.
-        gpu_helpers::propagate_output_provenance(
-            &mut output,
+        let output = gpu_helpers::propagate_owned_output_provenance(
+            output,
             std::iter::once(self.input).chain(self.caller_inputs.iter().copied()),
         )
         .map_err(|mut error| {

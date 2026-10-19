@@ -157,7 +157,7 @@ pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {
         Value::SparseTensor(tensor) => tensor.integer_storage().is_none_or(storage_exact),
         Value::ComplexTensor(tensor) => tensor
             .integer_storage()
-            .is_none_or(|storage| storage_exact(&storage.real) && storage_exact(&storage.imag)),
+            .is_none_or(|storage| storage_exact(storage.real()) && storage_exact(storage.imag())),
         Value::Cell(cell) => cell.data.iter().all(native_integer_value_is_exact_f64),
         Value::Struct(value) => value.fields.values().all(native_integer_value_is_exact_f64),
         Value::StructArray(value) => {

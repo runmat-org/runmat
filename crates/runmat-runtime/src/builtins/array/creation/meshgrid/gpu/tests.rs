@@ -151,4 +151,56 @@ fn reshape_stages_validate_original_axes_before_next_hook_and_keep_failure_phase
             }
         }
     }
+
+    let provider = Box::leak(Box::new(Provider {
+        inner: InProcessProvider::new(),
+        foreign: InProcessProvider::new(),
+        fault: Fault::Failure,
+        at: usize::MAX,
+        reshapes: AtomicUsize::new(0),
+        tiles: AtomicUsize::new(0),
+        produced: Mutex::new(vec![]),
+    }));
+    let _active = ThreadProviderGuard::set(Some(provider));
+    let axes = (0..2)
+        .map(|_| AxisData {
+            len: 2,
+            is_complex: false,
+            storage: AxisStorage::GpuReal(
+                provider
+                    .inner
+                    .upload(&HostTensorView {
+                        data: &[1., 2.],
+                        shape: &[1, 2],
+                    })
+                    .expect("axis"),
+            ),
+        })
+        .collect::<Vec<_>>();
+    let grids = try_meshgrid_gpu_from_vector_axes(&axes[0], &axes[1], None)
+        .expect("selected provider grid")
+        .expect("resident grids");
+    let empty = futures::executor::block_on(
+        MeshgridEval {
+            outputs: grids,
+            target_class: PrototypeClass::Real,
+            target_residency: DevicePreference::Gpu(provider.device_id()),
+        }
+        .into_output_list(0),
+    )
+    .expect("zero-output publication retires unrequested grids");
+    assert!(matches!(empty, Value::OutputList(values) if values.as_slice().is_empty()));
+    assert!(provider
+        .produced
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|lease| lease.acquire().is_none()));
+    for axis in &axes {
+        axis.gpu_real()
+            .expect("borrowed axis")
+            .allocation_lease()
+            .validate_live()
+            .expect("borrowed input remains live");
+    }
 }

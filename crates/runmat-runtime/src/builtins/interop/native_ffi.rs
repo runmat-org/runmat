@@ -58,7 +58,8 @@ async fn invoke_native(
                     requested_outputs,
                 },
             ))
-            .await?;
+            .await
+            .into_invoked_result()?;
         sequence.try_map_owned(
             |sequence| {
                 Ok::<_, crate::RuntimeError>(

@@ -77,12 +77,12 @@ fn complex(tensor: ComplexTensor, selection: usize) -> BuiltinResult<Value> {
         }
         ComplexStorage::Integer(storage) => {
             let real = storage
-                .real
-                .from_exact_values_like(columns(&storage.real.exact_values(), rows, selection)?)
+                .real()
+                .from_exact_values_like(columns(&storage.real().exact_values(), rows, selection)?)
                 .map_err(internal)?;
             let imaginary = storage
-                .imag
-                .from_exact_values_like(columns(&storage.imag.exact_values(), rows, selection)?)
+                .imag()
+                .from_exact_values_like(columns(&storage.imag().exact_values(), rows, selection)?)
                 .map_err(internal)?;
             ComplexStorage::Integer(IntegerComplexStorage::new(real, imaginary).map_err(internal)?)
         }

@@ -464,9 +464,9 @@ fn eye_complex_integer_like(
 ) -> Result<Value, String> {
     let shape = shape.to_vec();
     let len = tensor::element_count(&shape);
-    let mut real = storage.real.zeros_like(len);
+    let mut real = storage.real().zeros_like(len);
     let one = storage
-        .real
+        .real()
         .ones_like(1)
         .value_at(0)
         .expect("one-element integer storage has a value");
@@ -474,7 +474,7 @@ fn eye_complex_integer_like(
         real.set_value(index, one.clone())
             .expect("identity index and integer class are valid");
     });
-    let storage = IntegerComplexStorage::new(real, storage.imag.zeros_like(len))?;
+    let storage = IntegerComplexStorage::new(real, storage.imag().zeros_like(len))?;
     ComplexTensor::new_integer(storage, shape).map(Value::ComplexTensor)
 }
 
@@ -558,19 +558,18 @@ async fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Built
             gpu_helpers::upload_tensor_protecting(provider, &host, &[handle])?
         }
     };
-    let mut output =
-        crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
-            "eye",
-            provider,
-            output,
-            shape,
-            storage,
-            if logical { None } else { precision },
-            if logical { None } else { integer },
-            logical,
-            &[handle],
-        )?;
-    gpu_helpers::propagate_output_provenance(&mut output, [handle])?;
+    let output = crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+        "eye",
+        provider,
+        output,
+        shape,
+        storage,
+        if logical { None } else { precision },
+        if logical { None } else { integer },
+        logical,
+        &[handle],
+    )?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [handle])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -989,8 +988,8 @@ pub(crate) mod tests {
                 panic!("paired host storage")
             };
             let storage = gathered.integer_storage().unwrap();
-            assert_eq!(storage.real, IntegerStorage::U64(vec![1, 0, 0, 1, 0, 0]));
-            assert_eq!(storage.imag, IntegerStorage::U64(vec![0; 6]));
+            assert_eq!(storage.real(), &IntegerStorage::U64(vec![1, 0, 0, 1, 0, 0]));
+            assert_eq!(storage.imag(), &IntegerStorage::U64(vec![0; 6]));
             let Value::ComplexTensor(original) =
                 block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(input))).unwrap()
             else {

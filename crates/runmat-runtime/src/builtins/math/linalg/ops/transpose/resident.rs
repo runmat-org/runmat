@@ -72,8 +72,8 @@ pub(in crate::builtins::math::linalg::ops) fn adopt(
     output: GpuTensorHandle,
     error: ErrorMapper,
 ) -> BuiltinResult<Value> {
-    let mut output = live(output, error)?;
-    gpu_helpers::propagate_output_provenance(&mut output, [input])
+    let output = live(output, error)?;
+    let output = gpu_helpers::propagate_owned_output_provenance(output, [input])
         .map_err(|cause| source_error(error, cause))?;
     gpu_helpers::resident_gpu_value(output).map_err(|cause| source_error(error, cause))
 }

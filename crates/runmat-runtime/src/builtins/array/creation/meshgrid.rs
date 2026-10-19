@@ -91,30 +91,9 @@ fn meshgrid_type(args: &[Type], _context: &ResolveContext) -> Type {
 async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::output_list(Vec::new()));
-        }
-        let available = eval.output_count();
-        if out_count > available {
-            let msg = if available == 2 {
-                "meshgrid with two inputs supports at most two outputs"
-            } else {
-                "meshgrid supports at most three outputs"
-            };
-            return Err(builtin_error(msg));
-        }
-        let mut outputs = Vec::with_capacity(out_count);
-        let first = eval.first().await?;
-        outputs.push(first);
-        if out_count >= 2 {
-            outputs.push(eval.second().await?);
-        }
-        if out_count >= 3 {
-            outputs.push(eval.third().await?);
-        }
-        return Ok(Value::output_list(outputs));
+        return eval.into_output_list(out_count).await;
     }
-    eval.first().await
+    eval.into_first().await
 }
 
 /// Evaluate the `meshgrid` builtin once and reuse the result for multiple outputs.
@@ -585,7 +564,7 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::Built
         let len = tensor::complex_tensor_element_len(&tensor);
         let is_complex = match tensor.integer_storage() {
             Some(storage) => storage
-                .imag
+                .imag()
                 .exact_values()
                 .into_iter()
                 .any(|value| !value.is_zero()),
@@ -1000,7 +979,7 @@ fn complex_storage_into_real(storage: ComplexStorage) -> crate::BuiltinResult<Nu
             .map(NumericStorage::F32),
         ComplexStorage::Integer(storage) => {
             if storage
-                .imag
+                .imag()
                 .exact_values()
                 .into_iter()
                 .any(|value| !value.is_zero())
@@ -1009,7 +988,8 @@ fn complex_storage_into_real(storage: ComplexStorage) -> crate::BuiltinResult<Nu
                     "meshgrid: cannot represent complex values in a real output",
                 ));
             }
-            Ok(NumericStorage::from(storage.real))
+            let (real, _) = storage.into_unbounded_components();
+            Ok(NumericStorage::from(real))
         }
     }
 }
@@ -1164,6 +1144,8 @@ impl MeshgridEval {
         }
     }
 }
+
+mod owned;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -1896,12 +1878,12 @@ pub(crate) mod tests {
             };
             let storage = gathered.integer_storage().expect("paired storage");
             assert_eq!(
-                storage.real,
-                IntegerStorage::U64(vec![wide, wide, u64::MAX, u64::MAX])
+                storage.real(),
+                &IntegerStorage::U64(vec![wide, wide, u64::MAX, u64::MAX])
             );
             assert_eq!(
-                storage.imag,
-                IntegerStorage::U64(vec![u64::MAX, u64::MAX, wide, wide])
+                storage.imag(),
+                &IntegerStorage::U64(vec![u64::MAX, u64::MAX, wide, wide])
             );
             drop(axis_handle);
             drop(output);

@@ -602,10 +602,13 @@ pub(crate) mod tests {
         };
         let storage = result.integer_storage().expect("exact integer storage");
         assert_eq!(
-            storage.real,
-            IntegerStorage::U64(vec![4, 1_u64 << 63, u64::MAX, 2, 3])
+            storage.real(),
+            &IntegerStorage::U64(vec![4, 1_u64 << 63, u64::MAX, 2, 3])
         );
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![40, 50, 10, 20, 30]));
+        assert_eq!(
+            storage.imag(),
+            &IntegerStorage::U64(vec![40, 50, 10, 20, 30])
+        );
     }
 
     #[test]

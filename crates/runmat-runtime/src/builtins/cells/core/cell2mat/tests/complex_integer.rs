@@ -54,8 +54,8 @@ fn typed_complex_integer_cells_preserve_exact_components() {
             Value::ComplexTensor(tensor)
     if tensor.shape() == [1, 2]
                     && tensor.integer_storage().as_ref().is_some_and(|storage|
-                        storage.real == IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
-                            && storage.imag == IntegerStorage::U64(vec![5, 6]))
+                        storage.real() == &IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
+                            && storage.imag() == &IntegerStorage::U64(vec![5, 6]))
         ));
 }
 

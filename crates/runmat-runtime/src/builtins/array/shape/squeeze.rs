@@ -226,7 +226,7 @@ pub(crate) mod tests {
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
                 &IntegerStorage::I64(vec![7, -8]),

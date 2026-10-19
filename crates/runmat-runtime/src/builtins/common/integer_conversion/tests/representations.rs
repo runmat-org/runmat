@@ -50,8 +50,8 @@ fn low_rank_real_and_complex_conversions_preserve_existing_shape_policy() {
         } else {
             vec![2, 4]
         };
-        assert_eq!(storage.real, IntegerStorage::I16(expected_real));
-        assert_eq!(storage.imag, IntegerStorage::I16(expected_imag));
+        assert_eq!(storage.real(), &IntegerStorage::I16(expected_real));
+        assert_eq!(storage.imag(), &IntegerStorage::I16(expected_imag));
     }
 }
 
@@ -103,8 +103,8 @@ fn every_integer_class_preserves_empty_complex_shape_and_special_values() {
         };
         assert_eq!(output.shape(), &[2, 0, 3]);
         let storage = output.integer_storage().expect("storage");
-        assert_eq!(storage.real, target.storage(Vec::new()));
-        assert_eq!(storage.imag, target.storage(Vec::new()));
+        assert_eq!(storage.real(), &target.storage(Vec::new()));
+        assert_eq!(storage.imag(), &target.storage(Vec::new()));
 
         let special = ComplexTensor::new(
             vec![(f64::NAN, 0.0), (f64::INFINITY, f64::NEG_INFINITY)],
@@ -118,15 +118,15 @@ fn every_integer_class_preserves_empty_complex_shape_and_special_values() {
         };
         let storage = output.integer_storage().expect("storage");
         assert_eq!(
-            storage.real,
-            target.storage(vec![
+            storage.real(),
+            &target.storage(vec![
                 target.cast_scalar(f64::NAN),
                 target.cast_scalar(f64::INFINITY),
             ])
         );
         assert_eq!(
-            storage.imag,
-            target.storage(vec![
+            storage.imag(),
+            &target.storage(vec![
                 target.cast_scalar(0.0),
                 target.cast_scalar(f64::NEG_INFINITY),
             ])
