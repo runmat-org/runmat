@@ -1,54 +1,6 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::MFILENAME_ERROR_TOO_MANY_INPUTS;
 use runmat_value::Value;
 use std::path::Path;
-
-const MFILENAME_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current file name.",
-}];
-
-const MFILENAME_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "option",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "`fullpath` for full source path or `class` for current method class.",
-}];
-
-const MFILENAME_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "name = mfilename()",
-        inputs: &[],
-        outputs: &MFILENAME_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "name = mfilename(option)",
-        inputs: &MFILENAME_INPUTS,
-        outputs: &MFILENAME_OUTPUT,
-    },
-];
-
-pub const MFILENAME_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MFILENAME.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:TooManyInputs"),
-    when: "More than one option argument is provided.",
-    message: "mfilename: too many input arguments",
-};
-
-pub const MFILENAME_ERRORS: [BuiltinErrorDescriptor; 1] = [MFILENAME_ERROR_TOO_MANY_INPUTS];
-
-pub const MFILENAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MFILENAME_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MFILENAME_ERRORS,
-};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MfilenameMode {
@@ -126,24 +78,26 @@ pub(crate) fn dispatch_mfilename(args: Vec<Value>) -> crate::BuiltinResult<Value
     let mode = mode_from_args(&args)?;
     let result = match mode {
         MfilenameMode::Name => crate::source_context::current_source_info()
-            .map(|source| file_stem_without_extension(&source.name))
+            .map(|source| file_stem_without_extension(source.lexical_file_name()))
             .unwrap_or_default(),
         MfilenameMode::Fullpath => crate::source_context::current_source_info()
             .map(|source| {
-                let path = source.fullpath_name.as_deref().unwrap_or(&source.name);
+                let path = source
+                    .lexical_file_fullpath_name()
+                    .unwrap_or_else(|| source.lexical_file_name());
                 path_without_extension(path)
             })
             .unwrap_or_default(),
-        MfilenameMode::Class => crate::class_access_context().unwrap_or_default(),
+        MfilenameMode::Class => crate::class_access_context()
+            .map(|identity| identity.display_name().to_owned())
+            .unwrap_or_default(),
     };
     Ok(Value::String(result))
 }
 
 #[runmat_macros::runtime_builtin(
     name = "mfilename",
-    category = "introspection",
-    summary = "Return the filename of the currently running source.",
-    descriptor(self::MFILENAME_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::mfilename"
 )]
 pub fn mfilename_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -173,5 +127,71 @@ mod tests {
         let value = dispatch_mfilename(vec![Value::String("fullpath".to_string())])
             .expect("mfilename fullpath succeeds");
         assert_eq!(value, Value::String("/tmp/demo_file".to_string()));
+    }
+
+    #[test]
+    fn mfilename_class_and_unknown_options_preserve_existing_modes() {
+        let _guard = crate::source_context::replace_current_source_context(
+            Some("/project/probe.m"),
+            Some("name = mfilename();"),
+        );
+        assert_eq!(
+            dispatch_mfilename(vec![Value::from("class")]).expect("class mode"),
+            Value::String(String::new()),
+        );
+        assert_eq!(
+            dispatch_mfilename(vec![Value::from("unsupported")]).expect("default mode"),
+            Value::String("probe".into()),
+        );
+        assert_eq!(
+            dispatch_mfilename(vec![Value::Num(7.0)]).expect("non-text default mode"),
+            Value::String("probe".into()),
+        );
+        let error = dispatch_mfilename(vec![Value::from("class"), Value::from("fullpath")])
+            .expect_err("two options");
+        assert_eq!(error.identifier(), Some("RunMat:TooManyInputs"));
+    }
+
+    #[test]
+    fn mfilename_uses_lexical_file_while_nested_source_remains_distinct() {
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _runtime = runtime.enter();
+        let outer = crate::source_context::lease_source_context_in_context(
+            &runtime,
+            "outer_file.m",
+            Some(std::sync::Arc::from("/project/outer_file.m")),
+            "value = eval('mfilename()');",
+        )
+        .expect("outer source identity");
+        let _outer = crate::source_context::replace_current_source_id_in_context(
+            &runtime,
+            Some(outer.source_id()),
+        );
+        let nested = crate::source_context::lease_nested_source_context_in_context(
+            &runtime,
+            "<eval>",
+            "mfilename()",
+            Some(outer.source_id()),
+        )
+        .expect("nested source identity");
+        let _nested = crate::source_context::replace_current_source_id_in_context(
+            &runtime,
+            Some(nested.source_id()),
+        );
+
+        let current = crate::source_context::current_source_info().expect("nested source active");
+        assert_eq!(current.name.as_ref(), "<eval>");
+        assert_eq!(current.text.as_ref(), "mfilename()");
+        assert_eq!(
+            dispatch_mfilename(Vec::new()).expect("mfilename succeeds"),
+            Value::String("outer_file".to_string())
+        );
+        assert_eq!(
+            dispatch_mfilename(vec![Value::String("fullpath".to_string())])
+                .expect("mfilename fullpath succeeds"),
+            Value::String("/project/outer_file".to_string())
+        );
     }
 }

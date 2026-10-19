@@ -4,7 +4,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::introspection::class::class_name_for_value;
+use crate::builtins::introspection::class_identity::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::metaclass_type;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -16,7 +16,6 @@ use runmat_builtins::{
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::IntValue;
 use runmat_value::Value;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::metaclass")]
@@ -69,7 +68,14 @@ const METACLASS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &METACLASS_OUTPUT,
 }];
 
-const METACLASS_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+const METACLASS_ERROR_INVALID_CLASS_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.METACLASS.INVALID_CLASS_NAME",
+    identifier: Some("RunMat:InvalidClassName"),
+    when: "The runtime class name cannot be represented as a canonical class identity.",
+    message: "metaclass: invalid class name",
+};
+
+const METACLASS_ERRORS: [BuiltinErrorDescriptor; 1] = [METACLASS_ERROR_INVALID_CLASS_NAME];
 
 pub const METACLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &METACLASS_SIGNATURES,
@@ -113,7 +119,18 @@ pub const METACLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1
     builtin_path = "crate::builtins::introspection::metaclass"
 )]
 fn metaclass_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    Ok(Value::ClassRef(class_name_for_value(&value)))
+    let class_name = class_name_for_value(&value);
+    let identity = runmat_types::ClassIdentity::new(class_name).map_err(|error| {
+        let mut builder = crate::build_runtime_error(format!(
+            "{}: {error}",
+            METACLASS_ERROR_INVALID_CLASS_NAME.message
+        ));
+        if let Some(identifier) = METACLASS_ERROR_INVALID_CLASS_NAME.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })?;
+    Ok(Value::ClassRef(identity))
 }
 
 #[cfg(test)]
@@ -122,7 +139,8 @@ mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
-        CellArray, CharArray, HandleRef, Listener, MException, ObjectInstance, StringArray, Tensor,
+        CellArray, CharArray, HandleRef, IntValue, Listener, MException, ObjectInstance,
+        StringArray, Tensor,
     };
 
     fn handle_target() -> runmat_gc::GcHandle {
@@ -133,7 +151,7 @@ mod tests {
         let Value::ClassRef(class_name) = metaclass_builtin(value).expect("metaclass") else {
             panic!("metaclass should return ClassRef");
         };
-        class_name
+        class_name.display_name().to_owned()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -145,7 +163,7 @@ mod tests {
         );
         assert_eq!(
             call(Value::HandleObject(HandleRef {
-                class_name: "pkg.HandlePoint".to_string(),
+                class_name: "pkg.HandlePoint".into(),
                 target: handle_target(),
                 valid: true,
             })),
@@ -177,7 +195,7 @@ mod tests {
             )),
             "cell"
         );
-        assert_eq!(call(Value::ClassRef("Point".to_string())), "meta.class");
+        assert_eq!(call(Value::ClassRef("Point".into())), "meta.class");
         assert_eq!(
             call(Value::MException(MException::new(
                 "RunMat:Test".to_string(),
@@ -211,8 +229,8 @@ mod tests {
             call(Value::Listener(Listener {
                 id: 7,
                 target: handle_target(),
-                target_class_name: "pkg.Target".to_string(),
-                event_name: "Changed".to_string(),
+                target_class_name: "pkg.Target".into(),
+                event_name: "Changed".into(),
                 callback: handle_target(),
                 enabled: true,
                 valid: true,
@@ -224,13 +242,25 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
+            let caller_alias = handle.clone();
+            let original = handle.wire_descriptor();
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
             assert_eq!(call(Value::GpuTensor(handle.clone())), "double");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit immutable view");
+            drop(handle);
+            let handle = explicit;
             assert_eq!(call(Value::GpuTensor(handle)), "gpuArray");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(caller_alias.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            drop(caller_alias);
+            assert!(lease.acquire().is_none());
         });
     }
 }

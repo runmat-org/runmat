@@ -7,12 +7,29 @@ use runmat_types::{CapabilitySet, EffectSet, ProgramFunctionId, RegionContract};
 
 pub(super) fn lower_function(
     function: ProgramFunctionId,
+    input: &super::assembly::NativeLoweringInput<'_>,
     metadata: &runmat_mir::MirFunctionMetadata,
+    retained_callable_parent: Option<runmat_hir::FunctionId>,
     body: &runmat_mir::MirBody,
-    analysis: &runmat_mir::analysis::AnalysisStore,
-    binding_names: Option<&BTreeMap<runmat_types::BindingId, String>>,
-    regions: &[RegionContract],
 ) -> NativeCodegenResult<NativeFunction> {
+    let assembly = input.mir;
+    let analysis = input.analysis;
+    let binding_names = input.binding_names;
+    let regions = &input.manifest.regions;
+    body.validate_expression_regions().map_err(|error| {
+        NativeCodegenError::new(
+            "native.lowering.expression_region",
+            format!("invalid MIR expression region: {error}"),
+        )
+        .at_function(function)
+    })?;
+    body.validate_statement_outputs().map_err(|error| {
+        NativeCodegenError::new(
+            "native.lowering.statement_output",
+            format!("invalid MIR statement output: {error}"),
+        )
+        .at_function(function)
+    })?;
     let local_count = body.locals.len();
     let _ = u32::try_from(local_count).map_err(|_| {
         NativeCodegenError::new(
@@ -46,6 +63,160 @@ pub(super) fn lower_function(
                 binding: local.binding,
                 name,
                 kind: NativeLocalKind::from(&local.kind),
+            })
+        })
+        .collect::<NativeCodegenResult<Vec<_>>>()?;
+    let mut binding_locals = locals
+        .iter()
+        .filter_map(|local| {
+            local.binding.map(|binding| NativeBindingLocal {
+                binding,
+                local: local.id,
+            })
+        })
+        .collect::<Vec<_>>();
+    binding_locals.sort_by_key(|entry| entry.binding);
+    let projection = assembly
+        .lexical_environment_projection(runmat_hir::FunctionId(function.0 as usize))
+        .map_err(|error| {
+            NativeCodegenError::new("native.lowering.lexical_environment", error)
+                .at_function(function)
+        })?;
+    let mut lexical_bindings = locals
+        .iter()
+        .filter_map(|local| {
+            let binding = local.binding?;
+            let kind = if projection.owned.contains(&binding) {
+                NativeLexicalBindingKind::Owned
+            } else if projection.inherited.contains(&binding) {
+                NativeLexicalBindingKind::Inherited
+            } else if projection.transit.contains(&binding) {
+                NativeLexicalBindingKind::Transit
+            } else {
+                return None;
+            };
+            Some(NativeLexicalBinding {
+                binding,
+                local: local.id,
+                kind,
+            })
+        })
+        .collect::<Vec<_>>();
+    lexical_bindings.sort_by_key(|entry| entry.binding);
+    if lexical_bindings.len()
+        != projection.owned.len() + projection.inherited.len() + projection.transit.len()
+    {
+        return Err(NativeCodegenError::new(
+            "native.lowering.lexical_environment",
+            "shared lexical binding has no unique Native IR local",
+        )
+        .at_function(function));
+    }
+    let inherited_storage_bindings = projection
+        .inherited_storage
+        .iter()
+        .map(|entry| {
+            let local = locals
+                .iter()
+                .find(|local| local.binding == Some(entry.binding))
+                .ok_or_else(|| {
+                    NativeCodegenError::new(
+                        "native.lowering.inherited_storage",
+                        "inherited canonical storage has no Native IR local",
+                    )
+                    .at_function(function)
+                })?;
+            let name = local.name.clone().ok_or_else(|| {
+                NativeCodegenError::new(
+                    "native.lowering.inherited_storage",
+                    "inherited canonical storage has no semantic name",
+                )
+                .at_function(function)
+            })?;
+            let owner_function = assembly
+                .functions
+                .get(&entry.owner)
+                .map(|metadata| metadata.name.0.clone())
+                .ok_or_else(|| {
+                    NativeCodegenError::new(
+                        "native.lowering.inherited_storage",
+                        "inherited canonical storage owner is absent",
+                    )
+                    .at_function(function)
+                })?;
+            let kind = match entry.kind {
+                runmat_mir::MirInheritedStorageKind::Global => NativeInheritedStorageKind::Global,
+                runmat_mir::MirInheritedStorageKind::Persistent => {
+                    NativeInheritedStorageKind::Persistent
+                }
+            };
+            Ok(NativeInheritedStorageBinding {
+                binding: entry.binding,
+                local: local.id,
+                owner: ProgramFunctionId(u32::try_from(entry.owner.0).map_err(|_| {
+                    NativeCodegenError::new(
+                        "native.lowering.inherited_storage",
+                        "canonical storage owner exceeds portable function identity",
+                    )
+                    .at_function(function)
+                })?),
+                name,
+                owner_function,
+                kind,
+            })
+        })
+        .collect::<NativeCodegenResult<Vec<_>>>()?;
+    let closure_captures = metadata
+        .captures
+        .iter()
+        .map(|capture| {
+            let by_value = locals.iter().find(|local| {
+                local.binding == Some(capture.binding) && local.kind == NativeLocalKind::Capture
+            });
+            let lexical = lexical_bindings.iter().find(|binding| {
+                binding.binding == capture.binding
+                    && matches!(
+                        binding.kind,
+                        NativeLexicalBindingKind::Inherited | NativeLexicalBindingKind::Transit
+                    )
+            });
+            let storage = inherited_storage_bindings
+                .iter()
+                .find(|binding| binding.binding == capture.binding);
+            let (local, disposition) = match (by_value, lexical, storage) {
+                (Some(local), None, None) => (local.id, NativeClosureCaptureDisposition::ByValue),
+                (Some(local), Some(binding), None)
+                    if binding.kind == NativeLexicalBindingKind::Transit
+                        && binding.local == local.id =>
+                {
+                    (local.id, NativeClosureCaptureDisposition::TransitSnapshot)
+                }
+                (local, Some(binding), None)
+                    if binding.kind == NativeLexicalBindingKind::Inherited
+                        && local.is_none_or(|local| local.id == binding.local) =>
+                {
+                    (binding.local, NativeClosureCaptureDisposition::Lexical)
+                }
+                (local, None, Some(binding))
+                    if local.is_none_or(|local| local.id == binding.local) =>
+                {
+                    (
+                        binding.local,
+                        NativeClosureCaptureDisposition::InheritedStorage,
+                    )
+                }
+                _ => {
+                    return Err(NativeCodegenError::new(
+                        "native.lowering.closure_capture",
+                        "closure capture has no coherent Native frame authority",
+                    )
+                    .at_function(function))
+                }
+            };
+            Ok(NativeClosureCapture {
+                binding: capture.binding,
+                local,
+                disposition,
             })
         })
         .collect::<NativeCodegenResult<Vec<_>>>()?;
@@ -199,6 +370,11 @@ pub(super) fn lower_function(
         region_boundaries.sort_by_key(|boundary| (boundary.point, boundary.region, boundary.kind));
         blocks.push(NativeBlock {
             id: checked_block(block.id, function)?,
+            catch_scopes: body
+                .catch_scopes
+                .get(&block.id)
+                .cloned()
+                .unwrap_or_default(),
             parameters,
             side_effect_epoch: *epoch_parameters.get(&block.id).expect("preallocated epoch"),
             region_boundaries,
@@ -213,16 +389,54 @@ pub(super) fn lower_function(
     })?;
     let abi = lower_abi(body, function)?;
     let argument_validations = lower_argument_validations(metadata, &locals, &abi, function)?;
+    let capabilities = analysis
+        .function(function)
+        .ok_or_else(|| {
+            NativeCodegenError::new(
+                "native.lowering.function_analysis",
+                "MIR function has no canonical analysis summary",
+            )
+            .at_function(function)
+        })?
+        .capabilities
+        .clone();
+    let expression_continuation_geometry =
+        crate::NativeExpressionContinuationGeometry::for_blocks(&blocks).ok_or_else(|| {
+            NativeCodegenError::new(
+                "native.lowering.expression_continuation_geometry",
+                "expression continuation geometry exceeds portable capacity",
+            )
+            .at_function(function)
+        })?;
     Ok(NativeFunction {
         id: function,
         source: metadata.source,
         name: metadata.name.0.clone(),
+        source_role: metadata.source_role,
+        lexical_parent: retained_callable_parent
+            .map(|parent| {
+                u32::try_from(parent.0).map(ProgramFunctionId).map_err(|_| {
+                    NativeCodegenError::new(
+                        "native.lowering.lexical_parent",
+                        "lexical parent exceeds portable function identity",
+                    )
+                    .at_function(function)
+                })
+            })
+            .transpose()?,
+        class_method_owner: metadata.class_method_owner.clone(),
+        capabilities,
         abi,
         argument_validations,
         locals,
-        index_expressions: super::index_expression::derive(body, function)?,
+        binding_locals,
+        closure_captures,
+        lexical_bindings,
+        inherited_storage_bindings,
+        creates_lexical_environment: projection.creates_activation,
         entry: checked_block(entry.id, function)?,
         blocks,
+        expression_continuation_geometry,
         expected_sites,
     })
 }
@@ -271,19 +485,30 @@ pub(super) fn lower_argument_validations(
 fn rvalue_result(statement: &MirStmtKind) -> NativeCodegenResult<NativeRvalueResult> {
     Ok(match statement {
         MirStmtKind::Assign { .. } => NativeRvalueResult::Assignment,
-        MirStmtKind::MultiAssign { targets, .. } => NativeRvalueResult::MultiAssignment(
-            u32::try_from(targets.targets.len()).map_err(|_| {
+        MirStmtKind::MultiAssign { targets, .. } => {
+            let _ = u32::try_from(targets.targets.len()).map_err(|_| {
                 NativeCodegenError::new(
                     "native.lowering.output_arity",
                     "MIR output arity exceeds the Native IR schema",
                 )
-            })?,
-        ),
+            })?;
+            NativeRvalueResult::MultiAssignment(targets.clone())
+        }
+        MirStmtKind::SequenceAssign { target, .. } => {
+            NativeRvalueResult::SequenceAssignment(target.clone())
+        }
         MirStmtKind::Expr(value) if expression_produces_value(value) => {
             NativeRvalueResult::Expression
         }
         MirStmtKind::Expr(_) => NativeRvalueResult::Discard,
+        MirStmtKind::StatementOutput(_) => {
+            return Err(NativeCodegenError::new(
+                "native.lowering.rvalue_role",
+                "statement output has no Native IR rvalue role",
+            ))
+        }
         MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => {
             return Err(NativeCodegenError::new(
@@ -301,17 +526,28 @@ fn statement_rvalue_outputs(
         MirStmtKind::Assign { place, value } => {
             Some((value, vec![super::operation::root_local(place)]))
         }
-        MirStmtKind::MultiAssign { targets, value } => Some((
-            value,
-            targets
+        MirStmtKind::MultiAssign { targets, value } => {
+            let outputs = if targets
                 .targets
                 .iter()
-                .map(|target| match target {
-                    MirOutputTarget::Place(place) => super::operation::root_local(place),
-                    MirOutputTarget::Discard => None,
-                })
-                .collect(),
-        )),
+                .any(|target| matches!(target, MirOutputTarget::Sequence(_)))
+            {
+                Vec::new()
+            } else {
+                targets
+                    .targets
+                    .iter()
+                    .map(|target| match target {
+                        MirOutputTarget::Place(place) => super::operation::root_local(place),
+                        MirOutputTarget::Sequence(_) => None,
+                        MirOutputTarget::Discard => None,
+                    })
+                    .collect()
+            };
+            Some((value, outputs))
+        }
+        MirStmtKind::SequenceAssign { value, .. } => Some((value, Vec::new())),
+        MirStmtKind::StatementOutput(_) => None,
         MirStmtKind::Expr(value) => Some((
             value,
             expression_produces_value(value)
@@ -320,13 +556,24 @@ fn statement_rvalue_outputs(
                 .collect(),
         )),
         MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => None,
     }
 }
 
 fn expression_produces_value(value: &runmat_mir::MirRvalue) -> bool {
-    !matches!(value, runmat_mir::MirRvalue::Call(call) if call.requested_outputs.fixed_count() == 0)
+    !matches!(value, runmat_mir::MirRvalue::Call(call) if call.requested_outputs.known_count() == Some(0))
+        && !matches!(
+            value,
+            runmat_mir::MirRvalue::Member {
+                sequence_use: runmat_types::SequenceUse::Discard,
+                ..
+            } | runmat_mir::MirRvalue::DynamicMember {
+                sequence_use: runmat_types::SequenceUse::Discard,
+                ..
+            }
+        )
 }
 
 fn statement_output_roots(statement: &MirStmtKind) -> Vec<MirLocalId> {
@@ -339,20 +586,31 @@ fn statement_output_roots(statement: &MirStmtKind) -> Vec<MirLocalId> {
             .iter()
             .filter_map(|target| match target {
                 MirOutputTarget::Place(place) => super::operation::root_local(place),
+                MirOutputTarget::Sequence(target) => super::operation::root_local(target.base()),
                 MirOutputTarget::Discard => None,
             })
             .collect(),
+        MirStmtKind::SequenceAssign { target, .. } => {
+            sequence_target_root_local(target).into_iter().collect()
+        }
         MirStmtKind::PlaceMutation(mutation) => super::operation::root_local(&mutation.place)
             .into_iter()
             .collect(),
         MirStmtKind::WorkspaceEffect { bindings, .. } => bindings.clone(),
-        MirStmtKind::Expr(_) | MirStmtKind::EnvironmentEffect(_) => Vec::new(),
+        MirStmtKind::Expr(_)
+        | MirStmtKind::StatementOutput(_)
+        | MirStmtKind::CaptureSequence { .. }
+        | MirStmtKind::EnvironmentEffect(_) => Vec::new(),
     };
     let mut seen = BTreeSet::new();
     roots
         .into_iter()
         .filter(|local| seen.insert(*local))
         .collect()
+}
+
+fn sequence_target_root_local(target: &runmat_mir::MirSequenceTarget) -> Option<MirLocalId> {
+    super::operation::root_local(target.base())
 }
 
 pub(super) fn lower_abi(
@@ -385,9 +643,7 @@ pub(super) fn lower_abi(
         varargin: body.abi.varargin.map(find).transpose()?,
         fixed_outputs: body
             .abi
-            .fixed_outputs
-            .iter()
-            .filter(|binding| Some(**binding) != body.abi.varargout)
+            .fixed_output_bindings()
             .copied()
             .map(find)
             .collect::<NativeCodegenResult<_>>()?,

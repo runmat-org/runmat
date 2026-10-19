@@ -1,9 +1,168 @@
 use super::*;
 
 impl HostState {
+    /// A catch edge abandons the throwing native site, including every
+    /// partially prepared mutation. None of these cursors may be replayed at
+    /// the handler's next site, even when that site has the same MIR shape.
+    pub fn abandon_site_continuations(&mut self) -> NativeExecutorResult<()> {
+        self.pending_place_mutation = None;
+        self.pending_assign = None;
+        self.pending_place_prepare = None;
+        self.pending_plain_multi = None;
+        self.pending_sequence_assign = None;
+        self.pending_sequence_rvalue = None;
+        self.pending_multi_preparation = None;
+        self.sequence_assignment_register = None;
+        self.prepared_multi_assignment = None;
+        self.pending_call = None;
+        self.completed_call = None;
+        self.pending_await = None;
+        self.captured_sequences.clear();
+        self.contextual_index_extents.clear();
+        self.subscript_end_receivers.clear();
+        self.finish_contextual_site()
+    }
+
     pub fn refresh_roots(&mut self) -> NativeRootSet {
+        self.roots.truncate(self.locals.len());
         for (root, value) in self.roots.iter_mut().zip(&self.locals) {
             root.value = *value;
+        }
+        if let Some(value) = self.last_expression {
+            let slot = u32::try_from(self.roots.len())
+                .expect("native root cardinality is bounded by admitted frame state");
+            self.roots.push(NativeRoot {
+                value,
+                kind: NativeRootKind::TEMPORARY,
+                slot,
+            });
+        }
+        if let Some(sequence) = &self.sequence_assignment_register {
+            for (slot, value) in sequence.root_references() {
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        if let Some(sequence) = &self.pending_sequence_rvalue {
+            let values = sequence.root_references().collect::<Vec<_>>();
+            for value in values {
+                let slot = u32::try_from(self.roots.len()).expect(
+                    "prepared sequence root cardinality is bounded by native value admission",
+                );
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        if let Some(sequence) = &self.pending_sequence_assign {
+            let values = sequence.root_references().collect::<Vec<_>>();
+            for value in values {
+                let slot = u32::try_from(self.roots.len()).expect(
+                    "pending sequence root cardinality is bounded by native value admission",
+                );
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        if let Some(assignment) = &self.prepared_multi_assignment {
+            for (slot, value) in assignment.root_references() {
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        if let Some(preparation) = &self.pending_multi_preparation {
+            let values = preparation.root_references().collect::<Vec<_>>();
+            for value in values {
+                let slot = u32::try_from(self.roots.len())
+                    .expect("pending multi-target preparation root cardinality is bounded by native value admission");
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        if let Some(assignment) = &self.pending_assign {
+            let values = assignment.root_references().collect::<Vec<_>>();
+            for value in values {
+                let slot = u32::try_from(self.roots.len()).expect(
+                    "pending assignment root cardinality is bounded by native value admission",
+                );
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        if let Some(preparation) = &self.pending_place_prepare {
+            let values = preparation.root_references().collect::<Vec<_>>();
+            for value in values {
+                let slot = u32::try_from(self.roots.len())
+                    .expect("pending place preparation root cardinality is bounded by native value admission");
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        let contextual_roots = self.expression_region_roots().collect::<Vec<_>>();
+        for value in contextual_roots {
+            let slot = u32::try_from(self.roots.len())
+                .expect("contextual region root cardinality is bounded by native value admission");
+            self.roots.push(NativeRoot {
+                value,
+                kind: NativeRootKind::TEMPORARY,
+                slot,
+            });
+        }
+        let completed_call_roots =
+            super::super::call_suspension::completed_roots(self).collect::<Vec<_>>();
+        for value in completed_call_roots {
+            let slot = u32::try_from(self.roots.len())
+                .expect("completed call root cardinality is bounded by native value admission");
+            self.roots.push(NativeRoot {
+                value,
+                kind: NativeRootKind::TEMPORARY,
+                slot,
+            });
+        }
+        if let Some(pending) = &self.pending_call {
+            for value in &pending.retained_roots {
+                let slot = u32::try_from(self.roots.len())
+                    .expect("pending native call root cardinality is bounded by operation arity");
+                self.roots.push(NativeRoot {
+                    value: *value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        let mut sequence_root_slot = self.roots.len();
+        for values in self.captured_sequences.values() {
+            for value in values {
+                let slot = u32::try_from(sequence_root_slot).expect(
+                    "captured sequence root cardinality is validated when the sequence is captured",
+                );
+                self.roots.push(NativeRoot {
+                    value: *value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+                sequence_root_slot += 1;
+            }
         }
         NativeRootSet {
             roots: self.roots.as_ptr(),
@@ -65,6 +224,10 @@ impl HostState {
         }
     }
 
+    pub fn arm_deoptimization_fault(&mut self, fault: FaultInjection) {
+        self.deoptimization.inject = Some(fault);
+    }
+
     pub fn should_inject_safepoint(
         &mut self,
         safepoint: runmat_native_codegen::NativeSafepointId,
@@ -77,16 +240,39 @@ impl HostState {
         }
     }
 
+    pub fn deoptimization_transients_live(&self) -> bool {
+        self.pending_await.is_some()
+            || self.pending_call.is_some()
+            || self.completed_call.is_some()
+            || self.pending_place_mutation.is_some()
+            || self.pending_assign.is_some()
+            || self.pending_place_prepare.is_some()
+            || self.pending_plain_multi.is_some()
+            || self.pending_sequence_assign.is_some()
+            || self.pending_sequence_rvalue.is_some()
+            || self.sequence_assignment_register.is_some()
+            || self.prepared_multi_assignment.is_some()
+            || self.pending_multi_preparation.is_some()
+            || !self.captured_sequences.is_empty()
+            || self.has_contextual_progress()
+    }
+
     pub fn materialize_deoptimization(
         &mut self,
         frame: &runmat_native_codegen::NativeFrameState,
         site: &runmat_native_codegen::NativeMirSite,
     ) -> NativeExecutorResult<MaterializedFrame> {
+        if self.deoptimization_transients_live() {
+            return Err(NativeExecutorError::Host(
+                "native deoptimization cannot materialize while contextual execution state is live"
+                    .into(),
+            ));
+        }
         let bytecode_pc = self
             .interpreter_resume_supported(site)
             .then(|| self.interpreter_resume_points.get(&frame.point).copied())
             .flatten();
-        let materialized = MaterializedFrame::from_native(
+        let mut materialized = MaterializedFrame::from_native(
             frame,
             NativeMaterializationContext {
                 phase: site.phase,
@@ -95,8 +281,9 @@ impl HostState {
                 supplied_inputs: self.supplied_inputs,
                 requested_outputs: self.requested_outputs,
                 missing_input_locals: self.missing_input_locals.clone(),
-                global_bindings: self.global_bindings.clone(),
-                persistent_bindings: self.persistent_bindings.clone(),
+                global_bindings: self.global_bindings.snapshot().into_iter().collect(),
+                // Filled once after canonical local refresh below.
+                persistent_bindings: Default::default(),
             },
             |value| {
                 let Some(reference) = self.values.get(&value).copied() else {
@@ -112,6 +299,22 @@ impl HostState {
                 }
             },
         )?;
+        // A nested invocation can change a global or persistent value after
+        // this frame's last SSA definition. Override only its materialized local, leaving any other
+        // local or already-evaluated operand sharing that SSA value untouched.
+        for local in &mut materialized.locals {
+            if let Some(reference) = self.declared_session_reference(local.local.0 as usize)? {
+                local.value = if reference.is_null() {
+                    None
+                } else {
+                    Some(self.arena.get(reference)?.clone())
+                };
+            }
+        }
+        // Refreshing a declared local also observes function invalidation.
+        // Capture that same binding state alongside the refreshed locals;
+        // evaluated operands above remain their original SSA snapshots.
+        materialized.persistent_bindings = self.persistent_bindings.clone();
         self.pending_deoptimization = Some(materialized.clone());
         Ok(materialized)
     }
@@ -145,8 +348,7 @@ impl HostState {
     }
 
     fn interpreter_resume_supported(&self, site: &runmat_native_codegen::NativeMirSite) -> bool {
-        if self.pending_await.is_some()
-            || self.pending_place_mutation.is_some()
+        if self.deoptimization_transients_live()
             || self.last_error.is_some()
             || !self.active_for_loops.is_empty()
             || !self.active_exception_handlers.is_empty()
@@ -189,17 +391,17 @@ impl HostState {
         self.current_block = Some(block);
     }
 
-    pub fn next_await_identity(&mut self) -> NativeExecutorResult<(u64, u64)> {
-        if self.pending_await.is_some() {
+    pub fn next_suspension_identity(&mut self) -> NativeExecutorResult<(u64, u64)> {
+        if self.pending_await.is_some() || self.pending_call.is_some() {
             return Err(NativeExecutorError::Host(
-                "native invocation already has a pending await".into(),
+                "native invocation already has a pending suspension".into(),
             ));
         }
         let continuation = self.next_await_continuation;
-        self.next_await_continuation = self
-            .next_await_continuation
-            .checked_add(1)
-            .ok_or_else(|| NativeExecutorError::Host("native await identity exhausted".into()))?;
+        self.next_await_continuation =
+            self.next_await_continuation.checked_add(1).ok_or_else(|| {
+                NativeExecutorError::Host("native suspension identity exhausted".into())
+            })?;
         Ok((continuation, 1))
     }
 
@@ -288,10 +490,25 @@ impl HostState {
                 let start = span.offset();
                 (start, start + span.len())
             });
+            let source = self.runtime.program_source_id(self.function.source);
             error.context.call_frames.push(runmat_runtime::CallFrame {
                 function: self.function.name.clone(),
-                source_id: Some(self.function.source.0 as usize),
+                source_id: source.map(|source| source.0),
                 span,
+                source_owner: source.and_then(|_| {
+                    self.runtime
+                        .call_frame_source_owner_for_program_source(self.function.source)
+                }),
+                diagnostic_source: source
+                    .and_then(|source| {
+                        runmat_runtime::source_context::source_info_in_context(
+                            &self.runtime,
+                            source,
+                        )
+                    })
+                    .map(|info| {
+                        runmat_runtime::CallFrameDiagnosticSource::new(info.name, info.text)
+                    }),
             });
         }
         error

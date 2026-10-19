@@ -7,17 +7,25 @@ use runmat_types::{
 };
 
 use crate::{
-    BasicBlock, BasicBlockId, MirBody, MirOutputTarget, MirRvalue, MirStmt, MirStmtKind,
-    MirTerminatorKind,
+    BasicBlock, BasicBlockId, MirBody, MirLocalId, MirOutputTarget, MirRvalue, MirStmt,
+    MirStmtKind, MirTerminatorKind,
 };
 
 use super::state::FlowState;
 use crate::analysis::inference::FunctionSummary;
 use crate::analysis::inference::{
-    apply_rvalue_contract, assign_place, infer_rvalue, infer_rvalue_outputs, operand_fact,
-    rvalue_literal,
+    append_inference_diagnostics, apply_rvalue_contract, assign_place, infer_expansion_sequence,
+    infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal,
+    statement_contract_with_facts,
 };
+use crate::analysis::workspace_effect::statement_exposes_current_workspace;
 use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
+
+#[path = "flow/call_observations.rs"]
+mod call_observations;
+pub(crate) use call_observations::CallObservation;
+#[path = "flow/sequence.rs"]
+mod sequence;
 
 const WIDEN_AFTER_UPDATE: usize = 4;
 const MAX_BLOCK_UPDATES: usize = 64;
@@ -32,25 +40,18 @@ pub(crate) struct BodyFlow {
     pub calls: Vec<CallObservation>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct CallObservation {
-    pub callee: FunctionId,
-    pub arguments: Vec<ValueFact>,
-    pub span: Span,
-    pub argument_spans: Vec<Span>,
-}
-
 pub(crate) fn analyze_body(
     body: &MirBody,
     function: ProgramFunctionId,
     parameters: &[ValueFact],
     captures: &[ValueFact],
+    constructor_instance: Option<MirLocalId>,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> BodyFlow {
     if body.blocks.is_empty() {
         return BodyFlow {
             points: Vec::new(),
-            final_state: FlowState::entry(body, parameters, captures),
+            final_state: FlowState::entry(body, parameters, captures, constructor_instance),
             return_facts: Vec::new(),
             widened: false,
             converged: true,
@@ -67,7 +68,12 @@ pub(crate) fn analyze_body(
         .collect();
     let mut entries = vec![None; body.blocks.len()];
     let mut updates = vec![0usize; body.blocks.len()];
-    entries[0] = Some(FlowState::entry(body, parameters, captures));
+    entries[0] = Some(FlowState::entry(
+        body,
+        parameters,
+        captures,
+        constructor_instance,
+    ));
     let mut worklist = VecDeque::from([0usize]);
     let mut widened = false;
     let mut converged = true;
@@ -104,7 +110,7 @@ pub(crate) fn analyze_body(
     }
 
     let mut points = Vec::new();
-    let mut final_state = FlowState::entry(body, parameters, captures);
+    let mut final_state = FlowState::entry(body, parameters, captures, constructor_instance);
     let mut has_final = false;
     let mut return_facts = Vec::new();
     let mut diagnostics = Vec::new();
@@ -123,7 +129,7 @@ pub(crate) fn analyze_body(
         );
         let mut pending_mutation = None;
         for (statement_index, statement) in block.statements.iter().enumerate() {
-            collect_call_observation(statement, &state, &mut calls);
+            call_observations::collect(statement, &state, summaries, &mut calls);
             transfer_statement(
                 statement,
                 &mut state,
@@ -168,50 +174,6 @@ pub(crate) fn analyze_body(
     }
 }
 
-fn collect_call_observation(
-    statement: &MirStmt,
-    state: &FlowState,
-    calls: &mut Vec<CallObservation>,
-) {
-    let value = match &statement.kind {
-        MirStmtKind::Assign { value, .. }
-        | MirStmtKind::MultiAssign { value, .. }
-        | MirStmtKind::Expr(value) => value,
-        _ => return,
-    };
-    match value {
-        MirRvalue::Call(call) => {
-            let callee = match &call.callee {
-                crate::MirCallee::Static(
-                    runmat_hir::CallableIdentity::BoundFunction(function)
-                    | runmat_hir::CallableIdentity::AnonymousFunction(function),
-                ) => *function,
-                _ => return,
-            };
-            calls.push(CallObservation {
-                callee,
-                arguments: call
-                    .args
-                    .iter()
-                    .map(|argument| operand_fact(argument.operand(), state))
-                    .collect(),
-                span: statement.span,
-                argument_spans: call.arg_spans.clone(),
-            });
-        }
-        MirRvalue::Future { function, args, .. } => calls.push(CallObservation {
-            callee: *function,
-            arguments: args
-                .iter()
-                .map(|argument| operand_fact(argument.operand(), state))
-                .collect(),
-            span: statement.span,
-            argument_spans: Vec::new(),
-        }),
-        _ => {}
-    }
-}
-
 fn transfer_statements(
     statements: &[MirStmt],
     state: &mut FlowState,
@@ -242,6 +204,10 @@ fn transfer_statement(
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let assigned = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             let literal = rvalue_literal(value, state);
+            apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
             assign_place(
                 place,
                 assigned,
@@ -249,7 +215,6 @@ fn transfer_statement(
                 pending_mutation.take().as_ref(),
                 state,
             );
-            apply_rvalue_contract(value, state, summaries);
         }
         MirStmtKind::MultiAssign { targets, value } => {
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
@@ -261,23 +226,73 @@ fn transfer_statement(
                 statement.span,
                 diagnostics,
             );
+            apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
             for (index, target) in targets.targets.iter().enumerate() {
-                if let MirOutputTarget::Place(place) = target {
-                    assign_place(
+                match target {
+                    MirOutputTarget::Place(place) => assign_place(
                         place,
                         outputs.get(index).cloned().unwrap_or_else(dynamic_value),
                         LiteralValue::Unknown,
                         pending_mutation.take().as_ref(),
                         state,
-                    );
+                    ),
+                    MirOutputTarget::Sequence(target) => {
+                        sequence::assign_sequence_target(target, outputs.get(index), state)
+                    }
+                    MirOutputTarget::Discard => {}
                 }
             }
+        }
+        MirStmtKind::SequenceAssign { target, value } => {
+            transfer_short_circuit_temps(value, state, summaries, diagnostics);
+            let _ = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
+            sequence::assign_sequence_target(target, None, state);
+        }
+        MirStmtKind::CaptureSequence {
+            destination,
+            source,
+        } => {
+            source.visit_outer_operands(|operand| {
+                let _ = operand_fact(operand, state);
+            });
+            let inferred = infer_expansion_sequence(source, state, summaries);
+            append_inference_diagnostics(
+                &inferred.diagnostics,
+                statement.span,
+                "sequence-inference",
+                diagnostics,
+            );
+            state.set_sequence(*destination, inferred.sequence);
+            let facts = state.value_facts();
+            let (effects, capabilities) =
+                statement_contract_with_facts(statement, summaries, &facts);
+            state.effects.0.extend(effects.0);
+            state.capabilities.0.extend(capabilities.0);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
         }
         MirStmtKind::Expr(value) => {
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let _ = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
+        }
+        MirStmtKind::StatementOutput(_) => {
+            let facts = state.value_facts();
+            let (effects, capabilities) =
+                statement_contract_with_facts(statement, summaries, &facts);
+            state.effects.0.extend(effects.0);
+            state.capabilities.0.extend(capabilities.0);
         }
         MirStmtKind::PlaceMutation(mutation) => *pending_mutation = Some(mutation.clone()),
         MirStmtKind::WorkspaceEffect { bindings, .. } => {
@@ -403,7 +418,7 @@ fn edge_states(
                     output, ..
                 })
                 | ValueKindFact::Execution(runmat_types::ExecutionFact::Task { output, .. }) => {
-                    *output
+                    output.first_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue))
                 }
                 _ => dynamic_value(),
             };
@@ -481,6 +496,7 @@ fn push_point(
                 assignment: match state.assignment {
                     super::super::InitFact::Unassigned => AssignmentFact::Unassigned,
                     super::super::InitFact::MaybeAssigned => AssignmentFact::MaybeAssigned,
+                    super::super::InitFact::RuntimeWorkspaceLookup => AssignmentFact::MaybeAssigned,
                     super::super::InitFact::DefinitelyAssigned => {
                         AssignmentFact::DefinitelyAssigned
                     }
@@ -514,4 +530,99 @@ fn block_entry_span(block: &BasicBlock) -> Span {
 
 fn dynamic_value() -> ValueFact {
     ValueFact::unknown(DynamicReason::Unspecified)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_calls_do_not_hide_static_calls_in_contextual_arguments() {
+        let ast = runmat_parser::parse(
+            r#"
+function out = main(callable, values, flag)
+  out = callable(values{[flag && helper(1 + 2), end]});
+end
+function out = helper(index)
+  out = index;
+end
+"#,
+        )
+        .expect("parse fixture");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower HIR fixture");
+        let mir = crate::lowering::lower_assembly(&hir.assembly).expect("lower MIR fixture");
+        let program = super::super::interprocedural::analyze_program(&mir);
+        let by_name = mir
+            .functions
+            .iter()
+            .map(|(id, metadata)| (metadata.name.0.as_str(), *id))
+            .collect::<BTreeMap<_, _>>();
+        let main = by_name["main"];
+        let flow = analyze_body(
+            &mir.bodies[&main],
+            ProgramFunctionId(u32::try_from(main.0).unwrap()),
+            &program.parameters[&main],
+            &program.captures[&main],
+            None,
+            &program.summaries,
+        );
+        let helper = by_name["helper"];
+        let observations = flow
+            .calls
+            .iter()
+            .filter(|observation| observation.callee == helper)
+            .collect::<Vec<_>>();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].arguments.len(), 1);
+        assert!(matches!(
+            observations[0].arguments[0].kind,
+            ValueKindFact::Numeric(_)
+        ));
+        assert_eq!(
+            observations[0].arguments[0].shape.known_dims(),
+            Some(vec![Some(1), Some(1)])
+        );
+    }
+
+    #[test]
+    fn ordinary_short_circuit_calls_are_observed_once() {
+        let ast = runmat_parser::parse(
+            r#"
+function out = main(flag)
+  out = flag && helper(1 + 2);
+end
+function out = helper(value)
+  out = value;
+end
+"#,
+        )
+        .expect("parse fixture");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower HIR fixture");
+        let mir = crate::lowering::lower_assembly(&hir.assembly).expect("lower MIR fixture");
+        let program = super::super::interprocedural::analyze_program(&mir);
+        let by_name = mir
+            .functions
+            .iter()
+            .map(|(id, metadata)| (metadata.name.0.as_str(), *id))
+            .collect::<BTreeMap<_, _>>();
+        let main = by_name["main"];
+        let flow = analyze_body(
+            &mir.bodies[&main],
+            ProgramFunctionId(u32::try_from(main.0).unwrap()),
+            &program.parameters[&main],
+            &program.captures[&main],
+            None,
+            &program.summaries,
+        );
+        let helper = by_name["helper"];
+        assert_eq!(
+            flow.calls
+                .iter()
+                .filter(|observation| observation.callee == helper)
+                .count(),
+            1
+        );
+    }
 }

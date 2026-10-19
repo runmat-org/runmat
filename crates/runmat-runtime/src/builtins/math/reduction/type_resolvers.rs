@@ -138,21 +138,6 @@ pub fn reduce_numeric_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
-pub fn reduce_logical_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape: Some(_) } | Type::Logical { shape: Some(_) } => Type::Logical {
-            shape: reduction_shape_from_args(args, ctx),
-        },
-        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::logical(),
-        Type::Bool | Type::Num | Type::Int => Type::Bool,
-        _ => Type::Unknown,
-    }
-}
-
 pub fn cumulative_numeric_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
         Some(value) => value,
@@ -307,20 +292,6 @@ mod tests {
             out,
             Type::Tensor {
                 shape: Some(vec![Some(1), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn reduce_logical_returns_logical() {
-        let ty = Type::Logical {
-            shape: Some(vec![Some(2), Some(2)]),
-        };
-        let out = reduce_logical_type(&[ty], &ResolveContext::new(Vec::new()));
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![Some(1), Some(2)])
             }
         );
     }

@@ -1,20 +1,18 @@
-use crate::{
-    BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, Span, StmtId,
-};
+use crate::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, Span, StmtId};
 pub use runmat_types::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BuiltinId,
-    CallableFallbackPolicy, CallableIdentity, ClassDeclaration, DefPath, DefPathSegment,
-    EntrypointName, FunctionName, IndexKind, IndexResultContext, MemberName, MethodId, MethodName,
-    OperatorKind, PackageName, PlaceMutationKind, QualifiedName, RequestedOutputCount,
-    SemanticAttribute, SymbolName, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME,
-    DISCARD_OUTPUT_NAME, EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME,
-    FEVAL_BUILTIN_NAME, NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME,
-    NARGOUT_BUILTIN_NAME, RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BuiltinId, CallSyntax,
+    CallableFallbackPolicy, CallableIdentity, CapturedBinding, ClassDeclaration, ClassIdentity,
+    DefPath, DefPathSegment, EntrypointName, EnvironmentEffect, FunctionAbi,
+    FunctionArgumentValidation, FunctionKind, FunctionModifiers, FunctionName, IndexKind,
+    IndexResultContext, MemberName, MethodId, MethodName, OperatorKind, PackageName,
+    PlaceMutationKind, QualifiedName, RequestedOutputCount, SemanticAttribute, StringLiteral,
+    SymbolName, WorkspaceEffect, ASSIGNIN_BUILTIN_NAME, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME,
+    EVALC_BUILTIN_NAME, EVALIN_BUILTIN_NAME, EVAL_BUILTIN_NAME, FEVAL_BUILTIN_NAME,
+    NARGINCHK_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
+    RUNTESTS_BUILTIN_NAME, RUN_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
     TEST_CLASS_REGISTRATION_BUILTIN_NAME,
 };
-use runmat_types::{
-    FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator, IntegerLiteral,
-};
+use runmat_types::{IntegerLiteral, ProgramSourceId};
 use serde::{Deserialize, Serialize};
 
 /// Canonical semantic HIR product for one compiled source set.
@@ -28,11 +26,43 @@ pub struct HirAssembly {
     /// Original declarations for retained functions outside this unit's ID namespace.
     #[serde(default)]
     pub bound_function_modifiers: std::collections::BTreeMap<FunctionId, FunctionModifiers>,
+    /// Compiler-admitted program root, including function-only and empty
+    /// sources with no synthetic executable entrypoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_source: Option<ProgramSourceId>,
     pub modules: Vec<HirModule>,
     pub functions: Vec<HirFunction>,
     pub classes: Vec<HirClass>,
     pub bindings: Vec<HirBinding>,
     pub entrypoints: Vec<HirEntrypoint>,
+}
+
+impl HirAssembly {
+    /// Classify from the typed source unit and function graph, not a display
+    /// name or the spelling of a source path.
+    pub fn function_source_role(&self, function: &HirFunction) -> runmat_types::FunctionSourceRole {
+        use runmat_types::FunctionSourceRole as Role;
+        match &function.kind {
+            FunctionKind::Anonymous => Role::Anonymous,
+            FunctionKind::SyntheticEntrypoint => Role::Synthetic,
+            FunctionKind::ClassMethod { .. } => Role::Method,
+            FunctionKind::Named if function.parent.is_some() => Role::Nested,
+            FunctionKind::Named => {
+                let Some(module) = self.modules.get(function.module.0) else {
+                    return Role::Unknown;
+                };
+                if matches!(module.source_unit, SourceUnitKind::FunctionFile)
+                    && module.top_level_functions.first() == Some(&function.id)
+                {
+                    Role::Primary
+                } else if module.top_level_functions.contains(&function.id) {
+                    Role::Local
+                } else {
+                    Role::Unknown
+                }
+            }
+        }
+    }
 }
 
 /// Source unit metadata plus references to module-owned semantic items.
@@ -44,7 +74,7 @@ pub struct HirAssembly {
 pub struct HirModule {
     pub id: ModuleId,
     pub name: QualifiedName,
-    pub source_id: SourceId,
+    pub source_id: ProgramSourceId,
     pub source_unit: SourceUnitKind,
     pub imports: Vec<HirImport>,
     pub top_level_functions: Vec<FunctionId>,
@@ -128,45 +158,6 @@ pub struct HirFunction {
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum FunctionKind {
-    Named,
-    Anonymous,
-    SyntheticEntrypoint,
-    ClassMethod { is_static: bool },
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
-pub struct FunctionModifiers {
-    pub isolated: bool,
-    pub is_async: bool,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct FunctionAbi {
-    pub fixed_inputs: Vec<BindingId>,
-    pub varargin: Option<BindingId>,
-    pub fixed_outputs: Vec<BindingId>,
-    pub varargout: Option<BindingId>,
-    pub implicit_nargin: Option<BindingId>,
-    pub implicit_nargout: Option<BindingId>,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct FunctionArgumentValidation {
-    pub binding: BindingId,
-    pub size: Option<FunctionArgSizeSpec>,
-    pub class_name: Option<String>,
-    pub validators: Vec<FunctionArgValidator>,
-    pub default_value: Option<FunctionArgDefaultValue>,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct CapturedBinding {
-    pub binding: BindingId,
-    pub from_function: FunctionId,
-}
-
 /// Semantic binding identity for a name owned by a module or function.
 ///
 /// Bindings model MATLAB lexical/global/persistent storage and workspace
@@ -182,7 +173,7 @@ pub struct HirBinding {
     pub declared_span: Span,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum BindingOwner {
     Module(ModuleId),
     Function(FunctionId),
@@ -193,6 +184,9 @@ pub enum BindingRole {
     Parameter,
     Output,
     Local,
+    /// A top-level binding with a value supplied by the admitted incoming
+    /// workspace snapshot, not a newly declared or unresolved local.
+    IncomingWorkspace,
     ExternalWorkspace,
     ModuleBinding,
     ImplicitAns,
@@ -236,6 +230,11 @@ pub enum HirStmtKind {
     ExprStmt(HirExpr, bool),
     Assign(HirPlace, HirExpr, bool),
     MultiAssign(OutputTargetList, HirExpr, bool),
+    SequenceAssign {
+        target: HirSequenceTarget,
+        value: HirExpr,
+        suppressed: bool,
+    },
     If {
         cond: HirExpr,
         then_body: HirBlock,
@@ -292,11 +291,26 @@ impl HirExpr {
     pub fn span(&self) -> Span {
         self.span
     }
+
+    /// Whether an unsuppressed expression has a value for statement echo.
+    /// Builtin output policy belongs to the semantic call, not a CLI renderer.
+    pub fn emits_statement_output(&self) -> bool {
+        match &self.kind {
+            HirExprKind::Call(call) => {
+                call.requested_outputs.known_count() != Some(0)
+                    && !matches!(&call.callee, HirCallableRef::Builtin(builtin)
+                        if runmat_builtins::suppresses_auto_output(builtin.0.as_str()))
+            }
+            HirExprKind::CommandCall(_) => false,
+            _ => true,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirExprKind {
     Number(String),
+    ImaginaryNumber(String),
     IntegerLiteral(IntegerLiteral),
     String(StringLiteral),
     Constant(SymbolName),
@@ -314,11 +328,22 @@ pub enum HirExprKind {
     Colon,
     End,
     Index(Box<HirExpr>, IndexingSemantics),
-    Member(Box<HirExpr>, MemberName),
-    MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    /// One syntactic indexing chain retained as a unit so object dispatch can
+    /// give the authoritative receiver the complete ordered subscript path.
+    SubscriptChain(HirSubscriptChain),
+    Member {
+        base: Box<HirExpr>,
+        member: MemberName,
+        sequence_use: runmat_types::SequenceUse,
+    },
+    MemberDynamic {
+        base: Box<HirExpr>,
+        member: Box<HirExpr>,
+        sequence_use: runmat_types::SequenceUse,
+    },
     WorkspaceFirstStaticProperty {
         workspace_name: SymbolName,
-        class_name: String,
+        class_name: ClassIdentity,
         property: MemberName,
     },
     Call(HirCall),
@@ -337,6 +362,24 @@ pub enum HirPlace {
     MemberDynamic(Box<HirExpr>, Box<HirExpr>),
     Index(Box<HirExpr>, IndexingSemantics),
     IndexCell(Box<HirExpr>, IndexingSemantics),
+}
+
+/// A bracketed destination whose cardinality is determined by its evaluated
+/// aggregate rather than by the number of syntactic targets.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirSequenceTarget {
+    Member {
+        base: Box<HirExpr>,
+        member: MemberName,
+    },
+    DynamicMember {
+        base: Box<HirExpr>,
+        member: Box<HirExpr>,
+    },
+    CellContents {
+        base: Box<HirExpr>,
+        indexing: IndexingSemantics,
+    },
 }
 
 /// Call expression with a semantic callee reference and source syntax marker.
@@ -365,11 +408,11 @@ pub enum HirCallableRef {
     Builtin(BuiltinId),
     Imported(DefPath),
     SuperConstructor {
-        current_class: SymbolName,
+        current_class: ClassIdentity,
         super_class: QualifiedName,
     },
     SuperMethod {
-        current_class: SymbolName,
+        current_class: ClassIdentity,
         super_class: QualifiedName,
         method: SymbolName,
     },
@@ -411,14 +454,6 @@ impl HirCallableRef {
             }
         }
     }
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum CallSyntax {
-    Plain,
-    Method,
-    DottedInvoke,
-    Command,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -482,6 +517,7 @@ pub struct OutputTargetList {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum OutputTarget {
     Place(HirPlace),
+    Sequence(HirSequenceTarget),
     Discard,
 }
 
@@ -491,6 +527,54 @@ pub enum IndexComponent {
     End { dim: Option<usize>, offset: isize },
     Expr(HirExpr),
     Logical(HirExpr),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct HirSubscriptChain {
+    pub root: Box<HirExpr>,
+    pub steps: Vec<HirSubscriptStep>,
+    pub sequence_use: runmat_types::SequenceUse,
+    pub context: runmat_types::ObjectIndexingContext,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirSubscriptStep {
+    Index(IndexingSemantics),
+    Member(MemberName),
+    DynamicMember(HirExpr),
+    DottedInvoke {
+        member: MemberName,
+        arguments: Vec<HirDottedInvokeArgument>,
+        /// A lexically resolved function is eligible only after receiver
+        /// method/member dispatch. Never re-resolve its name at execution.
+        semantic_fallback: Option<runmat_types::CallableIdentity>,
+    },
+}
+
+/// A dotted invocation has call arguments, not ordinary index selectors.
+/// Receiver-relative `end` and `:` retain their source-level forms here;
+/// a Value may carry a comma-separated-list expansion request.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirDottedInvokeArgument {
+    Colon,
+    End { offset: isize },
+    Value(HirExpr),
+}
+
+impl HirSubscriptChain {
+    pub fn terminal_expands_sequence(&self) -> bool {
+        matches!(
+            self.steps.last(),
+            Some(
+                HirSubscriptStep::Member(_)
+                    | HirSubscriptStep::DynamicMember(_)
+                    | HirSubscriptStep::Index(IndexingSemantics {
+                        kind: IndexKind::Brace,
+                        ..
+                    })
+            )
+        )
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -532,27 +616,6 @@ impl FunctionHandleTarget {
             FunctionHandleTarget::DynamicName(name) => CallableIdentity::DynamicName(name.clone()),
         }
     }
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum WorkspaceEffect {
-    None,
-    ReadsWorkspace,
-    CreatesBinding,
-    ClearsBinding,
-    ClearsFunctionCache,
-    MutatesGlobal,
-    MutatesPersistent,
-    LoadsExternalBindings,
-    DynamicEval,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum EnvironmentEffect {
-    PathMutation,
-    WorkingDirectoryMutation,
-    FunctionCacheInvalidation,
-    DynamicLookupInvalidation,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -665,6 +728,8 @@ pub struct CallResolution {
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
     pub span: Span,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ProgramSourceId>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -672,26 +737,8 @@ pub struct FunctionHandleResolution {
     pub name: QualifiedName,
     pub target: FunctionHandleTarget,
     pub span: Span,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct StringLiteral(pub String);
-
-impl StringLiteral {
-    /// Decode the source spelling into the text observed by MATLAB execution.
-    pub fn runtime_text(&self) -> String {
-        if self.0.starts_with('"') && self.0.ends_with('"') && self.0.len() >= 2 {
-            self.0[1..self.0.len() - 1].replace("\"\"", "\"")
-        } else if self.0.starts_with('\'') && self.0.ends_with('\'') && self.0.len() >= 2 {
-            self.0[1..self.0.len() - 1].replace("''", "'")
-        } else {
-            self.0.clone()
-        }
-    }
-
-    pub fn is_character_row(&self) -> bool {
-        self.0.starts_with('\'') && self.0.ends_with('\'') && self.0.len() >= 2
-    }
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ProgramSourceId>,
 }
 
 #[derive(Debug, Clone)]

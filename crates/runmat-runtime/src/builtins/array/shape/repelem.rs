@@ -387,6 +387,18 @@ fn repelem_host_value(
             let out = repelem_cell_array(&ca, factors, single_arg)?;
             Ok(Value::Cell(out))
         }
+        Value::Struct(structure) => {
+            let (_, shape) = repelem_column_major(&[0usize], &[1, 1], factors, single_arg)?;
+            runmat_value::StructArray::replicate_scalar(structure, shape).map_err(repelem_internal)
+        }
+        Value::StructArray(array) => {
+            let shape = array.shape().to_vec();
+            let source = (0..array.len()).collect::<Vec<_>>();
+            let (indices, shape) = repelem_column_major(&source, &shape, factors, single_arg)?;
+            array
+                .select_linear(&indices, shape)
+                .map_err(repelem_internal)
+        }
         Value::GpuTensor(_) => Err(repelem_internal(
             "repelem: resident input reached the host replication boundary",
         )),
@@ -434,7 +446,7 @@ fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<Rep
                         position,
                     )?));
                 }
-                ensure_vector_shape(&tensor.shape, position)?;
+                ensure_vector_shape(tensor.shape(), position)?;
                 return storage
                     .exact_values()
                     .iter()
@@ -448,7 +460,7 @@ fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<Rep
                     position,
                 )?))
             } else {
-                ensure_vector_shape(&tensor.shape, position)?;
+                ensure_vector_shape(tensor.shape(), position)?;
                 let len = tensor::tensor_element_len(tensor);
                 let mut out = Vec::with_capacity(len);
                 for index in 0..len {
@@ -570,7 +582,7 @@ fn repelem_tensor(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<Tensor> {
-    let input_shape = tensor.shape.clone();
+    let input_shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
@@ -621,7 +633,7 @@ fn repelem_complex_tensor(
     single_arg: bool,
 ) -> crate::BuiltinResult<ComplexTensor> {
     let indices = (0..tensor.len()).collect::<Vec<_>>();
-    let (indices, shape) = repelem_column_major(&indices, &tensor.shape, factors, single_arg)?;
+    let (indices, shape) = repelem_column_major(&indices, tensor.shape(), factors, single_arg)?;
     let storage = tensor
         .complex_storage()
         .gather(&indices)
@@ -996,7 +1008,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, StructArray, StructValue};
 
     fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::repelem_builtin(value, rest))
@@ -1054,7 +1066,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(2))]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 6]);
+                assert_eq!(t.shape(), &[1, 6]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1068,8 +1080,9 @@ pub(crate) mod tests {
             let input = Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![1, 2])
                 .expect("integer tensor");
             let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated fixture provenance");
             let result = repelem_builtin(
                 Value::GpuTensor(source.clone()),
                 vec![Value::Int(IntValue::U8(2))],
@@ -1085,8 +1098,8 @@ pub(crate) mod tests {
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide, wide, 7, 7]))
             );
-            provider.free(&output).ok();
-            provider.free(&source).ok();
+            drop(output);
+            drop(source);
         });
     }
 
@@ -1098,7 +1111,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 6]);
+                assert_eq!(t.shape(), &[1, 6]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1122,7 +1135,7 @@ pub(crate) mod tests {
 
             match result {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![1, 6]);
+                    assert_eq!(t.shape(), &[1, 6]);
                     assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
                 }
                 other => panic!("expected tensor, got {other:?}"),
@@ -1137,7 +1150,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(2))]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![6, 1]);
+                assert_eq!(t.shape(), &[6, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1152,7 +1165,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![5, 1]);
+                assert_eq!(t.shape(), &[5, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1178,7 +1191,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![6, 9]);
+                assert_eq!(t.shape(), &[6, 9]);
                 let rows = 6usize;
                 for c in 0..9 {
                     for r in 0..rows {
@@ -1216,7 +1229,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 // Sum of row counts -> 4 rows. Sum of col counts -> 5 cols.
-                assert_eq!(t.shape, vec![4, 5]);
+                assert_eq!(t.shape(), &[4, 5]);
 
                 let row_table = [0usize, 1, 1, 2];
                 let col_table = [0usize, 0, 1, 2, 2];
@@ -1296,7 +1309,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1, 6]);
+                assert_eq!(t.shape(), &[1, 1, 6]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1310,7 +1323,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(2))]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 6, 1]);
+                assert_eq!(t.shape(), &[1, 6, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1331,7 +1344,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2, 2]);
+                assert_eq!(t.shape(), &[2, 2, 2]);
                 assert_eq!(t.materialize_f64(), vec![5.0; 8]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1346,7 +1359,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), &[1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1361,7 +1374,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 1]);
+                assert_eq!(t.shape(), &[0, 1]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1375,7 +1388,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(3))]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 1]);
+                assert_eq!(t.shape(), &[0, 1]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1390,7 +1403,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 1]);
+                assert_eq!(t.shape(), &[0, 1]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1407,7 +1420,7 @@ pub(crate) mod tests {
             repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1427,7 +1440,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4, 3]);
+                assert_eq!(t.shape(), &[4, 3]);
                 // Column 0 of source is [1, 4] repeated row-wise twice -> [1, 1, 4, 4].
                 // Column 1 of source is [2, 5] used twice across output cols 1..3.
                 let rows = 4usize;
@@ -1458,7 +1471,7 @@ pub(crate) mod tests {
             .expect("repelem");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 6]);
+                assert_eq!(t.shape(), &[1, 6]);
                 assert_eq!(
                     t.into_numeric_storage().expect("single storage"),
                     NumericStorage::F32(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
@@ -1491,7 +1504,7 @@ pub(crate) mod tests {
                 panic!("expected exact integer tensor");
             };
 
-            assert_eq!(output.shape, vec![1, 4]);
+            assert_eq!(output.shape(), &[1, 4]);
             assert_eq!(
                 output.integer_storage(),
                 Some(
@@ -1560,7 +1573,7 @@ pub(crate) mod tests {
             panic!("expected typed complex integer tensor");
         };
 
-        assert_eq!(output.shape, vec![1, 4]);
+        assert_eq!(output.shape(), &[1, 4]);
         assert_eq!(
             output.integer_storage().cloned(),
             Some(
@@ -1627,6 +1640,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn structure_replication_normalizes_scalar_and_preserves_column_major_order() {
+        let mut scalar = StructValue::new();
+        scalar.insert("id", Value::Num(1.0));
+        assert!(matches!(
+            repelem_builtin(Value::Struct(scalar.clone()), vec![Value::Num(1.0)]).unwrap(),
+            Value::Struct(_)
+        ));
+
+        let mut second = StructValue::new();
+        second.insert("id", Value::Num(2.0));
+        let array = StructArray::new(vec![scalar, second], vec![2, 1]).unwrap();
+        let Value::StructArray(output) = repelem_builtin(
+            Value::StructArray(array),
+            vec![Value::Num(2.0), Value::Num(1.0)],
+        )
+        .unwrap() else {
+            panic!("expected structure array");
+        };
+        assert_eq!(output.shape(), [4, 1]);
+        assert_eq!(
+            output
+                .elements()
+                .map(|element| element.fields["id"].clone())
+                .collect::<Vec<_>>(),
+            [
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(2.0),
+            ]
+        );
+    }
+
+    #[test]
     fn cell_array_replication_nd_preserves_shape() {
         let cell = CellArray::new_with_shape(vec![Value::Num(1.0), Value::Num(2.0)], vec![1, 1, 2])
             .unwrap();
@@ -1685,7 +1732,7 @@ pub(crate) mod tests {
         .expect("repelem");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 4]);
+                assert_eq!(out.shape(), &[1, 4]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(1.0, -1.0), (1.0, -1.0), (0.0, 2.0), (0.0, 2.0)]

@@ -328,7 +328,7 @@ async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if is_plot_form_call() {
         let (x, y, z) = make_sphere_tensors(n, true, true, true)?;
         render_sphere_plot(x, y, z)?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     build_output(n)
@@ -342,18 +342,18 @@ fn is_plot_form_call() -> bool {
 
 fn build_output(n: usize) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => {
             let (x, _, _) = make_sphere_tensors(n, true, false, false)?;
-            Ok(Value::OutputList(vec![Value::Tensor(x)]))
+            Ok(Value::output_list(vec![Value::Tensor(x)]))
         }
         Some(2) => {
             let (x, y, _) = make_sphere_tensors(n, true, true, false)?;
-            Ok(Value::OutputList(vec![Value::Tensor(x), Value::Tensor(y)]))
+            Ok(Value::output_list(vec![Value::Tensor(x), Value::Tensor(y)]))
         }
         Some(3) => {
             let (x, y, z) = make_sphere_tensors(n, true, true, true)?;
-            Ok(Value::OutputList(vec![
+            Ok(Value::output_list(vec![
                 Value::Tensor(x),
                 Value::Tensor(y),
                 Value::Tensor(z),
@@ -388,8 +388,7 @@ fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
     });
 
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(());
         }
         return Err(sphere_error(
@@ -401,8 +400,8 @@ fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
 }
 
 fn tensor_to_plot_grid(tensor: Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     if rows == 0 || cols == 0 || tensor.len() != rows * cols {
         return Err(sphere_error(
             &SPHERE_ERROR_INTERNAL,
@@ -584,6 +583,8 @@ mod tests {
             panic!("expected output list, got {value:?}");
         };
         outputs
+            .try_into_owned()
+            .expect("unique unbounded sphere fixture outputs")
             .into_iter()
             .map(|value| match value {
                 Value::Tensor(tensor) => tensor,
@@ -598,7 +599,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected X tensor");
         };
-        assert_eq!(tensor.shape, vec![21, 21]);
+        assert_eq!(tensor.shape(), &[21, 21]);
     }
 
     #[test]
@@ -642,11 +643,11 @@ mod tests {
 
     #[test]
     fn sphere_three_outputs_are_unit_sphere_coordinates() {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let outputs = output_tensors(call(vec![Value::Num(4.0)]).expect("sphere"));
         assert_eq!(outputs.len(), 3);
         for tensor in &outputs {
-            assert_eq!(tensor.shape, vec![5, 5]);
+            assert_eq!(tensor.shape(), &[5, 5]);
         }
 
         let x = &outputs[0];
@@ -675,18 +676,18 @@ mod tests {
 
     #[test]
     fn sphere_two_outputs_return_x_and_y_only() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let outputs = output_tensors(call(vec![Value::Num(3.0)]).expect("sphere"));
         assert_eq!(outputs.len(), 2);
-        assert_eq!(outputs[0].shape, vec![4, 4]);
-        assert_eq!(outputs[1].shape, vec![4, 4]);
+        assert_eq!(outputs[0].shape(), &[4, 4]);
+        assert_eq!(outputs[1].shape(), &[4, 4]);
     }
 
     #[test]
     fn sphere_zero_faces_is_single_unit_point() {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let outputs = output_tensors(call(vec![Value::Num(0.0)]).expect("sphere"));
-        assert_eq!(outputs[0].shape, vec![1, 1]);
+        assert_eq!(outputs[0].shape(), &[1, 1]);
         assert_eq!(outputs[0].materialize_f64(), vec![0.0]);
         assert_eq!(outputs[1].materialize_f64(), vec![0.0]);
         assert_eq!(outputs[2].materialize_f64(), vec![-1.0]);
@@ -696,7 +697,8 @@ mod tests {
     fn sphere_statement_form_plots_and_returns_no_outputs() {
         let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
         crate::builtins::plotting::reset_plot_state();
-        let _output_guard = crate::output_count::push_output_count(Some(0));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let value = call(vec![Value::Num(4.0)]).expect("sphere plot");
         assert!(matches!(value, Value::OutputList(outputs) if outputs.is_empty()));
         let figure = crate::builtins::plotting::clone_figure(
@@ -731,7 +733,7 @@ mod tests {
         let err = call(vec![Value::Num(1.0), Value::Num(2.0)]).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:sphere:InvalidArgument"));
 
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let err = call(vec![]).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:sphere:OutputCount"));
     }

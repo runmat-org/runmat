@@ -10,7 +10,7 @@ pub fn embedded_runtime_archive() -> AotResult<Option<RuntimeArchive>> {
     let (Some(payload), Some(manifest)) = (generated::PAYLOAD, generated::MANIFEST) else {
         return Ok(None);
     };
-    let manifest: RuntimeArchiveManifest = serde_json::from_str(manifest).map_err(|error| {
+    let manifest = RuntimeArchiveManifest::from_json(manifest.as_bytes()).map_err(|error| {
         AotError::contract(
             "aot.archive.manifest",
             format!("embedded runtime archive manifest is invalid: {error}"),

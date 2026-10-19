@@ -10,6 +10,9 @@ pub mod rcond;
 pub mod rref;
 pub mod vecnorm;
 
+#[cfg(test)]
+mod owning_tests;
+
 pub use cond::cond_host_real_for_provider;
 pub use inv::inv_host_real_for_provider;
 pub use norm::norm_host_real_for_provider;

@@ -30,6 +30,10 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
 
+#[cfg(test)]
+#[path = "diff/owning_tests.rs"]
+mod owning_tests;
+
 const DIFF_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "diff-character-input",
     mode: BuiltinExtensionMode::RunMatOnly,
@@ -533,7 +537,7 @@ async fn diff_gpu(
     order: usize,
     dim: Option<usize>,
 ) -> BuiltinResult<Value> {
-    let working_dim = dim.unwrap_or_else(|| default_dimension(&handle.shape));
+    let working_dim = dim.unwrap_or_else(|| default_dimension(handle.shape()));
     if working_dim == 0 {
         return Err(diff_invalid_argument("diff: dimension must be >= 1"));
     }
@@ -545,13 +549,10 @@ async fn diff_gpu(
         || runmat_accelerate_api::handle_storage(&handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
     if exact_or_nonreal {
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-            .await
-            .map_err(|e| diff_internal_error(format!("diff: {e}")))?;
-        let gathered =
-            crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
-                gathered, &handle, NAME,
-            )?;
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+        let gathered = crate::builtins::common::provider_restore::align_floating_value_precision(
+            gathered, &handle, NAME,
+        )?;
         let output = match gathered {
             Value::ComplexTensor(tensor) => {
                 Value::ComplexTensor(diff_complex_tensor(tensor, order, Some(working_dim))?)
@@ -579,39 +580,52 @@ async fn diff_gpu(
                 )))
             }
         };
-        return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+        return crate::builtins::common::provider_restore::upload_value_like(
             provider, output, NAME, &handle,
         );
     }
 
-    if let Ok(device_result) = provider.diff_dim(&handle, order, working_dim.saturating_sub(1)) {
-        let mut expected_shape = handle.shape.clone();
+    let result = provider.diff_dim(&handle, order, working_dim.saturating_sub(1));
+    if let Ok(device_result) = result {
+        let mut expected_shape = handle.shape().to_vec();
         if expected_shape.len() < working_dim {
             expected_shape.resize(working_dim, 1);
         }
         expected_shape[working_dim - 1] = expected_shape[working_dim - 1].saturating_sub(order);
-        let valid = device_result.shape == expected_shape
-            && device_result.device_id == handle.device_id
+        let valid = device_result.shape() == expected_shape
+            && device_result.device_id() == handle.device_id()
             && runmat_accelerate_api::handle_storage(&device_result)
                 == runmat_accelerate_api::handle_storage(&handle)
             && runmat_accelerate_api::handle_precision(&device_result)
                 == runmat_accelerate_api::handle_precision(&handle)
             && runmat_accelerate_api::handle_integer_type(&device_result).is_none()
             && !runmat_accelerate_api::handle_is_logical(&device_result)
-            && runmat_accelerate_api::provider_for_handle(&device_result)
-                .is_some_and(|owner| std::ptr::eq(owner, provider));
+            && (order == 0 || !device_result.shares_allocation_with(&handle))
+            && runmat_accelerate_api::provider_for_handle(&device_result).is_some_and(|owner| {
+                runmat_accelerate_api::same_provider_instance(owner, provider)
+            });
         if valid {
-            return Ok(gpu_helpers::resident_gpu_value(device_result));
+            let device_result =
+                gpu_helpers::propagate_owned_output_provenance(device_result, [&handle])?;
+            return gpu_helpers::resident_gpu_value(device_result);
         }
-        let owner = runmat_accelerate_api::provider_for_handle(&device_result).unwrap_or(provider);
-        let _ = owner.free(&device_result);
+        let mut error =
+            diff_internal_error("diff: provider returned a malformed or aliased result");
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(device_result, error));
+    } else if let Err(source) = result {
+        if !gpu_helpers::provider_hook_is_unsupported(&source) {
+            let mut error =
+                diff_internal_error(format!("diff: provider execution failed: {source}"));
+            error = crate::runtime_error::with_provider_execution_source(error, source.into());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|e| diff_internal_error(format!("diff: {e}")))?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let Value::Tensor(tensor) =
-        crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
+        crate::builtins::common::provider_restore::align_floating_value_precision(
             Value::Tensor(tensor),
             &handle,
             NAME,
@@ -620,7 +634,7 @@ async fn diff_gpu(
         unreachable!("real floating gather remains a tensor")
     };
     let output = diff_tensor_host(tensor, order, Some(working_dim))?;
-    crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+    crate::builtins::common::provider_restore::upload_value_like(
         provider,
         tensor::tensor_into_value(output),
         NAME,
@@ -640,7 +654,7 @@ fn diff_char_array(chars: CharArray, order: usize, dim: Option<usize>) -> Builti
 
 pub fn diff_tensor_host(tensor: Tensor, order: usize, dim: Option<usize>) -> BuiltinResult<Tensor> {
     let mut current = tensor;
-    let working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
+    let working_dim = dim.unwrap_or_else(|| default_dimension(current.shape()));
     for _ in 0..order {
         current = diff_tensor_once(current, working_dim)?;
         if tensor::tensor_element_len(&current) == 0 {
@@ -656,7 +670,7 @@ fn diff_complex_tensor(
     dim: Option<usize>,
 ) -> BuiltinResult<ComplexTensor> {
     let mut current = tensor;
-    let working_dim = dim.unwrap_or_else(|| default_dimension(&current.shape));
+    let working_dim = dim.unwrap_or_else(|| default_dimension(current.shape()));
     for _ in 0..order {
         current = diff_complex_tensor_once(current, working_dim)?;
         if current.materialize_f64().is_empty() {
@@ -667,7 +681,7 @@ fn diff_complex_tensor(
 }
 
 fn diff_tensor_once(tensor: Tensor, dim: usize) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| diff_internal_error(format!("diff: {error}")))?;
@@ -780,7 +794,7 @@ fn diff_complex_tensor_once(tensor: ComplexTensor, dim: usize) -> BuiltinResult<
     } else {
         NumericDType::F64
     };
-    let mut shape = tensor.shape.clone();
+    let mut shape = tensor.shape().to_vec();
     let data = tensor.materialize_f64();
     let dim_index = dim.saturating_sub(1);
     while shape.len() <= dim_index {
@@ -968,7 +982,7 @@ pub(crate) mod tests {
         let result = diff_builtin(Value::Tensor(tensor), Vec::new()).expect("diff");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -983,7 +997,7 @@ pub(crate) mod tests {
         let result = diff_builtin(Value::Tensor(tensor), args).expect("diff");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -998,7 +1012,7 @@ pub(crate) mod tests {
         let result = diff_builtin(Value::Tensor(tensor), args).expect("diff");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1013,7 +1027,7 @@ pub(crate) mod tests {
         let result = diff_builtin(Value::Tensor(tensor), args).expect("diff");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape[0], 0);
+                assert_eq!(out.shape()[0], 0);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1024,7 +1038,7 @@ pub(crate) mod tests {
     fn diff_high_order_does_not_cascade_to_later_dimensions() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("matrix");
         let output = diff_tensor_host(tensor, 3, None).expect("diff");
-        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.shape(), [0, 3]);
         assert!(output.materialize_f64().is_empty());
     }
 
@@ -1036,7 +1050,7 @@ pub(crate) mod tests {
         let result = diff_builtin(Value::CharArray(chars), Vec::new()).expect("diff");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 2.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1051,7 +1065,7 @@ pub(crate) mod tests {
         let result = diff_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("diff");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(out.materialize_f64(), vec![(2.0, 1.0), (3.0, 3.0)]);
             }
             other => panic!("expected complex tensor result, got {other:?}"),
@@ -1150,7 +1164,7 @@ pub(crate) mod tests {
         .expect("trailing dimension diff");
         match result {
             Value::Tensor(output) => {
-                assert_eq!(output.shape, vec![2, 1, 1, 1, 0]);
+                assert_eq!(output.shape(), [2, 1, 1, 1, 0]);
                 assert_eq!(
                     output.integer_storage(),
                     Some(&IntegerStorage::U64(Vec::new()))
@@ -1240,12 +1254,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 9.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = diff_builtin(Value::GpuTensor(handle), Vec::new()).expect("diff");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.shape(), [2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![3.0, 5.0]);
         });
     }
@@ -1260,8 +1274,8 @@ pub(crate) mod tests {
             let Value::GpuTensor(handle) = &output else {
                 panic!("expected resident result")
             };
-            assert_eq!(handle.shape, vec![1, 2]);
-            assert_eq!(handle.device_id, input.device_id);
+            assert_eq!(handle.shape(), vec![1, 2]);
+            assert_eq!(handle.device_id(), input.device_id());
             assert_eq!(
                 runmat_accelerate_api::handle_storage(handle),
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
@@ -1270,8 +1284,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_precision(handle),
                 Some(runmat_accelerate_api::ProviderPrecision::F64)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             match block_on(gpu_helpers::gather_value_async(&output)).expect("gather") {
                 Value::ComplexTensor(result) => {
                     assert_eq!(result.materialize_f64(), vec![(2.0, 1.0), (3.0, 3.0)])
@@ -1300,13 +1317,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = diff_builtin(Value::GpuTensor(handle), args).expect("diff");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         let tol = if matches!(
             provider.precision(),
             runmat_accelerate_api::ProviderPrecision::F32

@@ -146,12 +146,33 @@ pub(super) fn define(
     module: &mut ObjectModule,
     resolver: FuncId,
     builtin_resolver: FuncId,
+    source_service: bool,
     data: &BTreeMap<String, (DataId, u64)>,
 ) -> NativeCodegenResult<()> {
     let native_ir = required_data(data, super::AOT_NATIVE_IR_SYMBOL)?;
     let program = required_data(data, super::AOT_PROGRAM_SYMBOL)?;
     let resume_points = required_data(data, super::AOT_RESUME_POINTS_SYMBOL)?;
+    let native_interfaces = required_data(data, super::AOT_NATIVE_INTERFACES_SYMBOL)?;
+    let mex_artifacts = required_data(data, super::AOT_MEX_ARTIFACTS_SYMBOL)?;
+    let java_artifacts = required_data(data, super::AOT_JAVA_ARTIFACTS_SYMBOL)?;
+    let python_artifacts = required_data(data, super::AOT_PYTHON_ARTIFACTS_SYMBOL)?;
     let pointer = module.isa().pointer_type();
+    let source_service_factory = if source_service {
+        let mut signature = module.make_signature();
+        signature.params.push(AbiParam::new(pointer));
+        signature.returns.push(AbiParam::new(pointer));
+        Some(
+            module
+                .declare_function(
+                    super::AOT_SOURCE_SERVICE_FACTORY_SYMBOL,
+                    Linkage::Import,
+                    &signature,
+                )
+                .map_err(module_error)?,
+        )
+    } else {
+        None
+    };
 
     let mut runtime_signature = module.make_signature();
     runtime_signature.params.extend([
@@ -159,6 +180,15 @@ pub(super) fn define(
         AbiParam::new(pointer),
         AbiParam::new(pointer),
         AbiParam::new(pointer),
+        AbiParam::new(pointer),
+        AbiParam::new(pointer),
+        AbiParam::new(types::I64),
+        AbiParam::new(pointer),
+        AbiParam::new(types::I64),
+        AbiParam::new(pointer),
+        AbiParam::new(types::I64),
+        AbiParam::new(pointer),
+        AbiParam::new(types::I64),
         AbiParam::new(pointer),
         AbiParam::new(types::I64),
         AbiParam::new(pointer),
@@ -189,9 +219,16 @@ pub(super) fn define(
     let runtime = module.declare_func_in_func(runtime, &mut context.func);
     let resolver = module.declare_func_in_func(resolver, &mut context.func);
     let builtin_resolver = module.declare_func_in_func(builtin_resolver, &mut context.func);
+    let source_service_factory = source_service_factory
+        .map(|function| module.declare_func_in_func(function, &mut context.func));
     let native_ir_data = module.declare_data_in_func(native_ir.0, &mut context.func);
     let program_data = module.declare_data_in_func(program.0, &mut context.func);
     let resume_data = module.declare_data_in_func(resume_points.0, &mut context.func);
+    let native_interfaces_data =
+        module.declare_data_in_func(native_interfaces.0, &mut context.func);
+    let mex_artifacts_data = module.declare_data_in_func(mex_artifacts.0, &mut context.func);
+    let java_artifacts_data = module.declare_data_in_func(java_artifacts.0, &mut context.func);
+    let python_artifacts_data = module.declare_data_in_func(python_artifacts.0, &mut context.func);
 
     let mut builder_context = FunctionBuilderContext::new();
     let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
@@ -202,12 +239,24 @@ pub(super) fn define(
     let argv = builder.block_params(entry)[1];
     let resolver = builder.ins().func_addr(pointer, resolver);
     let builtin_resolver = builder.ins().func_addr(pointer, builtin_resolver);
+    let source_service_factory = match source_service_factory {
+        Some(factory) => builder.ins().func_addr(pointer, factory),
+        None => builder.ins().iconst(pointer, 0),
+    };
     let native_ir_ptr = builder.ins().symbol_value(pointer, native_ir_data);
     let program_ptr = builder.ins().symbol_value(pointer, program_data);
     let resume_ptr = builder.ins().symbol_value(pointer, resume_data);
+    let native_interfaces_ptr = builder.ins().symbol_value(pointer, native_interfaces_data);
+    let mex_artifacts_ptr = builder.ins().symbol_value(pointer, mex_artifacts_data);
+    let java_artifacts_ptr = builder.ins().symbol_value(pointer, java_artifacts_data);
+    let python_artifacts_ptr = builder.ins().symbol_value(pointer, python_artifacts_data);
     let native_ir_len = length_constant(&mut builder, native_ir.1)?;
     let program_len = length_constant(&mut builder, program.1)?;
     let resume_len = length_constant(&mut builder, resume_points.1)?;
+    let native_interfaces_len = length_constant(&mut builder, native_interfaces.1)?;
+    let mex_artifacts_len = length_constant(&mut builder, mex_artifacts.1)?;
+    let java_artifacts_len = length_constant(&mut builder, java_artifacts.1)?;
+    let python_artifacts_len = length_constant(&mut builder, python_artifacts.1)?;
     let call = builder.ins().call(
         runtime,
         &[
@@ -215,12 +264,21 @@ pub(super) fn define(
             argv,
             resolver,
             builtin_resolver,
+            source_service_factory,
             native_ir_ptr,
             native_ir_len,
             program_ptr,
             program_len,
             resume_ptr,
             resume_len,
+            native_interfaces_ptr,
+            native_interfaces_len,
+            mex_artifacts_ptr,
+            mex_artifacts_len,
+            java_artifacts_ptr,
+            java_artifacts_len,
+            python_artifacts_ptr,
+            python_artifacts_len,
         ],
     );
     let status = builder.inst_results(call)[0];

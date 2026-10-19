@@ -222,7 +222,7 @@ fn standard_overload(
     let identity = OperationOverloadIdentity::new(overload_identity).map_err(|error| {
         OperationCatalogCompositionError::InvalidStandardIdentity(error.to_string())
     })?;
-    let lowering = OperationLoweringId::new(entry.contract.inference_rule.0).map_err(|error| {
+    let lowering = OperationLoweringId::new(entry.identity.name).map_err(|error| {
         OperationCatalogCompositionError::InvalidStandardIdentity(error.to_string())
     })?;
     let distribution = match entry.placement.residency {
@@ -267,6 +267,7 @@ fn parameter(parameter: &BuiltinParamDescriptor) -> OperationParameter {
             BuiltinParamType::StyleSpec => OperationTypePattern::Style,
             BuiltinParamType::PropertyName => OperationTypePattern::PropertyName,
             BuiltinParamType::PropertyValue => OperationTypePattern::PropertyValue,
+            BuiltinParamType::Callable => OperationTypePattern::Callable,
         },
         arity: match parameter.arity {
             BuiltinParamArity::Required => OperationParameterArity::Required,

@@ -1,10 +1,9 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, Result};
 use bytemuck::{bytes_of, cast_slice, Pod};
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use rustfft::FftPlanner;
-use std::sync::Arc;
 
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::types::NumericPrecision;
@@ -83,6 +82,7 @@ fn fft_factor_smooth_235(mut len: usize) -> Option<Vec<u32>> {
     }
 }
 
+mod emission;
 mod fallback;
 mod helpers;
 mod kernels;

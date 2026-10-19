@@ -1,4 +1,8 @@
+use std::collections::HashSet;
 use std::rc::Rc;
+
+use runmat_execution::executable::ExecutableStaticImport;
+use runmat_hir::FunctionId;
 
 use super::{CoveragePlan, ExecutableRevision, ExecutableSource, ExecutableSourceMap};
 
@@ -18,78 +22,232 @@ pub struct ExecutableFunctionInterface {
     pub capabilities: runmat_types::CapabilitySet,
 }
 
+#[path = "unit/compiled_owners.rs"]
+mod compiled_owners;
+use compiled_owners::compiled_function_owners;
+#[path = "unit/draft.rs"]
+mod draft;
+pub(crate) use draft::ExecutableUnitDraft;
+#[path = "unit/class_products.rs"]
+#[cfg(not(target_arch = "wasm32"))]
+mod class_products;
+#[path = "unit/selected_runtime.rs"]
+mod selected_runtime;
+
 /// Immutable canonical compilation product reusable across invocations.
 #[derive(Clone, Debug)]
 pub struct ExecutableUnit {
-    source: ExecutableSource,
+    source: Rc<ExecutableSource>,
     revision: ExecutableRevision,
-    source_map: ExecutableSourceMap,
-    coverage: CoveragePlan,
+    source_map: Rc<ExecutableSourceMap>,
+    coverage: Rc<CoveragePlan>,
     mir: Rc<runmat_mir::MirAssembly>,
     analysis: Rc<runmat_mir::analysis::AnalysisStore>,
     bytecode: Rc<runmat_vm::Bytecode>,
     layout: Rc<runmat_vm::VmAssemblyLayout>,
     functions: Rc<runmat_vm::FunctionRegistry>,
+    portable_selection: Option<Rc<PortableSelection>>,
+    /// Original compiler products this unit's deferred callables depend on.
     pub(super) original_dependencies:
         std::collections::BTreeMap<runmat_types::ProgramFunctionId, Rc<ExecutableUnit>>,
-    pub(super) interop: runmat_types::InteropManifest,
-    pub(super) parallel: runmat_types::ParallelManifest,
-    pub(super) optional_sections: Vec<runmat_execution::ExecutableOptionalSection>,
+    /// Contracts of a restored portable product, reproduced exactly on re-export.
+    pub(super) imported_contract: Option<Rc<ImportedPortableContract>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_compilation_digest: Rc<std::cell::OnceCell<runmat_execution::Digest>>,
+}
+
+/// Manifest contracts retained from an imported portable product.
+#[derive(Debug)]
+pub(super) struct ImportedPortableContract {
+    pub interop: runmat_types::InteropManifest,
+    pub parallel: runmat_types::ParallelManifest,
+    pub optional_sections: Vec<runmat_execution::ExecutableOptionalSection>,
+}
+
+/// Compiler-selected bodies and their exact outbound product references.
+/// Only immutable wire facts live here; selected target products and definition
+/// leases remain with the separate graph owner.
+#[derive(Debug)]
+struct PortableSelection {
+    current: HashSet<FunctionId>,
+    imports: Vec<ExecutableStaticImport>,
 }
 
 impl ExecutableUnit {
+    pub(crate) fn with_portable_selection(
+        mut self,
+        current: HashSet<FunctionId>,
+        imports: Vec<ExecutableStaticImport>,
+    ) -> Result<Self, String> {
+        let compiled = self.compiled_product_owners()?;
+        if !current
+            .iter()
+            .all(|id| compiled.registered_bodies.contains(id))
+        {
+            return Err("selected portable body is not owned by this compiled product".into());
+        }
+        self.portable_selection = Some(Rc::new(PortableSelection { current, imports }));
+        Ok(self)
+    }
+
+    pub(crate) fn compiled_current_body_ids(&self) -> Result<HashSet<FunctionId>, String> {
+        Ok(self
+            .compiled_product_owners()?
+            .registered_bodies
+            .into_iter()
+            .collect())
+    }
+
+    pub(super) fn compiled_script_owner_ids(
+        &self,
+    ) -> Result<std::collections::BTreeSet<FunctionId>, String> {
+        let owners = self.compiled_product_owners()?;
+        Ok(owners
+            .assembly
+            .difference(&owners.registered_bodies)
+            .copied()
+            .collect())
+    }
+
+    fn compiled_product_owners(&self) -> Result<compiled_owners::CompiledProductOwners, String> {
+        let program = self
+            .revision
+            .program_revision
+            .identity_digest()
+            .map_err(|error| error.to_string())?;
+        compiled_function_owners(program, &self.mir, &self.bytecode)
+    }
+
+    pub(super) fn portable_selection(
+        &self,
+    ) -> Option<(&HashSet<FunctionId>, &[ExecutableStaticImport])> {
+        self.portable_selection
+            .as_deref()
+            .map(|selection| (&selection.current, selection.imports.as_slice()))
+    }
+    /// Retain the canonical frame layout before installing executable regions.
+    pub(crate) fn retain_vm_layout(
+        bytecode: &mut runmat_vm::Bytecode,
+        hir: &runmat_hir::HirAssembly,
+        mir: &runmat_mir::MirAssembly,
+    ) -> Result<(), runmat_vm::LayoutError> {
+        if bytecode.layout.is_none() {
+            bytecode.layout = Some(runmat_vm::derive_layout(hir, mir)?);
+        }
+        Ok(())
+    }
+
+    /// Bind immutable program ordinals to fresh session-issued provenance for
+    /// one invocation. The returned context retains every lease while pending.
+    pub(crate) fn bind_runtime_sources(
+        &self,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_runtime::context::RuntimeContext, String> {
+        let runtime = self.source_map.bind_runtime_sources(runtime)?;
+        for metadata in self.mir.functions.values() {
+            if runtime.program_source_id(metadata.source).is_none() {
+                return Err(format!(
+                    "MIR function source ordinal {} is absent from the invocation binding",
+                    metadata.source.0
+                ));
+            }
+        }
+        Ok(runtime)
+    }
+
+    fn runtime_source_id(
+        runtime: &runmat_runtime::context::RuntimeContext,
+        source: runmat_vm::BytecodeSourceRef,
+    ) -> Option<runmat_vm::BytecodeSourceRef> {
+        let ordinal = source.program()?;
+        runtime
+            .program_source_ref(ordinal)
+            .map(runmat_vm::BytecodeSourceRef::Runtime)
+    }
+
+    pub(crate) fn runtime_bytecode(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_vm::Bytecode, String> {
+        let mut bytecode = self.bytecode().clone();
+        bytecode.project_source_ids(|source| Self::runtime_source_id(runtime, source))?;
+        let mut registry = bytecode.function_registry();
+        self.attach_runtime_source_owner(&mut registry, runtime)?;
+        for (id, selected) in &registry.functions {
+            if let Some(bound) = bytecode.bound_functions.get_mut(id) {
+                if bound.binding_origin == selected.binding_origin
+                    && bound.source_id == selected.source_id
+                    && std::sync::Arc::ptr_eq(&bound.definition_owner, &selected.definition_owner)
+                {
+                    bound.selected_source_owner = selected.selected_source_owner.clone();
+                }
+            }
+        }
+        bytecode.function_registry = registry.clone();
+        Ok(bytecode)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn runtime_functions(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_vm::FunctionRegistry, String> {
+        let mut functions = self.functions().clone();
+        functions
+            .project_current_source_ids(|source| Self::runtime_source_id(runtime, source))
+            .map_err(|source| format!("function source {source:?} is absent"))?;
+        self.attach_runtime_source_owner(&mut functions, runtime)?;
+        self.attach_runtime_class_products(&mut functions)?;
+        Ok(functions)
+    }
+
+    fn attach_runtime_source_owner(
+        &self,
+        registry: &mut runmat_vm::FunctionRegistry,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), String> {
+        let owner = self.selected_source_owner(runtime)?;
+        let program = self
+            .revision
+            .program_revision
+            .identity_digest()
+            .map_err(|error| error.to_string())?;
+        let selected_ids = registry
+            .functions
+            .iter()
+            .filter_map(|(id, body)| {
+                body.binding_origin
+                    .is_some_and(|origin| origin.program == program)
+                    .then_some(*id)
+            })
+            .collect::<Vec<_>>();
+        registry
+            .attach_selected_program_source_owner(selected_ids, program, &owner)
+            .map_err(str::to_string)
+    }
+
+    /// Retain the already-issued source binding without execution ports.
+    pub(crate) fn selected_source_owner(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_runtime::source_context::SelectedProgramSourceOwner, String> {
+        runmat_runtime::source_context::SelectedProgramSourceOwner::capture(
+            runtime,
+            &self.source_map.portable_v2()?,
+        )
+        .map_err(|error| error.to_string())
+    }
+
     pub(crate) fn new(
         source: ExecutableSource,
         revision: ExecutableRevision,
         source_map: ExecutableSourceMap,
         mir: runmat_mir::MirAssembly,
         analysis: runmat_mir::analysis::AnalysisStore,
-        mut bytecode: runmat_vm::Bytecode,
+        bytecode: runmat_vm::Bytecode,
     ) -> Result<Self, String> {
-        let region_contracts = analysis
-            .regions
-            .iter()
-            .map(|region| region.contract.clone())
-            .collect::<Vec<_>>();
-        let owned_functions = mir
-            .functions
-            .keys()
-            .copied()
-            .filter(|id| {
-                u32::try_from(id.0)
-                    .map(runmat_types::ProgramFunctionId)
-                    .is_ok_and(|function| {
-                        super::dependencies::owns_callable_parts(
-                            &mir,
-                            &analysis,
-                            &bytecode.function_registry,
-                            function,
-                        )
-                    })
-            })
-            .collect();
-        bytecode.install_regions_for_functions(&region_contracts, &owned_functions)?;
-        let coverage = CoveragePlan::instrument(&source, &revision, &source_map, &mut bytecode);
-        let layout = bytecode
-            .layout
-            .clone()
-            .ok_or_else(|| "canonical bytecode is missing its VM assembly layout".to_string())?;
-        let functions = Rc::new(bytecode.function_registry.clone());
-        Ok(Self {
-            source,
-            revision,
-            source_map,
-            coverage,
-            mir: Rc::new(mir),
-            analysis: Rc::new(analysis),
-            bytecode: Rc::new(bytecode),
-            layout: Rc::new(layout),
-            functions,
-            original_dependencies: Default::default(),
-            interop: runmat_types::InteropManifest::empty(),
-            parallel: runmat_types::ParallelManifest::empty(),
-            optional_sections: Vec::new(),
-        })
+        ExecutableUnitDraft::prepare(source, revision, source_map, mir, analysis, bytecode)
+            .map(ExecutableUnitDraft::seal)
     }
 
     pub fn source(&self) -> &ExecutableSource {
@@ -229,29 +387,51 @@ impl ExecutableUnit {
         &self.mir
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn native_compilation_digest(&self) -> Result<runmat_execution::Digest, String> {
+        if let Some(digest) = self.native_compilation_digest.get() {
+            return Ok(*digest);
+        }
+        // Fingerprint the exact lowering inputs once, only when a native
+        // product is requested. Clones share this immutable unit's digest.
+        let digest = self.native_product_digest()?;
+        let _ = self.native_compilation_digest.set(digest);
+        Ok(digest)
+    }
+
     /// Deterministic whole-program retention facts for link planning and
     /// explanations. Human-readable source and binding names are supplied by
     /// this immutable executable rather than reconstructed by downstream
     /// artifact producers.
     pub fn reachability_report(&self) -> runmat_mir::analysis::ReachabilityReport {
+        self.reachability_analysis().0
+    }
+
+    /// Typed function retention and explanatory report from the same MIR walk.
+    pub fn reachability_analysis(
+        &self,
+    ) -> (
+        runmat_mir::analysis::ReachabilityReport,
+        std::collections::BTreeSet<runmat_hir::FunctionId>,
+    ) {
         let sources = self
             .source_map
             .entries()
             .iter()
-            .filter_map(|entry| {
-                u32::try_from(entry.source_id).ok().map(|source_id| {
-                    (
-                        runmat_types::ProgramSourceId(source_id),
-                        entry.relative_path.clone(),
-                    )
-                })
-            })
+            .map(|entry| (entry.source_id, entry.relative_path.clone()))
             .collect();
         let names = runmat_mir::analysis::ReachabilityNames {
             sources,
             bindings: self.binding_names(),
         };
-        runmat_mir::analysis::analyze_reachability(&self.mir, &names)
+        runmat_mir::analysis::analyze_reachability_with_functions(&self.mir, &names)
+    }
+
+    /// Whether the executable's closed, statically visible surface requires
+    /// the Python foreign runtime. Dynamic calls remain represented by the
+    /// reachability report's unknown edges and are not guessed here.
+    pub fn requires_python_runtime(&self) -> bool {
+        reachability_requires_python(&self.reachability_report())
     }
 
     /// Exact VM layout shared by interpreter state materialization and native frames.
@@ -283,7 +463,12 @@ impl ExecutableUnit {
         let names = self.binding_names();
         body.locals
             .iter()
-            .filter(|local| local.kind == runmat_mir::MirLocalKind::Binding)
+            .filter(|local| {
+                matches!(
+                    local.kind,
+                    runmat_mir::MirLocalKind::Binding | runmat_mir::MirLocalKind::IncomingWorkspace
+                )
+            })
             .filter_map(|local| {
                 let binding = local.binding?;
                 names.get(&binding).cloned().map(|name| (binding, name))
@@ -313,11 +498,20 @@ impl ExecutableUnit {
     /// Resolve the canonical MIR/native function identity by source name.
     /// Interactive VM publication may remap its registry identities into the
     /// session namespace; native compilation retains the immutable MIR identity.
+    /// A class-source request may use its typed constructor owner when no
+    /// function has the exact public name.
     pub(crate) fn native_function_id(&self, name: &str) -> Option<runmat_hir::FunctionId> {
-        self.mir
-            .functions
-            .iter()
-            .find_map(|(function, metadata)| (metadata.name.0 == name).then_some(*function))
+        native_function_id_in_mir(&self.mir, name)
+    }
+
+    /// Select the constructor declared by this exact primary class source.
+    /// Companion definitions and same-leaf classes cannot become its entrypoint.
+    pub(crate) fn source_constructor_function_id(
+        &self,
+        class: &runmat_types::ClassIdentity,
+        primary_source: runmat_types::ProgramSourceId,
+    ) -> Option<runmat_hir::FunctionId> {
+        constructor_function_id_in_mir(&self.mir, class, Some(primary_source))
     }
 
     pub(crate) fn procedure_input_count(&self, name: &str) -> Option<usize> {
@@ -334,4 +528,59 @@ impl ExecutableUnit {
     pub(crate) fn functions(&self) -> &runmat_vm::FunctionRegistry {
         &self.functions
     }
+}
+
+fn native_function_id_in_mir(
+    mir: &runmat_mir::MirAssembly,
+    name: &str,
+) -> Option<runmat_hir::FunctionId> {
+    let exact = mir.functions.iter().find_map(|(function, metadata)| {
+        (metadata.kind != runmat_hir::FunctionKind::SyntheticEntrypoint && metadata.name.0 == name)
+            .then_some(*function)
+    });
+    exact.or_else(|| {
+        let requested_class = runmat_types::ClassIdentity::new(name).ok()?;
+        constructor_function_id_in_mir(mir, &requested_class, None)
+    })
+}
+
+fn constructor_function_id_in_mir(
+    mir: &runmat_mir::MirAssembly,
+    class: &runmat_types::ClassIdentity,
+    source: Option<runmat_types::ProgramSourceId>,
+) -> Option<runmat_hir::FunctionId> {
+    let mut constructors = mir.functions.iter().filter_map(|(function, metadata)| {
+        metadata.class_method_owner.as_ref().and_then(|owner| {
+            (source.is_none_or(|source| metadata.source == source)
+                && matches!(
+                    metadata.kind,
+                    runmat_hir::FunctionKind::ClassMethod {
+                        is_static: false,
+                        role: runmat_types::ClassMethodRole::Constructor,
+                    }
+                )
+                && owner.role == runmat_types::ClassMethodRole::Constructor
+                && !owner.is_static
+                && &owner.declaring_class == class)
+                .then_some(*function)
+        })
+    });
+    let selected = constructors.next()?;
+    constructors.next().is_none().then_some(selected)
+}
+
+#[cfg(test)]
+#[path = "unit/tests.rs"]
+mod tests;
+
+pub fn reachability_requires_python(report: &runmat_mir::analysis::ReachabilityReport) -> bool {
+    report.nodes.iter().any(|node| {
+        node.symbol.starts_with("py.")
+            || matches!(
+                node.symbol.to_ascii_lowercase().as_str(),
+                "pyenv" | "pyrun" | "pyrunfile" | "pyargs"
+            )
+            || (node.kind == runmat_mir::analysis::ReachabilityNodeKind::ArtifactDependency
+                && node.symbol == "python")
+    })
 }

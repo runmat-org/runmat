@@ -119,5 +119,19 @@ pub(super) fn load_driver_invocation(
                 lease: Box::new(lease),
             })
         }
+        PersistedWorkload::Graph { mut submission } => {
+            submission.idempotency_key = None;
+            submission.validate()?;
+            if submission.request_digest()? != request.request_digest {
+                return Err(NativeExecutionError::Protocol(
+                    "durable graph request no longer matches its identity".into(),
+                ));
+            }
+            Ok(BatchDriverInvocation::Graph {
+                job_directory: job_dir.to_path_buf(),
+                job_id: request.handle.id,
+                submission,
+            })
+        }
     }
 }

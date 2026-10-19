@@ -4,7 +4,7 @@ use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::resource::{ResourceAccounting, ResourceAccountingSummary};
 use runmat_execution::state::AttemptState;
 use runmat_execution::task::TaskRequest;
-use runmat_execution::value::{ValuePayload, ValueRef};
+use runmat_execution::value::{GraphNode, PayloadGraph, ValuePayload, ValueRef};
 use runmat_execution::{ExecutionScopeId, TaskId};
 use serde::{Deserialize, Serialize};
 
@@ -18,16 +18,273 @@ pub struct AttemptRequest {
     pub worker_id: WorkerId,
     pub ordinal: u16,
     pub driver_fence: u64,
+    pub resource_assignment: runmat_execution::resource::ResourceAssignment,
     pub task: TaskRequest,
 }
 
+impl AttemptRequest {
+    pub fn validate(&self) -> crate::RunnerResult<()> {
+        if self.task_id != self.task.id || self.scope_id != self.task.scope_id || self.ordinal == 0
+        {
+            return Err(crate::RunnerError::Invalid(
+                "attempt identity differs from its task or has a zero ordinal".into(),
+            ));
+        }
+        self.task
+            .validate_executable()
+            .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+        self.task
+            .resources
+            .validate()
+            .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+        self.task
+            .host
+            .validate()
+            .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+        self.resource_assignment
+            .validate_for_request(&self.task.resources)
+            .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+        for lease in &self.resource_assignment.accelerator_leases {
+            lease
+                .validate_for_attempt(self.id)
+                .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AttemptSuccess {
-    pub outputs: Vec<ValuePayload>,
-    pub result_objects: Vec<ValueRef>,
-    /// Present on scheduler attempts. Serial domain executors may prepare an unmetered success,
-    /// but the generic driver rejects it as an attempt report until a worker binds accounting.
-    pub resources: Option<Box<AttemptResourceAccounting>>,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AttemptSuccess {
+    Values {
+        outputs: Vec<ValuePayload>,
+        result_objects: Vec<ValueRef>,
+        /// Present on scheduler attempts. Serial domain executors may prepare an unmetered
+        /// success, but the generic driver rejects it as an attempt report until a worker
+        /// binds accounting.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resources: Option<Box<AttemptResourceAccounting>>,
+    },
+    Graph {
+        graph: PayloadGraph,
+    },
+    Spmd {
+        outputs: Vec<Option<runmat_execution::SpmdOutputValue>>,
+    },
+}
+
+impl AttemptSuccess {
+    /// Bind worker-metered accounting to a value result for one scheduler attempt.
+    pub fn new(
+        request: &AttemptRequest,
+        outputs: Vec<ValuePayload>,
+        result_objects: Vec<ValueRef>,
+        wall_millis: u64,
+        egress_bytes: u64,
+        relay_bytes: u64,
+    ) -> Result<Self, String> {
+        let artifact_bytes = result_artifact_bytes(&result_objects)?;
+        Ok(Self::Values {
+            outputs,
+            result_objects,
+            resources: Some(Box::new(AttemptResourceAccounting::for_attempt(
+                request,
+                wall_millis,
+                artifact_bytes,
+                egress_bytes,
+                relay_bytes,
+            )?)),
+        })
+    }
+
+    /// Worker-bound accounting. Only value results carry scheduler accounting.
+    pub fn resources(&self) -> Option<&AttemptResourceAccounting> {
+        match self {
+            Self::Values { resources, .. } => resources.as_deref(),
+            Self::Graph { .. } | Self::Spmd { .. } => None,
+        }
+    }
+
+    pub fn validate_against(&self, request: &AttemptRequest) -> Result<(), String> {
+        if !matches!(self, Self::Values { .. }) {
+            return Ok(());
+        }
+        self.validate_accounting()?;
+        self.resources()
+            .ok_or_else(|| "attempt success has no worker resource accounting".to_string())?
+            .validate_against(request)
+    }
+
+    pub fn validate_accounting(&self) -> Result<(), String> {
+        let resources = self
+            .resources()
+            .ok_or_else(|| "attempt success has no worker resource accounting".to_string())?;
+        if result_artifact_bytes(self.result_objects())? != resources.resources.artifact_bytes {
+            return Err("attempt resource accounting differs from its result objects".into());
+        }
+        resources.validate()
+    }
+
+    pub fn validate_for_portable_transport(&self, task: &TaskRequest) -> crate::RunnerResult<()> {
+        use runmat_execution::value::{ValueLimits, ValuePayload, ValueTransportContext};
+
+        let owned = matches!(
+            &task.executable,
+            runmat_execution::TaskExecutableIdentity::OwnedBuiltin(_)
+        );
+        let limits = if owned {
+            runmat_execution::OWNED_BUILTIN_VALUE_LIMITS
+        } else {
+            ValueLimits::default()
+        };
+
+        match self {
+            Self::Values {
+                outputs,
+                result_objects,
+                ..
+            } => {
+                if owned
+                    && (outputs.len() != usize::from(task.outputs.requested_outputs)
+                        || !result_objects.is_empty()
+                        || outputs
+                            .iter()
+                            .any(|value| !matches!(value, ValuePayload::Inline(_))))
+                {
+                    return Err(crate::RunnerError::Invalid(
+                        "owned builtin result differs from its self-contained output contract"
+                            .into(),
+                    ));
+                }
+                if owned {
+                    let contract = task.outputs.owned_work.as_ref().ok_or_else(|| {
+                        crate::RunnerError::Invalid(
+                            "owned builtin task lost its dense output contract".into(),
+                        )
+                    })?;
+                    contract
+                        .validate(task.outputs.requested_outputs)
+                        .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                    ValuePayload::validate_all(
+                        outputs,
+                        runmat_execution::OWNED_BUILTIN_VALUE_LIMITS,
+                    )
+                    .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                    if !outputs
+                        .iter()
+                        .zip(&contract.dense)
+                        .all(|(output, contract)| contract.accepts(output))
+                    {
+                        return Err(crate::RunnerError::Invalid(
+                            "owned builtin result differs from its dense output contract".into(),
+                        ));
+                    }
+                    contract
+                        .validate_json_wire(self)
+                        .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                }
+                for output in outputs {
+                    output
+                        .validate_for_transport(limits, ValueTransportContext::Portable)
+                        .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                }
+                for reference in result_objects {
+                    ValuePayload::Object(Box::new(reference.clone()))
+                        .validate_for_transport(
+                            ValueLimits::default(),
+                            ValueTransportContext::Portable,
+                        )
+                        .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                    if reference.kind != runmat_execution::value::ValueRefKind::ResultObject {
+                        return Err(crate::RunnerError::Invalid(
+                            "result object inventory contains a non-result reference".into(),
+                        ));
+                    }
+                }
+            }
+            Self::Spmd { outputs } => {
+                if owned {
+                    return Err(crate::RunnerError::Invalid(
+                        "owned builtin cannot return an SPMD result".into(),
+                    ));
+                }
+                for output in outputs.iter().flatten() {
+                    output
+                        .validate_for_transport(ValueTransportContext::Portable)
+                        .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                }
+            }
+            Self::Graph { graph } => {
+                if owned {
+                    return Err(crate::RunnerError::Invalid(
+                        "owned builtin cannot return a graph result".into(),
+                    ));
+                }
+                let limits = ValueLimits::default();
+                if graph.nodes.len() as u64 > limits.max_nodes
+                    || graph
+                        .roots
+                        .iter()
+                        .any(|root| root.0 as usize >= graph.nodes.len())
+                {
+                    return Err(crate::RunnerError::Invalid(
+                        "graph result exceeds its node bound or has an invalid root".into(),
+                    ));
+                }
+                for node in &graph.nodes {
+                    if let GraphNode::Leaf { value } = node {
+                        value
+                            .validate_for_transport(limits, ValueTransportContext::Portable)
+                            .map_err(|error| crate::RunnerError::Invalid(error.to_string()))?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn values(&self) -> Option<(&[ValuePayload], &[ValueRef])> {
+        match self {
+            Self::Values {
+                outputs,
+                result_objects,
+                ..
+            } => Some((outputs, result_objects)),
+            Self::Graph { .. } | Self::Spmd { .. } => None,
+        }
+    }
+
+    pub fn into_values(self) -> Option<(Vec<ValuePayload>, Vec<ValueRef>)> {
+        match self {
+            Self::Values {
+                outputs,
+                result_objects,
+                ..
+            } => Some((outputs, result_objects)),
+            Self::Graph { .. } | Self::Spmd { .. } => None,
+        }
+    }
+
+    pub fn spmd_outputs(&self) -> Option<&[Option<runmat_execution::SpmdOutputValue>]> {
+        match self {
+            Self::Spmd { outputs } => Some(outputs),
+            Self::Values { .. } | Self::Graph { .. } => None,
+        }
+    }
+
+    pub fn graph(&self) -> Option<&PayloadGraph> {
+        match self {
+            Self::Graph { graph } => Some(graph),
+            Self::Values { .. } | Self::Spmd { .. } => None,
+        }
+    }
+
+    pub fn result_objects(&self) -> &[ValueRef] {
+        match self {
+            Self::Values { result_objects, .. } => result_objects,
+            Self::Graph { .. } | Self::Spmd { .. } => &[],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -107,8 +364,9 @@ impl AttemptResourceAccounting {
         Self::new(
             request.id,
             request.worker_id,
-            ResourceAccounting::for_reserved_interval(
+            ResourceAccounting::for_assigned_interval(
                 request.task.resources.clone(),
+                &request.resource_assignment,
                 wall_millis,
                 artifact_bytes,
                 egress_bytes,
@@ -135,59 +393,12 @@ impl AttemptResourceAccounting {
     }
 }
 
-impl AttemptSuccess {
-    pub fn new(
-        request: &AttemptRequest,
-        outputs: Vec<ValuePayload>,
-        result_objects: Vec<ValueRef>,
-        wall_millis: u64,
-        egress_bytes: u64,
-        relay_bytes: u64,
-    ) -> Result<Self, String> {
-        let artifact_bytes = result_objects.iter().try_fold(0_u64, |total, reference| {
-            total
-                .checked_add(reference.encoded_length)
-                .ok_or_else(|| "attempt result artifact accounting overflowed".to_string())
-        })?;
-        Ok(Self {
-            outputs,
-            result_objects,
-            resources: Some(Box::new(AttemptResourceAccounting::for_attempt(
-                request,
-                wall_millis,
-                artifact_bytes,
-                egress_bytes,
-                relay_bytes,
-            )?)),
-        })
-    }
-
-    pub fn validate_against(&self, request: &AttemptRequest) -> Result<(), String> {
-        self.validate_accounting()?;
-        self.resources
-            .as_ref()
-            .ok_or_else(|| "attempt success has no worker resource accounting".to_string())?
-            .validate_against(request)
-    }
-
-    pub fn validate_accounting(&self) -> Result<(), String> {
-        let artifact_bytes = self
-            .result_objects
-            .iter()
-            .try_fold(0_u64, |total, reference| {
-                total
-                    .checked_add(reference.encoded_length)
-                    .ok_or_else(|| "attempt result artifact accounting overflowed".to_string())
-            })?;
-        let resources = self
-            .resources
-            .as_ref()
-            .ok_or_else(|| "attempt success has no worker resource accounting".to_string())?;
-        if artifact_bytes != resources.resources.artifact_bytes {
-            return Err("attempt resource accounting differs from its result objects".into());
-        }
-        resources.validate()
-    }
+fn result_artifact_bytes(result_objects: &[ValueRef]) -> Result<u64, String> {
+    result_objects.iter().try_fold(0_u64, |total, reference| {
+        total
+            .checked_add(reference.encoded_length)
+            .ok_or_else(|| "attempt result artifact accounting overflowed".to_string())
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -209,9 +420,21 @@ pub enum AttemptReport {
         kind: AttemptFailureKind,
         message: String,
     },
+    RuntimeFailed {
+        failure: runmat_execution::ProgramRuntimeFailure,
+    },
     Lost {
         message: String,
     },
+    /// A worker tree or its foreign resources could not be proven retired.
+    /// This is terminal and non-retryable, but not ordinary cancellation.
+    RetirementUnverified {
+        message: String,
+    },
+    /// The backend that owns an active Graph worker has verified its process
+    /// tree and foreign resources retired after cancellation. Ordinary Lost
+    /// or Cancelled reports do not carry that cleanup proof.
+    GraphRetiredCancelled,
     Cancelled,
 }
 

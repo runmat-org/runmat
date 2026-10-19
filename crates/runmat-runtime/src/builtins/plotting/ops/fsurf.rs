@@ -379,6 +379,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fsurf",
+    execution_stack = "process",
     category = "plotting",
     summary = "Plot a function surface over a 2-D domain.",
     keywords = "fsurf,function surface,parametric surface,plotting,3d",
@@ -658,7 +659,7 @@ fn is_function_handle(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }
@@ -729,7 +730,7 @@ fn numeric_vector(value: &Value) -> BuiltinResult<Vec<f64>> {
 }
 
 fn checked_integer_f64(value: &IntValue, role: &str) -> BuiltinResult<f64> {
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(value.to_f64())
     } else {
         Err(fsurf_invalid(format!(
@@ -882,23 +883,27 @@ async fn call_surface_function(function: &Value, a: f64, b: f64) -> BuiltinResul
     let value = call_function(function, vec![Value::Num(a), Value::Num(b)])
         .await
         .map_err(map_fsurf_eval)?;
-    if matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
+    if matches!(value.value(), Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &INTEGER_CALLBACK_OUTPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    if matches!(&value, Value::GpuTensor(_)) {
+    if matches!(value.value(), Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &RESIDENT_CALLBACK_OUTPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    let value = crate::dispatcher::gather_if_needed_async(&value)
+    value
+        .with_owned_async(|value| async move {
+            let value = crate::dispatcher::gather_if_needed_async(&value)
+                .await
+                .map_err(map_fsurf_eval)?;
+            surface_value_to_scalar(value).map_err(map_fsurf_eval)
+        })
         .await
-        .map_err(map_fsurf_eval)?;
-    surface_value_to_scalar(value).map_err(map_fsurf_eval)
 }
 
 fn surface_value_to_scalar(value: Value) -> BuiltinResult<f64> {
@@ -942,7 +947,7 @@ fn checked_integer_callback_f64(value: &IntValue) -> BuiltinResult<f64> {
         &INTEGER_CALLBACK_OUTPUT_EXTENSION,
         BUILTIN_NAME,
     )?;
-    if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(value) {
+    if crate::builtins::common::validation::integer_is_exact_f64(value) {
         Ok(value.to_f64())
     } else {
         Err(fsurf_error_with_detail(
@@ -962,6 +967,7 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
 
 fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64> {
     apply_axes_target(parsed.target_axes, BUILTIN_NAME)?;
+    let function_state = function_surface_state(&parsed.function)?;
     let mut surface = Some(surface);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
@@ -991,11 +997,10 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
         parsed.mesh_density,
         (parsed.domain.x_min, parsed.domain.x_max),
         (parsed.domain.y_min, parsed.domain.y_max),
-        function_surface_state(&parsed.function),
+        function_state,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(err);
@@ -1003,40 +1008,44 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
     Ok(handle)
 }
 
-fn function_surface_state(function: &SurfaceFunction) -> FunctionSurfaceFunctionState {
+fn function_surface_state(
+    function: &SurfaceFunction,
+) -> BuiltinResult<FunctionSurfaceFunctionState> {
     match function {
-        SurfaceFunction::Explicit(function) => {
-            FunctionSurfaceFunctionState::Explicit(function_surface_ref(function))
+        SurfaceFunction::Explicit(function) => Ok(FunctionSurfaceFunctionState::Explicit(
+            function_surface_ref(function, BUILTIN_NAME)?,
+        )),
+        SurfaceFunction::Parametric { x, y, z } => {
+            let x = function_surface_ref(x, BUILTIN_NAME)?;
+            let y = function_surface_ref(y, BUILTIN_NAME)?;
+            let z = function_surface_ref(z, BUILTIN_NAME)?;
+            Ok(FunctionSurfaceFunctionState::Parametric { x, y, z })
         }
-        SurfaceFunction::Parametric { x, y, z } => FunctionSurfaceFunctionState::Parametric {
-            x: function_surface_ref(x),
-            y: function_surface_ref(y),
-            z: function_surface_ref(z),
-        },
     }
 }
 
-pub(crate) fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionRef {
-    match function {
-        Value::FunctionHandle(name) => FunctionSurfaceFunctionRef::FunctionHandle(name.clone()),
+pub(crate) fn function_surface_ref(
+    function: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<FunctionSurfaceFunctionRef> {
+    Ok(match function {
+        Value::FunctionHandle(name) => {
+            FunctionSurfaceFunctionRef::FunctionHandle(name.name().to_owned())
+        }
         Value::ExternalFunctionHandle(name) => {
-            FunctionSurfaceFunctionRef::ExternalFunctionHandle(name.clone())
+            FunctionSurfaceFunctionRef::ExternalFunctionHandle(name.name().to_owned())
         }
         Value::MethodFunctionHandle(name) => {
-            FunctionSurfaceFunctionRef::MethodFunctionHandle(name.clone())
+            FunctionSurfaceFunctionRef::MethodFunctionHandle(name.name().to_owned())
         }
-        Value::BoundFunctionHandle { name, function } => {
-            FunctionSurfaceFunctionRef::BoundFunctionHandle {
-                name: name.clone(),
-                function: *function,
-            }
+        Value::BoundFunctionHandle(_) | Value::Closure(_) => {
+            FunctionSurfaceFunctionRef::OwnedCallable(super::state::callbacks::retain(
+                function.clone(),
+                builtin,
+            )?)
         }
-        Value::Closure(closure) => FunctionSurfaceFunctionRef::ClosureSummary {
-            function_name: closure.function_name.clone(),
-            bound_function: closure.bound_function,
-        },
         _ => FunctionSurfaceFunctionRef::FunctionHandle("<invalid>".into()),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1049,12 +1058,50 @@ mod tests {
     use runmat_plot::plots::PlotElement;
     use std::sync::Arc;
 
+    struct TestFunctions {
+        runtime: crate::context::RuntimeContext,
+        bindings: Vec<runmat_value::BoundFunctionBinding>,
+        _bound: crate::user_functions::BoundFunctionInvokerGuard,
+    }
+
+    impl TestFunctions {
+        fn value(&self, name: &str, function: usize) -> Value {
+            let binding = self
+                .bindings
+                .iter()
+                .find(|binding| binding.function == function)
+                .expect("selected surface callback");
+            crate::user_functions::test_support::exact_local_value(name, binding.clone())
+        }
+    }
+
+    fn selected_functions(functions: &[usize]) -> TestFunctions {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let bindings = functions
+            .iter()
+            .map(|function| {
+                crate::user_functions::test_support::exact_local_binding(&runtime, *function)
+            })
+            .collect::<Vec<_>>();
+        let entry = runtime.enter();
+        let bound = crate::user_functions::test_support::install_bound_forwarders(bindings.clone());
+        drop(entry);
+        TestFunctions {
+            runtime,
+            bindings,
+            _bound: bound,
+        }
+    }
+
     fn with_test_function(
         f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
-    ) -> crate::user_functions::FunctionInvokerGuard {
+    ) -> (TestFunctions, crate::user_functions::FunctionInvokerGuard) {
+        let fixture = selected_functions(&[1]);
+        let entry = fixture.runtime.enter();
         let f = Arc::new(f);
-        crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+        let numeric = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 1);
                 let f = Arc::clone(&f);
                 let a = match &args[0] {
                     Value::Num(value) => *value,
@@ -1064,9 +1111,16 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(f(a, b))) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        f(a, b),
+                    ))
+                })
             },
         )))
+        .expect("call-port scope");
+        drop(entry);
+        (fixture, numeric)
     }
 
     #[test]
@@ -1092,10 +1146,15 @@ mod tests {
 
     #[test]
     fn fsurf_gates_integer_forms_independently() {
-        let function = Value::BoundFunctionHandle {
-            name: "surface".into(),
-            function: 1,
-        };
+        let function = Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "surface".into(),
+                function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        ));
         let domain = Value::Tensor(
             runmat_value::Tensor::new_integer(
                 runmat_value::IntegerStorage::I16(vec![-2, 2]),
@@ -1129,10 +1188,15 @@ mod tests {
         );
 
         let padded_mesh_err = preflight_fsurf_extensions(&[
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String(" MeshDensity ".into()),
             Value::Int(IntValue::U8(35)),
         ])
@@ -1143,10 +1207,15 @@ mod tests {
         );
 
         let style_err = preflight_fsurf_extensions(&[
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String("FaceAlpha".into()),
             Value::Int(IntValue::U8(1)),
         ])
@@ -1213,10 +1282,15 @@ mod tests {
         let Value::Num(encoded) = axes else {
             panic!("numeric axes representation");
         };
-        let function = Value::BoundFunctionHandle {
-            name: "surface".into(),
-            function: 1,
-        };
+        let function = Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+            runmat_value::BoundFunctionHandleData {
+                name: "surface".into(),
+                function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
+            },
+        ));
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = preflight_fsurf_extensions(&[
@@ -1237,32 +1311,33 @@ mod tests {
 
     #[test]
     fn fsurf_resident_integer_callback_is_gated_before_provider_access() {
+        let fixture = selected_functions(&[1]);
+        let _entry = fixture.runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, _args, _requested_outputs| {
+            |function, _args, _requested_outputs| {
+                assert_eq!(function, 1);
                 Box::pin(async {
-                    let handle = runmat_accelerate_api::GpuTensorHandle {
-                        shape: vec![1, 1],
-                        device_id: 999_992,
-                        buffer_id: 999_992,
-                        descriptor: Default::default(),
-                    }
-                    .with_numeric_descriptor(
-                        runmat_accelerate_api::NumericElementType::U64,
-                        runmat_accelerate_api::GpuTensorStorage::Real,
-                    );
-                    Ok(Value::GpuTensor(handle))
+                    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                        .allocate_zeroed(
+                            vec![1, 1],
+                            runmat_accelerate_api::NumericElementType::U64,
+                            runmat_accelerate_api::GpuTensorStorage::Real,
+                        )
+                        .unwrap()
+                        .handle;
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        Value::GpuTensor(handle),
+                    )
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(call_surface_function(
-            &Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let error = block_on(fixture.runtime.scope(call_surface_function(
+            &fixture.value("surface", 1),
             0.0,
             0.0,
-        ))
+        )))
         .expect_err("resident integer callback is rejected before gather");
         assert_eq!(
             error.identifier(),
@@ -1330,23 +1405,31 @@ mod tests {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         let _ = clear_figure(None);
-        let _invoker = with_test_function(|x, y| x * x + y);
+        let (fixture, _numeric) = with_test_function(|x, y| x * x + y);
+        let _entry = fixture.runtime.enter();
+        let prior_roots = fixture.runtime.plot_callback_root_count();
+        let prior_direct_roots = super::super::state::callbacks::direct_root_count();
 
-        let handle = block_on(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let handle = block_on(fixture.runtime.scope(fsurf_builtin(vec![
+            fixture.value("surface", 1),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(3.0),
             Value::String("DisplayName".into()),
             Value::String("parabola".into()),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
         assert_eq!(ty, Value::String("functionsurface".into()));
+        let callback = get_builtin(vec![Value::Num(handle), Value::String("Function".into())])
+            .expect("owning session callback");
+        assert_eq!(callback, fixture.value("surface", 1));
+        assert_eq!(
+            super::super::state::callbacks::direct_root_count(),
+            prior_direct_roots
+        );
+        assert_eq!(fixture.runtime.plot_callback_root_count(), prior_roots + 1);
         let mesh_density = get_builtin(vec![
             Value::Num(handle),
             Value::String("MeshDensity".into()),
@@ -1362,6 +1445,36 @@ mod tests {
         assert_eq!(surface.label.as_deref(), Some("parabola"));
         let z = surface.z_data.as_ref().unwrap();
         assert!((z[2][2] - 3.0).abs() < 1.0e-12);
+        clear_figure(Some(current_figure_handle())).expect("clear callback scene");
+        assert_eq!(fixture.runtime.plot_callback_root_count(), prior_roots);
+    }
+
+    #[test]
+    fn sibling_session_clear_revokes_scene_callback_without_owning_its_value() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        let _ = clear_figure(None);
+        let (fixture, _numeric) = with_test_function(|x, y| x + y);
+        let first = fixture.runtime.clone();
+        let second = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let handle = block_on(first.scope(fsurf_builtin(vec![
+            fixture.value("surface", 1),
+            Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
+            Value::String("MeshDensity".into()),
+            Value::Num(3.0),
+        ])))
+        .expect("first session surface");
+        assert_eq!(first.plot_callback_root_count(), 1);
+        {
+            let _active = second.enter();
+            let error = get_builtin(vec![Value::Num(handle), Value::String("Function".into())])
+                .expect_err("sibling cannot observe original callable");
+            assert!(error.message().contains("another or ended session"));
+            clear_figure(Some(current_figure_handle())).expect("sibling clears shared scene");
+        }
+        assert_eq!(first.plot_callback_root_count(), 0);
     }
 
     #[test]
@@ -1375,8 +1488,10 @@ mod tests {
             Value::Num(2.0),
         )
         .unwrap();
+        let fixture = selected_functions(&[11, 12, 13]);
+        let _entry = fixture.runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
                 let u = match &args[0] {
                     Value::Num(value) => *value,
                     other => panic!("expected first scalar argument, got {other:?}"),
@@ -1386,36 +1501,30 @@ mod tests {
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
                 Box::pin(async move {
-                    Ok(match _function {
-                        11 => Value::Num(u),
-                        12 => Value::Num(v),
-                        13 => Value::Num(u + v),
-                        other => panic!("unexpected function id {other}"),
-                    })
+                    crate::user_functions::test_support::rooted_single_value_sequence(
+                        match function {
+                            11 => Value::Num(u),
+                            12 => Value::Num(v),
+                            13 => Value::Num(u + v),
+                            other => panic!("unexpected function id {other}"),
+                        },
+                    )
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
-        let handle = block_on(fsurf_builtin(vec![
+        let handle = block_on(fixture.runtime.scope(fsurf_builtin(vec![
             Value::Num(ax),
-            Value::BoundFunctionHandle {
-                name: "x".into(),
-                function: 11,
-            },
-            Value::BoundFunctionHandle {
-                name: "y".into(),
-                function: 12,
-            },
-            Value::BoundFunctionHandle {
-                name: "z".into(),
-                function: 13,
-            },
+            fixture.value("x", 11),
+            fixture.value("y", 12),
+            fixture.value("z", 13),
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, 2.0, 4.0], vec![1, 4]).unwrap(),
             ),
             Value::String("MeshDensity".into()),
             Value::Num(2.0),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -1437,23 +1546,21 @@ mod tests {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         let _ = clear_figure(None);
-        let _invoker = with_test_function(|x, y| {
+        let (fixture, _numeric) = with_test_function(|x, y| {
             if x == 0.0 && y == 0.0 {
                 f64::NAN
             } else {
                 x + y
             }
         });
+        let _entry = fixture.runtime.enter();
 
-        let handle = block_on(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let handle = block_on(fixture.runtime.scope(fsurf_builtin(vec![
+            fixture.value("surface", 1),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(2.0),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -1471,15 +1578,21 @@ mod tests {
     fn fsurf_rejects_invalid_mesh_density() {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
-        let _invoker = with_test_function(|x, y| x + y);
-        let err = block_on(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let (fixture, _numeric) = with_test_function(|x, y| x + y);
+        let _entry = fixture.runtime.enter();
+        let err = block_on(fixture.runtime.scope(fsurf_builtin(vec![
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "surface".into(),
+                    function: 1,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
             Value::String("MeshDensity".into()),
             Value::Num(1.0),
-        ]))
+        ])))
         .expect_err("expected mesh-density validation error");
         assert_eq!(err.identifier(), FSURF_ERROR_INVALID_ARGUMENT.identifier);
     }

@@ -1,0 +1,28 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("spones"),
+    slug: Some("spones"),
+    summary: "Replace nonzero sparse matrix entries with ones.",
+    description: "`spones(S)` returns a sparse double matrix with the same nonzero pattern as `S` and stored values set to one.",
+    keywords: &["spones", "sparse", "pattern", "nonzero"],
+    related: &[],
+    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["Sparse input preserves row indices and column pointers while replacing each stored value with `1`.",
+"`S` may be sparse, dense numeric or logical, scalar, or dense GPU numeric. Dense host inputs are converted to sparse pattern storage; dense GPU inputs are gathered before that conversion.",
+"Typed integer input is a RunMat-only extension. Its nonzero pattern is inspected exactly, and the result is a sparse double matrix of ones.",
+"NaN values count as stored values, matching RunMat sparse storage semantics.",
+"Complex sparse storage is not currently represented by this builtin."] },
+BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &["`spones` gathers dense GPU tensors and returns a host sparse matrix because RunMat sparse matrices are currently host-resident.",
+"`spones` returns host-resident sparse CSC storage. Dense GPU inputs are gathered before sparse pattern construction."] }],
+    examples: &[BuiltinExample { id: "example-1", title: "Preserve a sparse pattern", program: "S = sparse([1; 3], [2; 2], [4; 9], 3, 3);\nfull(spones(S))", display_output: Some("ans = [0 1 0; 0 0 0; 0 1 0]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(issparse(S)); assert(isequal(size(S), [3 3]));" } }],
+    example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq { question: "Does `spones` preserve explicit sparse zeros?", answer: "RunMat's sparse constructor does not store final zero values, so `spones` operates on the stored nonzero pattern." }],
+    links: &[BuiltinDocumentationLink { label: "sparse", target: BuiltinDocumentationLinkTarget::Documentation("./sparse") },
+BuiltinDocumentationLink { label: "nnz", target: BuiltinDocumentationLinkTarget::Documentation("./nnz") },
+BuiltinDocumentationLink { label: "full", target: BuiltinDocumentationLinkTarget::Documentation("./full") }],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "spones sparse and dense input test", location: "builtins::array::creation::sparse::tests::spones_preserves_sparse_pattern_and_accepts_dense_gpu_input" }], notes: &[] },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

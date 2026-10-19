@@ -13,11 +13,11 @@ const SCENE_KIND: &str = "figure-scene";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FigureScenePayload {
+struct FigureScenePayload<T = runmat_plot::event::FigureScene> {
     schema_version: u32,
     kind: String,
     created_at: String,
-    figure: runmat_plot::event::FigureScene,
+    figure: T,
 }
 
 #[cfg(feature = "plot-core")]
@@ -46,7 +46,7 @@ pub fn encode_figure_scene_payload_with_limits(
         schema_version: SCENE_SCHEMA_VERSION,
         kind: SCENE_KIND.to_string(),
         created_at: Utc::now().to_rfc3339(),
-        figure: scene.clone(),
+        figure: scene,
     };
     let encoded = serde_json::to_vec(&payload).map_err(|err| {
         replay_error_with_source(
@@ -996,9 +996,7 @@ mod tests {
     #[cfg(feature = "plot-core")]
     #[test]
     fn scene_chunk_reader_resolves_provider_relative_paths() {
-        let _fs_lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _fs_lock = runmat_filesystem::provider_override_lock();
         let root = std::env::temp_dir().join(format!(
             "runmat_scene_relpath_{}",
             std::time::SystemTime::now()

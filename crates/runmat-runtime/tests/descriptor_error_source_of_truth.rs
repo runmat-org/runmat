@@ -3,22 +3,33 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[test]
-fn public_integer_cast_descriptors_are_unique() {
+fn public_migrated_numeric_descriptors_are_unique() {
     let _ = runmat_runtime::object_property_getter_name("__descriptor_registry_probe");
     for name in [
-        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+        "angle", "conj", "double", "expm1", "imag", "int8", "int16", "int32", "int64", "log",
+        "flintmax", "intmax", "intmin", "log1p", "log2", "log10", "real", "realmax", "realmin",
+        "realsqrt", "sign", "single", "sqrt", "uint8", "uint16", "uint32", "uint64",
     ] {
-        let count = runmat_builtins::builtin_functions()
-            .into_iter()
-            .filter(|builtin| {
-                builtin.name == name
-                    && builtin.descriptor.is_some_and(|descriptor| {
-                        descriptor.completion_policy
-                            == runmat_builtins::BuiltinCompletionPolicy::Public
-                    })
+        let catalog_count = runmat_builtins::builtin_catalog_entries()
+            .iter()
+            .filter(|entry| {
+                entry.identity.name == name
+                    && entry.descriptor.completion_policy
+                        == runmat_builtins::BuiltinCompletionPolicy::Public
             })
             .count();
-        assert_eq!(count, 1, "expected exactly one public {name} descriptor");
+        let legacy_count = runmat_builtins::builtin_functions()
+            .into_iter()
+            .filter(|builtin| builtin.name == name)
+            .count();
+        assert_eq!(
+            catalog_count, 1,
+            "expected exactly one canonical public {name} descriptor"
+        );
+        assert_eq!(
+            legacy_count, 0,
+            "expected no legacy {name} descriptor authority"
+        );
     }
 }
 

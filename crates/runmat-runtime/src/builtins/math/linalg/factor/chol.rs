@@ -10,174 +10,25 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, random_args, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderCholResult};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::BuiltinIntegerOutputClassRule;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, NumericScalar, Tensor, Value};
 
 const BUILTIN_NAME: &str = "chol";
 
-const CHOL_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "R",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Upper or lower triangular Cholesky factor.",
-}];
-
-const CHOL_OUTPUT_RP: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "R",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Upper or lower triangular Cholesky factor.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Failure flag (0 means positive definite).",
-    },
-];
-
-const CHOL_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix to factorize.",
-}];
-
-const CHOL_INPUTS_A_TRIANGLE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix to factorize.",
-    },
-    BuiltinParamDescriptor {
-        name: "triangle",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"upper\""),
-        description: "Triangle form (`\"upper\"` or `\"lower\"`).",
-    },
-];
-
-const CHOL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "R = chol(A)",
-        inputs: &CHOL_INPUTS_A,
-        outputs: &CHOL_OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "R = chol(A, triangle)",
-        inputs: &CHOL_INPUTS_A_TRIANGLE,
-        outputs: &CHOL_OUTPUT_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, p] = chol(A)",
-        inputs: &CHOL_INPUTS_A,
-        outputs: &CHOL_OUTPUT_RP,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[R, p] = chol(A, triangle)",
-        inputs: &CHOL_INPUTS_A_TRIANGLE,
-        outputs: &CHOL_OUTPUT_RP,
-    },
-];
-
-const CHOL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHOL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:chol:InvalidArgument"),
-    when: "Option arguments or requested output count are invalid.",
-    message: "chol currently supports at most two outputs",
+#[cfg(test)]
+use runmat_builtins::CHOL_DESCRIPTOR;
+use runmat_builtins::{
+    CHOL_ERROR_INTERNAL, CHOL_ERROR_INVALID_ARGUMENT, CHOL_ERROR_INVALID_INPUT,
+    CHOL_ERROR_NOT_POSITIVE_DEFINITE, CHOL_INTEGER_INPUT_EXTENSION, CHOL_LOGICAL_INPUT_EXTENSION,
 };
-
-const CHOL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHOL.INVALID_INPUT",
-    identifier: Some("RunMat:chol:InvalidInput"),
-    when: "Input is unsupported or not a square matrix.",
-    message: "chol: expected a square numeric matrix",
-};
-
-const CHOL_ERROR_NOT_POSITIVE_DEFINITE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHOL.NOT_POSITIVE_DEFINITE",
-    identifier: Some("RunMat:chol:NotPositiveDefinite"),
-    when: "Single-output form receives a matrix that is not positive definite.",
-    message: "Matrix must be positive definite.",
-};
-
-const CHOL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CHOL.INTERNAL",
-    identifier: Some("RunMat:chol:Internal"),
-    when: "Runtime cannot materialize Cholesky outputs.",
-    message: "chol: internal runtime failure",
-};
-
-const CHOL_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    CHOL_ERROR_INVALID_ARGUMENT,
-    CHOL_ERROR_INVALID_INPUT,
-    CHOL_ERROR_NOT_POSITIVE_DEFINITE,
-    CHOL_ERROR_INTERNAL,
-];
-
-pub const CHOL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CHOL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CHOL_ERRORS,
-};
-
-const CHOL_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "chol-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "chol with a typed-integer input matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CholIntegerInputExtension"),
-};
-const CHOL_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "chol-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "chol with a logical input matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:CholLogicalInputExtension"),
-};
-
-pub const CHOL_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [CHOL_INTEGER_INPUT_EXTENSION, CHOL_LOGICAL_INPUT_EXTENSION];
-
-const CHOL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented matrix classes are single and double. RunMat mode admits all eight real integer classes after an exact binary64-boundary check.",
-    }];
-
-pub const CHOL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "R = chol(integer_A,...) and [R,p] = chol(integer_A,...)",
-        inputs: &CHOL_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer matrices enter the binary64 Cholesky computation only after compatibility and exactness checks. Resident integer input bypasses the floating provider hook, gathers exactly, and restores a double factor to the owning provider when possible.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::chol")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -219,6 +70,13 @@ fn chol_invalid_input(message: impl Into<String>) -> RuntimeError {
     chol_error_with_message(message, &CHOL_ERROR_INVALID_INPUT)
 }
 
+fn chol_provider_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        chol_internal_error(error.to_string()),
+        error,
+    )
+}
+
 fn chol_internal_error(message: impl Into<String>) -> RuntimeError {
     chol_error_with_message(message, &CHOL_ERROR_INTERNAL)
 }
@@ -248,31 +106,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "chol",
-    category = "math/linalg/factor",
-    summary = "Compute Cholesky factorizations.",
-    keywords = "chol,cholesky,factorization,positive-definite",
-    accel = "sink",
-    sink = true,
-    type_resolver(matrix_unary_type),
-    descriptor(crate::builtins::math::linalg::factor::chol::CHOL_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::factor::chol::CHOL_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::factor::chol::CHOL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::chol"
 )]
 async fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             if !eval.is_positive_definite() {
                 return Err(chol_error(&CHOL_ERROR_NOT_POSITIVE_DEFINITE));
             }
-            return Ok(Value::OutputList(vec![eval.factor()]));
+            return Ok(Value::output_list(vec![eval.factor()]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![eval.factor(), eval.flag()]));
+            return Ok(Value::output_list(vec![eval.factor(), eval.flag()]));
         }
         return Err(chol_error(&CHOL_ERROR_INVALID_ARGUMENT));
     }
@@ -368,18 +218,18 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
     }
     match value {
         Value::GpuTensor(handle) => {
-            let provider = runmat_accelerate_api::provider_for_handle(&handle);
+            let provider = gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| chol_internal_error("chol: no exact owner for resident input"))?;
             if !integer_input {
                 if let Some(eval) = evaluate_gpu(&handle, triangle).await? {
                     return Ok(eval);
                 }
             }
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(with_chol_context)?;
-            ensure_exact_integer_boundary(&Value::Tensor(tensor.clone()))?;
-            let eval = evaluate_host_value(Value::Tensor(tensor), triangle).await?;
-            reupload_factor(eval, provider)
+            let host =
+                gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+            ensure_exact_integer_boundary(&host)?;
+            let eval = evaluate_host_value(host, triangle).await?;
+            reupload_factor(eval, provider, &handle)
         }
         other => {
             ensure_exact_integer_boundary(&other)?;
@@ -441,32 +291,32 @@ fn numeric_scalar_as_i128(value: NumericScalar) -> Option<i128> {
 
 fn reupload_factor(
     mut eval: CholEval,
-    provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
 ) -> BuiltinResult<CholEval> {
-    let Some(provider) = provider else {
-        return Ok(eval);
-    };
     let uploaded = match &eval.factor {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, tensor),
-        Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
-            .map_err(|err| err.to_string())
-            .and_then(|tensor| gpu_helpers::upload_tensor(provider, &tensor)),
-        Value::ComplexTensor(tensor) => {
-            gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|err| err.to_string())
+        Value::Tensor(tensor) => gpu_helpers::upload_tensor_protecting(provider, tensor, &[input]),
+        Value::Num(value) => {
+            let tensor = Tensor::new(vec![*value], vec![1, 1])
+                .map_err(|error| chol_internal_error(error.to_string()))?;
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])
         }
-        Value::Complex(real, imag) => ComplexTensor::new(vec![(*real, *imag)], vec![1, 1])
-            .map_err(|err| err.to_string())
-            .and_then(|tensor| {
-                gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| err.to_string())
-            }),
+        Value::ComplexTensor(tensor) => {
+            gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[input])
+        }
+        Value::Complex(real, imag) => {
+            let tensor = ComplexTensor::new(vec![(*real, *imag)], vec![1, 1])
+                .map_err(|error| chol_internal_error(error.to_string()))?;
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])
+        }
         other => {
             return Err(chol_internal_error(format!(
                 "chol: cannot restore GPU factor of type {other:?}"
             )))
         }
-    }
-    .map_err(|err| chol_internal_error(format!("chol: GPU fallback upload failed: {err}")))?;
-    eval.factor = gpu_helpers::resident_gpu_value(uploaded);
+    }?;
+    let uploaded = gpu_helpers::propagate_owned_output_provenance(uploaded, [input])?;
+    eval.factor = gpu_helpers::resident_gpu_value(uploaded)?;
     Ok(eval)
 }
 
@@ -494,10 +344,39 @@ async fn evaluate_gpu(
     handle: &GpuTensorHandle,
     triangle: CholTriangle,
 ) -> BuiltinResult<Option<CholEval>> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
+        if runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle) != Some(provider.precision())
+        {
+            return Ok(None);
+        }
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
         let lower = matches!(triangle, CholTriangle::Lower);
-        if let Ok(result) = provider.chol(handle, lower).await {
-            return Ok(Some(CholEval::from_provider(result, triangle)));
+        match provider.chol(handle, lower).await {
+            Ok(mut result) => {
+                let valid = result.factor.shape() == handle.shape()
+                    && result.info as usize <= handle.shape().first().copied().unwrap_or(1)
+                    && !result.factor.shares_allocation_with(handle)
+                    && !runmat_accelerate_api::handle_is_logical(&result.factor)
+                    && !runmat_accelerate_api::handle_is_transposed(&result.factor)
+                    && result.factor.physical().element_type() == handle.physical().element_type()
+                    && result.factor.physical().storage() == handle.physical().storage()
+                    && gpu_helpers::exact_provider_for_handle(&result.factor).is_some_and(
+                        |owner| runmat_accelerate_api::same_provider_instance(owner, provider),
+                    );
+                if !valid {
+                    return Err(gpu_helpers::reject_gpu_output(
+                        result.factor,
+                        chol_internal_error("chol: invalid provider factor output"),
+                    ));
+                }
+                gpu_helpers::propagate_output_provenance(&mut result.factor, [handle])?;
+                return Ok(Some(CholEval::from_provider(result, triangle)));
+            }
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => return Err(chol_provider_error(error)),
         }
     }
     Ok(None)
@@ -526,72 +405,19 @@ fn parse_triangle(args: &[Value]) -> BuiltinResult<CholTriangle> {
 
 const EPS: f64 = 1.0e-12;
 
-#[inline]
-fn hermitian_pair_matches(a: Complex64, b: Complex64) -> bool {
-    let diff = a - b.conj();
-    let scale = a.norm().max(b.norm()).max(1.0);
-    diff.norm() <= EPS * scale
-}
-
 fn chol_factor(matrix: RowMajorMatrix) -> BuiltinResult<CholComponents> {
-    let n = matrix.rows;
-    if n == 0 {
-        return Ok(CholComponents {
-            upper: RowMajorMatrix::zeros(0, 0),
-            info: 0,
-        });
-    }
-    let mut upper = RowMajorMatrix::zeros(n, n);
-    let mut info = 0usize;
-
-    'outer: for j in 0..n {
-        for i in 0..j {
-            if !hermitian_pair_matches(matrix.get(i, j), matrix.get(j, i)) {
-                info = j + 1;
-                break 'outer;
-            }
-        }
-
-        for i in 0..=j {
-            let mut sum = matrix.get(i, j);
-            for k in 0..i {
-                let rik = upper.get(k, i).conj();
-                let rkj = upper.get(k, j);
-                sum -= rik * rkj;
-            }
-            if i == j {
-                let imag_tol = EPS * sum.re.abs().max(1.0);
-                if !sum.re.is_finite()
-                    || !sum.im.is_finite()
-                    || sum.re <= 0.0
-                    || sum.im.abs() > imag_tol
-                {
-                    info = j + 1;
-                    break 'outer;
-                }
-                let diag = sum.re.sqrt();
-                upper.set(i, i, Complex64::new(diag, 0.0));
-            } else {
-                let denom = upper.get(i, i);
-                if denom.norm() <= EPS {
-                    info = i + 1;
-                    break 'outer;
-                }
-                upper.set(i, j, sum / denom);
-            }
-        }
-    }
-
-    if info != 0 {
-        let start = info.saturating_sub(1).min(n);
-        for row in start..n {
-            for col in row..n {
-                upper.set(row, col, Complex64::new(0.0, 0.0));
-            }
-        }
-    }
-
-    Ok(CholComponents { upper, info })
+    let factor = super::cholesky::factor_upper(matrix.rows, |row, col| matrix.get(row, col))
+        .map_err(|error| {
+            chol_internal_error(format!("chol: factor allocation failed: {error:?}"))
+        })?;
+    Ok(CholComponents {
+        upper: RowMajorMatrix {
+            rows: matrix.rows,
+            cols: matrix.cols,
+            data: factor.upper,
+        },
+        info: factor.info,
+    })
 }
 
 async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {
@@ -718,7 +544,7 @@ impl RowMajorMatrix {
     }
 
     fn from_tensor(tensor: &Tensor, label: &str) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(chol_invalid_input(format!("{label}: input must be 2-D")));
         }
         let rows = tensor.rows();
@@ -736,11 +562,11 @@ impl RowMajorMatrix {
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor, label: &str) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(chol_invalid_input(format!("{label}: input must be 2-D")));
         }
-        let rows = tensor.rows;
-        let cols = tensor.cols;
+        let rows = tensor.rows();
+        let cols = tensor.cols();
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
@@ -833,8 +659,8 @@ pub(crate) mod tests {
 
     #[test]
     fn chol_registers_integer_extension_and_capability() {
-        let builtin =
-            runmat_builtins::builtin_function_by_name(BUILTIN_NAME).expect("chol builtin");
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+            .expect("chol catalog entry");
         assert_eq!(builtin.extensions.len(), 2);
         assert_eq!(builtin.extensions[0].id, "chol-integer-input");
         assert_eq!(builtin.extensions[1].id, "chol-logical-input");
@@ -921,7 +747,7 @@ pub(crate) mod tests {
     }
 
     fn tensor_close(lhs: &Matrix, rhs: &Matrix, tol: f64) {
-        assert_eq!(lhs.shape, rhs.shape, "shape mismatch");
+        assert_eq!(lhs.shape(), rhs.shape(), "shape mismatch");
         for (a, b) in lhs
             .materialize_f64()
             .iter()
@@ -942,7 +768,7 @@ pub(crate) mod tests {
             }
             Value::Tensor(t) => {
                 let data: Vec<(f64, f64)> = t.materialize_f64().iter().map(|&v| (v, 0.0)).collect();
-                ComplexTensor::new(data, t.shape.clone()).expect("complex tensor")
+                ComplexTensor::new(data, t.shape().to_vec()).expect("complex tensor")
             }
             Value::Num(n) => {
                 ComplexTensor::new(vec![(n, 0.0)], vec![1, 1]).expect("complex tensor")
@@ -952,8 +778,8 @@ pub(crate) mod tests {
     }
 
     fn reconstruct_complex_upper(matrix: &ComplexTensor) -> ComplexTensor {
-        let rows = matrix.rows;
-        let cols = matrix.cols;
+        let rows = matrix.rows();
+        let cols = matrix.cols();
         assert_eq!(rows, cols, "expected square matrix");
         let mut data = vec![(0.0, 0.0); rows * rows];
         for i in 0..rows {
@@ -981,8 +807,8 @@ pub(crate) mod tests {
     }
 
     fn reconstruct_complex_lower(matrix: &ComplexTensor) -> ComplexTensor {
-        let rows = matrix.rows;
-        let cols = matrix.cols;
+        let rows = matrix.rows();
+        let cols = matrix.cols();
         assert_eq!(rows, cols, "expected square matrix");
         let mut data = vec![(0.0, 0.0); rows * rows];
         for i in 0..rows {
@@ -1010,7 +836,7 @@ pub(crate) mod tests {
     }
 
     fn complex_tensor_close(lhs: &ComplexTensor, rhs: &ComplexTensor, tol: f64) {
-        assert_eq!(lhs.shape, rhs.shape, "shape mismatch");
+        assert_eq!(lhs.shape(), rhs.shape(), "shape mismatch");
         for ((ar, ai), (br, bi)) in lhs
             .materialize_f64()
             .iter()
@@ -1039,7 +865,7 @@ pub(crate) mod tests {
         .unwrap();
         let r = chol_builtin(Value::Tensor(a.clone()), Vec::new()).expect("chol");
         let r_tensor = tensor_from_value(r);
-        assert_eq!(r_tensor.shape, vec![3, 3]);
+        assert_eq!(r_tensor.shape(), [3, 3]);
         for diag in 0..3 {
             let value = r_tensor.materialize_f64()[diag + diag * 3];
             assert!(value > 0.0, "Cholesky diagonal must be positive");
@@ -1083,7 +909,7 @@ pub(crate) mod tests {
         let result =
             chol_builtin(Value::Tensor(a.clone()), vec![Value::from("lower")]).expect("chol");
         let l = tensor_from_value(result);
-        assert_eq!(l.shape, vec![3, 3]);
+        assert_eq!(l.shape(), [3, 3]);
         for diag in 0..3 {
             let value = l.materialize_f64()[diag + diag * 3];
             assert!(value > 0.0, "Cholesky diagonal must be positive");
@@ -1119,7 +945,7 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(a), &[]).expect("chol eval");
         assert_eq!(eval.flag_index(), 2);
         let factor = tensor_from_value(eval.factor());
-        assert_eq!(factor.shape, vec![2, 2]);
+        assert_eq!(factor.shape(), [2, 2]);
         assert!((factor.materialize_f64()[0] - 1.0).abs() < 1e-12);
         assert!((factor.materialize_f64()[1] - 0.0).abs() < 1e-12);
         assert!((factor.materialize_f64()[2] - 2.0).abs() < 1e-12);
@@ -1166,7 +992,7 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(empty.clone()), &[]).expect("chol eval");
         assert_eq!(eval.flag_index(), 0);
         let factor = tensor_from_value(eval.factor());
-        assert_eq!(factor.shape, vec![0, 0]);
+        assert_eq!(factor.shape(), [0, 0]);
         assert!(factor.materialize_f64().is_empty());
     }
 
@@ -1262,9 +1088,12 @@ pub(crate) mod tests {
             );
         }
         test_support::with_test_provider(|provider| {
-            let tensor = tensor::logical_to_tensor(&logical).expect("logical tensor");
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("logical upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &logical.data,
+                    shape: &logical.shape,
+                })
+                .expect("logical upload");
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = match evaluate(Value::GpuTensor(handle.clone()), &[]) {
                 Err(err) => err,
@@ -1275,7 +1104,7 @@ pub(crate) mod tests {
                 CHOL_LOGICAL_INPUT_EXTENSION.error_identifier
             );
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
-            let _ = provider.free(&handle);
+            drop(handle);
         });
     }
 
@@ -1320,7 +1149,7 @@ pub(crate) mod tests {
             let a = Matrix::new(vec![6.0, 2.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = chol_builtin(Value::GpuTensor(handle), Vec::new()).expect("chol");
@@ -1337,7 +1166,7 @@ pub(crate) mod tests {
             let a = Matrix::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("chol eval");
@@ -1417,7 +1246,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
 
@@ -1435,7 +1264,7 @@ pub(crate) mod tests {
         match result {
             Value::Num(n) => assert!((n - 3.0).abs() < 1e-12),
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), [1, 1]);
                 assert!((t.materialize_f64()[0] - 3.0).abs() < 1e-12);
             }
             other => panic!("expected scalar-like, got {other:?}"),

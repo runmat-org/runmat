@@ -7,7 +7,7 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
     let source = "function y = answer(); before = getenv('RUNMAT_QUIC_ENV133'); setenv('RUNMAT_QUIC_ENV133','changed'); y = strcmp(before,'frozen') + strcmp(getenv('RUNMAT_QUIC_ENV133'),'changed') + isempty(getenv('HOME')); end";
     // The builder tears down the original source root before any worker starts.
     let (program, artifact_id, bundle) =
-        program::build(source, vec![(name.into(), "frozen".into())]).await;
+        program::build(source, vec![(name.into(), "frozen".into())], Vec::new()).await;
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
     let certificate_der = cert.der().to_vec();
@@ -25,6 +25,7 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
         id: WorkerId::derive(&[b"quic-environment-worker"]),
         pool_id,
         resources: inventory(1_000),
+        host: host_inventory(),
     };
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([5; 32]).unwrap();
@@ -72,48 +73,56 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
                 worker_id: worker.id,
                 ordinal: 1,
                 driver_fence: 9,
+                resource_assignment: Default::default(),
                 task: submission(scope_id, pool_id, task_id, artifact_id).request,
             };
             scheduling.task.environment = program.environment.clone();
             if ordinal == 1 {
                 for substitution in 0..3 {
-                    let mut rejected = RemoteAttempt {
-                        scheduling: scheduling.clone(),
-                        program: program.clone(),
-                    };
+                    let mut rejected_program = program.clone();
+                    let mut rejected_scheduling = scheduling.clone();
                     match substitution {
                         0 => {
-                            rejected.scheduling.task.environment =
+                            rejected_scheduling.task.environment =
                                 runmat_execution::EnvironmentSnapshot::default()
                         }
                         1 => {
-                            rejected.program.environment =
+                            rejected_program.environment =
                                 runmat_execution::EnvironmentSnapshot::new(vec![(
                                     name.into(),
                                     "substituted".into(),
                                 )])
                                 .unwrap();
-                            rejected.scheduling.task.environment =
-                                rejected.program.environment.clone();
+                            rejected_scheduling.task.environment =
+                                rejected_program.environment.clone();
                         }
-                        _ => rejected.scheduling.task.resources.memory_bytes = 1,
+                        _ => rejected_scheduling.task.resources.memory_bytes = 1,
                     }
+                    let rejected = RemoteAttempt {
+                        scheduling: rejected_scheduling,
+                        program: super::super::RemoteAttemptProgram::Direct(Box::new(
+                            rejected_program,
+                        )),
+                    };
                     assert!(channel.execute(rejected).await.is_err());
                 }
             }
             let report = channel
                 .execute(RemoteAttempt {
                     scheduling,
-                    program: program.clone(),
+                    program: super::super::RemoteAttemptProgram::Direct(Box::new(
+                        program.clone(),
+                    )),
                 })
                 .await
                 .unwrap();
             let AttemptReport::Succeeded { result } = report else {
                 panic!("original worker attempt failed: {report:?}")
             };
-            assert_eq!(result.outputs.len(), 1);
+            let (outputs, _) = result.values().expect("value result");
+            assert_eq!(outputs.len(), 1);
             assert_eq!(
-                runmat_runtime::execution::value_codec::decode_inline_value(&result.outputs[0])
+                runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0])
                     .unwrap(),
                 runmat_value::Value::Num(3.0)
             );

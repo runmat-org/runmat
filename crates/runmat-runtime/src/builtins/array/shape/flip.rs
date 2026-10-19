@@ -6,227 +6,17 @@
 //! dimension-vector and direction-keyword extensions.
 
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexTensor, LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor,
     Value,
 };
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::flip")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "flip",
-    op_kind: GpuOpKind::Custom("flip"),
-    supported_precisions: &[
-        ScalarType::F32,
-        ScalarType::F64,
-        ScalarType::I32,
-        ScalarType::Bool,
-    ],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("flip")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Providers may implement flip directly; the runtime falls back to gather→flip→upload when the hook is missing.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::flip")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "flip",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Flip is a data-reordering boundary; fusion planner treats it as a residency-preserving barrier.",
-};
-
-fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape } => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Type::Logical { shape } => Type::Logical {
-            shape: shape.clone(),
-        },
-        Type::Num | Type::Int | Type::Bool => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 const BUILTIN_NAME: &str = "flip";
-
-const FLIP_TYPED_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "flip-typed-dimension",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "flip(A,dim) with a typed-integer or logical dim is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FlipTypedDimensionExtension"),
-};
-const FLIP_DIMENSION_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "flip-dimension-vector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "flip(A,dims) with multiple or zero dimension entries is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FlipDimensionVectorExtension"),
-};
-const FLIP_DIRECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "flip-direction-keyword",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "flip(A,direction) is a RunMat convenience extension",
-    error_identifier: Some("RunMat:compatibility:FlipDirectionExtension"),
-};
-pub const FLIP_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    FLIP_TYPED_DIMENSION_EXTENSION,
-    FLIP_DIMENSION_VECTOR_EXTENSION,
-    FLIP_DIRECTION_EXTENSION,
-];
-
-const FLIP_INTEGER_A_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are reordered through authoritative storage without numeric conversion.",
-    }];
-const FLIP_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer dimensions are exact structural controls and are gated as a RunMat extension.",
-    }];
-pub const FLIP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = flip(integer_A[,dim])",
-        inputs: &FLIP_INTEGER_A_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The operation only permutes elements; GPU fallback gathers and re-uploads exact integer storage to the owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = flip(A,integer_dim)",
-        inputs: &FLIP_INTEGER_DIM_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Strict compatibility rejects this extension before parsing the dimension value.",
-    },
-];
-
-const FLIP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array with selected dimensions reversed.",
-}];
-
-const FLIP_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array/value to reverse.",
-}];
-
-const FLIP_INPUTS_A_DIM: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array/value to reverse.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim_or_direction",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description:
-            "Dimension index/vector or direction keyword ('horizontal', 'vertical', 'both').",
-    },
-];
-
-const FLIP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = flip(A)",
-        inputs: &FLIP_INPUTS_A,
-        outputs: &FLIP_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = flip(A, dim_or_direction)",
-        inputs: &FLIP_INPUTS_A_DIM,
-        outputs: &FLIP_OUTPUT,
-    },
-];
-
-const FLIP_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIP.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:flip:TooManyInputs"),
-    when: "More than one optional argument is provided after A.",
-    message: "flip: too many input arguments",
-};
-
-const FLIP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIP.INVALID_INPUT",
-    identifier: Some("RunMat:flip:InvalidInput"),
-    when: "Input type, dimension argument, or direction token is invalid.",
-    message: "flip: invalid input argument",
-};
-
-const FLIP_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIP.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:flip:UnsupportedInput"),
-    when: "Input type is unsupported for flip.",
-    message: "flip: unsupported input type",
-};
-
-const FLIP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    FLIP_ERROR_TOO_MANY_INPUTS,
-    FLIP_ERROR_INVALID_INPUT,
-    FLIP_ERROR_UNSUPPORTED_INPUT,
-];
-
-pub const FLIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FLIP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FLIP_ERRORS,
-};
 
 fn flip_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     flip_error_with_message(error.message, error)
@@ -249,17 +39,15 @@ fn flip_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeE
 
 #[runtime_builtin(
     name = "flip",
-    category = "array/shape",
-    summary = "Reverse element order along dimensions.",
-    keywords = "flip,reverse,dimension,gpu,horizontal,vertical",
-    accel = "custom",
-    type_resolver(preserve_array_type),
-    descriptor(crate::builtins::array::shape::flip::FLIP_DESCRIPTOR),
-    extensions(crate::builtins::array::shape::flip::FLIP_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::shape::flip::FLIP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::flip"
 )]
 async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &FLIP_DESCRIPTOR,
+        &FLIP_ERROR_INVALID_INPUT,
+        BUILTIN_NAME,
+    )?;
     if rest.len() > 1 {
         return Err(flip_error(&FLIP_ERROR_TOO_MANY_INPUTS));
     }
@@ -267,7 +55,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let spec = parse_flip_spec(&rest)?;
     match value {
         Value::Tensor(tensor) => {
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(array) => {
@@ -275,13 +63,13 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             Ok(flip_logical_array(array, &dims).map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
-            let dims = resolve_dims(&spec, &ct.shape);
+            let dims = resolve_dims(&spec, ct.shape());
             Ok(flip_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| flip_error_for("flip", format!("flip: {e}")))?;
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_complex_tensor(tensor, &dims).map(complex_tensor_into_value)?)
         }
         Value::StringArray(strings) => {
@@ -296,36 +84,45 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Num(n))
                 .map_err(|e| flip_error_for("flip", e))?;
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Int(i))
                 .map_err(|e| flip_error_for("flip", e))?;
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Bool(flag))
                 .map_err(|e| flip_error_for("flip", e))?;
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
-            let dims = resolve_dims(&spec, &handle.shape);
+            let dims = resolve_dims(&spec, handle.shape());
             Ok(flip_gpu(handle, &dims).await?)
         }
         Value::Cell(_) => Err(flip_error_with_message(
             "flip: cell arrays are not yet supported",
             &FLIP_ERROR_UNSUPPORTED_INPUT,
         )),
+        Value::StructArray(mut array) => {
+            let dims = resolve_dims(&spec, array.shape());
+            for dimension in dims {
+                array = array
+                    .flip(dimension - 1)
+                    .map_err(|error| flip_error_for("flip", error))?;
+            }
+            Ok(Value::StructArray(array))
+        }
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::SparseTensor(_)
-        | Value::Struct(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -336,6 +133,8 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
@@ -496,7 +295,7 @@ fn parse_dims_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
 }
 
 fn parse_dims_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
-    if !is_vector(&tensor.shape) {
+    if !is_vector(tensor.shape()) {
         return Err(flip_error_for(
             "flip",
             "flip: dimension vector must be a row or column vector",
@@ -618,7 +417,7 @@ pub(crate) fn flip_tensor_with(
     if tensor::tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
@@ -667,11 +466,10 @@ pub(crate) fn flip_complex_tensor_with(
     if tensor::complex_tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    let shape = tensor.shape.clone();
     let indices = (0..tensor.len()).collect::<Vec<_>>();
-    let indices = flip_generic(&indices, &shape, dims, builtin)?;
-    let storage = tensor
-        .into_complex_storage()
+    let indices = flip_generic(&indices, tensor.shape(), dims, builtin)?;
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = storage
         .gather(&indices)
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
     ComplexTensor::from_complex_storage(storage, shape)
@@ -757,56 +555,83 @@ pub(crate) async fn flip_gpu_with(
             format!("{builtin}: dimension indices must be >= 1"),
         ));
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        let logical = runmat_accelerate_api::handle_is_logical(&handle);
-        let integer_type = runmat_accelerate_api::handle_integer_type(&handle);
-        let zero_based: Vec<usize> = dims.iter().map(|&d| d - 1).collect();
-        if integer_type.is_none() {
-            if let Ok(out) = provider.flip(&handle, &zero_based) {
-                if flip_native_output_matches(&handle, &out, provider) {
-                    runmat_accelerate_api::set_handle_logical(&out, logical);
-                    return Ok(gpu_helpers::resident_gpu_value(out));
-                }
-                if !gpu_handles_alias(&handle, &out) {
-                    let owner =
-                        runmat_accelerate_api::provider_for_handle(&out).unwrap_or(provider);
-                    let _ = owner.free(&out);
-                }
-            }
-        }
-        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        let flipped = flip_tensor_with(builtin, host_tensor, dims)?;
-        let out = gpu_helpers::upload_tensor(provider, &flipped)
-            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
-        runmat_accelerate_api::set_handle_logical(&out, logical);
-        Ok(Value::GpuTensor(out))
-    } else {
-        Err(flip_error_for(
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        flip_error_for(
             builtin,
             format!("{builtin}: no acceleration provider owns the input handle"),
-        ))
+        )
+    })?;
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+    let zero_based: Vec<usize> = dims.iter().map(|&d| d - 1).collect();
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+        match provider.flip(&handle, &zero_based) {
+            Ok(Some(mut output)) => {
+                if !gpu_helpers::flip_output_matches(&handle, &output, provider, &zero_based) {
+                    return Err(gpu_helpers::reject_gpu_output(
+                        output,
+                        flip_error_for(builtin, format!("{builtin}: invalid provider flip output")),
+                    ));
+                }
+                output = gpu_helpers::propagate_owned_output_provenance(output, [&handle])?;
+                return gpu_helpers::resident_gpu_value(output);
+            }
+            Ok(None) => {}
+            Err(cause) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    crate::build_runtime_error(format!("{builtin}: provider flip failed: {cause}"))
+                        .with_builtin(builtin)
+                        .build(),
+                    cause,
+                ))
+            }
+        }
     }
+    flip_gpu_fallback_with(builtin, provider, &handle, dims).await
 }
 
-fn flip_native_output_matches(
-    input: &GpuTensorHandle,
-    output: &GpuTensorHandle,
+/// Adapt only this already-owned input after certified hook absence.
+pub(crate) async fn flip_gpu_fallback_with(
+    builtin: &'static str,
     provider: &dyn runmat_accelerate_api::AccelProvider,
-) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
-        && !gpu_handles_alias(output, input)
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::handle_storage(input)
-        && runmat_accelerate_api::handle_precision(output)
-            == runmat_accelerate_api::handle_precision(input)
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    handle: &GpuTensorHandle,
+    dims: &[usize],
+) -> crate::BuiltinResult<Value> {
+    let host = gpu_helpers::download_value_preserving_residency_async(provider, handle).await?;
+    let mut output = match host {
+        Value::Tensor(tensor) => {
+            let tensor = flip_tensor_with(builtin, tensor, dims)?;
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[handle])?
+        }
+        Value::ComplexTensor(tensor) => {
+            let tensor = flip_complex_tensor_with(builtin, tensor, dims)?;
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[handle])?
+        }
+        Value::LogicalArray(array) => {
+            let array = flip_logical_array_with(builtin, array, dims)?;
+            runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &array.data,
+                    shape: &array.shape,
+                },
+                &[handle],
+            )
+            .map_err(|cause| {
+                crate::build_runtime_error(format!("{builtin}: logical upload failed: {cause}"))
+                    .with_builtin(builtin)
+                    .with_source(cause)
+                    .build()
+            })?
+        }
+        _ => {
+            return Err(flip_error_for(
+                builtin,
+                format!("{builtin}: provider download did not retain tensor storage"),
+            ))
+        }
+    };
+    output = gpu_helpers::propagate_owned_output_provenance(output, [handle])?;
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn flip_generic<T: Clone>(
@@ -824,7 +649,15 @@ fn flip_generic<T: Clone>(
     if data.is_empty() {
         return Ok(Vec::new());
     }
-    let total: usize = shape.iter().product();
+    let total = shape
+        .iter()
+        .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+        .ok_or_else(|| {
+            flip_error_for(
+                builtin,
+                format!("{builtin}: shape product exceeds platform limits"),
+            )
+        })?;
     if total != data.len() {
         return Err(flip_error_for(
             builtin,
@@ -904,23 +737,28 @@ pub(crate) mod tests {
     };
     use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        StringArray, Tensor,
+        StringArray, StructArray, StructValue, Tensor,
     };
 
-    #[test]
-    fn flip_type_preserves_logical_shape() {
-        let out = preserve_array_type(
-            &[Type::Logical {
-                shape: Some(vec![Some(2), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![Some(2), Some(1)])
-            }
-        );
+    fn structure(value: f64) -> StructValue {
+        let mut structure = StructValue::new();
+        structure.insert("value", Value::Num(value));
+        structure
+    }
+
+    fn struct_values(value: Value) -> Vec<f64> {
+        let Value::StructArray(array) = value else {
+            panic!("expected structure array");
+        };
+        array
+            .field_values("value")
+            .expect("value field")
+            .iter()
+            .map(|value| match value {
+                Value::Num(value) => *value,
+                other => panic!("expected numeric value, got {other:?}"),
+            })
+            .collect()
     }
 
     #[test]
@@ -999,24 +837,71 @@ pub(crate) mod tests {
     #[test]
     fn flip_gpu_logical_result_preserves_residency_and_class() {
         test_support::with_test_provider(|provider| {
-            let values = [1.0, 0.0, 0.0, 1.0];
+            let values = [1u8, 0, 0, 1];
             let handle = provider
-                .upload(&HostTensorView {
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
                     data: &values,
                     shape: &[2, 2],
                 })
                 .expect("upload logical");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
             let Value::GpuTensor(result) =
                 flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip logical gpu")
             else {
                 panic!("expected resident logical output");
             };
             assert!(runmat_accelerate_api::handle_is_logical(&result));
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(&result).expect("result owner"),
                 provider
             ));
+        });
+    }
+
+    #[test]
+    fn flip_gpu_paired_integer_fallback_preserves_exact_components() {
+        test_support::with_test_provider(|provider| {
+            let real = vec![u64::MAX, 1u64 << 63, 3, 4, 5, 6];
+            let imag = vec![6, 5, 4, 3, 1u64 << 63, u64::MAX];
+            let host = ComplexTensor::new_integer(
+                runmat_value::IntegerComplexStorage::new(
+                    runmat_value::IntegerStorage::U64(real.clone()),
+                    runmat_value::IntegerStorage::U64(imag.clone()),
+                )
+                .unwrap(),
+                vec![2, 3],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &host).unwrap();
+            let value =
+                flip_builtin(Value::GpuTensor(input.clone()), vec![Value::Num(1.0)]).unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident paired result")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            let Value::ComplexTensor(result) =
+                block_on(gpu_helpers::gather_value_async(&value)).unwrap()
+            else {
+                panic!("paired output")
+            };
+            let storage = result.integer_storage().unwrap();
+            assert_eq!(
+                storage.real(),
+                &runmat_value::IntegerStorage::U64(vec![
+                    real[1], real[0], real[3], real[2], real[5], real[4]
+                ])
+            );
+            assert_eq!(
+                storage.imag(),
+                &runmat_value::IntegerStorage::U64(vec![
+                    imag[1], imag[0], imag[3], imag[2], imag[5], imag[4]
+                ])
+            );
+            let Value::ComplexTensor(original) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(input))).unwrap()
+            else {
+                panic!("paired input")
+            };
+            assert_eq!(original.integer_storage(), host.integer_storage());
         });
     }
 
@@ -1040,7 +925,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -1063,6 +948,39 @@ pub(crate) mod tests {
             Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn flip_struct_array_uses_one_based_public_dimensions() {
+        let array = StructArray::new(
+            (1..=4).map(|value| structure(value as f64)).collect(),
+            vec![2, 2],
+        )
+        .unwrap();
+        assert_eq!(
+            struct_values(flip_builtin(Value::StructArray(array.clone()), vec![]).unwrap()),
+            vec![2.0, 1.0, 4.0, 3.0]
+        );
+        assert_eq!(
+            struct_values(flip_builtin(Value::StructArray(array), vec![Value::Num(2.0)]).unwrap()),
+            vec![3.0, 4.0, 1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn flip_struct_array_handles_nd_and_empty_shapes() {
+        let array = StructArray::new(vec![structure(1.0), structure(2.0)], vec![1, 1, 2]).unwrap();
+        assert_eq!(
+            struct_values(flip_builtin(Value::StructArray(array), vec![Value::Num(3.0)]).unwrap()),
+            vec![2.0, 1.0]
+        );
+        let empty = StructArray::empty(vec!["value".into()], vec![0, 2]).unwrap();
+        let Value::StructArray(empty) =
+            flip_builtin(Value::StructArray(empty), vec![]).expect("empty flip")
+        else {
+            panic!("expected empty structure array");
+        };
+        assert_eq!(empty.shape(), &[0, 2]);
     }
 
     #[test]
@@ -1103,7 +1021,7 @@ pub(crate) mod tests {
         let value = flip_builtin(Value::Tensor(tensor), Vec::new()).expect("flip matrix");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 6.0, 3.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1137,7 +1055,7 @@ pub(crate) mod tests {
         .expect("flip dims");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2, 2]);
+                assert_eq!(t.shape(), &[2, 2, 2]);
                 assert_eq!(
                     t.materialize_f64(),
                     vec![6.0, 5.0, 8.0, 7.0, 2.0, 1.0, 4.0, 3.0]
@@ -1335,11 +1253,11 @@ pub(crate) mod tests {
                 Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let cpu =
-                flip_tensor(tensor.clone(), &[default_flip_dim(&tensor.shape)]).expect("cpu flip");
+                flip_tensor(tensor.clone(), &[default_flip_dim(tensor.shape())]).expect("cpu flip");
             let value = flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip gpu");
             let gathered = test_support::gather(value).expect("gather gpu result");
             assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
@@ -1359,7 +1277,7 @@ pub(crate) mod tests {
         let cpu = flip_tensor(tensor.clone(), &[1, 3]).expect("cpu flip");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()

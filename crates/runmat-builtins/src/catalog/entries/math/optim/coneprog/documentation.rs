@@ -1,0 +1,33 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+ authority: BuiltinDocumentationAuthority::Catalog,
+ title: Some("coneprog"), slug: Some("coneprog"),
+ summary: "Solve linear conic optimization problems with second-order cone constraints, linear constraints, equalities, and bounds.",
+ description: "`coneprog` minimizes `f' * x` subject to second-order cone constraints `norm(A*x + b) <= d'*x + gamma`, optional `A*x <= b`, optional `Aeq*x == beq`, and optional bounds `lb <= x <= ub`. RunMat supports positional forms, problem structs, `optimoptions(\"coneprog\")`, and one- through five-output forms.",
+ keywords: &["coneprog", "conic programming", "second-order cone", "SOCP", "optimization", "bounds"],
+ related: &["secondordercone", "linprog", "optimoptions"],
+ sections: &[BuiltinDocumentationSection { heading: "Behavior",
+         paragraphs: &["`socConstraints` may be `[]`, a `secondordercone` struct, a cell array of cone structs, or an output list of cone structs.",
+         "`f`, linear right-hand sides, equality right-hand sides, and bounds must have compatible vector lengths.",
+         "`A`, `Aeq`, and cone `A` matrices must have one column per element of `f`.",
+         "`[]` may be passed for omitted optional linear constraints, equalities, bounds, and cone lists.",
+         "`exitflag` is `1` when an optimum is found, `-2` when no feasible point is found, and `-3` when the objective is plainly unbounded below.",
+         "The fourth output is an `output` struct with `iterations`, `algorithm`, `constrviolation`, and `message` fields.",
+         "The fifth output is a `lambda` compatibility struct with `ineqlin`, `eqlin`, `lower`, `upper`, and `soc` fields. Multiplier fields are estimated from the active constraint KKT system after the host barrier solve.",
+         "Supported native integer coefficients are read from native storage and normalized to binary64 with its ordinary rounding. Wide integer coefficients need not remain exact; the host numerical output is double. This preserves RunMat's floating-boundary behavior and does not assert MATLAB integer-overload parity."] },
+         BuiltinDocumentationSection { heading: "Execution",
+         paragraphs: &["The host numerical boundary gathers resident numeric operands. No device solver, elementwise fusion, reduction fusion, broadcasting solver, or distributed solver is provided.",
+         "The solver uses invocation-owned cooperative checks at iteration, candidate, and line-search boundaries. The nalgebra SVD primitive is unchanged and uninterruptible between its bracketing checks; this is not a hard real-time or hard-preemption guarantee.",
+         "Positional calls accept f and cone constraints, complete optional A/b and Aeq/beq and lower/upper-bound pairs, then optional recognized options (at most nine arguments); the single problem-struct form is separate. Numeric constants remain host data; no device constant buffer or shader ABI is promised."] }],
+ examples: &[
+BuiltinExample { id: "example-1", title: "Solve a bounded second-order cone problem", program: "soc = secondordercone(eye(2), [0; 0], [0; 0], 1);\nf = [-1; 0];\nA = [1 0];\nb = 0.75;\n[x, fval, exitflag] = coneprog(f, soc, A, b)", display_output: Some("x =\n    0.7500\n         0\nfval =\n   -0.7500\nexitflag =\n     1"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(exitflag==1); assert(abs(x(1)-0.75)<1e-4); assert(abs(x(2))<1e-4); assert(abs(fval+0.75)<1e-4);" } },
+BuiltinExample { id: "example-2", title: "Use a problem struct with options", program: "problem.f = [0; 1];\nproblem.socConstraints = secondordercone(eye(2), [0; 0], [0; 0], 1);\nproblem.Aineq = [0 -1];\nproblem.bineq = 0.25;\nproblem.options = optimoptions(\"coneprog\", \"TolFun\", 1e-8);\n[x, fval] = coneprog(problem)", display_output: Some("x =\n         0\n   -0.2500\nfval =\n   -0.2500"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(x(1))<1e-4); assert(abs(x(2)+0.25)<1e-4); assert(abs(fval+0.25)<1e-4);" } },
+ ],
+ example_exemption: None,
+ faqs: &[BuiltinDocumentationFaq { question: "Does coneprog run on the GPU?", answer: "No. `coneprog` is an iterative solver boundary; RunMat gathers gpuArray numeric inputs and solves on the host." }, BuiltinDocumentationFaq { question: "How do I build second-order cone constraints?", answer: "Use `secondordercone(A,b,d,gamma)` to describe `norm(A*x + b) <= d'*x + gamma`, then pass the result or a cell array of results to `coneprog`." }],
+ links: &[BuiltinDocumentationLink { label: "secondordercone", target: BuiltinDocumentationLinkTarget::Builtin("secondordercone") }, BuiltinDocumentationLink { label: "linprog", target: BuiltinDocumentationLinkTarget::Builtin("linprog") }, BuiltinDocumentationLink { label: "optimoptions", target: BuiltinDocumentationLinkTarget::Builtin("optimoptions") },BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/coneprog.rs") }],
+ media: &[],
+ evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/coneprog.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Runtime behavior", location: "builtins::math::optim::coneprog::tests" }], notes: &["Source-authored examples require execution through the existing example protocol; no execution receipt is asserted here."] },
+ introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

@@ -3,9 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 use runmat_geometry_core::{
-    AssemblyNode, DiagnosticSeverity, EntityIdRange, EntityKind, EntityRef, GeometryAsset,
-    GeometrySource, MeshKind, Region, SourceGeometry, SourceGeometryKind, TessellationProfile,
-    UnitSystem,
+    EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind, Region,
+    SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
 };
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry_with_context, GeometryFormat,
@@ -402,8 +401,8 @@ pub fn geometry_load(path: &str, bytes: &[u8]) -> BuiltinResult<GeometryAsset> {
 }
 
 fn current_geometry_import_context() -> GeometryImportContext {
-    crate::interrupt::current_cancellation()
-        .map(GeometryImportContext::with_cancellation_token)
+    crate::interrupt::current_interrupt()
+        .map(|token| GeometryImportContext::with_cancellation_probe(move || token.is_cancelled()))
         .unwrap_or_default()
 }
 

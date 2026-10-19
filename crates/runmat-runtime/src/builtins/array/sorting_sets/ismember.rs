@@ -18,15 +18,18 @@ use runmat_value::{
     StringArray, Tensor, Value,
 };
 
-use super::{float_order::SetFloat, type_resolvers::logical_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    type_resolvers::logical_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::sorting_sets::ismember")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -268,7 +271,7 @@ async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builti
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -277,7 +280,7 @@ async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builti
                 vec![eval.into_mask_value()],
                 ismember_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (mask, loc) = eval.into_pair();
         let outputs = super::restore_set_outputs(
@@ -286,7 +289,7 @@ async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builti
             vec![mask, loc],
             ismember_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,
@@ -467,7 +470,7 @@ fn ismember_numeric_tensors(
     let a_dtype = a.numeric_dtype();
     let b_dtype = b.numeric_dtype();
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
-        if a_storage.class_name() == b_storage.class_name() {
+        if a_storage.numeric_dtype() == b_storage.numeric_dtype() {
             return if opts.rows {
                 ismember_integer_rows(&a, &b)
             } else {
@@ -478,12 +481,12 @@ fn ismember_numeric_tensors(
     }
     match (a.integer_storage(), b.integer_storage()) {
         (Some(storage), None) if b_dtype == NumericDType::F64 => {
-            let target = IntegerTarget::from_storage(storage);
+            let target = IntegerClass::from_storage(storage);
             let b = target.cast_tensor(b).map_err(ismember_internal_error)?;
             return ismember_numeric_tensors(a, b, opts);
         }
         (None, Some(storage)) if a_dtype == NumericDType::F64 => {
-            let target = IntegerTarget::from_storage(storage);
+            let target = IntegerClass::from_storage(storage);
             let a = target.cast_tensor(a).map_err(ismember_internal_error)?;
             return ismember_numeric_tensors(a, b, opts);
         }
@@ -492,8 +495,8 @@ fn ismember_numeric_tensors(
     if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
         return Err(ismember_error(&ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH));
     }
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
+    let a_shape = a.shape().to_vec();
+    let b_shape = b.shape().to_vec();
     let a_storage = a.into_numeric_storage().map_err(ismember_internal_error)?;
     let b_storage = b.into_numeric_storage().map_err(ismember_internal_error)?;
     match (a_storage, b_storage) {
@@ -555,9 +558,9 @@ fn ismember_integer_elements(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<IsM
             locations.push(0.0);
         }
     }
-    let logical = LogicalArray::new(mask, a.shape.clone())
+    let logical = LogicalArray::new(mask, a.shape().to_vec())
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
-    let locations = Tensor::new(locations, a.shape.clone())
+    let locations = Tensor::new(locations, a.shape().to_vec())
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, locations))
 }
@@ -698,9 +701,9 @@ fn ismember_complex(
     b: ComplexTensor,
     rows: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
-    match (a.into_complex_storage(), b.into_complex_storage()) {
+    let (a_storage, a_shape) = a.into_complex_storage_and_shape();
+    let (b_storage, b_shape) = b.into_complex_storage_and_shape();
+    match (a_storage, b_storage) {
         (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
             ismember_floating_complex(a, a_shape, b, b_shape, rows)
         }
@@ -713,9 +716,9 @@ fn ismember_complex(
 
 fn ismember_promoted_complex_f64(
     a: ComplexStorage,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: ComplexStorage,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     rows: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     ismember_floating_complex(
@@ -727,11 +730,11 @@ fn ismember_promoted_complex_f64(
     )
 }
 
-fn ismember_floating_complex<T: SetFloat>(
-    a: Vec<(T, T)>,
-    a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
-    b_shape: Vec<usize>,
+fn ismember_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    a_shape: runmat_value::SharedShape,
+    b: B,
+    b_shape: runmat_value::SharedShape,
     rows: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     if rows {
@@ -749,20 +752,22 @@ fn ismember_complex_elements(
     ismember_complex(a, b, false)
 }
 
-fn ismember_floating_complex_elements<T: SetFloat>(
-    a: Vec<(T, T)>,
-    a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
+fn ismember_floating_complex_elements<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    a_shape: runmat_value::SharedShape,
+    b: B,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
-    for (idx, &value) in b.iter().enumerate() {
+    for idx in 0..b.len() {
+        let value = b.pair_at(idx);
         map.entry(ComplexKey::new(value)).or_insert(idx + 1);
     }
 
     let mut mask_data = Vec::<u8>::with_capacity(a.len());
     let mut loc_data = Vec::<f64>::with_capacity(a.len());
 
-    for &value in &a {
+    for index in 0..a.len() {
+        let value = a.pair_at(index);
         let key = ComplexKey::new(value);
         if let Some(&pos) = map.get(&key) {
             mask_data.push(1);
@@ -788,11 +793,11 @@ fn ismember_complex_rows(
     ismember_complex(a, b, true)
 }
 
-fn ismember_floating_complex_rows<T: SetFloat>(
-    a: Vec<(T, T)>,
-    a_shape: Vec<usize>,
-    b: Vec<(T, T)>,
-    b_shape: Vec<usize>,
+fn ismember_floating_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
+    a: A,
+    a_shape: runmat_value::SharedShape,
+    b: B,
+    b_shape: runmat_value::SharedShape,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     let (rows_a, cols_a) = shape_rows_cols(&a_shape, "ismember")?;
     let (rows_b, cols_b) = shape_rows_cols(&b_shape, "ismember")?;
@@ -805,7 +810,7 @@ fn ismember_floating_complex_rows<T: SetFloat>(
         let mut row_keys = Vec::with_capacity(cols_b);
         for c in 0..cols_b {
             let idx = r + c * rows_b;
-            row_keys.push(ComplexKey::new(b[idx]));
+            row_keys.push(ComplexKey::new(b.pair_at(idx)));
         }
         map.entry(row_keys).or_insert(r + 1);
     }
@@ -817,7 +822,7 @@ fn ismember_floating_complex_rows<T: SetFloat>(
         let mut row_keys = Vec::with_capacity(cols_a);
         for c in 0..cols_a {
             let idx = r + c * rows_a;
-            row_keys.push(ComplexKey::new(a[idx]));
+            row_keys.push(ComplexKey::new(a.pair_at(idx)));
         }
         if let Some(&pos) = map.get(&row_keys) {
             mask_data[r] = 1;
@@ -1022,7 +1027,7 @@ fn ismember_string_rows(
 }
 
 fn tensor_rows_cols(t: &Tensor, name: &str) -> crate::BuiltinResult<(usize, usize)> {
-    shape_rows_cols(&t.shape, name)
+    shape_rows_cols(t.shape(), name)
 }
 
 fn shape_rows_cols(shape: &[usize], name: &str) -> crate::BuiltinResult<(usize, usize)> {
@@ -1096,8 +1101,8 @@ impl IsMemberEvaluation {
         let IsMemberEvaluation { mask, loc } = self;
         Ok(IsMemberResult {
             mask: HostLogicalOwned {
-                data: mask.data,
-                shape: mask.shape,
+                data: mask.data.into_vec(),
+                shape: mask.shape.to_vec(),
             },
             loc: tensor::tensor_into_host_f64_owned(loc),
         })
@@ -1152,6 +1157,41 @@ pub(crate) mod tests {
         futures::executor::block_on(ismember_builtin(a, b, rest))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn public_invocation_preserves_rank_zero_rows_and_rank_one_element_geometry() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero input");
+        let Value::OutputList(outputs) = builtin_sync(
+            Value::Tensor(rank_zero.clone()),
+            Value::Tensor(rank_zero),
+            vec![Value::from("rows")],
+        )
+        .expect("rank-zero rows membership") else {
+            panic!("expected two outputs");
+        };
+        assert_eq!(outputs.as_slice(), &[Value::Bool(true), Value::Num(1.0)]);
+
+        let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one input");
+        let set = Tensor::new(vec![2.0], vec![1]).expect("rank-one set");
+        let Value::OutputList(outputs) =
+            builtin_sync(Value::Tensor(rank_one), Value::Tensor(set), Vec::new())
+                .expect("rank-one element membership")
+        else {
+            panic!("expected two outputs");
+        };
+        let Value::LogicalArray(mask) = &outputs[0] else {
+            panic!("expected logical rank-one output");
+        };
+        assert_eq!(mask.shape, vec![2]);
+        assert_eq!(mask.data.as_slice(), &[0, 1]);
+        let Value::Tensor(locations) = &outputs[1] else {
+            panic!("expected rank-one location tensor");
+        };
+        assert_eq!(locations.shape(), &[2]);
+        assert_eq!(locations.materialize_f64(), vec![0.0, 1.0]);
+    }
+
     #[test]
     fn registered_builtin_restores_resident_outputs_and_rejects_excess_arity() {
         test_support::with_test_provider(|provider| {
@@ -1164,7 +1204,8 @@ pub(crate) mod tests {
             );
 
             {
-                let _guard = crate::output_count::push_output_count(Some(2));
+                let _guard =
+                    crate::output_count::push_output_count(Some(2)).expect("output-count scope");
                 let Value::OutputList(outputs) =
                     builtin_sync(left, right, Vec::new()).expect("resident ismember")
                 else {
@@ -1190,7 +1231,8 @@ pub(crate) mod tests {
                 );
             }
 
-            let _guard = crate::output_count::push_output_count(Some(3));
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let err = builtin_sync(Value::Num(1.0), Value::Num(1.0), Vec::new())
                 .expect_err("excess outputs must fail");
             assert_eq!(err.identifier(), ISMEMBER_ERROR_INVALID_ARGUMENT.identifier);
@@ -1501,7 +1543,7 @@ pub(crate) mod tests {
         let eval = ismember_numeric_rows(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 1]);
         assert_eq!(eval.loc.materialize_f64(), vec![3.0, 1.0, 3.0]);
-        assert_eq!(eval.loc.shape, vec![3, 1]);
+        assert_eq!(eval.loc.shape(), &[3, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1711,11 +1753,11 @@ pub(crate) mod tests {
             let set = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
             let view_a = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let view_b = runmat_accelerate_api::HostTensorView {
                 data: &set.materialize_f64(),
-                shape: &set.shape,
+                shape: set.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
@@ -1734,11 +1776,11 @@ pub(crate) mod tests {
             let bank = Tensor::new(vec![1.0, 5.0, 3.0, 2.0, 6.0, 4.0], vec![3, 2]).unwrap();
             let view_a = runmat_accelerate_api::HostTensorView {
                 data: &rows.materialize_f64(),
-                shape: &rows.shape,
+                shape: rows.shape(),
             };
             let view_b = runmat_accelerate_api::HostTensorView {
                 data: &bank.materialize_f64(),
-                shape: &bank.shape,
+                shape: bank.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
@@ -1750,8 +1792,8 @@ pub(crate) mod tests {
             .expect("ismember");
             assert_eq!(eval.mask.data, vec![1, 1]);
             assert_eq!(eval.loc.materialize_f64(), vec![1.0, 3.0]);
-            let _ = provider.free(&handle_a);
-            let _ = provider.free(&handle_b);
+            drop(handle_a);
+            drop(handle_b);
         });
     }
 
@@ -1771,11 +1813,11 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let view_b = HostTensorView {
             data: &set.materialize_f64(),
-            shape: &set.shape,
+            shape: set.shape(),
         };
         let handle_a = provider.upload(&view_a).expect("upload a");
         let handle_b = provider.upload(&view_b).expect("upload b");
@@ -1789,8 +1831,8 @@ pub(crate) mod tests {
         assert_eq!(eval.mask.data, cpu_eval.mask.data);
         assert_eq!(eval.loc.materialize_f64(), cpu_eval.loc.materialize_f64());
 
-        let _ = provider.free(&handle_a);
-        let _ = provider.free(&handle_b);
+        drop(handle_a);
+        drop(handle_b);
 
         let matrix = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let bank = Tensor::new(vec![1.0, 7.0, 3.0, 2.0, 9.0, 4.0], vec![3, 2]).unwrap();
@@ -1798,11 +1840,11 @@ pub(crate) mod tests {
             ismember_numeric_from_tensors(matrix.clone(), bank.clone(), true).expect("cpu rows");
         let view_matrix = HostTensorView {
             data: &matrix.materialize_f64(),
-            shape: &matrix.shape,
+            shape: matrix.shape(),
         };
         let view_bank = HostTensorView {
             data: &bank.materialize_f64(),
-            shape: &bank.shape,
+            shape: bank.shape(),
         };
         let handle_matrix = provider.upload(&view_matrix).expect("upload matrix");
         let handle_bank = provider.upload(&view_bank).expect("upload bank");
@@ -1817,8 +1859,8 @@ pub(crate) mod tests {
             eval_rows.loc.materialize_f64(),
             cpu_rows.loc.materialize_f64()
         );
-        let _ = provider.free(&handle_matrix);
-        let _ = provider.free(&handle_bank);
+        drop(handle_matrix);
+        drop(handle_bank);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

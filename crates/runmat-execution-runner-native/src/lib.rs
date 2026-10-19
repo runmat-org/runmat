@@ -228,13 +228,16 @@ pub use process_provider::{
     NATIVE_ACCELERATOR_REQUESTS_ENV, NATIVE_ACCELERATOR_REQUIRED_ENV, NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 pub use program_object_source::NativeProgramObjectSource;
-pub use program_session::{NativeProgramCompletion, NativeProgramSession, NativeProgramTask};
+pub use program_session::{
+    NativeProgramCompletion, NativeProgramFailure, NativeProgramSession, NativeProgramTask,
+};
 pub use protocol::{ProgramProgress, WorkerProcessMessage, WorkerResponse};
 pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
-    run_remote_worker_quic, run_remote_worker_relay, QuicRemoteWorkerChannel,
-    RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt, RemoteMeshingWorkerQuicRequest,
-    RemoteObjectReceipt, RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority,
+    run_remote_worker_quic, run_remote_worker_quic_ready_v1, run_remote_worker_relay,
+    QuicRemoteWorkerChannel, RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt,
+    RemoteMeshingWorkerQuicRequest, RemoteObjectReceipt, RemotePoolCheckpoint, RemotePoolDriver,
+    RemotePoolRestoreAuthority, RemoteSpmdGangCompletion, RemoteSpmdGangProgram,
     RemoteTaskCompletion, RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerChannelConfig,
     RemoteWorkerQuicRequest, RemoteWorkerRelayRequest,
 };
@@ -254,7 +257,10 @@ pub use structural_study_root::{
 pub use structural_study_root::{
     StructuralStudyMaterialExpectation, StructuralStudyResultExpectation,
 };
-pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
+pub use test_workload::{
+    execute_host_graph_request_with_graphics, execute_host_program_request,
+    execute_host_program_request_with_graphics, execute_host_program_request_with_project,
+};
 pub use typed_fea::{
     checked_fea_artifact_access, complete_frozen_fea_assessments, complete_local_fea_assessments,
     complete_remote_fea_assessments, freeze_fea_assessment_functions,

@@ -715,6 +715,105 @@ impl MeshPlot {
             })
     }
 
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        for value in [
+            self.mesh_id.as_ref(),
+            self.label.as_ref(),
+            self.highlighted_region_id.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        for bytes in [
+            crate::plots::clone_budget::vec::<Vec3>(self.vertices.capacity())?,
+            crate::plots::clone_budget::vec::<[u32; 3]>(self.triangles.capacity())?,
+            crate::plots::clone_budget::vec::<u64>(
+                self.feature_edge_groups.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.vertex_colors.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.triangle_colors.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.face_vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<u32>(
+                self.face_indices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.edge_vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vector_vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<MeshRegion>(self.regions.capacity())?,
+        ] {
+            crate::plots::clone_budget::add(&mut total, bytes)?;
+        }
+        for region in &self.regions {
+            for value in [
+                Some(&region.region_id),
+                region.label.as_ref(),
+                region.tag.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                crate::plots::clone_budget::add(&mut total, value.capacity())?;
+            }
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<MeshTriangleRange>(
+                    region.triangle_ranges.capacity(),
+                )?,
+            )?;
+        }
+        if let Some(field) = &self.scalar_field {
+            for value in [
+                Some(&field.field_id),
+                field.label.as_ref(),
+                Some(&field.colormap),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                crate::plots::clone_budget::add(&mut total, value.capacity())?;
+            }
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f32>(field.values.capacity())?,
+            )?;
+        }
+        if let Some(field) = &self.vector_field {
+            crate::plots::clone_budget::add(&mut total, field.field_id.capacity())?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::optional_string(field.label.as_ref()),
+            )?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vec3>(field.vectors.capacity())?,
+            )?;
+        }
+        if let Some(field) = &self.deformation {
+            crate::plots::clone_budget::add(&mut total, field.field_id.capacity())?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::optional_string(field.label.as_ref()),
+            )?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vec3>(field.displacements.capacity())?,
+            )?;
+        }
+        Some(total)
+    }
+
     fn generate_face_geometry(&mut self) -> (&Vec<Vertex>, &Vec<u32>) {
         if self.dirty || self.face_vertices.is_none() || self.face_indices.is_none() {
             let color = self.effective_face_color();

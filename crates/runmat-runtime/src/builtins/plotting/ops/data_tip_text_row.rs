@@ -22,10 +22,11 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dataTipTextRow";
-const CLASS_NAME: &str = "matlab.graphics.datatip.DataTipTextRow";
+const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.graphics.datatip.DataTipTextRow");
 
 static DATA_TIP_TEXT_ROW_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(CLASS_NAME);
+    crate::class_registry::ClassRegistration::new(CLASS_IDENTITY);
 
 const DATA_TIP_OUTPUT_ROW: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "row",
@@ -211,9 +212,9 @@ fn ensure_class_registered() {
         let mut properties = HashMap::new();
         for name in ["Label", "Value", "Format"] {
             properties.insert(
-                name.to_string(),
+                name.into(),
                 crate::class_registry::RuntimeProperty {
-                    name: name.to_string(),
+                    name: name.into(),
                     is_static: false,
                     is_constant: false,
                     is_dependent: false,
@@ -224,10 +225,12 @@ fn ensure_class_registered() {
             );
         }
 
-        let methods: HashMap<String, crate::class_registry::RuntimeMethod> = HashMap::new();
+        let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
+            HashMap::new();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: CLASS_NAME.to_string(),
-            parent: Some("handle".to_string()),
+            events: Default::default(),
+            name: CLASS_IDENTITY.into(),
+            parent: Some(runmat_types::standard::HANDLE.into()),
             properties,
             methods,
         });
@@ -297,7 +300,7 @@ pub fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         None => "auto".to_string(),
     };
 
-    let mut object = ObjectInstance::new(CLASS_NAME.to_string());
+    let mut object = ObjectInstance::new(CLASS_IDENTITY);
     object
         .properties
         .insert("Label".to_string(), Value::String(label));
@@ -312,7 +315,7 @@ pub fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )
     })?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: CLASS_NAME.to_string(),
+        class_name: CLASS_IDENTITY.owned(),
         target,
         valid: true,
     }))
@@ -329,18 +332,18 @@ fn validate_value_source(value: &Value) -> BuiltinResult<()> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. } => Ok(()),
+        | Value::BoundFunctionHandle(_) => Ok(()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(()),
-        Value::Tensor(tensor) => validate_host_vector_shape(&tensor.shape),
+        Value::Tensor(tensor) => validate_host_vector_shape(tensor.shape()),
         Value::LogicalArray(array) => validate_host_vector_shape(&array.shape),
-        Value::ComplexTensor(tensor) => validate_host_vector_shape(&tensor.shape),
+        Value::ComplexTensor(tensor) => validate_host_vector_shape(tensor.shape()),
         Value::Complex(_, _) => Ok(()),
         Value::GpuTensor(handle) => {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &DATA_TIP_RESIDENT_VALUE_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            if !vector_shape(&handle.shape) {
+            if !vector_shape(handle.shape()) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &DATA_TIP_NONVECTOR_VALUE_EXTENSION,
                     BUILTIN_NAME,
@@ -368,14 +371,13 @@ fn validate_host_vector_shape(shape: &[usize]) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::GpuTensorHandle;
     use runmat_value::{IntegerStorage, StringArray, Tensor};
 
     fn handle_payload(value: Value) -> ObjectInstance {
         let Value::HandleObject(handle) = value else {
             panic!("expected handle object");
         };
-        assert_eq!(handle.class_name, CLASS_NAME);
+        assert!(handle.class_name.is(CLASS_IDENTITY));
         let target = runmat_gc::gc_clone_value(&handle.target).expect("clone handle target");
         let Value::Object(object) = target else {
             panic!("expected object handle target");
@@ -411,6 +413,23 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn preserves_low_rank_real_and_complex_value_sources() {
+        let values = [
+            Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+            Value::ComplexTensor(
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap(),
+            ),
+        ];
+        for value in values {
+            let row = data_tip_text_row_builtin(vec![Value::String("Value".into()), value.clone()])
+                .expect("low-rank value source");
+            let object = handle_payload(row);
+            assert_eq!(object.properties.get("Value"), Some(&value));
+        }
+    }
+
     #[test]
     fn accepts_char_and_scalar_string_array_text() {
         let label = Value::CharArray(CharArray::new_row("Speed"));
@@ -444,12 +463,14 @@ mod tests {
     #[test]
     fn stores_gpu_value_without_gathering_or_replacing_handle() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let handle = GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 7,
-            buffer_id: 42,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let row = data_tip_text_row_builtin(vec![
             Value::String("GPU".into()),
             Value::GpuTensor(handle.clone()),
@@ -459,7 +480,7 @@ mod tests {
         assert!(matches!(
             object.properties.get("Value"),
             Some(Value::GpuTensor(stored))
-                if stored.device_id == handle.device_id && stored.buffer_id == handle.buffer_id
+                if stored.shares_allocation_with(&handle)
         ));
     }
 
@@ -486,7 +507,7 @@ mod tests {
                 Some(Value::GpuTensor(stored)) if stored == &handle
             ));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 
@@ -537,12 +558,14 @@ mod tests {
             error.identifier(),
             DATA_TIP_NONVECTOR_VALUE_EXTENSION.error_identifier
         );
-        let handle = GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 397,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let error = data_tip_text_row_builtin(vec![
             Value::String("GPU".into()),
             Value::GpuTensor(handle.clone()),

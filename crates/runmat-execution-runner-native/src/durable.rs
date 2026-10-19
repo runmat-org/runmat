@@ -2,12 +2,15 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use runmat_execution::JobHandle;
+use runmat_execution::{JobHandle, JobId};
 use runmat_execution_artifact::ProgramExecutionResponse;
 use runmat_runtime::execution::ExecutionServiceError;
 use runmat_value::Value;
 
-use crate::supervisor::{LocalJobState, LocalSupervisorClient, ProgramBatchSubmission};
+use crate::supervisor::{
+    GraphBatchSubmission, LocalJobState, LocalJobWorkloadKind, LocalSupervisorClient,
+    ProgramBatchSubmission,
+};
 
 enum Command {
     Submit {
@@ -15,20 +18,42 @@ enum Command {
         options: runmat_runtime::execution::DurableJobOptions,
         response: mpsc::Sender<Result<JobHandle, ExecutionServiceError>>,
     },
+    SubmitGraph {
+        submission: Box<GraphBatchSubmission>,
+        response: mpsc::Sender<Result<SubmittedGraphJob, ExecutionServiceError>>,
+    },
+    /// One non-blocking inspection. No bridge command waits for task lifetime,
+    /// so a long-running job never stalls submissions or cancellation.
     Inspect {
         handle: JobHandle,
         response: mpsc::Sender<Result<Option<ProgramExecutionResponse>, ExecutionServiceError>>,
+    },
+    InspectKind {
+        handle: JobHandle,
+        response: mpsc::Sender<Result<LocalJobWorkloadKind, ExecutionServiceError>>,
     },
     Cancel {
         handle: JobHandle,
         reason: runmat_execution::CancellationReason,
         response: mpsc::Sender<Result<(), ExecutionServiceError>>,
     },
+    ExpiredGraphReceipts {
+        candidates: Vec<JobId>,
+        response: mpsc::Sender<Result<Vec<JobId>, ExecutionServiceError>>,
+    },
 }
 
 pub(crate) struct DurableJobBridge {
     commands: mpsc::Sender<Command>,
 }
+
+pub(crate) struct SubmittedGraphJob {
+    pub handle: JobHandle,
+    pub retain_until_unix_millis: u64,
+    pub created_new: bool,
+}
+
+const AWAIT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 impl DurableJobBridge {
     pub(crate) fn start() -> Result<Self, ExecutionServiceError> {
@@ -52,14 +77,54 @@ impl DurableJobBridge {
         })
     }
 
+    pub(crate) fn submit_graph(
+        &self,
+        submission: GraphBatchSubmission,
+    ) -> Result<SubmittedGraphJob, ExecutionServiceError> {
+        self.request(|response| Command::SubmitGraph {
+            submission: Box::new(submission),
+            response,
+        })
+    }
+
+    /// The terminal response, or None while the job is still active.
+    pub(crate) fn try_response(
+        &self,
+        handle: &JobHandle,
+    ) -> Result<Option<ProgramExecutionResponse>, ExecutionServiceError> {
+        self.request(|response| Command::Inspect {
+            handle: handle.clone(),
+            response,
+        })
+    }
+
+    /// Blocking convenience API. The runtime await path uses `try_await_job`
+    /// and yields Pending instead.
+    pub(crate) fn await_response(
+        &self,
+        handle: JobHandle,
+    ) -> Result<ProgramExecutionResponse, ExecutionServiceError> {
+        loop {
+            if let Some(response) = self.try_response(&handle)? {
+                return Ok(response);
+            }
+            thread::sleep(AWAIT_POLL_INTERVAL);
+        }
+    }
+
+    pub(crate) fn workload_kind(
+        &self,
+        handle: JobHandle,
+    ) -> Result<LocalJobWorkloadKind, ExecutionServiceError> {
+        self.request(|response| Command::InspectKind { handle, response })
+    }
+
     pub(crate) fn await_job(&self, handle: JobHandle) -> Result<Value, ExecutionServiceError> {
         loop {
             if let Some(value) = self.try_await_job(&handle)? {
                 return Ok(value);
             }
-            // Blocking convenience API; the runtime await path uses one inspection
-            // and yields Pending instead. No bridge command waits for task lifetime.
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(AWAIT_POLL_INTERVAL);
         }
     }
 
@@ -67,12 +132,16 @@ impl DurableJobBridge {
         &self,
         handle: &JobHandle,
     ) -> Result<Option<Value>, ExecutionServiceError> {
+        if matches!(
+            self.workload_kind(handle.clone())?,
+            LocalJobWorkloadKind::Graph | LocalJobWorkloadKind::Legacy
+        ) {
+            // A durable graph response requires the submitting session's exact
+            // selected receipt, even if a restart retained the job record.
+            return Err(ExecutionServiceError::UnknownHandle);
+        }
         let requested = usize::from(handle.outputs.requested_outputs);
-        let response = self.request(|response| Command::Inspect {
-            handle: handle.clone(),
-            response,
-        })?;
-        response
+        self.try_response(handle)?
             .map(|response| decode_outputs(response, requested))
             .transpose()
     }
@@ -85,6 +154,18 @@ impl DurableJobBridge {
         self.request(|response| Command::Cancel {
             handle,
             reason,
+            response,
+        })
+    }
+
+    /// Prune only after the supervisor says the job is terminal and past its
+    /// exact stored retention deadline (or has already been GC'd).
+    pub(crate) fn expired_graph_receipts(
+        &self,
+        candidates: Vec<JobId>,
+    ) -> Result<Vec<JobId>, ExecutionServiceError> {
+        self.request(|response| Command::ExpiredGraphReceipts {
+            candidates,
             response,
         })
     }
@@ -128,8 +209,40 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
                     .map_err(service_error);
                 let _ = response.send(result);
             }
+            Command::SubmitGraph {
+                submission,
+                response,
+            } => {
+                let result = runtime
+                    .block_on(client.submit_graph(*submission))
+                    .map(|(record, created_new)| SubmittedGraphJob {
+                        handle: record.handle,
+                        retain_until_unix_millis: record.retain_until_unix_millis,
+                        created_new,
+                    })
+                    .map_err(service_error);
+                let _ = response.send(result);
+            }
             Command::Inspect { handle, response } => {
                 let result = runtime.block_on(inspect_job(&client, handle));
+                let _ = response.send(result);
+            }
+            Command::InspectKind { handle, response } => {
+                let result = runtime
+                    .block_on(client.show(handle.id))
+                    .map_err(|error| match error {
+                        crate::NativeExecutionError::Protocol(_) => {
+                            ExecutionServiceError::UnknownHandle
+                        }
+                        other => service_error(other),
+                    })
+                    .and_then(|record| {
+                        if record.handle != handle {
+                            Err(ExecutionServiceError::UnknownHandle)
+                        } else {
+                            Ok(record.workload_kind)
+                        }
+                    });
                 let _ = response.send(result);
             }
             Command::Cancel {
@@ -141,6 +254,31 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
                     .block_on(client.cancel_handle(handle, reason))
                     .map(|_| ())
                     .map_err(service_error);
+                let _ = response.send(result);
+            }
+            Command::ExpiredGraphReceipts {
+                candidates,
+                response,
+            } => {
+                let result =
+                    runtime
+                        .block_on(client.list())
+                        .map_err(service_error)
+                        .map(|records| {
+                            let now = crate::supervisor::unix_millis();
+                            candidates
+                                .into_iter()
+                                .filter(|candidate| {
+                                    records
+                                        .iter()
+                                        .find(|record| record.handle.id == *candidate)
+                                        .is_none_or(|record| {
+                                            record.state.is_terminal()
+                                                && record.retain_until_unix_millis <= now
+                                        })
+                                })
+                                .collect()
+                        });
                 let _ = response.send(result);
             }
         }
@@ -181,19 +319,28 @@ fn decode_outputs(
     requested: usize,
 ) -> Result<Value, ExecutionServiceError> {
     let outputs = match response {
-        ProgramExecutionResponse::Success { value } => vec![value],
-        ProgramExecutionResponse::ExternalizedSuccess {
-            outputs,
-            result_objects,
-        } if result_objects.is_empty() => outputs,
+        ProgramExecutionResponse::Success { outputs } => outputs,
+        ProgramExecutionResponse::GraphSuccess { .. } => {
+            // Graph values require their local selected result receipt; a
+            // restarted or expired service cannot reinterpret them as Direct.
+            return Err(ExecutionServiceError::UnknownHandle);
+        }
         ProgramExecutionResponse::ExternalizedSuccess { .. } => {
             return Err(ExecutionServiceError::Failed(
                 "durable runtime value requires an artifact consumer for externalized objects"
                     .into(),
             ))
         }
+        ProgramExecutionResponse::SpmdSuccess { .. } => {
+            return Err(ExecutionServiceError::Failed(
+                "durable runtime value cannot consume an SPMD gang response".into(),
+            ))
+        }
         ProgramExecutionResponse::Failure { message } => {
             return Err(ExecutionServiceError::Failed(message))
+        }
+        ProgramExecutionResponse::RuntimeFailure { failure } => {
+            return Err(ExecutionServiceError::RuntimeFailure(Box::new(failure)))
         }
     };
     runmat_runtime::execution::value_codec::decode_inline_outputs(&outputs, requested)
@@ -204,38 +351,45 @@ fn service_error(error: crate::NativeExecutionError) -> ExecutionServiceError {
     ExecutionServiceError::Failed(error.to_string())
 }
 
+/// Admit the original program into the supervisor's scope; the bridge thread
+/// owns the async client, so placement identity is resolved here.
 async fn submit_original(
     client: &LocalSupervisorClient,
     program: runmat_execution_artifact::ProgramExecutionRequest,
     options: runmat_runtime::execution::DurableJobOptions,
 ) -> crate::NativeExecutionResult<(crate::supervisor::LocalJobRecord, bool)> {
-    use runmat_execution::{
-        task::{Callable, RetryPolicy, TaskRequest},
-        Digest, OutputContract, TaskId,
-    };
+    use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
+    use runmat_execution::{OutputContract, TaskId};
     let context = client
         .execution_context(options.idempotency_key.as_deref())
         .await?;
+    let host = program
+        .artifact
+        .execution_host_requirement(
+            &program.recipe,
+            std::collections::BTreeSet::from([
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            ]),
+        )
+        .map_err(|error| crate::NativeExecutionError::Protocol(error.to_string()))?;
     let task = runmat_execution_runner::TaskSubmission {
         request: TaskRequest {
-            console: program.console,
-            environment: program.environment.clone(),
             id: TaskId::derive(&[context.scope_id.bytes(), program.artifact.id.0.bytes()]),
             scope_id: context.scope_id,
             pool_id: context.pool_id,
-            program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[program
-                .artifact
-                .id
-                .0
-                .bytes()]),
-            callable: Callable {
-                owner_identity: "runmat.runtime".into(),
-                qualified_name: program.function.to_string(),
-                entrypoint_digest: Digest::sha256(program.function.to_be_bytes()),
-            },
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]),
+            ),
+            callable: Callable::for_program("runmat.runtime", &program.callable),
+            host,
+            invocation_context: program.context.clone(),
             inputs: program.arguments.clone(),
+            environment: program.environment.clone(),
+            console: program.console,
             outputs: OutputContract {
                 requested_outputs: program.requested_outputs,
+                owned_work: None,
             },
             resources: options.resources,
             retry: RetryPolicy::Never,

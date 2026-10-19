@@ -3,6 +3,7 @@ mod flow;
 mod interprocedural;
 mod state;
 
+pub(crate) use call_graph::lexical_reference_graph;
 pub(crate) use state::FlowState;
 
 use runmat_types::{CallableFact, CallableIdentity, DynamicReason, ProgramFunctionId, ValueFact};
@@ -23,27 +24,35 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.diagnostics.extend(program.diagnostics.clone());
     store.dependencies = analysis_dependencies(&store);
     store.program_points.clear();
+    store.fusion_stage_contracts.clear();
     store.regions.clear();
     store.functions.clear();
     store.classes.clear();
+    let mut liveness_by_function = std::collections::BTreeMap::new();
 
     for (function, body) in &assembly.bodies {
+        let source = assembly
+            .functions
+            .get(function)
+            .map(|metadata| metadata.source);
         let Ok(function_ordinal) = u32::try_from(function.0) else {
             let span = assembly
                 .functions
                 .get(function)
                 .map_or_else(runmat_hir::Span::default, |metadata| metadata.span);
-            store.diagnostics.push(
-                crate::MirDiagnostic::new(
-                    "RM-MIR0010",
-                    crate::MirDiagnosticSeverity::Error,
-                    "function identity exceeds the portable analysis schema",
-                    span,
-                )
-                .with_primary_label("this function cannot receive a stable program identity")
-                .with_help("split the executable unit before analysis")
-                .with_category("analysis-schema"),
-            );
+            let diagnostic = crate::MirDiagnostic::new(
+                "RM-MIR0010",
+                crate::MirDiagnosticSeverity::Error,
+                "function identity exceeds the portable analysis schema",
+                span,
+            )
+            .with_primary_label("this function cannot receive a stable program identity")
+            .with_help("split the executable unit before analysis")
+            .with_category("analysis-schema");
+            store.diagnostics.push(match source {
+                Some(source) => diagnostic.with_source(source),
+                None => diagnostic,
+            });
             continue;
         };
         let program_function = ProgramFunctionId(function_ordinal);
@@ -52,9 +61,37 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             program_function,
             program.parameters.get(function).map_or(&[], Vec::as_slice),
             program.captures.get(function).map_or(&[], Vec::as_slice),
+            super::constructor_entry::instance_output_local(assembly, body),
             &program.summaries,
         );
-        store.diagnostics.extend(flow.diagnostics.clone());
+        let convergence = if !flow.converged || program.nonconverged.contains(function) {
+            FunctionConvergence::DynamicRecursion
+        } else if flow.widened || program.widened.contains(function) {
+            FunctionConvergence::Widened
+        } else {
+            FunctionConvergence::Exact
+        };
+        let liveness = super::regions::analyze_liveness(body);
+        store.diagnostics.extend(
+            flow.diagnostics
+                .iter()
+                .cloned()
+                .map(|diagnostic| match source {
+                    Some(source) => diagnostic.with_source(source),
+                    None => diagnostic,
+                }),
+        );
+        store
+            .fusion_stage_contracts
+            .extend(super::fusion_stage::certify_body(
+                body,
+                program_function,
+                &flow.points,
+                &program.summaries,
+                &liveness,
+                convergence,
+            ));
+        liveness_by_function.insert(*function, liveness);
         store.program_points.extend(flow.points);
         let summary = program
             .summaries
@@ -65,22 +102,25 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
                 .functions
                 .get(function)
                 .map_or_else(runmat_hir::Span::default, |metadata| metadata.span);
-            store.diagnostics.push(
-                crate::MirDiagnostic::new(
-                    "RM-MIR0011",
-                    crate::MirDiagnosticSeverity::Warning,
-                    "static analysis reached its convergence bound",
-                    span,
-                )
-                .with_primary_label("facts in this function were conservatively widened")
-                .with_help("simplify recursive or cyclic value flow to recover exact facts")
-                .with_category("analysis-convergence"),
-            );
+            let diagnostic = crate::MirDiagnostic::new(
+                "RM-MIR0011",
+                crate::MirDiagnosticSeverity::Warning,
+                "static analysis reached its convergence bound",
+                span,
+            )
+            .with_primary_label("facts in this function were conservatively widened")
+            .with_help("simplify recursive or cyclic value flow to recover exact facts")
+            .with_category("analysis-convergence");
+            store.diagnostics.push(match source {
+                Some(source) => diagnostic.with_source(source),
+                None => diagnostic,
+            });
         }
         store.functions.push(FunctionAnalysis {
             function: program_function,
             callable: CallableFact {
                 identity: Some(CallableIdentity::BoundFunction(*function)),
+                capabilities: summary.capabilities.clone(),
                 parameters: program
                     .parameters
                     .get(function)
@@ -97,17 +137,14 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             outputs: summary.outputs.clone(),
             effects: summary.effects.clone(),
             capabilities: summary.capabilities.clone(),
-            convergence: if !flow.converged || program.nonconverged.contains(function) {
-                FunctionConvergence::DynamicRecursion
-            } else if flow.widened || program.widened.contains(function) {
-                FunctionConvergence::Widened
-            } else {
-                FunctionConvergence::Exact
-            },
+            convergence,
         });
     }
 
     store.program_points.sort_by_key(|point| point.point);
+    store
+        .fusion_stage_contracts
+        .sort_by_key(|contract| contract.point);
     store.functions.sort_by_key(|function| function.function);
     store.classes = assembly
         .classes
@@ -136,23 +173,29 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
         })
         .collect();
     let mut regions = Vec::new();
-    for (function, body) in &assembly.bodies {
-        let (Some(metadata), Ok(function)) = (
-            assembly.functions.get(function),
-            u32::try_from(function.0).map(ProgramFunctionId),
+    for (hir_function, body) in &assembly.bodies {
+        let (Some(metadata), Ok(program_function)) = (
+            assembly.functions.get(hir_function),
+            u32::try_from(hir_function.0).map(ProgramFunctionId),
         ) else {
             continue;
         };
         regions.extend(super::regions::discover_regions(
             body,
-            function,
+            program_function,
             metadata.source,
             &program.summaries,
             &store,
+            liveness_by_function
+                .get(hir_function)
+                .expect("liveness exists for every analyzed body"),
         ));
     }
     regions.sort_by_key(|region| region.contract.id);
     store.regions = regions;
+    let (parallel, diagnostics) = super::parallel::analyze_parallel_contracts(assembly, &store);
+    store.parallel = parallel;
+    store.diagnostics.extend(diagnostics);
     store
 }
 

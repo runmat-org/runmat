@@ -9,6 +9,8 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 #[path = "support/symptom_regressions_shared.rs"]
 mod shared;
+#[path = "support/selected_dialog_browser.rs"]
+mod selected_dialog_browser;
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 

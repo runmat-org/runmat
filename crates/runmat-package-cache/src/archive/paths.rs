@@ -2,6 +2,39 @@ use super::ArchiveError;
 use runmat_package::NormalizedRelativePath;
 use unicode_normalization::UnicodeNormalization;
 
+/// Render a validated root-relative link destination relative to its entry.
+/// Formatting only: normalization/containment remain the archive validator's
+/// responsibility. This preserves the native materializer's existing form.
+pub fn relative_link_target(
+    entry: &NormalizedRelativePath,
+    target: &NormalizedRelativePath,
+) -> std::path::PathBuf {
+    let parent = entry
+        .as_str()
+        .rsplit_once('/')
+        .map_or("", |(parent, _)| parent);
+    let parent = std::path::Path::new(parent);
+    let target = std::path::Path::new(target.as_str());
+    let parent_components: Vec<_> = parent.components().collect();
+    let target_components: Vec<_> = target.components().collect();
+    let common = parent_components
+        .iter()
+        .zip(&target_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut relative = std::path::PathBuf::new();
+    for _ in common..parent_components.len() {
+        relative.push("..");
+    }
+    for component in &target_components[common..] {
+        relative.push(component.as_os_str());
+    }
+    if relative.as_os_str().is_empty() {
+        relative.push(".");
+    }
+    relative
+}
+
 pub(crate) fn normalize_entry_path(
     value: &str,
     max_path_bytes: usize,
@@ -134,4 +167,31 @@ fn invalid<T>(path: &str, reason: &str) -> Result<T, ArchiveError> {
         path: path.to_string(),
         reason: reason.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_link_formatter_preserves_valid_topology_and_parent_target() {
+        for (entry, target, expected) in [
+            ("alias", "data", "data"),
+            (
+                "Frameworks/Foo/Current",
+                "Frameworks/Foo/Versions/A",
+                "Versions/A",
+            ),
+            ("a/b/alias", "a/c", "../c"),
+            ("Framework/alias", "Framework", "."),
+        ] {
+            assert_eq!(
+                relative_link_target(
+                    &NormalizedRelativePath::new(entry).unwrap(),
+                    &NormalizedRelativePath::new(target).unwrap()
+                ),
+                std::path::PathBuf::from(expected)
+            );
+        }
+    }
 }

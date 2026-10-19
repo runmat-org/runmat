@@ -1,6 +1,9 @@
 #[test]
 fn inventory_is_normalized_and_names_runtime_and_platform_capabilities() {
-    let inventory = runmat_node_agent::inventory::collect().unwrap();
+    let inventory = runmat_node_agent::inventory::collect(
+        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+    )
+    .unwrap();
     assert!(inventory.cpu_millicores >= 1_000);
     assert!(inventory.memory_bytes > 0);
     assert!(inventory.capabilities.contains_key("runmat.version"));

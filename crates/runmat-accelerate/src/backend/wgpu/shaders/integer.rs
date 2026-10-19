@@ -9,7 +9,9 @@ pub fn minmax_shader(workgroup_size: u32) -> String {
 }
 
 pub fn arithmetic_shader(workgroup_size: u32) -> String {
-    INTEGER_ARITHMETIC_SHADER.replace("@WG@", &workgroup_size.to_string())
+    INTEGER_ARITHMETIC_SHADER
+        .replace("@DIVMOD64_HELPERS@", include_str!("integer_divmod64.wgsl"))
+        .replace("@WG@", &workgroup_size.to_string())
 }
 
 pub fn extrema_dim_shader(scalar_type: &str, workgroup_size: u32) -> String {
@@ -32,26 +34,89 @@ pub fn mean_dim_shader(workgroup_size: u32) -> String {
     INTEGER_MEAN_DIM_SHADER.replace("@WG@", &workgroup_size.to_string())
 }
 
-pub fn cast_shader(scalar_type: &str, workgroup_size: u32) -> String {
-    let read_float = if scalar_type == "f64" {
-        r#"
+pub fn cast_shader(
+    precision: crate::backend::wgpu::types::NumericPrecision,
+    workgroup_size: u32,
+) -> String {
+    use crate::backend::wgpu::types::NumericPrecision;
+    let read_float = match precision {
+        NumericPrecision::F64 => {
+            r#"
 fn read_float_cast(logical_index: u32) -> f64 {
     let lane = logical_index * 2u;
-    return bitcast<f64>(vec2<u32>(InBuf.data[lane], InBuf.data[lane + 1u]));
+    return runmat_f64_from_words(InBuf.data[lane], InBuf.data[lane + 1u]);
 }
 "#
-    } else {
-        r#"
+        }
+        NumericPrecision::F32 => {
+            r#"
 fn read_float_cast(logical_index: u32) -> f32 {
     return bitcast<f32>(InBuf.data[logical_index]);
 }
 "#
+        }
     };
-    INTEGER_CAST_SHADER
-        .replace("$SCALAR", scalar_type)
+    let source = INTEGER_CAST_SHADER
+        .replace("$SCALAR", precision.as_str())
         .replace("$READ_FLOAT", read_float)
-        .replace("@WG@", &workgroup_size.to_string())
+        .replace("@WG@", &workgroup_size.to_string());
+    crate::backend::wgpu::shaders::nan_predicate::inject(&source, precision)
 }
+
+pub fn floating_sum_cast_shader(workgroup_size: u32) -> String {
+    INTEGER_FLOATING_SUM_CAST_SHADER.replace("@WG@", &workgroup_size.to_string())
+}
+
+// Both 32-bit words convert exactly to f64. The scaled high word is exact;
+// adding the low word performs the sole rounding at the integer-to-f64 boundary.
+const INTEGER_FLOATING_SUM_CAST_SHADER: &str = r#"
+struct Words { data: array<u32> };
+struct Doubles { data: array<f64> };
+struct Params { len: u32, offset: u32, source_type: u32, _pad: u32 };
+@group(0) @binding(0) var<storage, read> input: Words;
+@group(0) @binding(1) var<storage, read_write> output: Doubles;
+@group(0) @binding(2) var<uniform> params: Params;
+
+fn wide_unsigned(low: u32, high: u32) -> f64 {
+    return f64(high) * f64(4294967296.0) + f64(low);
+}
+
+fn signed_word(word: u32, shift: u32) -> f64 {
+    return f64(bitcast<i32>(word << shift) >> shift);
+}
+
+fn integer_as_double(index: u32) -> f64 {
+    let lane = select(index, index * 2u,
+        params.source_type == 3u || params.source_type == 7u);
+    let low = input.data[lane];
+    switch params.source_type {
+        case 0u: { return signed_word(low, 24u); }
+        case 1u: { return signed_word(low, 16u); }
+        case 2u: { return f64(bitcast<i32>(low)); }
+        case 3u: {
+            let high = input.data[lane + 1u];
+            if ((high & 0x80000000u) != 0u) {
+                let magnitude_low = ~low + 1u;
+                let carry = select(0u, 1u, magnitude_low == 0u);
+                return -wide_unsigned(magnitude_low, ~high + carry);
+            }
+            return wide_unsigned(low, high);
+        }
+        case 4u: { return f64(low & 0xffu); }
+        case 5u: { return f64(low & 0xffffu); }
+        case 6u: { return f64(low); }
+        case 7u: { return wide_unsigned(low, input.data[lane + 1u]); }
+        default: { return f64(0.0); }
+    }
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if (id.x >= params.len) { return; }
+    let index = params.offset + id.x;
+    output.data[index] = integer_as_double(index);
+}
+"#;
 
 const INTEGER_COMPARISON_SHADER: &str = r#"
 struct Words { data: array<u32> };
@@ -189,7 +254,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (local >= params.len) { return; }
     let index = params.offset + local;
     if (index >= params.total) { return; }
-    Out.data[index] = select(0.0, 1.0, compare_result(compare_words(index)));
+    Out.data[index] = select($SCALAR(0.0), $SCALAR(1.0), compare_result(compare_words(index)));
 }
 "#;
 
@@ -502,42 +567,7 @@ fn negate64(lo: u32, hi: u32) -> vec2<u32> {
     let neg_lo = 0u - lo;
     return vec2<u32>(neg_lo, ~hi + select(0u, 1u, neg_lo == 0u));
 }
-fn ge64(a0: u32, a1: u32, b0: u32, b1: u32) -> bool {
-    return a1 > b1 || (a1 == b1 && a0 >= b0);
-}
-fn sub64(a0: u32, a1: u32, b0: u32, b1: u32) -> vec2<u32> {
-    let borrow = select(0u, 1u, a0 < b0);
-    return vec2<u32>(a0 - b0, a1 - b1 - borrow);
-}
-fn increment64(lo: u32, hi: u32) -> vec2<u32> {
-    let out_lo = lo + 1u;
-    return vec2<u32>(out_lo, hi + select(0u, 1u, out_lo == 0u));
-}
-fn divmod64(n0: u32, n1: u32, d0: u32, d1: u32) -> vec4<u32> {
-    var q0 = 0u;
-    var q1 = 0u;
-    var r0 = 0u;
-    var r1 = 0u;
-    var bit = 64u;
-    loop {
-        if (bit == 0u) { break; }
-        bit = bit - 1u;
-        var input_bit = 0u;
-        if (bit >= 32u) { input_bit = (n1 >> (bit - 32u)) & 1u; }
-        else { input_bit = (n0 >> bit) & 1u; }
-        let carry = r0 >> 31u;
-        r0 = (r0 << 1u) | input_bit;
-        r1 = (r1 << 1u) | carry;
-        if (ge64(r0, r1, d0, d1)) {
-            let remainder = sub64(r0, r1, d0, d1);
-            r0 = remainder.x;
-            r1 = remainder.y;
-            if (bit >= 32u) { q1 = q1 | (1u << (bit - 32u)); }
-            else { q0 = q0 | (1u << bit); }
-        }
-    }
-    return vec4<u32>(q0, q1, r0, r1);
-}
+@DIVMOD64_HELPERS@
 fn should_round64(r0: u32, r1: u32, d0: u32, d1: u32) -> bool {
     let complement = sub64(d0, d1, r0, r1);
     return ge64(r0, r1, complement.x, complement.y);
@@ -1742,8 +1772,10 @@ fn read_signed_cast(logical_index: u32) -> SignedWideCast {
 
 $READ_FLOAT
 
+fn isNan(value: $SCALAR) -> bool { @IEEE_NAN_PREDICATE@ }
+
 fn rounded_float_cast(value: $SCALAR) -> $SCALAR {
-    if (value != value) {
+    if (isNan(value)) {
         return $SCALAR(0.0);
     }
     if (value >= $SCALAR(0.0)) {
@@ -1756,7 +1788,7 @@ fn float_to_wide_cast(value: $SCALAR) -> SignedWideCast {
     let rounded = rounded_float_cast(value);
     let negative = rounded < $SCALAR(0.0);
     var magnitude = select(rounded, -rounded, negative);
-    if (magnitude != magnitude || magnitude <= $SCALAR(0.0)) {
+    if (isNan(magnitude) || magnitude <= $SCALAR(0.0)) {
         return SignedWideCast(wide_cast_zero(), false);
     }
     let two32 = $SCALAR(4294967296.0);
@@ -1960,6 +1992,7 @@ mod tests {
     use super::{
         arithmetic_shader, cast_shader, comparison_shader, extrema_dim_shader, minmax_shader,
     };
+    use crate::backend::wgpu::types::NumericPrecision;
 
     #[test]
     fn comparison_shader_substitutes_precision_and_workgroup_size() {
@@ -1997,15 +2030,23 @@ mod tests {
 
     #[test]
     fn cast_shader_uses_portable_packed_words_for_wide_integers() {
-        for scalar in ["f32", "f64"] {
-            let shader = cast_shader(scalar, 128);
+        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
+            let shader = cast_shader(precision, 128);
             assert!(shader.contains("struct WideCast"));
             assert!(shader.contains("@workgroup_size(128)"));
             assert!(!shader.contains("i64"));
-            assert!(!shader.contains("u64"));
+            assert!(!shader.contains("array<u64>"));
+            assert!(shader.contains("OutBuf.data[lane + 1u] = bits.high"));
+            assert!(shader.contains("WideCast(low, InBuf.data[lane + 1u])"));
+            if precision == NumericPrecision::F64 {
+                assert!(shader
+                    .contains("runmat_f64_from_words(InBuf.data[lane], InBuf.data[lane + 1u])"));
+            }
             assert!(!shader.contains("$SCALAR"));
             assert!(!shader.contains("$READ_FLOAT"));
             assert!(!shader.contains("@WG@"));
+            assert!(!shader.contains("value != value"));
+            assert!(!shader.contains("magnitude != magnitude"));
         }
     }
 }

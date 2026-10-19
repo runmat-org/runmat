@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::integer_conversion::IntegerClassExt;
 use runmat_value::{IntValue, IntegerStorage, NumericScalar};
 
 pub(in crate::builtins::table) fn dictionary_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -200,8 +201,8 @@ pub(in crate::builtins::table) fn dictionary_assign(
 
 fn dictionary_element_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
-        Value::LogicalArray(array) => array.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
+        Value::LogicalArray(array) => array.shape.to_vec(),
         Value::StringArray(array) => array.shape.clone(),
         Value::Cell(array) => vec![array.rows, array.cols],
         Value::CharArray(array) => vec![array.rows, 1],
@@ -224,9 +225,7 @@ fn normalize_to_existing_class(existing: &[Value], values: &mut [Value]) -> Buil
     match first {
         Value::Int(first) => {
             let target =
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::from_int_value(
-                    first,
-                );
+                crate::builtins::common::integer_conversion::IntegerClass::from_int_value(first);
             for value in values {
                 *value = match value {
                     Value::Int(value) => Value::Int(target.cast_int(value)),
@@ -613,7 +612,7 @@ mod tests {
         let Value::Tensor(found) = dictionary_lookup(&object, &query).unwrap() else {
             panic!("expected configured integer tensor output");
         };
-        assert_eq!(found.shape, vec![2, 1]);
+        assert_eq!(found.shape(), [2, 1]);
         assert_eq!(
             found.integer_storage(),
             Some(&IntegerStorage::I16(vec![20, 10]))

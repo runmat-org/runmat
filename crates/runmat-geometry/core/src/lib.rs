@@ -110,7 +110,7 @@ mod tests {
             )],
             regions: vec![Region {
                 region_id: "region_a".to_string(),
-                name: "body".to_string(),
+                name: "body".into(),
                 tag: None,
                 cad_ownership: None,
             }],

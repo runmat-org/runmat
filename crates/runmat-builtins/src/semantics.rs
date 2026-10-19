@@ -29,6 +29,8 @@ impl BuiltinSemantics {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BuiltinCompatibility {
     Matlab,
+    /// RunMat-native identity with no claim of MATLAB API parity.
+    RunMat,
     InteractiveOnly,
 }
 
@@ -54,6 +56,7 @@ pub enum BuiltinWorkspaceEffect {
     ClearsFunctionCache,
     LoadsExternalBindings,
     DynamicEval,
+    DynamicEvalCurrentWorkspace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +164,13 @@ pub enum BuiltinSemanticKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShapeTransformKind {
     General,
+    Flip,
+    Rotate90,
+    CircularShift,
+    ShiftDimensions,
+    Diagonal,
+    Kronecker,
+    Triangular(TriangularKind),
     Reshape,
     Permute,
     Repmat,
@@ -176,8 +186,17 @@ pub enum ConcatKind {
     Vertical,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TriangularKind {
+    Lower,
+    Upper,
+}
+
 pub fn builtin_semantics_for(function: &BuiltinFunction) -> BuiltinSemantics {
-    builtin_semantics_for_name(function.name).unwrap_or_else(|| derive_semantics(function))
+    crate::builtin_catalog_entry_by_name(function.name)
+        .map(crate::BuiltinCatalogEntry::legacy_semantics)
+        .or_else(|| builtin_semantics_for_name(function.name))
+        .unwrap_or_else(|| derive_semantics(function))
 }
 
 const GENERATED_GEOMETRY_BUILDERS: &[&str] = &[
@@ -226,23 +245,10 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::General,
             ..pure(BuiltinSemanticKind::General)
         },
-        "reshape" => pure(BuiltinSemanticKind::ShapeTransform(
-            ShapeTransformKind::Reshape,
-        )),
-        "permute" => pure(BuiltinSemanticKind::ShapeTransform(
-            ShapeTransformKind::Permute,
-        )),
-        "repmat" => pure(BuiltinSemanticKind::ShapeTransform(
-            ShapeTransformKind::Repmat,
-        )),
-        "ipermute" => pure(BuiltinSemanticKind::ShapeTransform(
-            ShapeTransformKind::Permute,
-        )),
         "transpose" | "ctranspose" => pure(BuiltinSemanticKind::ShapeTransform(
             ShapeTransformKind::Transpose,
         )),
-        "squeeze" | "flip" | "fliplr" | "flipud" | "rot90" | "circshift" | "tril" | "triu"
-        | "diag" | "kron" => pure(BuiltinSemanticKind::ShapeTransform(
+        "tril" | "triu" | "diag" | "kron" => pure(BuiltinSemanticKind::ShapeTransform(
             ShapeTransformKind::General,
         )),
         "cat" => pure(BuiltinSemanticKind::ShapeTransform(
@@ -274,7 +280,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::General,
             ..BuiltinSemantics::unknown()
         },
-        "disp" | "clc" => console_io(),
+        "disp" => console_io(),
         "format" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment().with_ui(),
             environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
@@ -298,27 +304,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             ..pure(BuiltinSemanticKind::Workspace)
         },
 
-        "jsondecode" | "jsonencode" | "fullfile" => pure(BuiltinSemanticKind::General),
-        "pwd" | "getenv" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            purity: BuiltinPurity::DeterministicReadOnly,
-            semantic_kind: BuiltinSemanticKind::General,
-            ..pure(BuiltinSemanticKind::General)
-        },
-        "setenv" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::General,
-            ..pure(BuiltinSemanticKind::General)
-        },
-        "tempname" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_filesystem().with_random(),
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Filesystem,
-            ..pure(BuiltinSemanticKind::Filesystem)
-        },
-
+        "jsondecode" | "jsonencode" => pure(BuiltinSemanticKind::General),
         "feval" | "call_method" | "subsref" | "subsasgn" | "notify" | "fzero" | "fsolve"
         | "ode45" | "ode23" | "ode15s" => host_callback(),
         "addlistener" | "new_handle_object" => BuiltinSemantics {
@@ -328,17 +314,16 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             ..BuiltinSemantics::unknown()
         },
 
-        "load" | "run" => BuiltinSemantics {
+        "load" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_filesystem().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::LoadsExternalBindings),
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::Filesystem,
             ..BuiltinSemantics::unknown()
         },
-        "save" | "fopen" | "fclose" | "fread" | "fwrite" | "fileread" | "filewrite"
-        | "copyfile" | "movefile" | "delete" | "mkdir" | "rmdir" | "dir" | "readmatrix"
-        | "csvwrite" | "csvread" | "dlmread" | "dlmwrite" | "writematrix" | "writecell"
-        | "xlsread" | "xlswrite" | "ls" | "genpath" => BuiltinSemantics {
+        "save" | "fopen" | "fclose" | "fread" | "fwrite" | "fileread" | "filewrite" | "delete"
+        | "readmatrix" | "csvwrite" | "csvread" | "dlmread" | "dlmwrite" | "writematrix"
+        | "writecell" | "xlsread" | "xlswrite" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_filesystem(),
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::Filesystem,
@@ -350,34 +335,8 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Filesystem,
             ..BuiltinSemantics::unknown()
         },
-        "uigetfile" | "uiputfile" => BuiltinSemantics {
-            compatibility: BuiltinCompatibility::InteractiveOnly,
-            async_behavior: BuiltinAsyncBehavior::MaySuspend,
-            effects: BuiltinEffects::none()
-                .with_filesystem()
-                .with_ui()
-                .with_host_callback(),
-            workspace_effect: None,
-            environment_effect: None,
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Filesystem,
-        },
         "webread" | "webwrite" | "tcpclient" | "tcpserver" | "accept" | "read" | "readline"
         | "write" => network_io(),
-        "path" | "addpath" | "rmpath" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            environment_effect: Some(BuiltinEnvironmentEffect::PathMutation),
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Workspace,
-            ..BuiltinSemantics::unknown()
-        },
-        "cd" | "chdir" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            environment_effect: Some(BuiltinEnvironmentEffect::WorkingDirectoryMutation),
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Workspace,
-            ..BuiltinSemantics::unknown()
-        },
         "rehash" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment(),
             environment_effect: Some(BuiltinEnvironmentEffect::FunctionCacheInvalidation),
@@ -385,38 +344,21 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "savepath" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment().with_filesystem(),
-            environment_effect: Some(BuiltinEnvironmentEffect::FunctionCacheInvalidation),
+        "eval" | "evalc" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_workspace(),
+            workspace_effect: Some(BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace),
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "exist" => BuiltinSemantics {
-            effects: BuiltinEffects::none()
-                .with_filesystem()
-                .with_workspace()
-                .with_environment(),
-            workspace_effect: Some(BuiltinWorkspaceEffect::ReadsWorkspace),
-            environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
-            purity: BuiltinPurity::DeterministicReadOnly,
-            semantic_kind: BuiltinSemanticKind::Workspace,
-            ..BuiltinSemantics::unknown()
-        },
-        "tempdir" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            purity: BuiltinPurity::DeterministicReadOnly,
-            semantic_kind: BuiltinSemanticKind::General,
-            ..BuiltinSemantics::unknown()
-        },
-        "eval" | "evalin" => BuiltinSemantics {
+        "evalin" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::DynamicEval),
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "assignin" | "syms" => BuiltinSemantics {
+        "assignin" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::CreatesBinding),
             purity: BuiltinPurity::Impure,

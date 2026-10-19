@@ -7,8 +7,8 @@ use crate::geometry::stroke3d::{
     create_line_vertices_dashed, tessellate_polyline_tube, StrokeCap3D, StrokeStyle3D,
 };
 use crate::gpu::line3::{Line3GpuInputs, Line3GpuParams};
-use crate::gpu::util::readback_scalar_buffer_f64;
-use crate::plots::NumericPlotData;
+use crate::gpu::util::readback_scalar_buffer_f64_typed;
+use crate::plots::{NumericPlotData, PlotDataExportError};
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_value::NumericStorage;
@@ -153,38 +153,48 @@ impl Line3Plot {
     pub async fn export_numeric_xyz_data(
         &self,
     ) -> Result<Option<(NumericPlotData, NumericPlotData, NumericPlotData)>, String> {
+        self.export_numeric_xyz_data_typed()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_numeric_xyz_data_typed(
+        &self,
+    ) -> Result<Option<(NumericPlotData, NumericPlotData, NumericPlotData)>, PlotDataExportError>
+    {
         match (&self.source_x, &self.source_y, &self.source_z) {
             (Some(x), Some(y), Some(z)) if x.len() == y.len() && x.len() == z.len() => {
                 return Ok(Some((x.clone(), y.clone(), z.clone())));
             }
             (None, None, None) => {}
-            _ => return Err("plot3 line has incomplete CPU data".to_string()),
+            _ => {
+                return Err(PlotDataExportError::SourceUnavailable(
+                    "plot3 line has incomplete CPU data",
+                ))
+            }
         }
 
         if let Some(inputs) = &self.gpu_line_inputs {
-            let context = shared_wgpu_context().ok_or_else(|| {
-                "plot3 line has GPU source data but no shared WGPU context is installed".to_string()
-            })?;
+            let context = shared_wgpu_context().ok_or(PlotDataExportError::SourceUnavailable(
+                "plot3 line has GPU source data but no shared WGPU context is installed",
+            ))?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+            let x = readback_scalar_buffer_f64_typed(
+                &context.access,
                 &inputs.x_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+            let y = readback_scalar_buffer_f64_typed(
+                &context.access,
                 &inputs.y_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
-            let z = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+            let z = readback_scalar_buffer_f64_typed(
+                &context.access,
                 &inputs.z_buffer,
                 len,
                 inputs.scalar,
@@ -200,13 +210,17 @@ impl Line3Plot {
                     shape.clone(),
                 ),
             };
-            return Ok(Some((wrap(x)?, wrap(y)?, wrap(z)?)));
+            return Ok(Some((
+                wrap(x).map_err(PlotDataExportError::InvalidSourceLayout)?,
+                wrap(y).map_err(PlotDataExportError::InvalidSourceLayout)?,
+                wrap(z).map_err(PlotDataExportError::InvalidSourceLayout)?,
+            )));
         }
 
         if self.gpu_vertices.is_some() {
-            return Err(
-                "plot3 line has GPU render vertices but no exportable source data".to_string(),
-            );
+            return Err(PlotDataExportError::SourceUnavailable(
+                "plot3 line has GPU render vertices but no exportable source data",
+            ));
         }
 
         Ok(None)
@@ -440,8 +454,7 @@ impl Line3Plot {
             0.0
         };
         let packed = crate::gpu::line3::pack_vertices_from_xyz(
-            gpu.device,
-            gpu.queue,
+            gpu.emission,
             inputs,
             &Line3GpuParams {
                 color: self.color,
@@ -558,16 +571,32 @@ impl Line3Plot {
             .map(|v| v.len() * std::mem::size_of::<Vertex>())
             .unwrap_or(0)
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for source in [&self.source_x, &self.source_y, &self.source_z]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        Some(total)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use pollster::FutureExt;
-    use std::sync::Arc;
     use wgpu::util::DeviceExt;
 
-    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
         if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
             || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
         {
@@ -592,7 +621,7 @@ mod tests {
             )
             .block_on()
             .ok()?;
-        Some((Arc::new(device), Arc::new(queue)))
+        Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
     }
 
     #[test]
@@ -631,35 +660,53 @@ mod tests {
 
     #[test]
     fn line3_gpu_source_packs_default_width_as_thick_geometry() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
-        let x_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("line3-test-x"),
-                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+        let x_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("line3-test-x"),
+                            contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
-        let y_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("line3-test-y"),
-                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+        let y_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("line3-test-y"),
+                            contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
-        let z_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("line3-test-z"),
-                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+        let z_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("line3-test-z"),
+                            contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
         let mut plot = Line3Plot::from_gpu_xyz(
             Line3GpuInputs {
-                x_buffer,
-                y_buffer,
-                z_buffer,
+                x_buffer: x_buffer.into(),
+                y_buffer: y_buffer.into(),
+                z_buffer: z_buffer.into(),
                 len: 2,
                 scalar: crate::gpu::ScalarType::F32,
             },
@@ -668,11 +715,12 @@ mod tests {
             crate::plots::line::LineStyle::Solid,
             BoundingBox::new(Vec3::ZERO, Vec3::ONE),
         );
-        let gpu = GpuPackContext {
-            device: &device,
-            queue: &queue,
-        };
-        let render = plot.render_data_with_viewport_gpu(Some((800, 600)), None, Some(&gpu));
+        let render = access
+            .with_shared(|emission| {
+                let gpu = GpuPackContext { emission };
+                plot.render_data_with_viewport_gpu(Some((800, 600)), None, Some(&gpu))
+            })
+            .expect("test device access");
         assert_eq!(render.pipeline_type, PipelineType::Triangles);
         assert_eq!(render.vertices.len(), 0);
         assert!(render.gpu_vertices.is_some());

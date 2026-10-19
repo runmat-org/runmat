@@ -228,9 +228,11 @@ fn fea_numeric_constructors_accept_every_host_integer_class() {
         let values = execute_source(&source)
             .unwrap_or_else(|error| panic!("{constructor} compiled FEA constructors: {error}"));
         for class_name in ["fea.ElectromagneticDomain", "fea.Material"] {
+            let class_identity =
+                runmat_types::ClassIdentity::new(class_name).expect("test class identity");
             assert!(
                 values.iter().any(|value| {
-                    matches!(value, Value::Object(object) if object.class_name == class_name)
+                    matches!(value, Value::Object(object) if object.class_name == class_identity)
                 }),
                 "{constructor} must construct {class_name}"
             );
@@ -358,9 +360,11 @@ fn typed_signal_excitation_and_case_compose_through_compiled_runmat_code() {
         "fea.ExcitationCase",
         "fea.Model",
     ] {
+        let class_identity =
+            runmat_types::ClassIdentity::new(class_name).expect("test class identity");
         assert!(
             values.iter().any(
-                |value| matches!(value, Value::Object(object) if object.class_name == class_name)
+                |value| matches!(value, Value::Object(object) if object.class_name == class_identity)
             ),
             "compiled source must construct {class_name}"
         );
@@ -414,9 +418,11 @@ fn sampled_signal_initial_state_and_response_spectrum_compose_through_compiled_c
         "fea.ResponseSpectrum",
         "fea.Model",
     ] {
+        let class_identity =
+            runmat_types::ClassIdentity::new(class_name).expect("test class identity");
         assert!(
             values.iter().any(
-                |value| matches!(value, Value::Object(object) if object.class_name == class_name)
+                |value| matches!(value, Value::Object(object) if object.class_name == class_identity)
             ),
             "compiled source must construct {class_name}"
         );

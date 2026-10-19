@@ -390,7 +390,7 @@ async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count > 1 {
             return Err(cummin_error_with_detail(
@@ -398,7 +398,7 @@ async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
                 "cummin returns exactly one output",
             ));
         }
-        return Ok(Value::OutputList(vec![eval.into_value()]));
+        return Ok(Value::output_list(vec![eval.into_value()]));
     }
     Ok(eval.into_value())
 }
@@ -429,7 +429,7 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvalu
             })
         }
         Value::ComplexTensor(ct) => {
-            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&ct.shape));
+            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(ct.shape()));
             let (values, indices) = cummin_complex_tensor(&ct, target_dim, direction, nan_mode)?;
             Ok(CumminEvaluation {
                 values: complex_tensor_into_value(values),
@@ -567,7 +567,7 @@ fn cummin_host(
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
             integer_cummin(
                 tensor.integer_storage().expect("checked integer storage"),
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 target_dim,
                 direction,
             )
@@ -634,7 +634,7 @@ async fn cummin_gpu(
         }
     }
 
-    let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
+    let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(handle.shape()));
     if target_dim == 0 {
         return Err(cummin_error_with_detail(
             &CUMMIN_ERROR_INVALID_ARGUMENT,
@@ -642,8 +642,8 @@ async fn cummin_gpu(
         ));
     }
 
-    if target_dim > handle.shape.len() {
-        let indices = ones_indices(&handle.shape)?;
+    if target_dim > handle.shape().len() {
+        let indices = ones_indices(handle.shape())?;
         return Ok(CumminEvaluation {
             values: Value::GpuTensor(handle),
             indices: tensor::tensor_into_value(indices),
@@ -672,7 +672,7 @@ async fn cummin_gpu(
 
     if let Some(provider) = runmat_accelerate_api::provider() {
         let zero_based_dim = target_dim.saturating_sub(1);
-        if zero_based_dim < handle.shape.len() {
+        if zero_based_dim < handle.shape().len() {
             let provider_direction = match direction {
                 CumminDirection::Forward => ProviderScanDirection::Forward,
                 CumminDirection::Reverse => ProviderScanDirection::Reverse,
@@ -711,7 +711,7 @@ fn cummin_tensor(
     direction: CumminDirection,
     nan_mode: CumminNanMode,
 ) -> BuiltinResult<(Tensor, Tensor)> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| cummin_internal_error(&error))?;
@@ -740,7 +740,7 @@ fn cummin_complex_tensor(
 ) -> BuiltinResult<(ComplexTensor, Tensor)> {
     complex_cumulative_extrema::cumulative_extrema(
         tensor.clone().into_complex_storage(),
-        tensor.shape.clone(),
+        tensor.shape().to_vec(),
         dim,
         match direction {
             CumminDirection::Forward => complex_cumulative_extrema::Direction::Forward,
@@ -774,7 +774,7 @@ fn ones_indices(shape: &[usize]) -> BuiltinResult<Tensor> {
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -850,7 +850,7 @@ pub(crate) mod tests {
 
     #[test]
     fn cummin_rejects_a_second_public_output() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(super::cummin_builtin(Value::Num(7.0), Vec::new())).unwrap_err();
         assert_eq!(
             error.identifier.as_deref(),
@@ -870,7 +870,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             values.complex_storage(),
-            &runmat_value::ComplexStorage::F32(vec![(1.0, 0.0), (1.0, 0.0), (1.0, 0.0)])
+            &runmat_value::ComplexStorage::F32(vec![(1.0, 0.0), (1.0, 0.0), (1.0, 0.0)].into())
         );
     }
 
@@ -938,14 +938,14 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 3.0, 2.0, 2.0, 7.0, 1.0]);
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert_eq!(idx.shape, vec![2, 3]);
+                assert_eq!(idx.shape(), [2, 3]);
                 assert_eq!(idx.materialize_f64(), vec![1.0, 2.0, 1.0, 1.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
@@ -1183,7 +1183,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![4.0, 2.0, 7.0, 1.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("cummin");
@@ -1236,7 +1236,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let args = vec![Value::from("omitnan")];
@@ -1263,7 +1263,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::Int(IntValue::I32(5))];
@@ -1298,7 +1298,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate(Value::GpuTensor(handle), &[]).expect("cummin gpu");
@@ -1312,12 +1312,12 @@ pub(crate) mod tests {
         let gathered_vals = test_support::gather(gpu_vals).expect("gather values");
         let gathered_idx = test_support::gather(gpu_idx).expect("gather indices");
 
-        assert_eq!(gathered_vals.shape, expected_vals.shape);
+        assert_eq!(gathered_vals.shape(), expected_vals.shape());
         assert_eq!(
             gathered_vals.materialize_f64(),
             expected_vals.materialize_f64()
         );
-        assert_eq!(gathered_idx.shape, expected_idx.shape);
+        assert_eq!(gathered_idx.shape(), expected_idx.shape());
         assert_eq!(
             gathered_idx.materialize_f64(),
             expected_idx.materialize_f64()

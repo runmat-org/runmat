@@ -16,12 +16,48 @@ pub struct PublishedEntry {
     pub dependencies: DependencySnapshot,
     pub publication: u64,
     pub tier: PublishedTier,
+    /// Complete Core preparation, lowering, code generation, and binding time
+    /// for this exact published product. Ready execution never pays it again.
+    pub compilation: NativeCompilationEvidence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeCompilationEvidence {
+    pub prepare_ns: u64,
+    pub lower_codegen_bind_ns: u64,
+}
+
+impl NativeCompilationEvidence {
+    pub fn total_ns(self) -> Option<u64> {
+        self.prepare_ns.checked_add(self.lower_codegen_bind_ns)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublishedTier {
     Generic,
     Specialized { profile: Digest },
+}
+
+/// Publication identities observed for one entry before tiering may prepare
+/// another product. This snapshot does not authenticate dependencies or pin
+/// executable code; resolution must still validate the selected publication.
+#[derive(Clone, Copy, Default)]
+pub struct EntryPublications {
+    generic: Option<u64>,
+    specialized: Option<(Digest, u64)>,
+}
+
+impl EntryPublications {
+    /// Compare a subsequently resolved product from the same registry entry.
+    pub fn contains(self, entry: &PublishedEntry) -> bool {
+        match entry.tier {
+            PublishedTier::Generic => self.generic == Some(entry.publication),
+            PublishedTier::Specialized { profile } => {
+                self.specialized == Some((profile, entry.publication))
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -50,6 +86,19 @@ impl EntryCell {
         &self.key
     }
 
+    pub(crate) fn publications(&self, profile: Option<Digest>) -> EntryPublications {
+        let state = self.state.borrow();
+        EntryPublications {
+            generic: state.generic.as_ref().map(|entry| entry.publication),
+            specialized: profile.and_then(|profile| {
+                state
+                    .specialized
+                    .get(&profile)
+                    .map(|entry| (profile, entry.publication))
+            }),
+        }
+    }
+
     pub fn resolve(&self, current: &DependencySnapshot) -> Option<PublishedEntry> {
         self.state
             .borrow()
@@ -64,6 +113,7 @@ impl EntryCell {
         executor: Rc<NativeExecutor>,
         entrypoint: ProgramFunctionId,
         dependencies: DependencySnapshot,
+        compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
         if dependencies.is_empty() {
             return Err("published native entry must declare dependencies");
@@ -79,6 +129,7 @@ impl EntryCell {
             dependencies,
             publication: state.publication,
             tier: PublishedTier::Generic,
+            compilation,
         };
         state.generic = Some(target.clone());
         Ok(target)
@@ -90,6 +141,7 @@ impl EntryCell {
         executor: Rc<NativeExecutor>,
         entrypoint: ProgramFunctionId,
         dependencies: DependencySnapshot,
+        compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
         if dependencies.is_empty() {
             return Err("published native entry must declare dependencies");
@@ -105,6 +157,7 @@ impl EntryCell {
             dependencies,
             publication: state.publication,
             tier: PublishedTier::Specialized { profile },
+            compilation,
         };
         state.specialized.insert(profile, target.clone());
         Ok(target)

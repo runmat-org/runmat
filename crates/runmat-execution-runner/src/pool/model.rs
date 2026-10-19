@@ -35,4 +35,5 @@ pub struct WorkerSpec {
     pub id: WorkerId,
     pub pool_id: PoolId,
     pub resources: ResourceInventory,
+    pub host: runmat_execution::host::ExecutionHostInventory,
 }

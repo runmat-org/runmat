@@ -10,7 +10,9 @@ use runmat_value::Value;
 
 use crate::api::plot::ensure_figure_event_bridge;
 use crate::api::session::RunMatWasm;
-use crate::runtime::config::{apply_plotting_overrides, InitOptions, SessionConfig};
+use crate::runtime::config::{
+    apply_plotting_overrides, ApplicationSettingsMode, InitOptions, SessionConfig,
+};
 use crate::runtime::execution::{execution_host_from_options, BrowserExecutionService};
 use crate::runtime::filesystem::install_js_fs_provider;
 use crate::runtime::gpu::{
@@ -41,7 +43,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     ensure_getrandom_js();
     #[cfg(target_arch = "wasm32")]
     ensure_figure_event_bridge();
-    install_fs_provider_from_options(&options).map_err(|err| {
+    let dialog_host = install_fs_provider_from_options(&options).map_err(|err| {
         init_error_with_details(
             InitErrorCode::FilesystemProvider,
             "Failed to install filesystem provider",
@@ -85,6 +87,19 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             format!("Failed to initialize RunMat session: {err}"),
         )
     })?;
+    if let Some(host) = dialog_host.clone() {
+        session.install_host_service(host);
+    }
+    if matches!(
+        parsed_opts.application_settings,
+        Some(ApplicationSettingsMode::IsolatedMemory)
+    ) {
+        session
+            .install_application_settings(std::rc::Rc::new(
+                runmat_runtime::context::IsolatedMemoryPreferenceService::new(),
+            ))
+            .map_err(|err| init_error(InitErrorCode::SessionCreation, err.to_string()))?;
+    }
     session.set_telemetry_consent(config.telemetry_consent);
     if let Some(cid) = config.telemetry_client_id.clone() {
         session.set_telemetry_client_id(Some(cid));
@@ -93,22 +108,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     session.set_compat_mode(config.language_compat);
     session.set_callstack_limit(config.callstack_limit);
     session.set_error_namespace(config.error_namespace.clone());
-    let execution_service =
-        BrowserExecutionService::new(execution_host_from_options(&options).map_err(|error| {
-            init_error_with_details(
-                InitErrorCode::InvalidOptions,
-                "Failed to initialize browser execution host",
-                Some(error),
-            )
-        })?)
-        .map_err(|error| {
-            init_error(
-                InitErrorCode::SessionCreation,
-                format!("Failed to initialize browser execution: {error}"),
-            )
-        })?;
-    session.install_execution_services(execution_service.clone());
-
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
         active: false,
@@ -157,6 +156,28 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         install_cpu_provider(&config);
     }
 
+    // Build the browser scheduler after provider initialization so its typed
+    // worker inventory reflects the accelerator that can actually execute
+    // this session's programs.
+    let execution_service =
+        BrowserExecutionService::new(execution_host_from_options(&options).map_err(|error| {
+            init_error_with_details(
+                InitErrorCode::InvalidOptions,
+                "Failed to initialize browser execution host",
+                Some(error),
+            )
+        })?)
+        .map_err(|error| {
+            init_error(
+                InitErrorCode::SessionCreation,
+                format!("Failed to initialize browser execution: {error}"),
+            )
+        })?;
+    session.install_execution_services(execution_service.clone());
+    if execution_service.has_owned_cpu_worker() {
+        session.install_owned_builtin_work_service(execution_service.clone());
+    }
+
     let telemetry_sink: Option<Arc<dyn TelemetrySink>> = {
         #[cfg(target_arch = "wasm32")]
         {
@@ -195,6 +216,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         telemetry_sink,
         package_cache,
         execution_service,
+        dialog_host,
     ))
 }
 
@@ -224,29 +246,37 @@ async fn package_cache_from_options(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn install_fs_provider_from_options(options: &JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_from_options(
+    options: &JsValue,
+) -> Result<Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>, JsValue> {
     if options.is_null() || options.is_undefined() || !options.is_object() {
-        return Ok(());
+        return Ok(None);
     }
     let value = js_sys::Reflect::get(options, &JsValue::from_str("fsProvider"))?;
     if value.is_null() || value.is_undefined() {
-        return Ok(());
+        return Ok(None);
     }
-    install_js_fs_provider(&value)
+    install_js_fs_provider(&value).map(Some)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn install_fs_provider_from_options(_options: &JsValue) -> Result<(), JsValue> {
-    Ok(())
+pub(crate) fn install_fs_provider_from_options(
+    _options: &JsValue,
+) -> Result<Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>, JsValue> {
+    Ok(None)
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn install_fs_provider_value(bindings: JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_value(
+    bindings: JsValue,
+) -> Result<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>, JsValue> {
     install_js_fs_provider(&bindings)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_value(
+    _bindings: JsValue,
+) -> Result<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>, JsValue> {
     Err(crate::wire::errors::js_error(
         "filesystem provider installation is only available when targeting wasm32",
     ))

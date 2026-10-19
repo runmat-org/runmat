@@ -130,7 +130,7 @@ impl Parser {
             {
                 continue;
             }
-            if let Some(Token::Ident) = self.peek_token() {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 let start = self.tokens[self.pos].position;
                 let name = self.expect_ident()?;
                 names.push(ClassNamedDecl {
@@ -157,7 +157,7 @@ impl Parser {
             {
                 continue;
             }
-            if let Some(Token::Ident) = self.peek_token() {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 let start = self.tokens[self.pos].position;
                 let name = self.expect_ident()?;
                 let mut default = None;
@@ -187,7 +187,7 @@ impl Parser {
                 break;
             }
             match self.peek_token() {
-                Some(Token::Ident) => {
+                Some(token) if token.can_be_identifier() => {
                     let start = self.tokens[self.pos].position;
                     let name = self.expect_ident().unwrap_or_else(|_| "".to_string());
                     let mut value: Option<String> = None;

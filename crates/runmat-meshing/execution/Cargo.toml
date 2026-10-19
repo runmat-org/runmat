@@ -19,6 +19,7 @@ runmat-meshing-curve = { workspace = true }
 runmat-meshing-surface = { workspace = true }
 runmat-meshing-tetrahedron = { workspace = true }
 futures = "0.3"
+runmat-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tracing = "0.1"

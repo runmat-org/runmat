@@ -35,8 +35,9 @@ pub struct MaterializedFrame {
     pub supplied_inputs: usize,
     pub requested_outputs: usize,
     pub missing_input_locals: Vec<NativeLocalId>,
-    pub global_bindings: BTreeMap<usize, String>,
-    pub persistent_bindings: BTreeMap<usize, String>,
+    pub global_bindings: BTreeMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
+    pub persistent_bindings:
+        BTreeMap<usize, runmat_runtime::workspace::session::PersistentBindingContinuation>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -47,8 +48,9 @@ pub(crate) struct NativeMaterializationContext {
     pub supplied_inputs: usize,
     pub requested_outputs: usize,
     pub missing_input_locals: Vec<NativeLocalId>,
-    pub global_bindings: BTreeMap<usize, String>,
-    pub persistent_bindings: BTreeMap<usize, String>,
+    pub global_bindings: BTreeMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
+    pub persistent_bindings:
+        BTreeMap<usize, runmat_runtime::workspace::session::PersistentBindingContinuation>,
 }
 
 impl MaterializedFrame {

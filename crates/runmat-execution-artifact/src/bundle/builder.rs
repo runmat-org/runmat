@@ -5,7 +5,7 @@ use runmat_package::{FrozenProject, FrozenProjectHandoff};
 
 use crate::bundle::{
     BuildResourceDeclaration, BundleCallable, BundleCodeClosure, BundleManifest,
-    CompiledPackageClosure, ExecutionBundle, ProjectRevisionRecord,
+    CompiledPackageClosure, ExecutionBundle, ForeignArtifactClosure, ProjectRevisionRecord,
     EXECUTION_BUNDLE_SCHEMA_VERSION,
 };
 use crate::{
@@ -47,6 +47,9 @@ pub struct ExecutionBundleBuilder<'a, R> {
     resources: BuildResourceDeclaration,
     code_closure: CodeClosureMode,
     portable_environment: Vec<(String, String)>,
+    foreign_objects: Vec<LogicalObject>,
+    foreign_policy_objects: Vec<LogicalObject>,
+    foreign_artifact_closures: Vec<ForeignArtifactClosure>,
 }
 
 impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
@@ -79,6 +82,9 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             },
             code_closure: CodeClosureMode::SourceProject,
             portable_environment: Vec::new(),
+            foreign_objects: Vec::new(),
+            foreign_policy_objects: Vec::new(),
+            foreign_artifact_closures: Vec::new(),
         })
     }
 
@@ -104,6 +110,34 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
     pub fn with_resources(mut self, resources: BuildResourceDeclaration) -> Self {
         self.resources = resources;
         self
+    }
+
+    pub fn with_foreign_object(mut self, object: LogicalObject) -> ArtifactResult<Self> {
+        if object.descriptor.namespace != ObjectNamespace::ForeignArtifact {
+            return Err(ArtifactError::Invalid(
+                "foreign bundle object has the wrong namespace".into(),
+            ));
+        }
+        object.validate()?;
+        self.foreign_objects.push(object);
+        Ok(self)
+    }
+
+    /// Attach only the exact bounded opaque policy object referenced by a
+    /// recipe. The producer remains responsible for setting that descriptor.
+    pub fn with_foreign_policy_object(mut self, object: LogicalObject) -> ArtifactResult<Self> {
+        crate::object::validate_foreign_policy_object(&object)?;
+        self.foreign_policy_objects.push(object);
+        Ok(self)
+    }
+
+    pub fn with_foreign_artifact_closure(
+        mut self,
+        closure: ForeignArtifactClosure,
+    ) -> ArtifactResult<Self> {
+        closure.validate()?;
+        self.foreign_artifact_closures.push(closure);
+        Ok(self)
     }
 
     /// Package an already compiled program without source files or a project
@@ -144,7 +178,8 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                     .into(),
             ));
         }
-        let mut objects = Vec::new();
+        let mut objects = std::mem::take(&mut self.foreign_objects);
+        objects.extend(std::mem::take(&mut self.foreign_policy_objects));
         let mut callables = Vec::new();
         let code_closure = match self.code_closure {
             CodeClosureMode::SourceProject => {
@@ -186,7 +221,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                     }
                 }
                 BundleCodeClosure::SourceProject {
-                    handoff: project_handoff,
+                    handoff: Box::new(project_handoff),
                 }
             }
             CodeClosureMode::Compiled => {
@@ -213,8 +248,15 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         callables.sort();
         let source_descriptors = objects
             .iter()
+            .filter(|object| object.descriptor.namespace == ObjectNamespace::ProgramSource)
             .map(|object| object.descriptor.clone())
             .collect::<Vec<_>>();
+        let foreign_artifacts = objects
+            .iter()
+            .filter(|object| object.descriptor.namespace == ObjectNamespace::ForeignArtifact)
+            .map(|object| object.descriptor.clone())
+            .collect::<Vec<_>>();
+        self.foreign_artifact_closures.sort();
         for materialization in &mut self.materializations {
             attach_source_closure(
                 &mut materialization.recipe,
@@ -256,6 +298,8 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             },
             code_closure,
             sources: source_descriptors,
+            foreign_artifacts,
+            foreign_artifact_closures: self.foreign_artifact_closures,
             callables,
             recipes,
             artifacts,

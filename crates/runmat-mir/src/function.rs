@@ -1,8 +1,8 @@
-use runmat_hir::{
+use runmat_types::ProgramSourceId;
+use runmat_types::{
     CapturedBinding, ClassId, FunctionArgumentValidation, FunctionId, FunctionKind,
     FunctionModifiers, FunctionName, Span,
 };
-use runmat_types::ProgramSourceId;
 use serde::{Deserialize, Serialize};
 
 /// Immutable frontend metadata required by MIR-owned semantic analysis.
@@ -16,7 +16,9 @@ pub struct MirFunctionMetadata {
     pub name: FunctionName,
     pub parent: Option<FunctionId>,
     pub enclosing_class: Option<ClassId>,
+    pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     pub kind: FunctionKind,
+    pub source_role: runmat_types::FunctionSourceRole,
     pub argument_validations: Vec<FunctionArgumentValidation>,
     pub captures: Vec<CapturedBinding>,
     pub modifiers: FunctionModifiers,

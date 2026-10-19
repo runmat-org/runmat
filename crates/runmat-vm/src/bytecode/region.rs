@@ -1,5 +1,6 @@
 use runmat_types::{ProgramPointId, RegionContract, RegionId};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 use super::program::Bytecode;
 
@@ -18,34 +19,41 @@ pub struct BytecodeRegion {
     pub exits: Vec<BytecodeRegionBoundary>,
 }
 
+impl BytecodeRegion {
+    pub(crate) fn rebind_owner(&mut self, owner: runmat_types::ProgramFunctionId) {
+        self.id.function = owner;
+        self.entry.point.function = owner;
+        for exit in &mut self.exits {
+            exit.point.function = owner;
+        }
+    }
+}
+
 impl Bytecode {
     /// Transactionally install every analyzed region that resolves to exact
     /// empty-stack VM boundaries in this bytecode product. Regions are
     /// optional optimization candidates; a composed or transformed product
     /// that cannot represent one must execute normally without it.
-    pub fn install_regions(&mut self, contracts: &[RegionContract]) -> Result<(), String> {
-        self.install_regions_scoped(contracts, None)
-    }
-
-    /// Install this assembly's regions without rewriting retained foreign function metadata.
-    /// The root bytecode still receives synthetic-entrypoint regions; registry
-    /// functions receive regions only when the compiler declares their ownership.
-    pub fn install_regions_for_functions(
+    pub fn install_regions(
         &mut self,
         contracts: &[RegionContract],
-        owned_functions: &std::collections::BTreeSet<runmat_hir::FunctionId>,
+        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
     ) -> Result<(), String> {
-        self.install_regions_scoped(contracts, Some(owned_functions))
+        self.install_regions_for_product(contracts, compiled_functions, compiled_functions)
     }
 
-    fn install_regions_scoped(
+    /// The assembly may contain a synthetic script owner whose numeric ID
+    /// collides with an inherited callable. Only `registered_bodies` may have
+    /// function metadata changed by this product's region compilation.
+    pub fn install_regions_for_product(
         &mut self,
         contracts: &[RegionContract],
-        owned_functions: Option<&std::collections::BTreeSet<runmat_hir::FunctionId>>,
+        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
+        registered_bodies: &BTreeSet<runmat_hir::FunctionId>,
     ) -> Result<(), String> {
-        let owns = |function: runmat_hir::FunctionId| {
-            owned_functions.is_none_or(|ids| ids.contains(&function))
-        };
+        if !registered_bodies.is_subset(compiled_functions) {
+            return Err("region body owners exceed compiled assembly".into());
+        }
         let mut contracts = contracts.iter().collect::<Vec<_>>();
         contracts.sort_by_key(|contract| contract.id);
         if contracts.windows(2).any(|pair| pair[0].id == pair[1].id) {
@@ -60,6 +68,12 @@ impl Bytecode {
                 usize::try_from(contract.id.function.0)
                     .map_err(|_| "region function identity exceeds this target".to_string())?,
             );
+            if !compiled_functions.contains(&function) {
+                return Err(format!(
+                    "region {:?} belongs to a function outside the compiled assembly",
+                    contract.id
+                ));
+            }
             // Region contracts describe this executable's MIR assembly. Prefer
             // its immutable layout over the composed session registry: a
             // persisted function may legitimately reuse a unit-local function
@@ -69,11 +83,10 @@ impl Bytecode {
                 .as_ref()
                 .and_then(|layout| layout.functions.get(&function))
                 .map(|layout| &layout.resume_points);
-            let registry_points = self
-                .function_registry
-                .functions
-                .get(&function)
-                .filter(|_| owns(function))
+            let registry_points = registered_bodies
+                .contains(&function)
+                .then(|| self.function_registry.functions.get(&function))
+                .flatten()
                 .map(|function| &function.resume_points);
             let Some(points) = layout_points
                 .filter(|points| contains_region_boundaries(contract, points))
@@ -88,18 +101,16 @@ impl Bytecode {
         }
 
         self.regions = mapped.iter().map(|(_, region)| region.clone()).collect();
-        for function in self.function_registry.functions.values_mut() {
-            if owns(function.function) {
-                function.regions.clear();
+        for function in registered_bodies {
+            if let Some(bytecode) = self.function_registry.functions.get_mut(function) {
+                bytecode.regions.clear();
             }
-        }
-        for function in self.bound_functions.values_mut() {
-            if owns(function.function) {
-                function.regions.clear();
+            if let Some(bytecode) = self.bound_functions.get_mut(function) {
+                bytecode.regions.clear();
             }
         }
         for (function, region) in mapped {
-            if !owns(function) {
+            if !registered_bodies.contains(&function) {
                 continue;
             }
             if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {

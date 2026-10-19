@@ -5,10 +5,97 @@ pub struct NativeLoweringInput<'a> {
     pub mir: &'a runmat_mir::MirAssembly,
     pub analysis: &'a runmat_mir::analysis::AnalysisStore,
     pub manifest: &'a runmat_execution::ExecutableUnitManifest,
+    /// Selected compiler/MIR identity. The manifest retains the immutable
+    /// portable identity of the same function.
+    pub entrypoint: NativeEntrypointBinding,
     /// Canonical names for semantic HIR bindings retained by MIR locals.
     /// May be absent only when the supplied MIR contains no bound locals.
     pub binding_names: Option<&'a std::collections::BTreeMap<runmat_types::BindingId, String>>,
     pub target: NativeTarget,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeEntrypointBinding {
+    compiled: runmat_types::ProgramFunctionId,
+    portable: runmat_types::ProgramFunctionId,
+    body_digest: runmat_execution::Digest,
+}
+
+impl NativeEntrypointBinding {
+    pub fn new(
+        mir: &runmat_mir::MirAssembly,
+        compiled: runmat_hir::FunctionId,
+        portable: runmat_types::ProgramFunctionId,
+    ) -> NativeCodegenResult<Self> {
+        let compiled = u32::try_from(compiled.0)
+            .map(runmat_types::ProgramFunctionId)
+            .map_err(|_| {
+                NativeCodegenError::new(
+                    "native.lowering.entrypoint_identity",
+                    "native entrypoint identity exceeds the Native IR schema",
+                )
+            })?;
+        let body_digest = entrypoint_body_digest(mir, compiled)?;
+        Ok(Self {
+            compiled,
+            portable,
+            body_digest,
+        })
+    }
+
+    pub fn compiled(&self) -> runmat_types::ProgramFunctionId {
+        self.compiled
+    }
+
+    pub fn portable(&self) -> runmat_types::ProgramFunctionId {
+        self.portable
+    }
+
+    fn validate(
+        &self,
+        mir: &runmat_mir::MirAssembly,
+        manifest: &runmat_execution::ExecutableUnitManifest,
+    ) -> NativeCodegenResult<()> {
+        if Some(self.portable) != manifest.identity.entrypoint_function
+            || self.body_digest != entrypoint_body_digest(mir, self.compiled)?
+        {
+            return Err(NativeCodegenError::new(
+                "native.lowering.entrypoint_binding",
+                "selected native entrypoint does not match its admitted portable body",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn entrypoint_body_digest(
+    mir: &runmat_mir::MirAssembly,
+    function: runmat_types::ProgramFunctionId,
+) -> NativeCodegenResult<runmat_execution::Digest> {
+    let function = usize::try_from(function.0)
+        .map(runmat_hir::FunctionId)
+        .map_err(|_| {
+            NativeCodegenError::new(
+                "native.lowering.entrypoint_identity",
+                "native entrypoint identity exceeds this host",
+            )
+        })?;
+    let metadata = mir.functions.get(&function).ok_or_else(|| {
+        NativeCodegenError::new(
+            "native.lowering.entrypoint_identity",
+            "selected native entrypoint has no canonical MIR metadata",
+        )
+    })?;
+    let body = mir.bodies.get(&function).ok_or_else(|| {
+        NativeCodegenError::new(
+            "native.lowering.entrypoint_identity",
+            "selected native entrypoint is absent from canonical MIR",
+        )
+    })?;
+    let bytes = serde_json::to_vec(&(metadata, body)).map_err(|error| {
+        NativeCodegenError::new("native.lowering.entrypoint_binding", error.to_string())
+    })?;
+    Ok(runmat_execution::Digest::sha256(&bytes))
 }
 
 pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<NativeAssembly> {
@@ -16,6 +103,14 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
         .manifest
         .validate()
         .map_err(|error| NativeCodegenError::new("native.lowering.manifest", error.to_string()))?;
+    input
+        .manifest
+        .identity
+        .program
+        .validate_current_compiler()
+        .map_err(|error| {
+            NativeCodegenError::new("native.lowering.compiler_compatibility", error.to_string())
+        })?;
     input
         .analysis
         .revision
@@ -33,7 +128,11 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
     if input.manifest.revisions.mir_schema != runmat_mir::MIR_SCHEMA_VERSION {
         return Err(NativeCodegenError::new(
             "native.lowering.mir_schema",
-            "Native IR requires MIR schema 2 with retained source identities",
+            format!(
+                "Native IR received MIR schema {}; expected {}. Rebuild the program with this RunMat version",
+                input.manifest.revisions.mir_schema,
+                runmat_mir::MIR_SCHEMA_VERSION
+            ),
         ));
     }
     super::requirements::validate_requirements(input.mir, input.manifest)?;
@@ -56,17 +155,39 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
             )
             .at_function(function_id)
         })?;
+        let retained_callable_parent =
+            input
+                .mir
+                .retained_callable_parent(*function)
+                .map_err(|error| {
+                    NativeCodegenError::new("native.lowering.lexical_parent", error)
+                        .at_function(function_id)
+                })?;
         functions.push(super::function::lower_function(
             function_id,
+            &input,
             metadata,
+            retained_callable_parent,
             body,
-            input.analysis,
-            input.binding_names,
-            &input.manifest.regions,
         )?);
     }
     functions.sort_by_key(|function| function.id);
 
+    input.entrypoint.validate(input.mir, input.manifest)?;
+    let entrypoint = usize::try_from(input.entrypoint.compiled().0)
+        .map(runmat_hir::FunctionId)
+        .map_err(|_| {
+            NativeCodegenError::new(
+                "native.lowering.entrypoint_identity",
+                "native entrypoint identity exceeds this host",
+            )
+        })?;
+    if !input.mir.bodies.contains_key(&entrypoint) {
+        return Err(NativeCodegenError::new(
+            "native.lowering.entrypoint_identity",
+            "selected native entrypoint is absent from canonical MIR",
+        ));
+    }
     let mut entrypoints = input
         .mir
         .entrypoints
@@ -81,18 +202,20 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
                     )
                 })
         })
-        .collect::<NativeCodegenResult<Vec<_>>>()?;
-    if !entrypoints.contains(&input.manifest.identity.entrypoint_function) {
-        entrypoints.push(input.manifest.identity.entrypoint_function);
-    }
-    entrypoints.sort();
+        .collect::<Result<Vec<_>, _>>()?;
+    entrypoints.push(input.entrypoint.compiled());
+    entrypoints.sort_unstable();
     entrypoints.dedup();
 
     let executable_cache_key = input
         .manifest
         .cache_key()
         .map_err(|error| NativeCodegenError::new("native.lowering.cache_key", error.to_string()))?;
-    let native_cache_key = input.target.cache_key(&executable_cache_key)?;
+    let native_cache_key = input.target.cache_key(
+        &executable_cache_key,
+        input.entrypoint.compiled(),
+        &input.entrypoint.body_digest,
+    )?;
     let assembly = NativeAssembly {
         schema_version: NATIVE_IR_SCHEMA_VERSION,
         executable_identity: input.manifest.identity.clone(),
@@ -106,8 +229,12 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
             interop: input.manifest.interop.clone(),
             parallel: input.manifest.parallel.clone(),
         },
+        selected_entrypoint: input.entrypoint.compiled(),
+        selected_portable_entrypoint: input.entrypoint.portable(),
+        selected_entrypoint_body: input.entrypoint.body_digest,
         entrypoints,
         functions,
+        class_declarations: super::super_constructor::lower(input.mir)?,
     };
     assembly.verify()?;
     verify_against_manifest(&assembly, input.manifest)?;
@@ -150,6 +277,20 @@ pub fn verify_against_mir(
     mir: &runmat_mir::MirAssembly,
     binding_names: Option<&std::collections::BTreeMap<runmat_types::BindingId, String>>,
 ) -> NativeCodegenResult<()> {
+    if assembly.class_declarations != super::super_constructor::lower(mir)? {
+        return Err(NativeCodegenError::new(
+            "native.ir.mir_class_declarations",
+            "Native IR class declarations differ from canonical MIR",
+        ));
+    }
+    if assembly.selected_entrypoint_body
+        != entrypoint_body_digest(mir, assembly.selected_entrypoint)?
+    {
+        return Err(NativeCodegenError::new(
+            "native.ir.entrypoint_binding",
+            "selected native entrypoint body differs from canonical MIR",
+        ));
+    }
     let functions = assembly
         .functions
         .iter()
@@ -249,13 +390,6 @@ pub fn verify_against_mir(
             )
             .at_function(function_id));
         }
-        if native.index_expressions != super::index_expression::derive(body, function_id)? {
-            return Err(NativeCodegenError::new(
-                "native.ir.mir_index_expressions",
-                "Native IR selector-expression metadata differs from canonical MIR",
-            )
-            .at_function(function_id));
-        }
         let expected = super::inventory::expected_sites(function_id, body)?;
         if native.expected_sites != expected {
             return Err(NativeCodegenError::new(
@@ -326,8 +460,11 @@ fn verify_statement_operations(
             let expected_rvalue = match &statement.kind {
                 runmat_mir::MirStmtKind::Assign { value, .. }
                 | runmat_mir::MirStmtKind::MultiAssign { value, .. }
+                | runmat_mir::MirStmtKind::SequenceAssign { value, .. }
                 | runmat_mir::MirStmtKind::Expr(value) => Some(value),
                 runmat_mir::MirStmtKind::PlaceMutation(_)
+                | runmat_mir::MirStmtKind::StatementOutput(_)
+                | runmat_mir::MirStmtKind::CaptureSequence { .. }
                 | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
                 | runmat_mir::MirStmtKind::EnvironmentEffect(_) => None,
             };

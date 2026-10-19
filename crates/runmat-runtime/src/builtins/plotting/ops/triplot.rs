@@ -323,9 +323,7 @@ pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let target_axes = parsed.axes_target.map(|(_, axes)| axes);
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
             let plot = plot_slot
@@ -342,8 +340,7 @@ pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     };
     let handle = register_line_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_triplot_internal(err));
@@ -478,7 +475,8 @@ fn parse_triangulation_struct(args: &[Value]) -> BuiltinResult<Option<Triangulat
         .ok_or_else(|| triplot_invalid("triangulation input must contain Points"))?;
     let points = Tensor::try_from(&points)
         .map_err(|e| triplot_invalid(format!("Points must be numeric: {e}")))?;
-    if points.cols < 2 || points.rows == 0 {
+    let (point_rows, point_cols) = triplot_matrix_dimensions(&points);
+    if point_cols < 2 || point_rows == 0 {
         return Err(triplot_invalid(
             "Points must be an N-by-2 or N-by-more coordinate matrix",
         ));
@@ -589,7 +587,8 @@ fn build_triangle_edges(
     x: &Tensor,
     y: &Tensor,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
-    if tri.cols != 3 {
+    let (tri_rows, tri_cols) = triplot_matrix_dimensions(tri);
+    if tri_cols != 3 {
         return Err(triplot_invalid("TRI must be an M-by-3 connectivity matrix"));
     }
     let point_count = tensor_utils::tensor_element_len(x);
@@ -601,7 +600,7 @@ fn build_triangle_edges(
             "X and Y must be coordinate vectors with the same length",
         ));
     }
-    if tri.rows == 0 {
+    if tri_rows == 0 {
         return Ok((Vec::new(), Vec::new()));
     }
     if point_count == 0 {
@@ -610,12 +609,12 @@ fn build_triangle_edges(
 
     let x_values = tensor_utils::tensor_values_f64(x);
     let y_values = tensor_utils::tensor_values_f64(y);
-    let mut x_edges = Vec::with_capacity(tri.rows * 5);
-    let mut y_edges = Vec::with_capacity(tri.rows * 5);
-    for row in 0..tri.rows {
+    let mut x_edges = Vec::with_capacity(tri_rows * 5);
+    let mut y_edges = Vec::with_capacity(tri_rows * 5);
+    for row in 0..tri_rows {
         let a = vertex_index_at(tri, row, point_count)?;
-        let b = vertex_index_at(tri, row + tri.rows, point_count)?;
-        let c = vertex_index_at(tri, row + 2 * tri.rows, point_count)?;
+        let b = vertex_index_at(tri, row + tri_rows, point_count)?;
+        let c = vertex_index_at(tri, row + 2 * tri_rows, point_count)?;
         for idx in [a, b, c, a] {
             x_edges.push(x_values[idx]);
             y_edges.push(y_values[idx]);
@@ -660,19 +659,27 @@ fn vertex_index(value: f64, point_count: usize) -> BuiltinResult<usize> {
 }
 
 fn column_tensor(tensor: &Tensor, col: usize) -> Tensor {
-    let indices = (0..tensor.rows)
-        .map(|row| row + col * tensor.rows)
-        .collect::<Vec<_>>();
+    let (rows, _) = triplot_matrix_dimensions(tensor);
+    let indices = (0..rows).map(|row| row + col * rows).collect::<Vec<_>>();
     let storage = tensor
         .clone()
         .into_numeric_storage()
         .and_then(|storage| storage.gather(&indices))
         .expect("triplot column indices");
-    Tensor::from_numeric_storage(storage, vec![tensor.rows, 1]).expect("triplot column shape")
+    Tensor::from_numeric_storage(storage, vec![rows, 1]).expect("triplot column shape")
+}
+
+fn triplot_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
-    tensor.rows == 1 || tensor.cols == 1
+    let (rows, cols) = triplot_matrix_dimensions(tensor);
+    rows == 1 || cols == 1
 }
 
 fn triplot_invalid(detail: impl AsRef<str>) -> RuntimeError {
@@ -738,6 +745,28 @@ mod tests {
         guard
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn triplot_rank_one_connectivity_is_one_triangle_and_rank_zero_is_not_a_vector() {
+        let tri = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let x = Tensor::new(vec![0.0, 1.0, 0.0], vec![3]).unwrap();
+        let y = Tensor::new(vec![0.0, 0.0, 1.0], vec![3]).unwrap();
+        let (x_edges, y_edges) = build_triangle_edges(&tri, &x, &y).unwrap();
+        assert_eq!(&x_edges[..4], &[0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(&y_edges[..4], &[0.0, 0.0, 1.0, 0.0]);
+
+        let scalar = Tensor::new(vec![1.0], Vec::new()).unwrap();
+        assert!(!is_vector_tensor(&scalar));
+        assert!(build_triangle_edges(&scalar, &x, &y)
+            .expect_err("rank-zero TRI has no connectivity columns")
+            .message()
+            .contains("M-by-3"));
+        assert!(build_triangle_edges(&tri, &scalar, &y)
+            .expect_err("rank-zero X is not a coordinate vector")
+            .message()
+            .contains("coordinate vectors"));
+    }
+
     #[test]
     fn triplot_edges_read_typed_integer_storage_exactly() {
         let (x_edges, y_edges) = build_triangle_edges(
@@ -797,13 +826,17 @@ mod tests {
     #[test]
     fn triplot_explicit_gpu_input_is_gated_before_gather() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 0,
-            buffer_id: 9_462_001,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let error = block_on(triplot_builtin(vec![
             Value::GpuTensor(handle),
             tensor(&[0.0, 1.0, 0.0], 1, 3),

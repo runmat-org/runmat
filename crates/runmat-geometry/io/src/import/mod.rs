@@ -64,8 +64,10 @@ impl Default for GeometryImportOptions {
 
 #[derive(Clone, Default)]
 pub struct GeometryImportContext {
-    cancellation: Option<runmat_execution::CancellationToken>,
+    cancellation: Option<CancellationProbe>,
 }
+
+pub(crate) type CancellationProbe = Arc<dyn Fn() -> bool + Send + Sync>;
 
 impl std::fmt::Debug for GeometryImportContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -81,23 +83,21 @@ impl GeometryImportContext {
     }
 
     pub fn with_cancellation(cancellation: Arc<AtomicBool>) -> Self {
-        Self {
-            cancellation: Some(runmat_execution::CancellationToken::from_shared(
-                cancellation,
-            )),
-        }
+        Self::with_cancellation_probe(move || cancellation.load(Ordering::Relaxed))
     }
 
-    pub fn with_cancellation_token(cancellation: runmat_execution::CancellationToken) -> Self {
+    /// Cooperative synchronous import boundary. The probe does not register
+    /// wakeups or interrupt a noncooperative native geometry operation.
+    pub fn with_cancellation_probe(probe: impl Fn() -> bool + Send + Sync + 'static) -> Self {
         Self {
-            cancellation: Some(cancellation),
+            cancellation: Some(Arc::new(probe)),
         }
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.cancellation
             .as_ref()
-            .map(runmat_execution::CancellationToken::is_cancelled)
+            .map(|is_cancelled| is_cancelled())
             .unwrap_or(false)
     }
 
@@ -110,7 +110,7 @@ impl GeometryImportContext {
     }
 
     #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
-    pub(crate) fn cancellation_token(&self) -> Option<runmat_execution::CancellationToken> {
+    pub(crate) fn cancellation_probe(&self) -> Option<CancellationProbe> {
         self.cancellation.clone()
     }
 }
@@ -268,7 +268,7 @@ pub(crate) fn default_surface_regions(
     let region_id = "region_default".to_string();
     let regions = vec![Region {
         region_id: region_id.clone(),
-        name: "Default Region".to_string(),
+        name: "Default Region".into(),
         tag: Some("mesh_default".to_string()),
         cad_ownership: None,
     }];
@@ -386,20 +386,13 @@ pub(crate) fn is_degenerate_triangle(vertices: &[[f64; 3]; 3]) -> bool {
 mod control_tests {
     use super::*;
     #[test]
-    fn import_control_keeps_live_parent_and_deadline() {
+    fn import_control_follows_its_live_caller_probe() {
         let caller = Arc::new(AtomicBool::new(false));
-        let token = runmat_execution::CancellationToken::default().with_source(caller.clone());
-        let context = GeometryImportContext::with_cancellation_token(token.clone());
+        let context = GeometryImportContext::with_cancellation(caller.clone());
         assert!(!context.is_cancelled());
-        caller.store(true, std::sync::atomic::Ordering::Release);
+        caller.store(true, Ordering::Release);
         assert!(matches!(
             context.check_cancelled(),
-            Err(GeometryImportError::Cancelled)
-        ));
-        caller.store(false, std::sync::atomic::Ordering::Release);
-        let deadline = GeometryImportContext::with_cancellation_token(token.with_deadline(Some(0)));
-        assert!(matches!(
-            deadline.check_cancelled(),
             Err(GeometryImportError::Cancelled)
         ));
     }

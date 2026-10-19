@@ -41,6 +41,56 @@ fn parent_cancellation_cascades_and_requests_active_attempt_cancellation() {
 }
 
 #[test]
+fn task_cancellation_retire_only_the_selected_active_or_queued_task() {
+    let mut fixture = common::fixture(1, 1);
+    let active = common::task("active", fixture.scope, fixture.pool, RetryPolicy::Never);
+    let active_id = active.request.id;
+    let _request = common::submit(&mut fixture.driver, active);
+    let queued = common::task("queued", fixture.scope, fixture.pool, RetryPolicy::Never);
+    let queued_id = queued.request.id;
+    fixture
+        .driver
+        .handle(DriverCommand::Submit(Box::new(queued)))
+        .unwrap();
+
+    let queued_actions = fixture
+        .driver
+        .handle(DriverCommand::CancelTask {
+            task_id: queued_id,
+            now_millis: 10,
+        })
+        .unwrap();
+    assert!(queued_actions.is_empty());
+    assert_eq!(
+        fixture.driver.snapshot().tasks[&queued_id].state,
+        TaskState::Cancelled
+    );
+    assert_ne!(
+        fixture.driver.snapshot().tasks[&active_id].state,
+        TaskState::Cancelled
+    );
+
+    let active_actions = fixture
+        .driver
+        .handle(DriverCommand::CancelTask {
+            task_id: active_id,
+            now_millis: 11,
+        })
+        .unwrap();
+    assert_eq!(
+        active_actions
+            .iter()
+            .filter(|action| matches!(action, DriverAction::Cancel(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        fixture.driver.snapshot().tasks[&active_id].state,
+        TaskState::Cancelled
+    );
+}
+
+#[test]
 fn expired_deadline_cancels_only_the_expired_task() {
     let mut fixture = common::fixture(1, 1);
     let mut first = common::task("deadline", fixture.scope, fixture.pool, RetryPolicy::Never);

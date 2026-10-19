@@ -8,7 +8,6 @@ use crate::gpu::axis::OwnedAxisData;
 use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
-use std::sync::Arc;
 
 pub type QuiverSourceData<'a> = (
     &'a NumericPlotData,
@@ -57,8 +56,8 @@ pub struct QuiverPlot {
 pub struct QuiverGpuSource {
     pub x_data: OwnedAxisData,
     pub y_data: OwnedAxisData,
-    pub u_buffer: Arc<wgpu::Buffer>,
-    pub v_buffer: Arc<wgpu::Buffer>,
+    pub u_buffer: crate::gpu::GpuInputBuffer,
+    pub v_buffer: crate::gpu::GpuInputBuffer,
     pub count: usize,
     pub rows: usize,
     pub cols: usize,
@@ -149,16 +148,14 @@ impl QuiverPlot {
                     .to_string()
             })?;
             let u = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.u_buffer,
                 source.count,
                 source.scalar,
             )
             .await?;
             let v = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.v_buffer,
                 source.count,
                 source.scalar,
@@ -176,11 +173,11 @@ impl QuiverPlot {
             };
             let x_axis = source
                 .x_data
-                .export_f64(&context.device, &context.queue, x_axis_len, source.scalar)
+                .export_f64(&context.access, x_axis_len, source.scalar)
                 .await?;
             let y_axis = source
                 .y_data
-                .export_f64(&context.device, &context.queue, y_axis_len, source.scalar)
+                .export_f64(&context.access, y_axis_len, source.scalar)
                 .await?;
             let (x, y) = match source.xy_mode {
                 0 => {
@@ -636,6 +633,52 @@ impl QuiverPlot {
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>()),
         )
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for source in [
+            &self.source_x,
+            &self.source_y,
+            &self.source_z,
+            &self.source_u,
+            &self.source_v,
+            &self.source_w,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for values in [&self.x, &self.y, &self.u, &self.v] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for values in [&self.z, &self.w].into_iter().flatten() {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        if let Some(source) = &self.gpu_source {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::owned_axis(&source.x_data)?,
+            )?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::owned_axis(&source.y_data)?,
+            )?;
+        }
+        Some(total)
     }
 }
 

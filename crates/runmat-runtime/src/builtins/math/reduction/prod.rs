@@ -26,8 +26,8 @@ use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{
     gpu_helpers,
@@ -348,13 +348,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("accumulator *= {input};"))
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            writer.write_formatted(format_args!("accumulator *= {input};"))
+        }),
     }),
     emits_nan: false,
     notes: "Fusion planner emits multiplicative reductions; providers can override with custom kernels when available.",
@@ -412,7 +409,7 @@ fn prod_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult
             let Some(storage) = tensor.integer_storage() else {
                 return Ok(None);
             };
-            (storage.clone(), tensor.shape.clone())
+            (storage.clone(), tensor.shape().to_vec())
         }
         _ => return Ok(None),
     };
@@ -724,9 +721,9 @@ async fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelectio
                 .map_err(map_dims_error)?;
             Ok(dim.map(DimSelection::Dim))
         }
-        Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
+        Value::Tensor(t) => parse_dimension_tensor(value, t.shape()).await,
         Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
-        Value::GpuTensor(handle) => parse_dimension_tensor(value, &handle.shape).await,
+        Value::GpuTensor(handle) => parse_dimension_tensor(value, handle.shape()).await,
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Ok(None),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(None),
         _ => Ok(None),
@@ -798,7 +795,7 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 
 fn prod_host(value: Value, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("prod", value)?;
-    let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
+    let resolved = resolve_dims(tensor.shape(), &parsed.selection)?;
     let reduced = prod_tensor(&tensor, &resolved, parsed.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -812,14 +809,15 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
         return prod_gpu_fallback(&handle, parsed).await;
     };
 
-    let resolved = resolve_dims(&handle.shape, &parsed.selection)?;
+    let resolved = resolve_dims(handle.shape(), &parsed.selection)?;
     if resolved.dims_in_bounds.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
     if matches!(parsed.output, OutputTemplate::Native)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
     {
-        if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
+        if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape())
+        {
             return provider
                 .reduce_integer_prod_native(&handle)
                 .await
@@ -844,7 +842,7 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
         return Ok(Value::GpuTensor(current));
     }
 
-    if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
+    if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape()) {
         if let Ok(reduced) = provider.reduce_prod(&handle).await {
             return Ok(Value::GpuTensor(reduced));
         }
@@ -867,7 +865,7 @@ async fn prod_gpu_fallback(
     parsed: &ParsedArguments,
 ) -> BuiltinResult<Value> {
     let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-    let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
+    let resolved = resolve_dims(tensor.shape(), &parsed.selection)?;
     let reduced = prod_tensor(&tensor, &resolved, parsed.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -959,10 +957,10 @@ fn prod_tensor(
     dims: &ResolvedDims,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
-    let shape = if is_scalar_shape(&tensor.shape) {
-        normalize_scalar_shape(&tensor.shape)
+    let shape = if is_scalar_shape(tensor.shape()) {
+        normalize_scalar_shape(tensor.shape())
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     };
 
     if dims.dims_in_bounds.is_empty() {
@@ -1270,7 +1268,7 @@ pub(crate) mod tests {
         let result = prod_builtin(Value::Tensor(tensor), Vec::new()).expect("prod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(values(&out), vec![4.0, 10.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1285,7 +1283,7 @@ pub(crate) mod tests {
             prod_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("prod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(values(&out), vec![6.0, 120.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1300,7 +1298,7 @@ pub(crate) mod tests {
         let result = prod_builtin(Value::Tensor(tensor), Vec::new()).expect("prod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(values(&out), vec![4.0, 10.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1328,7 +1326,7 @@ pub(crate) mod tests {
         let result = prod_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("prod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 4, 1]);
+                assert_eq!(out.shape(), [1, 4, 1]);
                 assert_eq!(values(&out), vec![16380.0, 587520.0, 4021920.0, 16030080.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1416,7 +1414,7 @@ pub(crate) mod tests {
                 let Value::Tensor(output) = result else {
                     panic!("expected tensor output");
                 };
-                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.shape(), [1, 2]);
                 assert_eq!(output.numeric_dtype(), NumericDType::F64);
                 assert_eq!(values(&output), vec![2.0, 3.0]);
             }
@@ -1452,7 +1450,7 @@ pub(crate) mod tests {
             let Value::Tensor(default) = default else {
                 panic!("expected default tensor output");
             };
-            assert_eq!(default.shape, vec![1, 3]);
+            assert_eq!(default.shape(), [1, 3]);
             assert_eq!(default.numeric_dtype(), NumericDType::F64);
             assert_eq!(values(&default), vec![1.0; 3]);
 
@@ -1461,7 +1459,7 @@ pub(crate) mod tests {
             let Value::Tensor(native) = native else {
                 panic!("expected native tensor output");
             };
-            assert_eq!(native.shape, vec![1, 3]);
+            assert_eq!(native.shape(), [1, 3]);
             assert_eq!(native.integer_storage(), Some(&storage.ones_like(3)));
 
             let default_dim_two = prod_builtin(
@@ -1472,7 +1470,7 @@ pub(crate) mod tests {
             let Value::Tensor(default_dim_two) = default_dim_two else {
                 panic!("expected default empty tensor output");
             };
-            assert_eq!(default_dim_two.shape, vec![0, 1]);
+            assert_eq!(default_dim_two.shape(), [0, 1]);
             assert_eq!(default_dim_two.numeric_dtype(), NumericDType::F64);
             assert!(default_dim_two.is_empty());
 
@@ -1484,7 +1482,7 @@ pub(crate) mod tests {
             let Value::Tensor(native_dim_two) = native_dim_two else {
                 panic!("expected native empty tensor output");
             };
-            assert_eq!(native_dim_two.shape, vec![0, 1]);
+            assert_eq!(native_dim_two.shape(), [0, 1]);
             assert_eq!(native_dim_two.integer_storage(), Some(&storage));
 
             let default_all = prod_builtin(Value::Tensor(tensor.clone()), vec![Value::from("all")])
@@ -1509,7 +1507,7 @@ pub(crate) mod tests {
             let Value::Tensor(zero_by_zero) = zero_by_zero else {
                 panic!("expected zero-by-zero tensor output");
             };
-            assert_eq!(zero_by_zero.shape, vec![1, 0]);
+            assert_eq!(zero_by_zero.shape(), [1, 0]);
             assert_eq!(zero_by_zero.integer_storage(), Some(&storage));
         }
     }
@@ -1531,7 +1529,7 @@ pub(crate) mod tests {
             prod_builtin(Value::Tensor(tensor), vec![Value::from("native")]).expect("prod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::I16(vec![4, 10, 18]))
@@ -1563,7 +1561,7 @@ pub(crate) mod tests {
         .expect("prod vecdim");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3, 1]);
+                assert_eq!(out.shape(), [1, 3, 1]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::I32(vec![112, 1080, 3960]))
@@ -1649,7 +1647,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = prod_builtin(Value::GpuTensor(handle), Vec::new()).expect("prod");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             assert_eq!(values(&gathered), vec![4.0, 10.0, 18.0]);
         });
     }
@@ -1681,7 +1679,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(output) = &result else {
                 panic!("expected resident gpuArray output");
             };
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), vec![1, 2]);
             assert_eq!(runmat_accelerate_api::handle_integer_type(output), None);
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
@@ -1705,7 +1703,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(default_handle) = &default else {
                 panic!("expected resident default output");
             };
-            assert_eq!(default_handle.shape, vec![1, 3]);
+            assert_eq!(default_handle.shape(), vec![1, 3]);
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(default_handle),
                 None
@@ -1719,7 +1717,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(native) = native else {
                 panic!("expected resident native output");
             };
-            assert_eq!(native.shape, vec![1, 3]);
+            assert_eq!(native.shape(), vec![1, 3]);
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&native),
                 Some(IntegerElementType::U16)
@@ -1798,8 +1796,8 @@ pub(crate) mod tests {
             let Value::GpuTensor(all_out) = all else {
                 panic!("expected resident all gpuArray result");
             };
-            assert_eq!(vecdim_out.shape, vec![1, 3, 1]);
-            assert_eq!(all_out.shape, vec![1, 1, 1]);
+            assert_eq!(vecdim_out.shape(), vec![1, 3, 1]);
+            assert_eq!(all_out.shape(), vec![1, 1, 1]);
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&vecdim_out),
                 Some(IntegerElementType::U16)
@@ -1832,7 +1830,7 @@ pub(crate) mod tests {
             let result =
                 prod_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")]).expect("prod");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(values(&gathered), vec![2.0, 4.0]);
         });
     }
@@ -1868,7 +1866,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 for (a, b) in values(&gt).iter().zip(values(&ct).iter()) {
                     assert!((a - b).abs() < 1e-8);
                 }

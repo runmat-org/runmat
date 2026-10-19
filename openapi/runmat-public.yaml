@@ -156,7 +156,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SubmitApplicationRequest'
+              $ref: '#/components/schemas/VersionRequest'
         required: true
       responses:
         '200':
@@ -577,6 +577,42 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/GoalFollowupRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmissionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/auth/feedback/trial-extension:
+    post:
+      tags:
+      - auth::feedback
+      operationId: request_trial_extension
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrialExtensionRequest'
         required: true
       responses:
         '200':
@@ -3852,6 +3888,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/trial:
+    get:
+      tags:
+      - orgs::trials
+      operationId: get_trial_state
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrialStateResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - orgs::trials
+      operationId: start_trial
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrialStateResponse'
+        '409':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/orgs/{orgId}/referrals:
     get:
       tags:
@@ -6864,20 +6947,47 @@ components:
       enum:
       - approve
       - deny
+      - adjust
+      - request_information
     AcademicDecisionRequest:
       type: object
       required:
       - action
       - expectedVersion
       - idempotencyKey
+      - reasonCode
       properties:
         action:
           $ref: '#/components/schemas/AcademicDecisionAction'
+        applicantMessage:
+          type: string
+          nullable: true
+        durationDays:
+          type: integer
+          format: int32
+          nullable: true
         expectedVersion:
           type: integer
           format: int32
         idempotencyKey:
           type: string
+        privateNote:
+          type: string
+          nullable: true
+        reasonCode:
+          type: string
+        seatLimit:
+          type: integer
+          format: int32
+          nullable: true
+        storageLimitGb:
+          type: number
+          format: double
+          nullable: true
+        teachingLimits:
+          allOf:
+          - $ref: '#/components/schemas/TeachingLimitsBody'
+          nullable: true
     AcademicDecisionResponse:
       type: object
       required:
@@ -7160,6 +7270,109 @@ components:
       - teaching_assistant
       - co_instructor
       - other_staff
+    AcceleratorAllocationDomainIdBody:
+      type: string
+    AcceleratorClassBody:
+      type: string
+    AcceleratorDeviceBody:
+      type: object
+      required:
+      - id
+      - allocationDomain
+      - class
+      - provider
+      - maxAllocationBytes
+      - features
+      - inventoryEpoch
+      properties:
+        allocationDomain:
+          $ref: '#/components/schemas/AcceleratorAllocationDomainIdBody'
+        class:
+          $ref: '#/components/schemas/AcceleratorClassBody'
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorFeatureBody'
+        id:
+          $ref: '#/components/schemas/AcceleratorDeviceIdBody'
+        inventoryEpoch:
+          type: integer
+          format: int64
+          minimum: 0
+        maxAllocationBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        provider:
+          $ref: '#/components/schemas/AcceleratorProviderBody'
+      additionalProperties: false
+    AcceleratorDeviceIdBody:
+      type: string
+    AcceleratorFeatureBody:
+      oneOf:
+      - type: string
+        enum:
+        - compute
+      - type: string
+        enum:
+        - unified_memory
+      - type: string
+        enum:
+        - peer_to_peer
+      - type: string
+        enum:
+        - confidential_compute
+      - type: object
+        required:
+        - custom
+        properties:
+          custom:
+            type: string
+    AcceleratorProviderBody:
+      type: object
+      required:
+      - id
+      - version
+      - abiFingerprint
+      properties:
+        abiFingerprint:
+          $ref: '#/components/schemas/DigestBody'
+        id:
+          $ref: '#/components/schemas/AcceleratorProviderIdBody'
+        version:
+          $ref: '#/components/schemas/AcceleratorProviderVersionBody'
+      additionalProperties: false
+    AcceleratorProviderIdBody:
+      type: string
+    AcceleratorProviderVersionBody:
+      type: string
+    AcceleratorRequestBody:
+      type: object
+      required:
+      - class
+      - count
+      - minimumAllocationBytes
+      - requiredFeatures
+      properties:
+        class:
+          $ref: '#/components/schemas/AcceleratorClassBody'
+        count:
+          type: integer
+          format: int32
+          minimum: 0
+        minimumAllocationBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        provider:
+          allOf:
+          - $ref: '#/components/schemas/AcceleratorProviderBody'
+          nullable: true
+        requiredFeatures:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorFeatureBody'
+      additionalProperties: false
     ActivateAcademicRequest:
       type: object
       required:
@@ -7251,11 +7464,16 @@ components:
       - projectId
       - queue
       - resources
+      - acceleratorDevices
       - role
       - state
       - fencingToken
       - expiresAt
       properties:
+        acceleratorDevices:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
         expiresAt:
           type: string
           format: date-time
@@ -7888,6 +8106,9 @@ components:
         runKeyEnvelope:
           type: string
           description: Base64url-encoded canonical run-key envelope for the verified worker.
+        readyV1:
+          type: boolean
+          description: Opt in this exact allocation to encrypted worker ReadyV1 discovery.
       additionalProperties: false
     BeginTransferRequest:
       type: object
@@ -8202,7 +8423,15 @@ components:
       - endsAt
       - expectedEnrollment
       - idempotencyKey
+      - accessStartsAt
+      - accessEndsAt
       properties:
+        accessEndsAt:
+          type: string
+          format: date-time
+        accessStartsAt:
+          type: string
+          format: date-time
         allocationId:
           type: string
         authorizationId:
@@ -8398,6 +8627,8 @@ components:
           minimum: 0
         updated_at:
           type: string
+    DigestBody:
+      type: string
     DirectQuicEndpointBody:
       type: object
       required:
@@ -8492,6 +8723,9 @@ components:
           type: string
         runId:
           type: string
+        readyV1:
+          type: boolean
+          description: This Server accepts allocation-bound ReadyV1 intent.
     DriverHeartbeatRequest:
       type: object
       required:
@@ -8556,6 +8790,11 @@ components:
           type: string
         driverResources:
           $ref: '#/components/schemas/ResourceRequestBody'
+        driverAcceleratorDevices:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
+          nullable: true
         endpointFingerprint:
           type: string
         fencingToken:
@@ -8628,8 +8867,14 @@ components:
       - fencingToken
       - state
       - resources
+      - acceleratorDevices
+      - host
       - runKeyEnvelopeAuthorized
       properties:
+        acceleratorDevices:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
         allocationLeaseId:
           type: string
         endpointIdentity:
@@ -8640,6 +8885,8 @@ components:
           type: integer
           format: int64
           minimum: 0
+        host:
+          $ref: '#/components/schemas/ExecutionHostInventoryBody'
         resources:
           $ref: '#/components/schemas/ResourceRequestBody'
         runKeyEnvelopeAuthorized:
@@ -8819,6 +9066,80 @@ components:
         traceId:
           type: string
           nullable: true
+    ExecutionCapabilityBody:
+      type: string
+      enum:
+      - host-runtime
+      - filesystem
+      - network
+      - user-interface
+      - accelerator
+      - native-code
+      - foreign-runtime
+      - parallel-runtime
+      - distributed-runtime
+    ExecutionHostInventoryBody:
+      type: object
+      required:
+      - schemaVersion
+      - semanticSchema
+      - compilerSchema
+      - runtimeFingerprint
+      - catalogFingerprint
+      - compatibilityModes
+      - platform
+      - capabilities
+      - adapters
+      - processStackAvailable
+      - hostBridgeAvailable
+      - trustTier
+      properties:
+        adapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForeignAdapterInventoryBody'
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionCapabilityBody'
+        catalogFingerprint:
+          type: string
+        compatibilityModes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LanguageCompatibilityModeBody'
+        compilerSchema:
+          type: integer
+          format: int32
+          minimum: 0
+        hostBridgeAvailable:
+          type: boolean
+        nativeTarget:
+          allOf:
+          - $ref: '#/components/schemas/NativeTargetIdentityBody'
+          nullable: true
+        platform:
+          $ref: '#/components/schemas/ExecutionHostPlatformBody'
+        processStackAvailable:
+          type: boolean
+        runtimeFingerprint:
+          type: string
+        schemaVersion:
+          type: integer
+          format: int32
+          minimum: 0
+        semanticSchema:
+          type: integer
+          format: int32
+          minimum: 0
+        trustTier:
+          $ref: '#/components/schemas/ExecutionTrustTierBody'
+      additionalProperties: false
+    ExecutionHostPlatformBody:
+      type: string
+      enum:
+      - native
+      - browser-wasm
     ExecutionOrganizationOverviewResponse:
       type: object
       required:
@@ -8932,6 +9253,11 @@ components:
           format: int64
           minimum: 0
       additionalProperties: false
+    ExecutionStackRequirementBody:
+      type: string
+      enum:
+      - any
+      - process
     ExecutionTrustTierBody:
       type: string
       enum:
@@ -9004,6 +9330,48 @@ components:
           type: string
         version:
           type: string
+    ForeignAdapterInventoryBody:
+      type: object
+      required:
+      - adapter
+      - version
+      - capabilities
+      - foreignCapabilities
+      - executionStack
+      - supportsWasm
+      - supportsHostBridge
+      properties:
+        adapter:
+          type: string
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionCapabilityBody'
+        executionStack:
+          $ref: '#/components/schemas/ExecutionStackRequirementBody'
+        foreignCapabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ForeignCapabilityBody'
+        supportsHostBridge:
+          type: boolean
+        supportsWasm:
+          type: boolean
+        version:
+          type: integer
+          format: int32
+          minimum: 0
+      additionalProperties: false
+    ForeignCapabilityBody:
+      type: string
+      enum:
+      - invoke
+      - read
+      - write
+      - callback
+      - transfer
+      - serialize
+      - zero-copy
     FsCommitRequest:
       type: object
       required:
@@ -10292,6 +10660,12 @@ components:
           minimum: 0
         wrappedKey:
           type: string
+    LanguageCompatibilityModeBody:
+      type: string
+      enum:
+      - runmat
+      - matlab
+      - strict
     MarcomBackfillRequest:
       type: object
       properties:
@@ -10343,6 +10717,45 @@ components:
       - low
       - medium
       - high
+    NativeTargetIdentityBody:
+      type: object
+      required:
+      - architecture
+      - operatingSystem
+      - pointerWidth
+      - abi
+      - objectFormat
+      properties:
+        abi:
+          type: string
+        architecture:
+          $ref: '#/components/schemas/NativeTargetIdentityBodyArchitecture'
+        objectFormat:
+          $ref: '#/components/schemas/NativeTargetIdentityBodyObjectFormat'
+        operatingSystem:
+          $ref: '#/components/schemas/NativeTargetIdentityBodyOperatingSystem'
+        pointerWidth:
+          type: integer
+          format: int32
+          minimum: 0
+      additionalProperties: false
+    NativeTargetIdentityBodyArchitecture:
+      type: string
+      enum:
+      - x86_64
+      - aarch64
+    NativeTargetIdentityBodyObjectFormat:
+      type: string
+      enum:
+      - mach-o
+      - elf
+      - coff
+    NativeTargetIdentityBodyOperatingSystem:
+      type: string
+      enum:
+      - macos
+      - linux
+      - windows
     NodeCredentialResponse:
       type: object
       required:
@@ -12635,20 +13048,13 @@ components:
       - cpuMillicores
       - memoryBytes
       - scratchBytes
-      - acceleratorCount
-      - acceleratorMemoryBytes
+      - accelerators
+      - host
       properties:
-        acceleratorClass:
-          type: string
-          nullable: true
-        acceleratorCount:
-          type: integer
-          format: int32
-          minimum: 0
-        acceleratorMemoryBytes:
-          type: integer
-          format: int64
-          minimum: 0
+        accelerators:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorDeviceBody'
         capabilities:
           type: object
           additionalProperties:
@@ -12657,6 +13063,8 @@ components:
           type: integer
           format: int64
           minimum: 0
+        host:
+          $ref: '#/components/schemas/ExecutionHostInventoryBody'
         memoryBytes:
           type: integer
           format: int64
@@ -12672,21 +13080,13 @@ components:
       - cpuMillicores
       - memoryBytes
       - scratchBytes
-      - acceleratorCount
-      - acceleratorMemoryBytes
+      - accelerators
       - maximumWallMillis
       properties:
-        acceleratorClass:
-          type: string
-          nullable: true
-        acceleratorCount:
-          type: integer
-          format: int32
-          minimum: 0
-        acceleratorMemoryBytes:
-          type: integer
-          format: int64
-          minimum: 0
+        accelerators:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceleratorRequestBody'
         cpuMillicores:
           type: integer
           format: int64
@@ -13474,17 +13874,6 @@ components:
           minimum: 0
         kind:
           type: string
-    SubmitApplicationRequest:
-      type: object
-      required:
-      - expectedVersion
-      properties:
-        applicantName:
-          type: string
-          nullable: true
-        expectedVersion:
-          type: integer
-          format: int32
     SubmitRunRequest:
       type: object
       required:
@@ -13555,6 +13944,22 @@ components:
         startsAt:
           type: string
           format: date-time
+    TeachingLimitsBody:
+      type: object
+      required:
+      - maxActiveCourses
+      - maxEnrollmentPerCourse
+      - maxAggregateEnrollment
+      properties:
+        maxActiveCourses:
+          type: integer
+          format: int32
+        maxAggregateEnrollment:
+          type: integer
+          format: int32
+        maxEnrollmentPerCourse:
+          type: integer
+          format: int32
     TelemetryIngestRequest:
       type: object
       required:
@@ -13723,6 +14128,35 @@ components:
         orgId:
           type: string
       additionalProperties: false
+    TrialExtensionRequest:
+      type: object
+      required:
+      - comment
+      properties:
+        comment:
+          type: string
+    TrialExtensionStateResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+    TrialStateResponse:
+      type: object
+      required:
+      - state
+      properties:
+        endsAt:
+          type: string
+          format: date-time
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        state:
+          type: string
     TrustTierBody:
       type: string
       enum:
@@ -14047,9 +14481,12 @@ components:
       type: object
       required:
       - onboardingGoalFollowup
+      - trialExtension
       properties:
         onboardingGoalFollowup:
           $ref: '#/components/schemas/OnboardingGoalFollowupStateResponse'
+        trialExtension:
+          $ref: '#/components/schemas/TrialExtensionStateResponse'
     UserPreferencesRequest:
       type: object
       required:
@@ -14277,6 +14714,9 @@ components:
         relayTicket:
           type: string
           description: Single-use, short-lived capability for the allocation-owned worker.
+        readyV1:
+          type: boolean
+          description: Present only when the authoritative driver opted in this allocation.
         runId:
           type: string
         runKeyEnvelope:

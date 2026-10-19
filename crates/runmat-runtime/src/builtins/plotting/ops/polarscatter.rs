@@ -23,7 +23,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use super::line::handles_value;
 use super::op_common::polar::{
     evaluate_theta_rho_tensors, is_real_numeric_value, polar_to_cartesian, real_tensor_from_value,
-    tensor_is_vector, EvaluatedPolarData,
+    tensor_cols, tensor_is_vector, tensor_rows, EvaluatedPolarData,
 };
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
@@ -361,6 +361,7 @@ async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value>
     let opts = PlotRenderOptions {
         axis_equal: true,
         grid: true,
+        ..Default::default()
     };
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
         figure.set_axes_kind(axes_index, AxesKind::Polar);
@@ -390,8 +391,7 @@ async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value>
         })
         .collect();
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handles_value(handles));
         }
         return Err(err);
@@ -412,7 +412,9 @@ fn series_style_value(
     if tensor_utils::tensor_element_len(tensor) <= 1 || tensor_is_vector(tensor) {
         return value.clone();
     }
-    if tensor.rows == point_count && tensor.cols == series_count {
+    let rows = tensor_rows(tensor);
+    let cols = tensor_cols(tensor);
+    if rows == point_count && cols == series_count {
         let start = series_idx * point_count;
         let indices: Vec<usize> = (start..start + point_count).collect();
         let storage = tensor
@@ -425,7 +427,7 @@ fn series_style_value(
                 .expect("series style column shape"),
         );
     }
-    if is_color_arg && (tensor.cols == 3 || tensor.cols == 4) && tensor.rows == point_count {
+    if is_color_arg && (cols == 3 || cols == 4) && rows == point_count {
         return value.clone();
     }
     value.clone()
@@ -503,6 +505,56 @@ mod tests {
             tensor.integer_storage(),
             Some(&IntegerStorage::U8(vec![30, 40]))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn polarscatter_preserves_rank_zero_and_rank_one_style_boundaries() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+
+        for (size, expected_sizes) in [
+            (
+                Value::Tensor(Tensor::new(vec![25.0], Vec::new()).unwrap()),
+                Some(vec![
+                    marker_area_points2_to_diameter_px(25.0),
+                    marker_area_points2_to_diameter_px(25.0),
+                ]),
+            ),
+            (
+                Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).unwrap()),
+                Some(vec![
+                    marker_area_points2_to_diameter_px(10.0),
+                    marker_area_points2_to_diameter_px(20.0),
+                ]),
+            ),
+        ] {
+            reset_plot_state();
+            reset_hold_state_for_run();
+            futures::executor::block_on(polarscatter_builtin(vec![
+                tensor(&[0.0, 1.0], 1, 2),
+                tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2),
+                size,
+            ]))
+            .expect("polarscatter style rank boundary");
+
+            let figure = clone_figure(current_figure_handle()).expect("figure");
+            assert_eq!(figure.plots().count(), 2);
+            for plot in figure.plots() {
+                let runmat_plot::plots::PlotElement::Scatter(scatter) = plot else {
+                    panic!("expected scatter plot");
+                };
+                let rendered_sizes: Vec<_> = (0..scatter.len())
+                    .map(|index| {
+                        scatter
+                            .per_point_sizes
+                            .as_ref()
+                            .map_or(scatter.marker_size, |sizes| sizes[index])
+                    })
+                    .collect();
+                assert_eq!(Some(rendered_sizes), expected_sizes);
+            }
+        }
     }
 
     #[test]

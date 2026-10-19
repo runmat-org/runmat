@@ -1,22 +1,13 @@
-use runmat_builtins::{ResolveContext, Type};
 use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
 
-const TEST_RUNNER_CLASS: &str = "matlab.unittest.TestRunner";
-
-fn runner_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Object {
-        class_name: Some(TEST_RUNNER_CLASS.into()),
-        shape: Some(vec![Some(1), Some(1)]),
-    }
-}
+const TEST_RUNNER_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.TestRunner");
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestRunner.withTextOutput",
-    category = "testing",
-    summary = "Construct a test runner that emits text progress through the host reporter.",
-    type_resolver(runner_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::testrunner"
 )]
 async fn with_text_output(options: Vec<Value>) -> BuiltinResult<Value> {
@@ -26,6 +17,14 @@ async fn with_text_output(options: Vec<Value>) -> BuiltinResult<Value> {
             "TestRunner.withTextOutput options must be name-value pairs",
         ));
     }
+    if !options.is_empty() {
+        return Err(
+            build_runtime_error("TestRunner.withTextOutput options are not supported yet")
+                .with_identifier("RunMat:Testing:UnsupportedRunnerOption")
+                .with_builtin("matlab.unittest.TestRunner.withTextOutput")
+                .build(),
+        );
+    }
     let runner = crate::new_handle_object_builtin(TEST_RUNNER_CLASS.into()).await?;
     set_plugins(&runner, Vec::new())?;
     Ok(runner)
@@ -33,27 +32,29 @@ async fn with_text_output(options: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestRunner.addPlugin",
-    category = "testing/plugins",
-    summary = "Attach a compatible TestRunnerPlugin to a runner.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::testrunner"
 )]
 fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
     crate::testing::ensure_testing_classes();
     let plugin_class = match &plugin {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
-        _ => "",
+        Value::Object(object) => Some(&object.class_name),
+        Value::HandleObject(handle) => Some(&handle.class_name),
+        _ => None,
     };
-    if !crate::class_registry::is_class_or_subclass(
-        plugin_class,
-        "matlab.unittest.plugins.TestRunnerPlugin",
-    ) {
+    if !plugin_class.is_some_and(|identity| {
+        crate::class_registry::is_class_or_subclass(
+            identity,
+            &runmat_types::standard::UNIT_TEST_RUNNER_PLUGIN.owned(),
+        )
+    }) {
         return Err(runner_error("addPlugin requires a TestRunnerPlugin"));
     }
     let Value::HandleObject(handle) = &runner else {
         return Err(runner_error("addPlugin requires a TestRunner handle"));
     };
-    if !crate::class_registry::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
+    if !crate::class_registry::is_class_or_subclass(&handle.class_name, &TEST_RUNNER_CLASS.owned())
+    {
         return Err(runner_error("addPlugin requires a TestRunner handle"));
     }
     runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
@@ -65,9 +66,8 @@ fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
                     Value::Cell(runmat_value::CellArray::new(Vec::new(), 1, 0).unwrap())
                 });
             if let Value::Cell(plugins) = plugins {
-                plugins.data.push(plugin);
-                plugins.cols += 1;
-                true
+                runmat_gc::gc_record_handle_write(&handle.target, &plugin);
+                plugins.push_row_element(plugin).is_ok()
             } else {
                 false
             }
@@ -86,15 +86,15 @@ fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestRunner.run",
-    category = "testing",
-    summary = "Run a suite through the active Core test executor.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::testrunner"
 )]
 async fn run(runner: Value, suite: Value) -> BuiltinResult<Value> {
     let Value::HandleObject(handle) = &runner else {
         return Err(runner_error("TestRunner.run requires a TestRunner handle"));
     };
-    if !crate::class_registry::is_class_or_subclass(&handle.class_name, TEST_RUNNER_CLASS) {
+    if !crate::class_registry::is_class_or_subclass(&handle.class_name, &TEST_RUNNER_CLASS.owned())
+    {
         return Err(runner_error("TestRunner.run requires a TestRunner handle"));
     }
     let plugins = runmat_gc::gc_with_value(&handle.target, |target| {
@@ -146,4 +146,54 @@ fn runner_error(message: impl Into<String>) -> crate::RuntimeError {
         .with_identifier("RunMat:Testing:InvalidRunner")
         .with_builtin("matlab.unittest.TestRunner")
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    #[test]
+    fn text_runner_rejects_options_that_it_cannot_apply() {
+        let odd = futures::executor::block_on(with_text_output(vec![Value::String(
+            "OutputDetail".into(),
+        )]))
+        .unwrap_err();
+        assert_eq!(odd.identifier(), Some("RunMat:Testing:InvalidRunner"));
+
+        let ignored = futures::executor::block_on(with_text_output(vec![
+            Value::String("OutputDetail".into()),
+            Value::String("Verbose".into()),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            ignored.identifier(),
+            Some("RunMat:Testing:UnsupportedRunnerOption")
+        );
+    }
+
+    #[test]
+    fn add_plugin_updates_the_public_cell_shape() {
+        let runner = block_on(with_text_output(Vec::new())).unwrap();
+        let plugin = Value::Object(runmat_value::ObjectInstance::new(
+            runmat_types::standard::UNIT_TEST_RUNNER_PLUGIN.owned(),
+        ));
+
+        let updated = add_plugin(runner.clone(), plugin).unwrap();
+        assert_eq!(updated, runner);
+        let plugins = block_on(crate::object::resolve::load_member(
+            runner,
+            "Plugins".into(),
+            false,
+            None,
+        ))
+        .unwrap();
+        let Value::Cell(plugins) = plugins.value() else {
+            panic!("runner.Plugins should be a cell array");
+        };
+        assert_eq!(plugins.shape, [1, 1]);
+        assert_eq!(plugins.rows, 1);
+        assert_eq!(plugins.cols, 1);
+        assert_eq!(plugins.data.len(), 1);
+    }
 }

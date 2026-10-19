@@ -1,0 +1,16 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog, title: Some("ls"), slug: Some("ls"), summary: "List file and folder names.",
+    description: "`ls` lists local files and folders, optionally selected by a file, folder, or wildcard name.",
+    keywords: &["ls", "files", "folders", "wildcard", "listing"], related: &["dir", "what", "pwd", "cd"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Paths and patterns", paragraphs: &["With no input, `ls` lists the current folder. Pass a character vector or string scalar to list a different folder, one file, or names selected by `*` and `?`. Relative paths use the current folder and a leading `~` uses the active environment.", "The implemented API interprets its input as a filesystem name. Unix command flags are not passed to a host shell, and remote URLs are not currently resolved."] },
+        BuiltinDocumentationSection { heading: "Character-array result", paragraphs: &["When an output is requested, `ls` returns characters. In RunMat mode the result has one padded row per entry on every platform, which makes the shape deterministic across native and browser execution. Directory names end with the platform file separator and duplicate wildcard matches are removed.", "MATLAB compatibility mode preserves the platform-specific layout: Unix-like targets return a separated character vector, while Windows returns one padded row per name. A pattern with no matches returns an empty character array."] },
+        BuiltinDocumentationSection { heading: "Execution boundary", paragraphs: &["Enumeration uses RunMat's filesystem service on native and browser/WASM targets. Paths must be host text; numeric and provider-resident inputs reject before provider or filesystem access.", "Calling `ls` without an output writes the listing to the active console. Capturing the result suppresses that console rendering."] },
+    ],
+    examples: super::examples::EXAMPLES, example_exemption: None, faqs: super::faqs::FAQS,
+    links: &[BuiltinDocumentationLink { label: "dir", target: BuiltinDocumentationLinkTarget::Builtin("dir") }, BuiltinDocumentationLink { label: "what", target: BuiltinDocumentationLinkTarget::Builtin("what") }, BuiltinDocumentationLink { label: "pwd", target: BuiltinDocumentationLinkTarget::Builtin("pwd") }, BuiltinDocumentationLink { label: "cd", target: BuiltinDocumentationLinkTarget::Builtin("cd") }], media: &[],
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "Name listing runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/directory_listing/ls") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Name listing and layout behavior", location: "builtins::io::repl_fs::directory_listing::ls::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Executable filesystem examples", location: "scripts/runtime/verify-builtin-examples.mjs" }], notes: &[] },
+    introduced: Some("before R2006a"), status: Some(BuiltinDocumentationStatus::Stable),
+};

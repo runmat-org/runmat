@@ -1,0 +1,114 @@
+use crate::{BuiltinCatalogEntry, MathInferenceRule};
+use runmat_types::{CallInference, CallRequest};
+
+pub(in crate::catalog::inference) fn infer(
+    rule: MathInferenceRule,
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
+    match rule {
+        MathInferenceRule::AngleConversion(rule) => {
+            super::super::math::angle_conversion::infer(rule, request, entry)
+        }
+        MathInferenceRule::Atan2 => super::super::math::two_argument_angle::infer(request, entry),
+        MathInferenceRule::Bsxfun => {
+            crate::catalog::entries::math::elementwise::bsxfun::infer(request, entry)
+        }
+        MathInferenceRule::BesselJ => super::super::math::bessel_functions::infer(request, entry),
+        MathInferenceRule::BinaryArithmetic(rule) => {
+            crate::catalog::entries::math::elementwise::binary_arithmetic::infer_binary_arithmetic(
+                rule, request, entry,
+            )
+        }
+        MathInferenceRule::MatrixArithmetic(rule) => {
+            crate::catalog::entries::math::infer_matrix_arithmetic(rule, request, entry)
+        }
+        MathInferenceRule::Bitwise(rule) => {
+            super::super::math::bitwise::infer(rule, request, entry)
+        }
+        MathInferenceRule::ComplexConstruction => {
+            super::super::math::complex_construction::infer(request, entry)
+        }
+        MathInferenceRule::Discrete(rule) => {
+            super::super::math::discrete::infer(rule, request, entry)
+        }
+        MathInferenceRule::ErrorFunction(rule) => {
+            super::super::math::error_functions::infer(rule, request, entry)
+        }
+        MathInferenceRule::GammaFunction(rule) => {
+            super::super::math::gamma_functions::infer(rule, request, entry)
+        }
+        MathInferenceRule::Heaviside => super::super::math::heaviside::infer(request, entry),
+        MathInferenceRule::IntegerDivide => {
+            super::super::math::integer_division::infer(request, entry)
+        }
+        MathInferenceRule::Hypot => super::super::math::hypotenuse::infer(request, entry),
+        MathInferenceRule::MagnitudePhaseSign(kind) => {
+            super::super::math::magnitude_phase_sign::infer(kind, request, entry)
+        }
+        MathInferenceRule::Exponential(kind) => {
+            super::super::math::exponentials::infer(kind, request, entry)
+        }
+        MathInferenceRule::Logarithm(kind) => {
+            super::super::math::logarithms::infer(kind, request, entry)
+        }
+        MathInferenceRule::LogicalReduction(kind) => {
+            super::super::math_reduction::infer_logical(request, entry, kind)
+        }
+        MathInferenceRule::Root(kind) => super::super::math::roots::infer(kind, request, entry),
+        MathInferenceRule::NumericLimit(rule) => {
+            super::super::math::numeric_limits::infer(request, entry, rule)
+        }
+        MathInferenceRule::NumericConversion(target) => {
+            super::super::math::numeric_conversion::infer_numeric_conversion_call(
+                request, entry, target,
+            )
+        }
+        MathInferenceRule::NumericConversionWithLike(target) => {
+            super::super::math::numeric_conversion::infer_numeric_conversion_with_like_call(
+                request, entry, target,
+            )
+        }
+        MathInferenceRule::NumericComponent(rule) => {
+            super::super::math::complex_components::infer(request, entry, rule)
+        }
+        MathInferenceRule::Rescale => {
+            crate::catalog::entries::math::elementwise::rescale::infer(request, entry)
+        }
+        MathInferenceRule::Typecast => {
+            crate::catalog::entries::math::elementwise::typecast::infer(request, entry)
+        }
+        MathInferenceRule::Rounding(function) => {
+            super::super::math_rounding::infer_rounding(request, entry, function)
+        }
+        MathInferenceRule::Round => super::super::math_rounding::infer_round(request, entry),
+        MathInferenceRule::Remainder(function) => {
+            super::super::math::remainder::infer(function, request, entry)
+        }
+        MathInferenceRule::Trigonometric(function) => {
+            super::super::math_trigonometric::infer_trigonometric(request, entry, function)
+        }
+        MathInferenceRule::Hyperbolic(function) => {
+            super::super::math_hyperbolic::infer_hyperbolic(request, entry, function)
+        }
+        MathInferenceRule::PiScaledTrigonometric(function) => {
+            super::super::math_trigonometric::infer_pi_scaled_trigonometric(
+                request, entry, function,
+            )
+        }
+        MathInferenceRule::PowerOfTwo(rule) => {
+            super::super::math::powers_of_two::infer(rule, request, entry)
+        }
+        MathInferenceRule::DegreeTrigonometric(function) => {
+            super::super::math_degree_trigonometric::infer_degree_trigonometric(
+                request, entry, function,
+            )
+        }
+        MathInferenceRule::InverseTrigonometric(function) => {
+            super::super::math::inverse::infer_inverse_trigonometric(request, entry, function)
+        }
+        MathInferenceRule::InverseHyperbolic(function) => {
+            super::super::math::inverse::infer_inverse_hyperbolic(request, entry, function)
+        }
+    }
+}

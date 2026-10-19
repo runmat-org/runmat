@@ -115,11 +115,22 @@ pub(crate) fn elementwise_value_extrema(
 ) -> Result<Option<IntegerExtrema>, String> {
     let left_integer = integer_storage_and_shape(left);
     let right_integer = integer_storage_and_shape(right);
+    if elementwise_result_class(
+        left_integer
+            .as_ref()
+            .map(|(storage, _)| storage.integer_class()),
+        right_integer
+            .as_ref()
+            .map(|(storage, _)| storage.integer_class()),
+        scalar_double_value(left).is_some(),
+        scalar_double_value(right).is_some(),
+    )
+    .is_none()
+    {
+        return Ok(None);
+    }
     match (left_integer, right_integer) {
         (Some((left_storage, left_shape)), Some((right_storage, right_shape))) => {
-            if left_storage.class_name() != right_storage.class_name() {
-                return Ok(None);
-            }
             elementwise_extrema(
                 &left_storage,
                 &left_shape,
@@ -152,13 +163,29 @@ pub(crate) fn elementwise_value_extrema(
     }
 }
 
+/// Class admission shared by exact host computation and resident output
+/// contracts. A logical scalar or scalar Single is not a scalar Double.
+pub(crate) fn elementwise_result_class(
+    left: Option<runmat_types::IntegerClass>,
+    right: Option<runmat_types::IntegerClass>,
+    left_scalar_double: bool,
+    right_scalar_double: bool,
+) -> Option<runmat_types::IntegerClass> {
+    match (left, right) {
+        (Some(left), Some(right)) if left == right => Some(left),
+        (Some(left), None) if right_scalar_double => Some(left),
+        (None, Some(right)) if left_scalar_double => Some(right),
+        _ => None,
+    }
+}
+
 fn integer_storage_and_shape(value: &Value) -> Option<(IntegerStorage, Vec<usize>)> {
     match value {
         Value::Int(value) => Some((storage_from_scalar(value), vec![1, 1])),
         Value::Tensor(tensor) => tensor
             .integer_storage()
             .cloned()
-            .map(|storage| (storage, tensor.shape.clone())),
+            .map(|storage| (storage, tensor.shape().to_vec())),
         _ => None,
     }
 }

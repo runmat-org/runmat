@@ -11,14 +11,8 @@ use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
 use egui::{Align2, Color32, Context, FontId, Pos2, Rect, Stroke};
 use glam::{Vec3, Vec4};
 
-#[cfg(target_arch = "wasm32")]
 fn transparent_frame() -> egui::Frame {
     egui::Frame::NONE
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn transparent_frame() -> egui::Frame {
-    egui::Frame::none()
 }
 
 fn format_scalar_legend_value(value: f64, unit: &str) -> String {
@@ -671,6 +665,16 @@ impl PlotOverlay {
         let Some((position, units)) = plot_renderer.overlay_position_for_axes(axes_index) else {
             return outer;
         };
+        Self::positioned_axes_rect(outer, position, &units)
+    }
+
+    fn positioned_axes_rect(outer: Rect, position: [f64; 4], units: &str) -> Rect {
+        // A newly created browser surface can be smaller than the overlay's
+        // margins. Keep the placement rectangle nonempty before clamping.
+        let outer = Rect::from_min_size(
+            outer.min,
+            egui::vec2(outer.width().max(1.0), outer.height().max(1.0)),
+        );
         let (left, bottom, width, height) = if units.eq_ignore_ascii_case("normalized") {
             (
                 position[0] as f32 * outer.width(),
@@ -1155,7 +1159,7 @@ impl PlotOverlay {
     pub fn render(
         &mut self,
         ctx: &Context,
-        plot_renderer: &PlotRenderer,
+        plot_renderer: &mut PlotRenderer,
         config: &OverlayConfig,
         metrics: OverlayMetrics,
     ) -> FrameInfo {
@@ -1204,13 +1208,10 @@ impl PlotOverlay {
                                     },
                                 );
                             };
-                            #[cfg(target_arch = "wasm32")]
                             ui.allocate_new_ui(
                                 egui::UiBuilder::new().max_rect(padded),
                                 add_toolbar,
                             );
-                            #[cfg(not(target_arch = "wasm32"))]
-                            ui.allocate_ui_at_rect(padded, add_toolbar);
                         });
                 } else {
                     self.toolbar_rect = None;
@@ -1402,7 +1403,7 @@ impl PlotOverlay {
     fn render_plot_area(
         &mut self,
         ui: &mut egui::Ui,
-        plot_renderer: &PlotRenderer,
+        plot_renderer: &mut PlotRenderer,
         config: &OverlayConfig,
     ) -> Rect {
         let available_rect = ui.available_rect_before_wrap();
@@ -1459,6 +1460,16 @@ impl PlotOverlay {
                     .expect("one panel layout per subplot cell");
                 let r =
                     Self::snap_rect_to_pixels(panel_layout.plot_rect, ui.ctx().pixels_per_point());
+                plot_renderer.fit_pending_figure_camera_for_viewport(
+                    i,
+                    (
+                        (r.width() * ui.ctx().pixels_per_point()).round().max(1.0) as u32,
+                        (r.height() * ui.ctx().pixels_per_point()).round().max(1.0) as u32,
+                    ),
+                );
+                let cam = plot_renderer
+                    .axes_camera(i)
+                    .unwrap_or_else(|| plot_renderer.camera());
                 let frame_rect =
                     Self::snap_rect_to_pixels(panel_layout.frame_rect, ui.ctx().pixels_per_point());
                 rendered_axes_rects.push(r);
@@ -1609,11 +1620,22 @@ impl PlotOverlay {
                 }
             }
         } else {
-            let cam = plot_renderer.camera();
             let panel_layout =
                 self.panel_layout_for_axes(plot_area_rect, plot_renderer, 0, config.font_scale);
             let centered_plot_rect =
                 Self::snap_rect_to_pixels(panel_layout.plot_rect, ui.ctx().pixels_per_point());
+            plot_renderer.fit_pending_figure_camera_for_viewport(
+                0,
+                (
+                    (centered_plot_rect.width() * ui.ctx().pixels_per_point())
+                        .round()
+                        .max(1.0) as u32,
+                    (centered_plot_rect.height() * ui.ctx().pixels_per_point())
+                        .round()
+                        .max(1.0) as u32,
+                ),
+            );
+            let cam = plot_renderer.camera();
             let centered_frame_rect =
                 Self::snap_rect_to_pixels(panel_layout.frame_rect, ui.ctx().pixels_per_point());
             rendered_axes_rects.push(centered_plot_rect);
@@ -2030,6 +2052,9 @@ impl PlotOverlay {
                             - ((y_val.log10() - y_min.log10()) / (y_max.log10() - y_min.log10()))
                                 as f32
                                 * plot_rect.height();
+                        let y_screen = plot_renderer
+                            .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                            .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         if (y_screen - plot_rect.min.y).abs() <= edge_eps
                             || (y_screen - plot_rect.max.y).abs() <= edge_eps
@@ -2066,6 +2091,9 @@ impl PlotOverlay {
                             }
                             let y_screen = plot_rect.max.y
                                 - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                            let y_screen = plot_renderer
+                                .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                                .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                             let y_screen = Self::snap_coord(y_screen, ppp);
                             if (y_screen - plot_rect.min.y).abs() <= edge_eps
                                 || (y_screen - plot_rect.max.y).abs() <= edge_eps
@@ -2100,6 +2128,9 @@ impl PlotOverlay {
                             plot_rect.max.y
                                 - ((y_val - y_min) / y_range) as f32 * plot_rect.height()
                         };
+                        let y_screen = plot_renderer
+                            .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                            .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         if (y_screen - plot_rect.min.y).abs() <= edge_eps
                             || (y_screen - plot_rect.max.y).abs() <= edge_eps
@@ -2321,6 +2352,9 @@ impl PlotOverlay {
                     } else {
                         plot_rect.max.y - ((*y_val - y_min) / y_range) as f32 * plot_rect.height()
                     };
+                    let y_screen = plot_renderer
+                        .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                        .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
@@ -2364,6 +2398,9 @@ impl PlotOverlay {
                         }
                         let y_screen = plot_rect.max.y
                             - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                        let y_screen = plot_renderer
+                            .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                            .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         ui.painter().line_segment(
                             [
@@ -2451,6 +2488,9 @@ impl PlotOverlay {
                         }
                         let y_screen = plot_rect.max.y
                             - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                        let y_screen = plot_renderer
+                            .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                            .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         // Tick
                         ui.painter().line_segment(
@@ -2546,6 +2586,9 @@ impl PlotOverlay {
                         - ((decade.log10() - y_min.log10()) / (y_max.log10() - y_min.log10()))
                             as f32
                             * plot_rect.height();
+                    let y_screen = plot_renderer
+                        .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                        .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
@@ -2568,6 +2611,9 @@ impl PlotOverlay {
                 for y_val in plot_utils::generate_major_ticks(y_min, y_max) {
                     let y_screen =
                         plot_rect.max.y - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                    let y_screen = plot_renderer
+                        .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                        .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
@@ -2695,7 +2741,10 @@ impl PlotOverlay {
             },
             AxisItem {
                 label: "Y",
-                dir_world: Vec3::Y,
+                dir_world: Vec3::Y
+                    * plot_renderer
+                        .overlay_y_direction_for_axes(axes_index)
+                        .orient(1., -1., 1.),
                 color: Color32::from_rgb(90, 220, 120),
                 z_sort: 0.0,
             },
@@ -2778,7 +2827,7 @@ impl PlotOverlay {
         let w = plot_rect.width().max(1.0);
         let h = plot_rect.height().max(1.0);
         cam.update_aspect_ratio(w / h);
-        let view_proj = cam.view_proj_matrix();
+        let view_proj = cam.view_proj_matrix() * plot_renderer.axes_model_matrix(axes_index);
 
         let project = |p: Vec3| -> Option<Pos2> {
             let clip: Vec4 = view_proj * Vec4::new(p.x, p.y, p.z, 1.0);
@@ -3131,16 +3180,12 @@ impl PlotOverlay {
                 | crate::plots::figure::PlotType::Pie
                 | crate::plots::figure::PlotType::ContourFill => {
                     ui.painter().rect_filled(swatch_rect, 2.0, c);
-                    #[cfg(target_arch = "wasm32")]
                     ui.painter().rect_stroke(
                         swatch_rect,
                         2.0,
                         Stroke::new(1.0_f32, legend_stroke),
-                        egui::StrokeKind::Inside,
+                        super::OUTLINE_STROKE_KIND,
                     );
-                    #[cfg(not(target_arch = "wasm32"))]
-                    ui.painter()
-                        .rect_stroke(swatch_rect, 2.0, Stroke::new(1.0_f32, legend_stroke));
                 }
                 crate::plots::figure::PlotType::ErrorBar
                 | crate::plots::figure::PlotType::Stairs
@@ -3197,10 +3242,7 @@ impl PlotOverlay {
                 if let Some(fill) = fill {
                     painter.rect_filled(rect, 0.0, fill);
                 }
-                #[cfg(target_arch = "wasm32")]
-                painter.rect_stroke(rect, 0.0, edge, egui::StrokeKind::Inside);
-                #[cfg(not(target_arch = "wasm32"))]
-                painter.rect_stroke(rect, 0.0, edge);
+                painter.rect_stroke(rect, 0.0, edge, super::OUTLINE_STROKE_KIND);
             }
             MarkerStyle::Plus | MarkerStyle::Cross | MarkerStyle::Star => {
                 let d = radius;
@@ -3350,6 +3392,7 @@ impl PlotOverlay {
         point: glam::Vec3,
     ) -> Option<Pos2> {
         let mut cam = camera.clone();
+        cam.update_aspect_ratio(plot_rect.width().max(1.0) / plot_rect.height().max(1.0));
         let clip = cam.view_proj_matrix() * point.extend(1.0);
         if !clip.x.is_finite() || !clip.y.is_finite() || !clip.z.is_finite() || !clip.w.is_finite()
         {
@@ -3419,6 +3462,9 @@ impl PlotOverlay {
             if !style.visible || text.trim().is_empty() {
                 continue;
             }
+            let position = plot_renderer
+                .axes_model_matrix(axes_index)
+                .transform_point3(position);
             let Some(screen) = self.project_world_to_screen(plot_rect, camera, position) else {
                 continue;
             };
@@ -3493,11 +3539,8 @@ impl PlotOverlay {
         }
         let axis_color = self.theme_axis_color();
         let stroke = Stroke::new(1.0_f32, axis_color);
-        #[cfg(target_arch = "wasm32")]
         ui.painter()
-            .rect_stroke(bar_rect, 0.0, stroke, egui::StrokeKind::Inside);
-        #[cfg(not(target_arch = "wasm32"))]
-        ui.painter().rect_stroke(bar_rect, 0.0, stroke);
+            .rect_stroke(bar_rect, 0.0, stroke, super::OUTLINE_STROKE_KIND);
 
         let Some((lo, hi)) = plot_renderer.overlay_color_range_for_axes(axes_index) else {
             return;
@@ -3804,4 +3847,67 @@ fn truncate_label(label: &str, max_len: usize) -> String {
     }
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod positioned_axes_tests {
+    use super::{OverlayConfig, PlotOverlay};
+    use crate::core::Camera;
+    use egui::{pos2, vec2, Rect};
+    use glam::Vec3;
+
+    #[test]
+    fn overlay_annotations_are_absent_by_default_but_explicit_text_remains_visible() {
+        let mut config = OverlayConfig::default();
+        assert!(config.show_title);
+        assert!(config.title.is_none());
+        assert!(config.x_label.is_none());
+        assert!(config.y_label.is_none());
+        assert!(!PlotOverlay::has_visible_text(config.title.as_deref()));
+        assert!(!PlotOverlay::has_visible_text(config.x_label.as_deref()));
+        assert!(!PlotOverlay::has_visible_text(config.y_label.as_deref()));
+
+        config.title = Some("Explicit title".to_string());
+        config.x_label = Some("Horizontal".to_string());
+        config.y_label = Some("Vertical".to_string());
+        assert!(PlotOverlay::has_visible_text(config.title.as_deref()));
+        assert!(PlotOverlay::has_visible_text(config.x_label.as_deref()));
+        assert!(PlotOverlay::has_visible_text(config.y_label.as_deref()));
+    }
+
+    #[test]
+    fn positioned_axes_accepts_a_surface_smaller_than_overlay_margins() {
+        let outer = Rect::from_min_size(pos2(8.0, 8.0), vec2(0.0, 0.0));
+        let rect = PlotOverlay::positioned_axes_rect(outer, [0.2, 0.2, 0.6, 0.6], "normalized");
+        assert!(rect.min.x.is_finite() && rect.min.y.is_finite());
+        assert!(rect.width() >= 1.0 && rect.height() >= 1.0);
+    }
+
+    #[test]
+    fn positioned_axes_keeps_normalized_placement_on_a_regular_surface() {
+        let outer = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 100.0));
+        let rect = PlotOverlay::positioned_axes_rect(outer, [0.2, 0.2, 0.6, 0.6], "normalized");
+        assert!((rect.min.x - 20.0).abs() < 1.0e-4);
+        assert!((rect.min.y - 20.0).abs() < 1.0e-4);
+        assert!((rect.width() - 60.0).abs() < 1.0e-4);
+        assert!((rect.height() - 60.0).abs() < 1.0e-4);
+    }
+
+    #[test]
+    fn projected_world_text_uses_the_plot_rect_camera_aspect() {
+        let overlay = PlotOverlay::new();
+        let rect = Rect::from_min_size(pos2(20.0, 30.0), vec2(200.0, 700.0));
+        let mut camera = Camera::new();
+        let point = Vec3::new(0.3, 0.0, 0.0);
+        let screen = overlay
+            .project_world_to_screen(rect, &camera, point)
+            .unwrap();
+        camera.update_aspect_ratio(rect.width() / rect.height());
+        let clip = camera.view_proj_matrix() * point.extend(1.0);
+        let ndc = clip.truncate() / clip.w;
+        let expected_x = rect.min.x + (ndc.x + 1.0) * 0.5 * rect.width();
+        let expected_y = rect.min.y + (1.0 - (ndc.y + 1.0) * 0.5) * rect.height();
+        assert!((screen.x - expected_x).abs() < 1.0e-4);
+        assert!((screen.y - expected_y).abs() < 1.0e-4);
+    }
 }

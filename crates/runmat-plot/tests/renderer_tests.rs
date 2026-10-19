@@ -1318,7 +1318,7 @@ mod gpu_stress {
     }
 
     fn build_shared_context() -> Option<SharedWgpuContext> {
-        let instance = Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor::default()));
+        let instance = Arc::new(wgpu::Instance::new(&wgpu::InstanceDescriptor::default()));
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -1335,6 +1335,7 @@ mod gpu_stress {
                     label: Some("runmat-plot-gpu-stress-device"),
                     required_features: features,
                     required_limits: limits.clone(),
+                    memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
             )
@@ -1342,8 +1343,7 @@ mod gpu_stress {
             .ok()?;
         Some(SharedWgpuContext {
             instance,
-            device: Arc::new(device),
-            queue: Arc::new(queue),
+            access: runmat_accelerate_api::WgpuDeviceAccess::new(device, queue),
             adapter: Arc::new(adapter),
             adapter_info,
             limits,

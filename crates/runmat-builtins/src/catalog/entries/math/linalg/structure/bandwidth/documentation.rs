@@ -1,0 +1,167 @@
+use crate::*;
+
+const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection {
+        heading: "Transfer-function frequency bandwidth",
+        paragraphs: &["For a zero-delay scalar SISO `tf` model, `bandwidth(sys)` returns the first physical frequency where the response falls below its nonzero finite DC magnitude by 3 dB. `bandwidth(sys, dbdrop)` selects a finite negative dB drop. The result is a host double scalar in rad/s; `Inf` means no downward crossing in the supported domain.",
+            "Continuous models and discrete models with a known positive sample period are supported. An unspecified discrete sample period, state-space or MIMO model, delay, or zero/infinite DC gain is not yet supported. The host evaluator uses the model's physical s/z polynomial view; finite managed calls require a complete output owner and otherwise fail before evaluation. This overload never invokes the matrix/GPU structure hook."],
+    },
+    BuiltinDocumentationSection {
+        heading: "Behavior and supported arrays",
+        paragraphs: &["`bandwidth(A)` inspects the nonzero pattern of matrix `A` and returns the lower bandwidth as its first output and the upper bandwidth as its optional second output. A `'lower'` or `'upper'` selector returns one side.",
+            "`lower = bandwidth(A)` returns the lower bandwidth. `[lower, upper] = bandwidth(A)` returns separate lower and upper double scalars. A diagonal matrix has zero for both, and each side counts the furthest nonzero from the main diagonal.",
+            "`bandwidth(A, 'lower')` returns only the lower bandwidth, while `bandwidth(A, 'upper')` returns only the upper bandwidth.",
+            "RunMat accepts full or sparse single/double real or complex matrices. RunMat mode additionally accepts full or sparse logical matrices and all eight real integer classes, plus paired complex-integer dense matrices; MATLAB-compatible mode rejects those extensions before host or provider dispatch.",
+            "Sparse CSC column indices and authoritative typed stored values are scanned directly without densifying. Explicitly stored numeric zeros are ignored; logical sparse pattern entries are true. Exact integer zero tests never cross a floating conversion. Outputs remain double scalar metadata.",
+            "Nonzero detection treats any value that is not numerically equal to zero (including `NaN` or `Inf`) as nonzero, matching MATLAB semantics.",
+            "Empty matrices and all-zero matrices report zero for both the lower and upper outputs.",
+            "Inputs must be two-dimensional matrices. Higher-dimensional arrays (with any dimension beyond the second larger than one) raise an error.",
+            "Complex matrices are supported. A complex entry counts as nonzero if either the real or imaginary part is nonzero."],
+    },
+    BuiltinDocumentationSection {
+        heading: "GPU residency and provider behavior",
+        paragraphs: &["Documented single/double GPU inputs use the provider `bandwidth` hook when available and otherwise gather. Integer and logical GPU inputs are gated RunMat extensions; admitted values gather exactly before the floating-only provider hook and return host double scalar metadata.", "`bandwidth` leverages the active acceleration provider for documented floating input when available. The WGPU backend scans the matrix on-device and reads back lower/upper metadata. Providers without the hook gather and reuse the CPU implementation. Admitted integer/logical extensions gather before provider dispatch so packed typed buffers are never interpreted by floating shaders.", "Runs a device-side reduction when the acceleration provider implements the `bandwidth` hook; falls back to gathering on providers without support."],
+    },
+];
+
+const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "tf-lowpass",
+        title: "Frequency bandwidth of a low-pass model",
+        program: "H = tf(1, [1 1]); w = bandwidth(H); fprintf(\"%.2f\\n\", w);",
+        display_output: Some("1.00"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(abs(w-1) < 0.01);",
+        },
+    },
+    BuiltinExample {
+        id: "example-1",
+        title: "Checking the bandwidth of a diagonal matrix",
+        program: "A = eye(4);\nbw = bandwidth(A)",
+        display_output: Some("bw = 0"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(bw == 0);",
+        },
+    },
+    BuiltinExample {
+        id: "example-2",
+        title: "Requesting only the lower bandwidth",
+        program: "A = [-1 0 0; 2 3 0; 4 5 6];\nlower_bw = bandwidth(A, 'lower')",
+        display_output: Some("lower_bw = 2"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(lower_bw == 2);",
+        },
+    },
+    BuiltinExample {
+        id: "example-3",
+        title: "Requesting only the upper bandwidth",
+        program: "B = [1 2 0 0; 0 3 4 0; 0 0 5 6];\nupper_bw = bandwidth(B, 'upper')",
+        display_output: Some("upper_bw = 1"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(upper_bw == 1);",
+        },
+    },
+    BuiltinExample {
+        id: "example-4",
+        title: "Analysing a rectangular matrix",
+        program: "C = [0 0 7; 8 0 0; 0 9 0; 0 0 10];\n[lower, upper] = bandwidth(C)",
+        display_output: Some("lower = 1, upper = 2"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(lower == 1 && upper == 2);",
+        },
+    },
+    BuiltinExample {
+        id: "example-5",
+        title: "Working with complex-valued matrices",
+        program: "Z = [1+2i 0; 0 3-4i; 5i 0];\n[lower, upper] = bandwidth(Z)",
+        display_output: Some("lower = 2, upper = 0"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(lower == 2 && upper == 0);",
+        },
+    },
+    BuiltinExample {
+        id: "example-6",
+        title: "Inspecting a GPU-resident matrix",
+        program: "G = gpuArray([0 1 0; 2 0 3; 0 0 0]);\n[lower, upper] = bandwidth(G)",
+        display_output: Some("lower = 1, upper = 1"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Wgpu,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(lower == 1 && upper == 1);",
+        },
+    },
+];
+const FAQS: &[BuiltinDocumentationFaq] = &[
+    BuiltinDocumentationFaq { question: "How does `bandwidth` distinguish a matrix from a control model?", answer: "A canonical `tf` object selects frequency bandwidth; numeric, logical, sparse and GPU matrices retain the lower/upper structural-bandwidth forms." },
+    BuiltinDocumentationFaq { question: "What do lower and upper bandwidths of zero mean?", answer: "Separate lower and upper outputs of zero indicate that all nonzero elements are on the main diagonal." },
+    BuiltinDocumentationFaq { question: "How are rows or columns full of zeros handled?", answer: "Zero rows or columns do not increase the bandwidth; only nonzero entries affect the result." },
+    BuiltinDocumentationFaq { question: "Does `bandwidth` treat `NaN` values as nonzero?", answer: "Yes. Any value that is not exactly zero—including `NaN` or `Inf`—counts as nonzero." },
+    BuiltinDocumentationFaq { question: "Can I request only the lower or upper bandwidth?", answer: "Yes. Pass `'lower'` or `'upper'` as the second argument to obtain a scalar result." },
+    BuiltinDocumentationFaq { question: "Why does `bandwidth` error on higher-dimensional arrays?", answer: "The builtin matches MATLAB and only operates on two-dimensional matrices. Use `reshape` to collapse trailing singleton dimensions before calling `bandwidth`." },
+    BuiltinDocumentationFaq { question: "Does `bandwidth` work with sparse matrices?", answer: "Yes. Host sparse CSC inputs are scanned without converting to a dense matrix; explicitly stored numeric zeros do not contribute to either bandwidth." },
+    BuiltinDocumentationFaq { question: "What precision does the result use?", answer: "The result is always returned as double precision (`double`), matching MATLAB." },
+    BuiltinDocumentationFaq { question: "Will this function keep my data on the GPU?", answer: "Documented floating input stays resident when the provider implements the hook, with only lower/upper metadata read back. Providers without the hook gather. Integer and logical extension inputs gather exactly before provider dispatch." },
+    BuiltinDocumentationFaq { question: "Can I call `bandwidth` inside fused expressions?", answer: "Yes. The builtin returns host double scalar metadata, so it behaves like other metadata queries." },
+    BuiltinDocumentationFaq { question: "What happens if I pass logical matrices?", answer: "Logical input is a gated RunMat extension because the documented matrix domain is single/double. In RunMat mode, `true` entries count as nonzero." },
+];
+const LINKS: &[BuiltinDocumentationLink] = &[
+    BuiltinDocumentationLink { label: "diag", target: BuiltinDocumentationLinkTarget::Builtin("diag") },
+    BuiltinDocumentationLink { label: "tril", target: BuiltinDocumentationLinkTarget::Builtin("tril") },
+    BuiltinDocumentationLink { label: "triu", target: BuiltinDocumentationLinkTarget::Builtin("triu") },
+    BuiltinDocumentationLink { label: "issymmetric", target: BuiltinDocumentationLinkTarget::Builtin("issymmetric") },
+    BuiltinDocumentationLink { label: "find", target: BuiltinDocumentationLinkTarget::Builtin("find") },
+    BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuarray") },
+    BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+    BuiltinDocumentationLink { label: "ishermitian", target: BuiltinDocumentationLinkTarget::Builtin("ishermitian") },
+    BuiltinDocumentationLink { label: "symrcm", target: BuiltinDocumentationLinkTarget::Builtin("symrcm") },
+    BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/bandwidth.rs") },
+];
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("bandwidth"),
+    slug: Some("bandwidth"),
+    summary: "Compute matrix structural bandwidth or SISO transfer-function frequency bandwidth.",
+    description: "For a matrix, `bandwidth(A)` returns lower and optional upper structural bandwidth. For a scalar SISO `tf` model, `bandwidth(sys, dbdrop)` returns the first downward frequency-response gain-drop crossing in rad/s.",
+    keywords: &["bandwidth", "frequency response", "transfer function", "lower bandwidth", "upper bandwidth", "banded matrix", "structure", "gpu"],
+    related: &["diag", "tril", "triu", "issymmetric", "find", "gpuarray", "gather", "ishermitian", "symrcm"],
+    sections: SECTIONS,
+    examples: EXAMPLES,
+    example_exemption: None,
+    faqs: FAQS,
+    links: LINKS,
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/structure/bandwidth.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Existing runtime unit tests", location: "builtins::math::linalg::structure::bandwidth::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Existing runtime integration tests", location: "builtins::math::linalg::structure::bandwidth::tests::bandwidth_gpu_roundtrip" }],
+        notes: &["Source-only catalog migration. Compiled conservation and executable example verification remain pending."],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};

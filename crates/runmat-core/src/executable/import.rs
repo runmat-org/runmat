@@ -69,9 +69,11 @@ impl ExecutableUnit {
         bytecode.function_registry = registry;
         bytecode.layout = Some(layout);
         let mut unit = Self::new(source, revision, source_map, mir, analysis, bytecode)?;
-        unit.interop = envelope.manifest.interop.clone();
-        unit.parallel = envelope.manifest.parallel.clone();
-        unit.optional_sections = envelope.manifest.optional_sections.clone();
+        unit.imported_contract = Some(std::rc::Rc::new(super::unit::ImportedPortableContract {
+            interop: envelope.manifest.interop.clone(),
+            parallel: envelope.manifest.parallel.clone(),
+            optional_sections: envelope.manifest.optional_sections.clone(),
+        }));
         let selected = match envelope.manifest.identity.entrypoint_kind {
             ExecutableEntrypointKind::Function => Some((
                 envelope.manifest.identity.entrypoint.clone(),

@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use super::driver_files::{load_driver_invocation, write_completion, write_driver_marker};
 use super::model::{
-    BatchDriverInvocation, DriverCompletion, DurableProgramAttempt, ProgramBatchExecution,
-    ProgramBatchSubmission,
+    BatchDriverInvocation, DriverCompletion, DurableProgramAttempt, GraphBatchSubmission,
+    ProgramBatchExecution, ProgramBatchSubmission,
 };
 use crate::protocol::WorkerResponse;
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -20,7 +20,7 @@ pub fn prepare_batch_driver() -> NativeExecutionResult<BatchDriverInvocation> {
     let invocation = load_driver_invocation(&job_directory)?;
     let attempt_id = match &invocation {
         BatchDriverInvocation::Program { attempt, .. } => Some(attempt.request.id),
-        BatchDriverInvocation::Script { .. } => None,
+        BatchDriverInvocation::Script { .. } | BatchDriverInvocation::Graph { .. } => None,
     };
     write_driver_marker(&job_directory, std::process::id(), attempt_id)?;
     Ok(invocation)
@@ -39,8 +39,47 @@ pub fn complete_batch_driver(
             success,
             exit_code,
             message,
+            response: None,
         },
     )
+}
+
+/// Commits a detached Graph batch's typed response with its driver completion.
+pub fn complete_batch_driver_with_response(
+    job_directory: &Path,
+    response: WorkerResponse,
+) -> NativeExecutionResult<()> {
+    let (success, exit_code, message) = match &response {
+        WorkerResponse::Success { .. }
+        | WorkerResponse::GraphSuccess { .. }
+        | WorkerResponse::ExternalizedSuccess { .. } => (true, Some(0), None),
+        WorkerResponse::SpmdSuccess { .. } => (
+            false,
+            None,
+            Some("SPMD responses require an interactive gang driver".into()),
+        ),
+        WorkerResponse::Failure { message } => (false, None, Some(message.clone())),
+        WorkerResponse::RuntimeFailure { failure } => (false, None, Some(failure.message.clone())),
+    };
+    write_completion(
+        job_directory,
+        &DriverCompletion {
+            schema_version: 4,
+            success,
+            exit_code,
+            message,
+            response: Some(response),
+        },
+    )
+}
+
+pub async fn execute_graph_batch(
+    submission: GraphBatchSubmission,
+    job_id: runmat_execution::JobId,
+) -> WorkerResponse {
+    let mut request = submission.request;
+    request.job_id = Some(job_id);
+    crate::worker::execute(crate::protocol::WorkerRequest::Graph(request)).await
 }
 
 pub async fn execute_and_complete_program_batch(
@@ -127,4 +166,13 @@ pub async fn execute_and_complete_program_batch(
     super::program_store::write_program_completion(&attempt.job_directory, completed.clone())?;
     drop(lease);
     Ok(completed)
+}
+
+pub async fn execute_graph_batch(
+    submission: GraphBatchSubmission,
+    job_id: runmat_execution::JobId,
+) -> WorkerResponse {
+    let mut request = submission.request;
+    request.job_id = Some(job_id);
+    crate::worker::execute(crate::protocol::WorkerRequest::Graph(request)).await
 }

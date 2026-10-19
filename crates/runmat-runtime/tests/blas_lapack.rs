@@ -124,11 +124,12 @@ fn test_lapack_qr_decomposition() {
     assert_eq!(qr.r.cols(), 2);
 
     // Q should be orthogonal (Q^T * Q = I)
-    let qt = match call_builtin("transpose", &[Value::Tensor(qr.q.clone())]).unwrap() {
+    let transposed = call_builtin("transpose", &[Value::Tensor(qr.q.clone())]).unwrap();
+    let qt = match transposed.value() {
         Value::Tensor(t) => t,
         other => panic!("expected tensor transpose, got {other:?}"),
     };
-    let qt_q = blas_matrix_mul(&qt, &qr.q).unwrap();
+    let qt_q = blas_matrix_mul(qt, &qr.q).unwrap();
 
     // Check if Q^T * Q is approximately identity
     let tolerance = 1e-10;
@@ -198,14 +199,16 @@ fn test_builtin_blas_functions() {
     let b = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
 
     match call_builtin("blas_matmul", &[Value::Tensor(a), Value::Tensor(b)]) {
-        Ok(Value::Tensor(m)) => {
-            assert_eq!(m.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
-        }
+        Ok(result) => match result.value() {
+            Value::Tensor(m) => {
+                assert_eq!(m.materialize_f64(), vec![4.0, 10.0, 5.0, 11.0]);
+            }
+            other => panic!("Expected matrix result, got {other:?}"),
+        },
         Err(message) if message.message().contains("Undefined function") => {
             // Builtin not wired up yet; direct helper coverage above still exercises implementation.
             return;
         }
-        Ok(other) => panic!("Expected matrix result, got {other:?}"),
         Err(message) => panic!("Unexpected error calling blas_matmul builtin: {message}"),
     }
 
@@ -224,9 +227,11 @@ fn test_builtin_blas_functions() {
     .unwrap();
 
     match call_builtin("dot", &[Value::Cell(vec_a), Value::Cell(vec_b)]) {
-        Ok(Value::Num(dot)) => assert_eq!(dot, 32.0),
+        Ok(result) => match result.value() {
+            Value::Num(dot) => assert_eq!(*dot, 32.0),
+            other => panic!("Expected numeric result, got {other:?}"),
+        },
         Err(message) if message.message().contains("Undefined function") => (),
-        Ok(other) => panic!("Expected numeric result, got {other:?}"),
         Err(message) => panic!("Unexpected error calling dot builtin: {message}"),
     }
 }
@@ -238,17 +243,19 @@ fn test_builtin_lapack_functions() {
     let b_vec = CellArray::new(vec![Value::Num(5.0), Value::Num(6.0)], 2, 1).unwrap();
 
     match call_builtin("solve", &[Value::Tensor(a), Value::Cell(b_vec)]) {
-        Ok(Value::Cell(sol)) => {
-            assert_eq!(sol.data.len(), 2);
-            if let (Value::Num(x), Value::Num(y)) = (&sol.data[0], &sol.data[1]) {
-                assert!((x - 1.8).abs() < 1e-10);
-                assert!((y - 1.4).abs() < 1e-10);
-            } else {
-                panic!("Expected numeric solution");
+        Ok(result) => match result.value() {
+            Value::Cell(sol) => {
+                assert_eq!(sol.data.len(), 2);
+                if let (Value::Num(x), Value::Num(y)) = (&sol.data[0], &sol.data[1]) {
+                    assert!((x - 1.8).abs() < 1e-10);
+                    assert!((y - 1.4).abs() < 1e-10);
+                } else {
+                    panic!("Expected numeric solution");
+                }
             }
-        }
+            other => panic!("Expected vector result, got {other:?}"),
+        },
         Err(message) if message.message().contains("Undefined function") => (),
-        Ok(other) => panic!("Expected vector result, got {other:?}"),
         Err(message) => panic!("Unexpected error calling solve builtin: {message}"),
     }
 
@@ -256,8 +263,8 @@ fn test_builtin_lapack_functions() {
     let matrix = Matrix::new_2d(vec![2.0, 1.0, 1.0, 2.0], 2, 2).unwrap();
     let det_result = call_builtin("det", &[Value::Tensor(matrix)]).unwrap();
 
-    if let Value::Num(det) = det_result {
-        assert!((det - 3.0).abs() < 1e-10);
+    if let Value::Num(det) = det_result.value() {
+        assert!((*det - 3.0).abs() < 1e-10);
     } else {
         panic!("Expected numeric result");
     }

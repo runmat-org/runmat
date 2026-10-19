@@ -12,7 +12,46 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::operand::evaluate_rvalue;
 use super::state::HostState;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "site/terminator_tests.rs"]
+mod terminator_tests;
+
 pub(super) fn execute(
+    state: &mut HostState,
+    call: &mut NativeCall,
+    request: NativeSiteRequest,
+    exit: &mut NativeExit,
+) -> NativeExecutorResult<NativeSiteOutcome> {
+    if state.region_observation.is_some() && !request_matches_function(state, request) {
+        state.region_observation = None;
+    } else {
+        super::region::observation::before_site(state, request);
+    }
+    let result = execute_inner(state, call, request, exit);
+    super::region::observation::after_site(state, request, &result);
+    result
+}
+
+fn request_matches_function(state: &HostState, request: NativeSiteRequest) -> bool {
+    request.function == state.function.id.0
+        && state
+            .function
+            .blocks
+            .iter()
+            .find(|block| block.id.0 == request.block)
+            .is_some_and(|block| {
+                if request.phase == NativeSitePhase::TERMINATOR {
+                    ensure_site(&block.terminator, request).is_ok()
+                } else {
+                    block
+                        .instructions
+                        .iter()
+                        .any(|instruction| site_matches(instruction, request))
+                }
+            })
+}
+
+fn execute_inner(
     state: &mut HostState,
     call: &mut NativeCall,
     request: NativeSiteRequest,
@@ -26,7 +65,7 @@ pub(super) fn execute(
     if state.skip_before_resume(request)? {
         return Ok(NativeSiteOutcome::continue_execution());
     }
-    if let Some(cancelled) = super::control::poll(&state.runtime.cancellation_token()) {
+    if let Some(cancelled) = super::control::poll(&state.runtime.cancellation()) {
         *exit = cancelled;
         return Ok(NativeSiteOutcome::exit());
     }
@@ -44,7 +83,7 @@ pub(super) fn execute(
         })?;
     if request.phase == NativeSitePhase::TERMINATOR {
         ensure_site(&block.terminator, request)?;
-        enter_site(
+        let _catch_guard = enter_site(
             state,
             call,
             &block.terminator.site,
@@ -74,7 +113,19 @@ pub(super) fn execute(
         {
             return Ok(NativeSiteOutcome::exit());
         }
-        let outcome = execute_terminator(state, call, block.id, &block.terminator, exit)?;
+        let outcome = match execute_terminator(state, call, block.id, &block.terminator, exit) {
+            Ok(outcome) => {
+                state.finish_contextual_site()?;
+                outcome
+            }
+            Err(NativeExecutorError::CallSuspended) => {
+                return super::call_suspension::publish(state, call, request, exit);
+            }
+            Err(error) => {
+                state.finish_contextual_site()?;
+                return Err(error);
+            }
+        };
         refresh_frame_roots(state, call)?;
         Ok(outcome)
     } else {
@@ -86,7 +137,7 @@ pub(super) fn execute(
             .ok_or_else(|| {
                 NativeExecutorError::Host("native instruction site is unavailable".into())
             })?;
-        enter_site(
+        let _catch_guard = enter_site(
             state,
             call,
             &instruction.site,
@@ -112,8 +163,28 @@ pub(super) fn execute(
         )? {
             return Ok(NativeSiteOutcome::exit());
         }
+        if request.phase == NativeSitePhase::TERMINATOR_RVALUE && instruction.site.ordinal == 0 {
+            if let NativeTerminatorKind::ParFor { region, .. } = &block.terminator.kind {
+                super::deoptimization::install_exit_for_target(
+                    state,
+                    call,
+                    &instruction.site,
+                    frame_state,
+                    super::deoptimization::NativeTransfer::interpreter_slow_path(
+                        parallel_region_token(*region),
+                    ),
+                    exit,
+                )?;
+                return Ok(NativeSiteOutcome::exit());
+            }
+        }
         if request.phase == NativeSitePhase::RVALUE {
             if let Some(outcome) = super::region::checkpoint(state, request, exit)? {
+                // The region completed this site's work without entering the
+                // ordinary instruction path. Release its expression scope and
+                // publish the updated roots before the next native site.
+                state.finish_contextual_site()?;
+                refresh_frame_roots(state, call)?;
                 return Ok(outcome);
             }
         }
@@ -125,7 +196,18 @@ pub(super) fn execute(
             && state.has_for_loop(block.id)
             && matches!(block.terminator.kind, NativeTerminatorKind::For { .. });
         if !retained_for_iterable {
-            execute_instruction(state, &instruction)?;
+            match execute_instruction(state, &instruction) {
+                Ok(()) => state.finish_contextual_site()?,
+                Err(NativeExecutorError::CallSuspended) => {
+                    return super::call_suspension::publish(state, call, request, exit);
+                }
+                Err(error) => {
+                    state.finish_contextual_site()?;
+                    return Err(error);
+                }
+            }
+        } else {
+            state.finish_contextual_site()?;
         }
         refresh_frame_roots(state, call)?;
         Ok(NativeSiteOutcome::continue_execution())
@@ -139,9 +221,11 @@ fn enter_site(
     source: &runmat_native_codegen::NativeSourceLocation,
     side_effect_epoch: u32,
     request: NativeSiteRequest,
-) -> NativeExecutorResult<()> {
+) -> NativeExecutorResult<runmat_runtime::context::ActiveCatchGuard> {
     state.hit_coverage(site);
     state.current_source = runtime_source(source);
+    state.current_request = Some(request);
+    state.begin_contextual_site(request)?;
     state.enter_site_block(runmat_native_codegen::NativeBlockId(request.block));
     // SAFETY: NativeCall was validated before entry and its frame/resume
     // backing allocations live for the complete synchronous invocation.
@@ -161,7 +245,13 @@ fn enter_site(
     resume.local_count = state.locals.len() as u32;
     resume.side_effect_epoch = u64::from(side_effect_epoch);
     resume.source = state.current_source;
-    refresh_frame_roots(state, call)
+    refresh_frame_roots(state, call)?;
+    // The machine entry began before this MIR block was selected. Scope every
+    // synchronous semantic operation at the site to its actual lexical catch,
+    // including dynamic calls that do not enter call_suspension.
+    Ok(state
+        .runtime
+        .enter_active_catch_shared(state.active_catch_exception()))
 }
 
 fn refresh_frame_roots(state: &mut HostState, call: &mut NativeCall) -> NativeExecutorResult<()> {
@@ -190,6 +280,68 @@ fn execute_instruction(
     instruction: &NativeInstruction,
 ) -> NativeExecutorResult<()> {
     match &instruction.operation {
+        NativeOperation::Rvalue {
+            value,
+            result: runmat_native_codegen::NativeRvalueResult::MultiAssignment(targets),
+        } if targets
+            .targets
+            .iter()
+            .any(|target| matches!(target, runmat_mir::MirOutputTarget::Sequence(_))) =>
+        {
+            let prepared = match state.prepared_multi_assignment.take() {
+                Some(prepared) => {
+                    prepared.skip_preparation_regions(state)?;
+                    prepared
+                }
+                None => super::mutation::PreparedMultiAssignment::prepare(state, targets)?,
+            };
+            let results = match evaluate_rvalue(state, value, prepared.cardinality(), None) {
+                Ok(results) => results,
+                Err(error) => {
+                    // A suspending RHS resumes this exact rvalue site. Retain the
+                    // already-materialized targets so selector and protocol
+                    // preparation is never replayed before completion routing.
+                    state.prepared_multi_assignment = Some(prepared);
+                    return Err(error);
+                }
+            };
+            let prepared = prepared.bind_values(state, results)?;
+            state.prepared_multi_assignment = Some(prepared);
+        }
+        NativeOperation::Rvalue {
+            value,
+            result: runmat_native_codegen::NativeRvalueResult::SequenceAssignment(target),
+        } => {
+            if state.sequence_assignment_register.is_some() {
+                return Err(NativeExecutorError::Host(
+                    "native sequence register was overwritten before consumption".into(),
+                ));
+            }
+            let prepared = match state.pending_sequence_rvalue.take() {
+                Some(prepared) => {
+                    super::mutation::skip_prepared_sequence_region(state)?;
+                    prepared
+                }
+                None => {
+                    let (destination, count) =
+                        super::mutation::prepare_sequence_assignment(state, target)?;
+                    super::mutation::PreparedSequenceRvalue { destination, count }
+                }
+            };
+            let results = match evaluate_rvalue(state, value, prepared.count, None) {
+                Ok(results) => results,
+                Err(NativeExecutorError::CallSuspended) => {
+                    state.pending_sequence_rvalue = Some(prepared);
+                    return Err(NativeExecutorError::CallSuspended);
+                }
+                Err(error) => return Err(error),
+            };
+            state.sequence_assignment_register =
+                Some(super::mutation::PreparedSequenceAssignment::with_values(
+                    prepared.destination,
+                    results,
+                )?);
+        }
         NativeOperation::Rvalue { value, .. } => {
             let output_local = (instruction.outputs.len() == 1)
                 .then(|| instruction.outputs[0].local)
@@ -223,7 +375,14 @@ fn execute_statement(
         return Ok(());
     }
     match statement {
+        MirStmtKind::StatementOutput(output) => {
+            if !super::call_suspension::take_completed_statement_output(state)? {
+                super::call_suspension::begin_statement_output(state, output)?;
+            }
+        }
         MirStmtKind::Expr(_) => {
+            state.pending_assign = None;
+            state.pending_plain_multi = None;
             state.pending_place_mutation = None;
             if let Some(value) = instruction
                 .inputs
@@ -234,8 +393,13 @@ fn execute_statement(
                 state.record_expression(value);
             }
         }
+        MirStmtKind::CaptureSequence {
+            destination,
+            source,
+        } => super::call::capture_sequence(state, *destination, source)?,
         MirStmtKind::Assign { .. }
         | MirStmtKind::MultiAssign { .. }
+        | MirStmtKind::SequenceAssign { .. }
         | MirStmtKind::PlaceMutation(_) => {
             return Err(NativeExecutorError::Host(
                 "native mutation statement was not consumed by its semantic adapter".into(),
@@ -264,13 +428,23 @@ fn execute_terminator(
             then_edge,
             else_edge,
         } => {
-            let condition = value_for(state, *condition)?;
-            let value = state.arena.get(condition)?;
-            let truth = super::sync::complete(
-                &state.runtime,
-                runmat_runtime::condition::logical_truth_from_value(value, "branch condition"),
-                "branch condition",
-            )?;
+            let truth = match super::call_suspension::take_completed_terminator(state)?
+                .map(super::call_suspension::TerminatorReady::into_parts)
+            {
+                Some((super::call_suspension::TerminatorReadyStage::BranchTruth(truth), None)) => {
+                    truth
+                }
+                Some(_) => {
+                    return Err(NativeExecutorError::Host(
+                        "native branch resumed with another terminator stage".into(),
+                    ));
+                }
+                None => {
+                    let condition = value_for(state, *condition)?;
+                    let value = state.arena.get(condition)?.clone();
+                    return super::call_suspension::begin_branch_truth(state, value);
+                }
+            };
             if truth {
                 take_edge(state, then_edge, 0, None, None)
             } else {
@@ -282,24 +456,71 @@ fn execute_terminator(
             cases,
             otherwise,
         } => {
-            let discriminant = state.arena.get(value_for(state, *discriminant)?)?.clone();
-            for (index, (case, edge)) in cases.iter().enumerate() {
+            use super::call_suspension::TerminatorReadyStage;
+            let (index, discriminant) =
+                match super::call_suspension::take_completed_terminator(state)?
+                    .map(super::call_suspension::TerminatorReady::into_parts)
+                {
+                    Some((
+                        TerminatorReadyStage::SwitchEquality {
+                            index,
+                            discriminant,
+                        },
+                        Some(equality),
+                    )) => {
+                        if index >= cases.len() {
+                            return Err(NativeExecutorError::Host(
+                                "resumed switch case index is unavailable".into(),
+                            ));
+                        }
+                        return super::call_suspension::begin_switch_truth(
+                            state,
+                            index,
+                            discriminant,
+                            equality,
+                        );
+                    }
+                    Some((
+                        TerminatorReadyStage::SwitchTruth {
+                            index,
+                            discriminant,
+                            truth,
+                        },
+                        None,
+                    )) => {
+                        if index >= cases.len() {
+                            return Err(NativeExecutorError::Host(
+                                "resumed switch truth index is unavailable".into(),
+                            ));
+                        }
+                        if truth {
+                            return take_edge(state, &cases[index].1, index as u32, None, None);
+                        }
+                        (index + 1, discriminant)
+                    }
+                    Some(_) => {
+                        return Err(NativeExecutorError::Host(
+                            "native switch resumed with another terminator stage".into(),
+                        ));
+                    }
+                    None => {
+                        let value = state.arena.get(value_for(state, *discriminant)?)?.clone();
+                        let rooted = runmat_runtime::execution::RootedValue::new(value).map_err(
+                            |error| NativeExecutorError::from(error.into_runtime_error()),
+                        )?;
+                        (0, rooted)
+                    }
+                };
+            if let Some((case, _)) = cases.get(index) {
+                // Read this case only after the previous equality and truth
+                // completions reconciled workspace effects.
                 let case = state.arena.get(value_for(state, *case)?)?.clone();
-                let equal = super::sync::complete(
-                    &state.runtime,
-                    runmat_runtime::call_builtin_async("eq", &[discriminant.clone(), case]),
-                    "switch comparison",
-                )?;
-                if super::sync::complete(
-                    &state.runtime,
-                    runmat_runtime::condition::logical_truth_from_value(
-                        &equal,
-                        "switch case comparison",
-                    ),
-                    "switch truth evaluation",
-                )? {
-                    return take_edge(state, edge, index as u32, None, None);
-                }
+                return super::call_suspension::begin_switch_equality(
+                    state,
+                    index,
+                    discriminant,
+                    case,
+                );
             }
             take_edge(state, otherwise, cases.len() as u32, None, None)
         }
@@ -309,27 +530,34 @@ fn execute_terminator(
             body,
             exit,
         } => {
-            if !state.has_for_loop(block) {
-                let source = state.arena.get(value_for(state, *iterable)?)?.clone();
-                let iterator = super::sync::complete(
-                    &state.runtime,
-                    runmat_runtime::iteration::ForColumnIterator::new(source),
-                    "for iterable capture",
-                )?;
-                state.start_for_loop(block, body.target, iterator);
+            match super::call_suspension::take_completed_terminator(state)?
+                .map(super::call_suspension::TerminatorReady::into_parts)
+            {
+                Some((
+                    super::call_suspension::TerminatorReadyStage::ForCapture(iterator),
+                    None,
+                )) => {
+                    state.start_for_loop(block, body.target, *iterator);
+                }
+                Some((super::call_suspension::TerminatorReadyStage::ForNext(next), None)) => {
+                    if let Some(reference) = next {
+                        state.observe_loop_backedge(terminator.site.point);
+                        return take_edge(state, body, 0, Some((*binding, reference)), None);
+                    }
+                    return take_edge(state, exit, 1, None, None);
+                }
+                Some(_) => {
+                    return Err(NativeExecutorError::Host(
+                        "native for-loop resumed with another terminator stage".into(),
+                    ));
+                }
+                None if !state.has_for_loop(block) => {
+                    let source = state.arena.get(value_for(state, *iterable)?)?.clone();
+                    return super::call_suspension::begin_for_capture(state, source);
+                }
+                None => {}
             }
-            let runtime = state.runtime.clone();
-            let next = {
-                let active = state.for_loop_mut(block)?;
-                super::sync::complete(&runtime, active.iterator.next(), "for iteration")?
-            };
-            if let Some(value) = next {
-                state.observe_loop_backedge(terminator.site.point);
-                let reference = state.arena.insert(value);
-                take_edge(state, body, 0, Some((*binding, reference)), None)
-            } else {
-                take_edge(state, exit, 1, None, None)
-            }
+            super::call_suspension::begin_for_next(state, block)
         }
         NativeTerminatorKind::TryCatch {
             try_edge,
@@ -354,12 +582,10 @@ fn execute_terminator(
                     .map(|value| state.arena.get(value_for(state, *value)?).cloned())
                     .collect::<NativeExecutorResult<Vec<_>>>()?
             } else {
-                state
-                    .function
-                    .abi
-                    .fixed_outputs
-                    .iter()
-                    .map(|local| return_local_value(state, terminator, *local))
+                let output_locals = state.function.abi.fixed_outputs.clone();
+                output_locals
+                    .into_iter()
+                    .map(|local| return_local_value(state, terminator, local))
                     .collect::<NativeExecutorResult<Vec<_>>>()?
             };
             let varargout = state
@@ -390,7 +616,7 @@ fn execute_terminator(
             let value = state.arena.get(value_for(state, *future)?)?.clone();
             match super::awaiting::begin(state, value, resume.clone())? {
                 super::awaiting::AwaitStart::Ready(value) => {
-                    let value = state.arena.insert(value);
+                    let value = value.with_owned(|value| state.arena.insert(value));
                     take_edge(state, resume, 0, None, Some(value))
                 }
                 super::awaiting::AwaitStart::Suspended {
@@ -435,19 +661,37 @@ fn execute_terminator(
                 }
             }
         }
-        NativeTerminatorKind::ParFor { .. } | NativeTerminatorKind::Spmd { .. } => {
-            Err(NativeExecutorError::UnsupportedSite(
-                "parallel terminator requires the R27 native parallel executor".into(),
-            ))
+        NativeTerminatorKind::ParFor { region, .. } => {
+            super::deoptimization::install_exit_for_target(
+                state,
+                call,
+                &terminator.site,
+                &terminator.frame_state,
+                super::deoptimization::NativeTransfer::interpreter_slow_path(
+                    parallel_region_token(*region),
+                ),
+                exit,
+            )?;
+            Ok(NativeSiteOutcome::exit())
         }
+        NativeTerminatorKind::Spmd { .. } => Err(NativeExecutorError::UnsupportedSite(
+            "SPMD terminator requires the distributed native executor".into(),
+        )),
     }
 }
 
+fn parallel_region_token(region: runmat_types::ParallelRegionId) -> u64 {
+    (u64::from(region.0.function.0) << 32) | u64::from(region.0.ordinal)
+}
+
 fn return_local_value(
-    state: &HostState,
+    state: &mut HostState,
     terminator: &NativeTerminator,
     local: runmat_native_codegen::NativeLocalId,
 ) -> NativeExecutorResult<runmat_value::Value> {
+    if let Some(reference) = state.declared_session_reference(local.0 as usize)? {
+        return state.arena.get(reference).cloned();
+    }
     let value = terminator
         .frame_state
         .locals
@@ -460,7 +704,7 @@ fn return_local_value(
     state.arena.get(value_for(state, value)?).cloned()
 }
 
-fn take_edge(
+pub(in crate::execute) fn take_edge(
     state: &mut HostState,
     edge: &NativeEdge,
     index: u32,
@@ -499,11 +743,15 @@ fn take_edge(
                 NativeExecutorError::Host("native await edge has no completed value".into())
             })?,
         };
-        transferred.push((parameter.clone(), value));
+        transferred.push((
+            parameter.clone(),
+            value,
+            matches!(argument, NativeEdgeArgument::Value(_)),
+        ));
     }
-    for (parameter, value) in transferred {
-        state.values.insert(parameter.value, value);
-        state.set_local(parameter.local.0 as usize, value)?;
+    for (parameter, value, inherited_snapshot) in transferred {
+        let bound = state.bind_edge_local(parameter.local.0 as usize, value, inherited_snapshot)?;
+        state.values.insert(parameter.value, bound);
     }
     state.take_control_edge(edge.target);
     Ok(NativeSiteOutcome::edge(index))
@@ -513,7 +761,9 @@ pub(super) fn resume_await(
     state: &mut HostState,
     completion: super::awaiting::AwaitCompletion,
 ) -> NativeExecutorResult<runmat_runtime::native::NativeSiteRequest> {
-    let value = state.arena.insert(completion.value);
+    let value = completion
+        .value
+        .with_owned(|value| state.arena.insert(value));
     let target = completion.edge.target;
     let _ = take_edge(state, &completion.edge, 0, None, Some(value))?;
     state.resume_request_for_block(target)
@@ -523,6 +773,7 @@ pub(super) fn redirect_exception(
     state: &mut HostState,
     exception: runmat_runtime::native::NativeException,
 ) -> NativeExecutorResult<Option<runmat_runtime::native::NativeSiteRequest>> {
+    state.abandon_site_continuations()?;
     let Some(handler) = state.take_exception_handler() else {
         return Ok(None);
     };
@@ -530,15 +781,16 @@ pub(super) fn redirect_exception(
         handle: exception.handle,
         generation: exception.generation,
     };
-    if !matches!(
-        state.arena.get(reference)?,
-        runmat_value::Value::MException(_)
-    ) {
-        return Err(NativeExecutorError::Host(
-            "native exception exit does not reference an MException".into(),
-        ));
-    }
+    let exception = match state.arena.get(reference)? {
+        runmat_value::Value::MException(exception) => exception.clone(),
+        _ => {
+            return Err(NativeExecutorError::Host(
+                "native exception exit does not reference an MException".into(),
+            ))
+        }
+    };
     let target = handler.catch_edge.target;
+    state.bind_catch_exception(target, exception)?;
     let _ = take_edge(state, &handler.catch_edge, 1, None, Some(reference))?;
     state.resume_request_for_block(target).map(Some)
 }

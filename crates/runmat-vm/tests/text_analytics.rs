@@ -5,6 +5,7 @@ mod test_helpers;
 use test_helpers::execute_source;
 
 fn has_object_class(vars: &[Value], class_name: &str) -> bool {
+    let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     vars.iter()
         .any(|value| matches!(value, Value::Object(object) if object.class_name == class_name))
 }

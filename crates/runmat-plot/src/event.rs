@@ -62,12 +62,22 @@ pub struct FigureScene {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "dtype", content = "values", rename_all = "lowercase")]
 pub enum SceneNumericStorage {
-    // JSON has no NaN: serde_json writes NaN as null, so float storage reads null back as NaN
-    // (NaN marks gaps, e.g. holes in a surf).
-    #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
-    F64(Vec<f64>),
-    #[serde(deserialize_with = "deserialize_vec_f32_lossy")]
-    F32(Vec<f32>),
+    // Nonfinite values are written losslessly; scenes saved before that wrote NaN as JSON
+    // `null` (NaN marks gaps, e.g. holes in a surf), which still reads back as NaN.
+    F64(
+        #[serde(
+            serialize_with = "runmat_types::serde_f64::vec::serialize",
+            deserialize_with = "deserialize_vec_f64_lossy"
+        )]
+        Vec<f64>,
+    ),
+    F32(
+        #[serde(
+            serialize_with = "runmat_types::serde_f32::vec::serialize",
+            deserialize_with = "deserialize_vec_f32_lossy"
+        )]
+        Vec<f32>,
+    ),
     I8(Vec<i8>),
     I16(Vec<i16>),
     I32(Vec<i32>),
@@ -203,6 +213,45 @@ impl fmt::Display for SceneExportError {
 }
 
 impl Error for SceneExportError {}
+
+/// An export failure with the public category/message and an inspectable plot-data cause.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneExportFailure {
+    pub error: SceneExportError,
+    source: Option<crate::plots::PlotDataExportError>,
+}
+
+impl SceneExportFailure {
+    fn readback_typed(source: crate::plots::PlotDataExportError) -> Self {
+        Self {
+            error: SceneExportError::readback(source.to_string()),
+            source: Some(source),
+        }
+    }
+}
+
+impl From<SceneExportError> for SceneExportFailure {
+    fn from(error: SceneExportError) -> Self {
+        Self {
+            error,
+            source: None,
+        }
+    }
+}
+
+impl fmt::Display for SceneExportFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.error, f)
+    }
+}
+
+impl Error for SceneExportFailure {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|source| source as &(dyn Error + 'static))
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct SceneExportBudget {
@@ -450,6 +499,8 @@ pub enum ScenePlot {
         y_source: Option<SceneNumericData>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         z_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        c_source: Option<SceneNumericData>,
         #[serde(default)]
         x_grid: Option<Vec<Vec<f64>>>,
         #[serde(default)]
@@ -464,6 +515,8 @@ pub enum ScenePlot {
         /// Heatmap: the text printed in each cell, indexed like `z`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cell_labels: Option<Vec<Vec<String>>>,
+        #[serde(default)]
+        color_mapping: crate::plots::surface::SurfaceColorMapping,
         #[serde(default)]
         color_grid_rgba: Option<Vec<Vec<[f32; 4]>>>,
         #[serde(default, deserialize_with = "deserialize_option_pair_f64_lossy")]
@@ -488,6 +541,10 @@ pub enum ScenePlot {
         visible: bool,
         #[serde(default)]
         force_3d: bool,
+        #[serde(default)]
+        color_mapping: crate::plots::surface::SurfaceColorMapping,
+        #[serde(default)]
+        color_source_kind: crate::plots::PatchColorSourceKind,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x_source: Option<SceneNumericData>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -622,6 +679,12 @@ impl FigureSnapshot {
     /// Capture a snapshot from a [`Figure`] reference.
     pub fn capture(figure: &Figure) -> Self {
         let (rows, cols) = figure.axes_grid();
+        let mut axes_grid_cells = (0..figure.axes_count())
+            .map(|axes| figure.axes_grid_cell(axes))
+            .collect::<Vec<_>>();
+        if axes_grid_cells.iter().all(Option::is_none) {
+            axes_grid_cells.clear();
+        }
         let layout = FigureLayout {
             axes_rows: rows as u32,
             axes_cols: cols as u32,
@@ -630,6 +693,7 @@ impl FigureSnapshot {
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect(),
+            axes_grid_cells,
         };
 
         let metadata = FigureMetadata::from_figure(figure);
@@ -662,7 +726,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 5;
+    pub const SCHEMA_VERSION: u32 = 6;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -686,6 +750,16 @@ impl FigureScene {
         figure: &Figure,
         policy: SceneExportPolicy,
     ) -> Result<Self, SceneExportError> {
+        Self::capture_for_export_with_cause(figure, policy)
+            .await
+            .map_err(|failure| failure.error)
+    }
+
+    /// Capture an export with the original plot-data failure attached for callers that need it.
+    pub async fn capture_for_export_with_cause(
+        figure: &Figure,
+        policy: SceneExportPolicy,
+    ) -> Result<Self, SceneExportFailure> {
         let snapshot = FigureSnapshot::capture(figure);
         let mut budget = SceneExportBudget::new(policy);
         let mut plots = Vec::new();
@@ -732,6 +806,7 @@ impl FigureScene {
                 axes_rows: 1,
                 axes_cols: 1,
                 axes_indices: vec![0; plots.len()],
+                axes_grid_cells: Vec::new(),
             },
             metadata: snapshot.metadata,
             plots,
@@ -742,6 +817,13 @@ impl FigureScene {
         self.validate_schema_version()?;
 
         let mut figure = Figure::new();
+        let default_map = self
+            .metadata
+            .default_colormap
+            .as_deref()
+            .map(parse_colormap_name)
+            .unwrap_or(ColorMap::Parula);
+        figure.set_figure_colormap(default_map, self.metadata.default_colormap_length);
         figure.set_subplot_grid(
             self.layout.axes_rows as usize,
             self.layout.axes_cols as usize,
@@ -751,10 +833,12 @@ impl FigureScene {
             figure.axes_metadata = axes_metadata.into_iter().map(AxesMetadata::from).collect();
             figure.set_active_axes_index(figure.active_axes_index);
         } else {
-            figure.title = self.metadata.title;
-            figure.x_label = self.metadata.x_label;
-            figure.y_label = self.metadata.y_label;
-            figure.legend_enabled = self.metadata.legend_enabled;
+            figure.set_active_axes_index(figure.active_axes_index);
+            let axes = &mut figure.axes_metadata[figure.active_axes_index];
+            axes.title = self.metadata.title;
+            axes.x_label = self.metadata.x_label;
+            axes.y_label = self.metadata.y_label;
+            figure.set_axes_legend_enabled(figure.active_axes_index, self.metadata.legend_enabled);
             figure.set_axes_data_aspect_ratio(
                 figure.active_axes_index,
                 self.metadata.data_aspect_ratio,
@@ -764,6 +848,7 @@ impl FigureScene {
                 figure.set_axes_axis_equal(figure.active_axes_index, true);
             }
         }
+        figure.restore_axes_grid_cells(self.layout.axes_grid_cells)?;
         figure.name = self.metadata.name;
         figure.number_title = self.metadata.number_title;
         figure.visible = self.metadata.visible;
@@ -845,6 +930,9 @@ impl FigureScene {
                 "mesh plots require figure scene schema version {}",
                 3
             ));
+        }
+        if self.schema_version < 5 && !self.layout.axes_grid_cells.is_empty() {
+            return Err("axes grid-cell identity requires figure scene schema version 5".into());
         }
         Ok(())
     }
@@ -1046,6 +1134,8 @@ pub struct FigureLayout {
     pub axes_rows: u32,
     pub axes_cols: u32,
     pub axes_indices: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub axes_grid_cells: Vec<Option<crate::plots::figure::AxesGridCell>>,
 }
 
 /// Figure-level metadata (title, labels, theming).
@@ -1089,6 +1179,10 @@ pub struct FigureMetadata {
     pub background_rgba: [f32; 4],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colormap: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_colormap: Option<String>,
+    #[serde(default = "default_colormap_length")]
+    pub default_colormap_length: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_limits: Option<[f64; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1136,6 +1230,8 @@ impl FigureMetadata {
                 .unwrap_or_else(|| "auto".into()),
             background_rgba: vec4_to_rgba(figure.background_color),
             colormap: Some(figure.colormap.to_serialized_token()),
+            default_colormap: Some(figure.default_colormap.to_serialized_token()),
+            default_colormap_length: figure.default_colormap_length,
             color_limits: figure.color_limits.map(|(lo, hi)| [lo, hi]),
             z_limits: figure.z_limits.map(|(lo, hi)| [lo, hi]),
             legend_entries,
@@ -1154,6 +1250,10 @@ impl FigureMetadata {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_colormap_length() -> usize {
+    256
 }
 
 fn is_true(value: &bool) -> bool {
@@ -1277,6 +1377,8 @@ impl From<SerializedLegendStyle> for LegendStyle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedAxesMetadata {
+    #[serde(default)]
+    pub y_direction: crate::plots::figure::YDirection,
     #[serde(default, skip_serializing_if = "is_cartesian_axes_kind")]
     pub axes_kind: SerializedAxesKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1330,6 +1432,21 @@ pub struct SerializedAxesMetadata {
     pub y_limits: Option<[f64; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub z_limits: Option<[f64; 2]>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::plots::figure::AxisLimitMethod::is_default"
+    )]
+    pub x_limit_method: crate::plots::figure::AxisLimitMethod,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::plots::figure::AxisLimitMethod::is_default"
+    )]
+    pub y_limit_method: crate::plots::figure::AxisLimitMethod,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::plots::figure::AxisLimitMethod::is_default"
+    )]
+    pub z_limit_method: crate::plots::figure::AxisLimitMethod,
     #[serde(default)]
     pub x_log: bool,
     #[serde(default)]
@@ -1364,6 +1481,8 @@ pub struct SerializedAxesMetadata {
     #[serde(default)]
     pub colorbar_enabled: bool,
     pub colormap: String,
+    #[serde(default = "default_colormap_length")]
+    pub colormap_length: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_order: Option<Vec<[f32; 3]>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1521,6 +1640,7 @@ pub struct SerializedMeshDeformation {
 impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
+            y_direction: value.y_direction,
             axes_kind: value.axes_kind.into(),
             overlay_parent: value.overlay_parent,
             y_axis_location: value.y_axis_location,
@@ -1543,6 +1663,9 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             x_limits: value.x_limits.map(|(a, b)| [a, b]),
             y_limits: value.y_limits.map(|(a, b)| [a, b]),
             z_limits: value.z_limits.map(|(a, b)| [a, b]),
+            x_limit_method: value.x_limit_method,
+            y_limit_method: value.y_limit_method,
+            z_limit_method: value.z_limit_method,
             x_log: value.x_log,
             y_log: value.y_log,
             view_azimuth_deg: value.view_azimuth_deg,
@@ -1558,6 +1681,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: value.colormap.to_serialized_token(),
+            colormap_length: value.colormap_length,
             color_order: value
                 .color_order
                 .map(|colors| colors.into_iter().map(|c| [c.x, c.y, c.z]).collect()),
@@ -1581,6 +1705,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
 impl From<SerializedAxesMetadata> for AxesMetadata {
     fn from(value: SerializedAxesMetadata) -> Self {
         Self {
+            y_direction: value.y_direction,
             axes_kind: value.axes_kind.into(),
             overlay_parent: value.overlay_parent,
             y_axis_location: value.y_axis_location,
@@ -1603,6 +1728,9 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             x_limits: value.x_limits.map(|[a, b]| (a, b)),
             y_limits: value.y_limits.map(|[a, b]| (a, b)),
             z_limits: value.z_limits.map(|[a, b]| (a, b)),
+            x_limit_method: value.x_limit_method,
+            y_limit_method: value.y_limit_method,
+            z_limit_method: value.z_limit_method,
             x_log: value.x_log,
             y_log: value.y_log,
             view_azimuth_deg: value.view_azimuth_deg,
@@ -1619,6 +1747,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: parse_colormap_name(&value.colormap),
+            colormap_length: value.colormap_length,
             color_order: value.color_order.map(|colors| {
                 colors
                     .into_iter()
@@ -1979,13 +2108,13 @@ impl ScenePlot {
     async fn from_plot_for_export(
         plot: &PlotElement,
         axes_index: u32,
-    ) -> Result<Self, SceneExportError> {
+    ) -> Result<Self, SceneExportFailure> {
         let scene_plot = match plot {
             PlotElement::Line(line) => {
                 let (x_data, y_data) = line
-                    .export_numeric_xy_data()
+                    .export_numeric_xy_data_typed()
                     .await
-                    .map_err(SceneExportError::readback)?
+                    .map_err(SceneExportFailure::readback_typed)?
                     .ok_or_else(|| {
                         SceneExportError::unexportable("line plot has no exportable scene data")
                     })?;
@@ -1994,7 +2123,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "line plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Line {
                     x,
@@ -2019,9 +2149,9 @@ impl ScenePlot {
             PlotElement::ReferenceLine(_) => Self::from_plot(plot, axes_index),
             PlotElement::Scatter(scatter) => {
                 let (x_data, y_data) = scatter
-                    .export_numeric_xy_data()
+                    .export_numeric_xy_data_typed()
                     .await
-                    .map_err(SceneExportError::readback)?
+                    .map_err(SceneExportFailure::readback_typed)?
                     .ok_or_else(|| {
                         SceneExportError::unexportable("scatter plot has no exportable scene data")
                     })?;
@@ -2030,7 +2160,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "scatter plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Scatter {
                     x,
@@ -2053,7 +2184,8 @@ impl ScenePlot {
                 if values.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "bar chart has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Bar {
                     labels: bar.labels.clone(),
@@ -2085,7 +2217,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "errorbar plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::ErrorBar {
                     x,
@@ -2117,7 +2250,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "stairs plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Stairs {
                     x,
@@ -2139,7 +2273,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "stem plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Stem {
                     x,
@@ -2173,7 +2308,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "area plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Area {
                     x,
@@ -2194,7 +2330,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() && u.is_empty() && v.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "quiver plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 let source = quiver.source_data();
                 Self::Quiver {
@@ -2227,7 +2364,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() && z.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "surface plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 let color_grid = surface
                     .export_scene_color_grid()
@@ -2241,6 +2379,7 @@ impl ScenePlot {
                     x_source: source_x.map(Into::into),
                     y_source: source_y.map(Into::into),
                     z_source: source_z.map(Into::into),
+                    c_source: surface.color_source().map(Into::into),
                     x_grid: surface.x_grid.clone(),
                     y_grid: surface.y_grid.clone(),
                     colormap: surface.colormap.to_serialized_token(),
@@ -2248,6 +2387,7 @@ impl ScenePlot {
                     wireframe: surface.wireframe,
                     alpha: surface.alpha,
                     flatten_z: surface.flatten_z,
+                    color_mapping: surface.color_mapping,
                     image_mode: surface.image_mode,
                     cell_labels: surface.cell_labels.clone(),
                     color_grid_rgba: color_grid.as_ref().map(|grid| {
@@ -2278,7 +2418,8 @@ impl ScenePlot {
                 if x.is_empty() && y.is_empty() && z.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "plot3 line has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Line3 {
                     x,
@@ -2313,7 +2454,8 @@ impl ScenePlot {
                 if points.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "scatter3 plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 let colors = scatter3
                     .export_scene_colors(points.len())
@@ -2340,7 +2482,8 @@ impl ScenePlot {
                 if vertices.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "contour plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::Contour {
                     vertices: vertices.into_iter().map(Into::into).collect(),
@@ -2363,7 +2506,8 @@ impl ScenePlot {
                 if vertices.is_empty() {
                     return Err(SceneExportError::unexportable(
                         "filled contour plot has no exportable scene data",
-                    ));
+                    )
+                    .into());
                 }
                 Self::ContourFill {
                     vertices: vertices.into_iter().map(Into::into).collect(),
@@ -2787,6 +2931,7 @@ impl ScenePlot {
                 x_source: surface.source_data().0.map(Into::into),
                 y_source: surface.source_data().1.map(Into::into),
                 z_source: surface.source_data().2.map(Into::into),
+                c_source: surface.color_source().map(Into::into),
                 x_grid: surface.x_grid.clone(),
                 y_grid: surface.y_grid.clone(),
                 colormap: surface.colormap.to_serialized_token(),
@@ -2794,6 +2939,7 @@ impl ScenePlot {
                 wireframe: surface.wireframe,
                 alpha: surface.alpha,
                 flatten_z: surface.flatten_z,
+                color_mapping: surface.color_mapping,
                 image_mode: surface.image_mode,
                 cell_labels: surface.cell_labels.clone(),
                 color_grid_rgba: surface.color_grid.as_ref().map(|grid| {
@@ -2831,6 +2977,8 @@ impl ScenePlot {
                     label: patch.label().map(str::to_string),
                     visible: patch.is_visible(),
                     force_3d: patch.force_3d(),
+                    color_mapping: patch.color_mapping(),
+                    color_source_kind: patch.color_source_kind(),
                     x_source: source_x.map(Into::into),
                     y_source: source_y.map(Into::into),
                     z_source: source_z.map(Into::into),
@@ -3311,6 +3459,7 @@ impl ScenePlot {
                 x_source,
                 y_source,
                 z_source,
+                c_source,
                 x_grid,
                 y_grid,
                 colormap,
@@ -3320,6 +3469,7 @@ impl ScenePlot {
                 flatten_z,
                 image_mode,
                 cell_labels,
+                color_mapping,
                 color_grid_rgba,
                 color_limits,
                 axes_index,
@@ -3349,6 +3499,9 @@ impl ScenePlot {
                         z_source.map(TryInto::try_into).transpose()?.or(fallback_z),
                     );
                 }
+                if let Some(source) = c_source {
+                    surface.set_color_source(source.try_into()?)?;
+                }
                 surface.colormap = parse_colormap(&colormap);
                 surface.shading_mode = parse_shading_mode(&shading_mode);
                 surface.wireframe = wireframe;
@@ -3356,6 +3509,7 @@ impl ScenePlot {
                 surface.flatten_z = flatten_z;
                 surface.image_mode = image_mode;
                 surface.cell_labels = cell_labels;
+                surface.color_mapping = color_mapping;
                 surface.color_grid = color_grid_rgba.map(|grid| {
                     grid.into_iter()
                         .map(|row| row.into_iter().map(rgba_to_vec4).collect())
@@ -3380,6 +3534,8 @@ impl ScenePlot {
                 label,
                 visible,
                 force_3d,
+                color_mapping,
+                color_source_kind,
                 x_source,
                 y_source,
                 z_source,
@@ -3403,14 +3559,17 @@ impl ScenePlot {
                 patch.set_label(label);
                 patch.set_visible(visible);
                 patch.set_force_3d(force_3d);
-                patch.set_source_data(
-                    x_source.map(TryInto::try_into).transpose()?,
-                    y_source.map(TryInto::try_into).transpose()?,
-                    z_source.map(TryInto::try_into).transpose()?,
-                    c_source.map(TryInto::try_into).transpose()?,
-                    faces_source.map(TryInto::try_into).transpose()?,
-                    vertices_source.map(TryInto::try_into).transpose()?,
-                );
+                patch.set_color_mapping(color_mapping);
+                patch.set_source_data(crate::plots::PatchSourceDataOwned {
+                    x: x_source.map(TryInto::try_into).transpose()?,
+                    y: y_source.map(TryInto::try_into).transpose()?,
+                    z: z_source.map(TryInto::try_into).transpose()?,
+                    colors: c_source.map(TryInto::try_into).transpose()?,
+                    color_kind: color_source_kind,
+                    faces: faces_source.map(TryInto::try_into).transpose()?,
+                    vertices: vertices_source.map(TryInto::try_into).transpose()?,
+                })?;
+                patch.validate_color_mode()?;
                 figure.add_patch_plot_on_axes(patch, axes_index as usize);
             }
             ScenePlot::Mesh {
@@ -3680,6 +3839,7 @@ fn parse_patch_face_color_mode(value: &str) -> PatchFaceColorMode {
     match value {
         "None" => PatchFaceColorMode::None,
         "Flat" => PatchFaceColorMode::Flat,
+        "Interp" => PatchFaceColorMode::Interp,
         _ => PatchFaceColorMode::Color,
     }
 }
@@ -3836,26 +3996,58 @@ where
     Ok(value.unwrap_or(f64::NAN))
 }
 
+/// One float read leniently: a number, the lossless nonfinite tag `runmat_types` writes, or
+/// JSON `null` (NaN), as scenes saved before lossless encoding wrote NaN.
+struct LossyFloat<T>(T);
+
+impl<'de> Deserialize<'de> for LossyFloat<f64> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        if !deserializer.is_human_readable() {
+            return f64::deserialize(deserializer).map(Self);
+        }
+        let value = Option::<LosslessFloat<f64>>::deserialize(deserializer)?;
+        Ok(Self(value.map_or(f64::NAN, |value| value.0)))
+    }
+}
+
+impl<'de> Deserialize<'de> for LossyFloat<f32> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        if !deserializer.is_human_readable() {
+            return f32::deserialize(deserializer).map(Self);
+        }
+        let value = Option::<LosslessFloat<f32>>::deserialize(deserializer)?;
+        Ok(Self(value.map_or(f32::NAN, |value| value.0)))
+    }
+}
+
+struct LosslessFloat<T>(T);
+
+impl<'de> Deserialize<'de> for LosslessFloat<f64> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        runmat_types::serde_f64::deserialize(deserializer).map(Self)
+    }
+}
+
+impl<'de> Deserialize<'de> for LosslessFloat<f32> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        runmat_types::serde_f32::deserialize(deserializer).map(Self)
+    }
+}
+
 fn deserialize_vec_f64_lossy<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let values = Vec::<Option<f64>>::deserialize(deserializer)?;
-    Ok(values
-        .into_iter()
-        .map(|value| value.unwrap_or(f64::NAN))
-        .collect())
+    let values = Vec::<LossyFloat<f64>>::deserialize(deserializer)?;
+    Ok(values.into_iter().map(|value| value.0).collect())
 }
 
 fn deserialize_vec_f32_lossy<'de, D>(deserializer: D) -> Result<Vec<f32>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let values = Vec::<Option<f32>>::deserialize(deserializer)?;
-    Ok(values
-        .into_iter()
-        .map(|value| value.unwrap_or(f32::NAN))
-        .collect())
+    let values = Vec::<LossyFloat<f32>>::deserialize(deserializer)?;
+    Ok(values.into_iter().map(|value| value.0).collect())
 }
 
 fn deserialize_option_vec_f64_lossy<'de, D>(deserializer: D) -> Result<Option<Vec<f64>>, D::Error>
@@ -3945,6 +4137,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu::PlotReadbackError;
+    use crate::plots::{
+        AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
+        MeshPlot, NumericPlotData, PatchPlot, PieChart, PolarHistogramDisplayStyle, QuiverPlot,
+        ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot,
+        SurfacePlot,
+    };
+    use glam::{Vec3, Vec4};
 
     #[test]
     fn numeric_storage_reads_null_as_nan() {
@@ -3958,13 +4158,38 @@ mod tests {
         assert_eq!(values[0], 1.0);
         assert!(values[1].is_nan());
     }
-    use crate::plots::{
-        AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
-        MeshPlot, NumericPlotData, PatchPlot, PieChart, PolarHistogramDisplayStyle, QuiverPlot,
-        ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot,
-        SurfacePlot,
-    };
-    use glam::{Vec3, Vec4};
+
+    #[test]
+    fn typed_scene_readback_keeps_the_original_device_failure() {
+        let cause = crate::plots::PlotDataExportError::Readback(PlotReadbackError::Access(
+            runmat_accelerate_api::WgpuAccessError::WrongDevice,
+        ));
+        let error = SceneExportFailure::readback_typed(cause.clone());
+        assert_eq!(error.error.kind, SceneExportErrorKind::Readback);
+        assert_eq!(error.error.message, cause.to_string());
+        assert_eq!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<crate::plots::PlotDataExportError>()),
+            Some(&cause)
+        );
+        assert!(error
+            .source()
+            .and_then(Error::source)
+            .and_then(|source| source.downcast_ref::<PlotReadbackError>())
+            .is_some());
+    }
+
+    #[test]
+    fn public_scene_export_error_remains_a_two_field_value() {
+        let error = SceneExportError {
+            kind: SceneExportErrorKind::Readback,
+            message: "device readback failed".into(),
+        };
+        let failure = SceneExportFailure::from(error.clone());
+        assert_eq!(failure.error, error);
+        assert!(failure.source().is_none());
+    }
 
     #[test]
     fn async_scene_export_covers_every_plot_element_variant() {
@@ -4145,6 +4370,7 @@ mod tests {
             x_source: None,
             y_source: None,
             z_source: None,
+            c_source: None,
             x_grid: None,
             y_grid: None,
             colormap: "Parula".to_string(),
@@ -4154,6 +4380,7 @@ mod tests {
             flatten_z: false,
             image_mode: false,
             cell_labels: None,
+            color_mapping: Default::default(),
             color_grid_rgba: Some(vec![
                 vec![[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
                 vec![[0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 0.0, 1.0]],
@@ -4173,6 +4400,7 @@ mod tests {
             x_source: None,
             y_source: None,
             z_source: None,
+            c_source: None,
             x_grid: None,
             y_grid: None,
             colormap: "Parula".to_string(),
@@ -4182,6 +4410,7 @@ mod tests {
             flatten_z: false,
             image_mode: false,
             cell_labels: None,
+            color_mapping: Default::default(),
             color_grid_rgba: None,
             color_limits: None,
             axes_index: 0,
@@ -4210,6 +4439,7 @@ mod tests {
                 x_source: None,
                 y_source: None,
                 z_source: None,
+                c_source: None,
                 x_grid: None,
                 y_grid: None,
                 colormap: "Parula".to_string(),
@@ -4219,6 +4449,7 @@ mod tests {
                 flatten_z: true,
                 image_mode: true,
                 cell_labels: None,
+                color_mapping: Default::default(),
                 color_grid_rgba: Some(vec![
                     vec![
                         [1.0, 0.0, 0.0, 1.0],
@@ -4727,6 +4958,101 @@ mod tests {
     }
 
     #[test]
+    fn figure_scene_json_roundtrip_preserves_nonfinite_native_float_sources() {
+        let double_bits = [
+            0x3ff8_0000_0000_0000,
+            0x8000_0000_0000_0000,
+            0x7ff0_0000_0000_0000,
+            0xfff0_0000_0000_0000,
+            0x7ff8_0000_0000_0042,
+        ];
+        let single_bits = [
+            0x3fc0_0000,
+            0x8000_0000,
+            0x7f80_0000,
+            0xff80_0000,
+            0x7fc0_0042,
+        ];
+        let x = NumericPlotData::new(
+            NumericStorage::F64(double_bits.map(f64::from_bits).to_vec()),
+            vec![1, double_bits.len()],
+        )
+        .unwrap();
+        let y = NumericPlotData::new(
+            NumericStorage::F32(single_bits.map(f32::from_bits).to_vec()),
+            vec![1, single_bits.len()],
+        )
+        .unwrap();
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::from_numeric_data(x, y).unwrap());
+
+        let scene = FigureScene::capture(&figure);
+        assert_eq!(scene.schema_version, 6);
+        let encoded = serde_json::to_string(&scene).unwrap();
+        assert!(encoded.contains(r#""f64_bits":"7ff8000000000042""#));
+        assert!(encoded.contains(r#""f32_bits":"7fc00042""#));
+        let rebuilt = serde_json::from_str::<FigureScene>(&encoded)
+            .unwrap()
+            .into_figure()
+            .unwrap();
+        let Some(PlotElement::Line(line)) = rebuilt.plots().next() else {
+            panic!("expected line")
+        };
+        let (x, y) = line.source_data();
+        let Some(NumericStorage::F64(x_values)) = x.map(NumericPlotData::storage) else {
+            panic!("expected native double source")
+        };
+        let Some(NumericStorage::F32(y_values)) = y.map(NumericPlotData::storage) else {
+            panic!("expected native single source")
+        };
+        assert_eq!(x.unwrap().shape(), &[1, double_bits.len()]);
+        assert_eq!(y.unwrap().shape(), &[1, single_bits.len()]);
+        assert_eq!(
+            x_values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            double_bits
+        );
+        assert_eq!(
+            y_values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            single_bits
+        );
+        assert!(
+            serde_json::from_str::<SceneNumericStorage>(r#"{"dtype":"f64","values":[null]}"#)
+                .is_err()
+        );
+
+        let mut legacy_figure = Figure::new()
+            .with_title("Legacy title")
+            .with_labels("Time", "Value")
+            .with_legend(true);
+        legacy_figure.add_line_plot(
+            LinePlot::from_numeric_data(
+                NumericPlotData::new(NumericStorage::F64(vec![1.0, -0.0]), vec![1, 2]).unwrap(),
+                NumericPlotData::new(NumericStorage::F32(vec![2.0, 3.0]), vec![1, 2]).unwrap(),
+            )
+            .unwrap(),
+        );
+        let mut legacy = FigureScene::capture(&legacy_figure);
+        legacy.schema_version = 1;
+        legacy.metadata.axes_metadata = None;
+        let finite_legacy = serde_json::to_string(&legacy).unwrap();
+        let rebuilt = serde_json::from_str::<FigureScene>(&finite_legacy)
+            .unwrap()
+            .into_figure()
+            .expect("finite legacy scene remains readable");
+        assert!(rebuilt.legend_enabled);
+        assert!(rebuilt.axes_metadata(0).unwrap().legend_enabled);
+        assert_eq!(rebuilt.title.as_deref(), Some("Legacy title"));
+        assert_eq!(rebuilt.x_label.as_deref(), Some("Time"));
+        assert_eq!(rebuilt.y_label.as_deref(), Some("Value"));
+    }
+
+    #[test]
     fn figure_scene_json_roundtrip_preserves_wide_integer_stairs_and_stem_sources() {
         let wide = 9_007_199_254_740_993_u64;
         let source = || {
@@ -5112,6 +5438,13 @@ mod tests {
                     .expect("native surface data"),
             ),
         );
+        let colors = vec![1_u8, 2, 3, 4];
+        surface
+            .set_color_source(
+                NumericPlotData::new(NumericStorage::U8(colors.clone()), vec![2, 2])
+                    .expect("native surface colors"),
+            )
+            .expect("matching CData");
         let mut figure = Figure::new();
         figure.add_surface_plot(surface);
 
@@ -5125,6 +5458,10 @@ mod tests {
         assert_eq!(
             source_z.map(NumericPlotData::storage),
             Some(&NumericStorage::U64(wide))
+        );
+        assert_eq!(
+            surface.color_source().map(NumericPlotData::storage),
+            Some(&NumericStorage::U8(colors))
         );
     }
 
@@ -5141,20 +5478,24 @@ mod tests {
             vec![vec![0, 1, 2]],
         )
         .unwrap();
-        patch.set_source_data(
-            None,
-            None,
-            None,
-            None,
-            Some(
-                NumericPlotData::new(NumericStorage::I16(faces.clone()), vec![1, 3])
-                    .expect("native faces"),
-            ),
-            Some(
-                NumericPlotData::new(NumericStorage::U64(vertices.clone()), vec![3, 2])
-                    .expect("native vertices"),
-            ),
-        );
+        patch
+            .set_source_data(crate::plots::PatchSourceDataOwned {
+                colors: Some(
+                    NumericPlotData::new(NumericStorage::U8(vec![1, 2, 3]), vec![3, 1])
+                        .expect("native patch colors"),
+                ),
+                color_kind: crate::plots::PatchColorSourceKind::FaceVertex,
+                faces: Some(
+                    NumericPlotData::new(NumericStorage::I16(faces.clone()), vec![1, 3])
+                        .expect("native faces"),
+                ),
+                vertices: Some(
+                    NumericPlotData::new(NumericStorage::U64(vertices.clone()), vec![3, 2])
+                        .expect("native vertices"),
+                ),
+                ..Default::default()
+            })
+            .expect("valid native patch data");
         let mut figure = Figure::new();
         figure.add_patch_plot(patch);
 
@@ -5164,7 +5505,11 @@ mod tests {
         let PlotElement::Patch(patch) = rebuilt.plots().next().unwrap() else {
             panic!("expected patch")
         };
-        let (_, _, _, _, source_faces, source_vertices) = patch.source_data();
+        let (_, _, _, source_c, source_faces, source_vertices) = patch.source_data();
+        assert_eq!(
+            source_c.map(NumericPlotData::storage),
+            Some(&NumericStorage::U8(vec![1, 2, 3]))
+        );
         assert_eq!(
             source_faces.map(NumericPlotData::storage),
             Some(&NumericStorage::I16(faces))
@@ -5191,6 +5536,7 @@ mod tests {
                 x_source: None,
                 y_source: None,
                 z_source: None,
+                c_source: None,
                 x_grid: None,
                 y_grid: None,
                 colormap: "Parula".into(),
@@ -5200,6 +5546,7 @@ mod tests {
                 flatten_z: false,
                 image_mode: false,
                 cell_labels: None,
+                color_mapping: Default::default(),
                 color_grid_rgba: None,
                 color_limits: None,
                 axes_index: 0,

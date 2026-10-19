@@ -45,7 +45,7 @@ pub fn parse_symbolic_declaration(
     let Some(open) = trimmed.find('(') else {
         return is_valid_symbolic_identifier(trimmed)
             .then(|| SymbolicDeclaration {
-                name: trimmed.to_string(),
+                name: trimmed.into(),
                 parameters: Vec::new(),
             })
             .ok_or(SymbolicDeclarationError::InvalidName);
@@ -75,7 +75,7 @@ pub fn parse_symbolic_declaration(
         parameters.push(parameter.to_string());
     }
     Ok(SymbolicDeclaration {
-        name: name.to_string(),
+        name: name.into(),
         parameters,
     })
 }

@@ -22,9 +22,12 @@ impl ProgramArtifact {
             outputs,
             execution_mode: "portable-v4".into(),
             target,
+            interop: envelope.manifest.interop.clone(),
+            accelerators: Vec::new(),
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
+            foreign_policy: None,
             expected_artifact_id: None,
         };
         let artifact = Self::materialize(&recipe, ExecutableForm::ExecutableUnitV4, program)?;

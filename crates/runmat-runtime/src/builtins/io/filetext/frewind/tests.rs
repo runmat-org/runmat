@@ -1,0 +1,243 @@
+use super::*;
+use crate::builtins::common::test_support;
+use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
+use crate::RuntimeError;
+use runmat_filesystem::File;
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_time::system_time_now;
+use runmat_value::{IntValue, IntegerStorage, Tensor};
+use std::io::Write;
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::UNIX_EPOCH;
+
+fn unwrap_error_message(err: RuntimeError) -> String {
+    err.message().to_string()
+}
+
+fn run_evaluate(fid_value: &Value) -> BuiltinResult<()> {
+    futures::executor::block_on(evaluate(fid_value))
+}
+
+#[test]
+fn resident_logical_identifier_uses_logical_gate_before_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_logical_zeroed(vec![1, 1], runmat_accelerate_api::ProviderPrecision::F32)
+        .expect("logical allocation");
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = run_evaluate(&Value::GpuTensor(allocation.handle.clone()))
+        .expect_err("resident compatibility gate");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:FrewindResidentIdExtension")
+    );
+    drop(_strict);
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    preflight_fid(&Value::GpuTensor(allocation.handle.clone())).expect("admitted logical ID");
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
+fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
+    futures::executor::block_on(fopen::evaluate(args))
+}
+
+fn run_fread(fid_value: &Value, args: &[Value]) -> BuiltinResult<fread::FreadEval> {
+    futures::executor::block_on(fread::evaluate(fid_value, args))
+}
+
+fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
+    futures::executor::block_on(fclose::evaluate(args))
+}
+
+fn registry_guard() -> registry::RegistryTestGuard {
+    registry::test_guard()
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn frewind_descriptor_signature_covers_core_form() {
+    let labels: Vec<&str> = FREWIND_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|sig| sig.label)
+        .collect();
+    assert!(labels.contains(&"frewind(fid)"));
+}
+
+#[test]
+fn frewind_integer_capability_and_identifier_roles_are_independently_gated() {
+    assert_eq!(INTEGER_CAPABILITIES.len(), 1);
+    assert_eq!(INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+    let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+    let integer = preflight_fid(&Value::Int(IntValue::I32(3))).unwrap_err();
+    assert_eq!(
+        integer.identifier(),
+        Some("RunMat:compatibility:FrewindIntegerIdExtension")
+    );
+    let logical = preflight_fid(&Value::Bool(true)).unwrap_err();
+    assert_eq!(
+        logical.identifier(),
+        Some("RunMat:compatibility:FrewindLogicalIdExtension")
+    );
+}
+
+#[test]
+fn typed_file_identifier_parser_rejects_unrepresentable_uint64() {
+    assert_eq!(parse_fid(&Value::Int(IntValue::U16(7))).unwrap(), 7);
+    assert!(parse_fid(&Value::Int(IntValue::U64(u64::MAX))).is_err());
+
+    let fid_tensor =
+        Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("typed fid tensor");
+    assert_eq!(parse_fid(&Value::Tensor(fid_tensor)).unwrap(), 7);
+    let fid_too_large = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        .expect("typed fid tensor");
+    assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
+}
+
+#[test]
+fn frewind_typed_identifier_tensors_ignore_poisoned_f64_mirrors() {
+    let classes = [
+        IntegerStorage::I8(vec![7]),
+        IntegerStorage::I16(vec![7]),
+        IntegerStorage::I32(vec![7]),
+        IntegerStorage::I64(vec![7]),
+        IntegerStorage::U8(vec![7]),
+        IntegerStorage::U16(vec![7]),
+        IntegerStorage::U32(vec![7]),
+        IntegerStorage::U64(vec![7]),
+    ];
+    for storage in classes {
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed fid");
+        assert_eq!(parse_fid(&Value::Tensor(tensor)).unwrap(), 7);
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn frewind_rewinds_to_beginning() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let path = unique_path("frewind_rewinds");
+    {
+        let mut file = File::create(&path).expect("create");
+        file.write_all(&[1u8, 2, 3]).expect("write");
+    }
+
+    let open = run_fopen(&[
+        Value::from(path.to_string_lossy().to_string()),
+        Value::from("rb"),
+    ])
+    .expect("fopen");
+    let fid = open.as_open().unwrap().fid as i32;
+
+    let first = run_fread(&Value::Num(fid as f64), &[Value::from("uint8")]).expect("fread");
+    assert_eq!(first.count(), 3);
+
+    run_evaluate(&Value::Num(fid as f64)).expect("frewind");
+
+    let second = run_fread(&Value::Num(fid as f64), &[Value::from("uint8")]).expect("fread");
+    assert_eq!(second.count(), 3);
+    match second.data() {
+        Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]),
+        other => panic!("unexpected value {other:?}"),
+    }
+
+    run_fclose(&[Value::Num(fid as f64)]).unwrap();
+    test_support::fs::remove_file(path).unwrap();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn frewind_standard_stream_is_no_op() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    run_evaluate(&Value::Num(1.0)).expect("frewind stdout");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn frewind_invalid_identifier_errors() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let err = unwrap_error_message(run_evaluate(&Value::Num(9999.0)).unwrap_err());
+    assert_eq!(err, FREWIND_ERROR_INVALID_IDENTIFIER.message);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn frewind_rejects_non_integer_identifier() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let err = unwrap_error_message(run_evaluate(&Value::Num(1.5)).unwrap_err());
+    assert_eq!(
+        err,
+        format!(
+            "{}: file identifier must be an integer",
+            FREWIND_ERROR_INVALID_INPUT.message
+        )
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn frewind_rejects_nan_identifier() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let err = unwrap_error_message(run_evaluate(&Value::Num(f64::NAN)).unwrap_err());
+    assert_eq!(
+        err,
+        format!(
+            "{}: file identifier must be finite",
+            FREWIND_ERROR_INVALID_INPUT.message
+        )
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn frewind_rejects_negative_identifier() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let err = unwrap_error_message(run_evaluate(&Value::Num(-1.0)).unwrap_err());
+    assert_eq!(
+        err,
+        format!(
+            "{}: file identifier must be non-negative",
+            FREWIND_ERROR_INVALID_INPUT.message
+        )
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn frewind_rejects_non_numeric_input() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let err = unwrap_error_message(run_evaluate(&Value::from("abc")).unwrap_err());
+    assert_eq!(
+        err,
+        format!(
+            "{}: {}",
+            FREWIND_ERROR_INVALID_INPUT.message, IDENTIFIER_TYPE_ERROR_DETAIL
+        )
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn unique_path(prefix: &str) -> PathBuf {
+    let now = system_time_now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let filename = format!("{prefix}_{now}.tmp");
+    std::env::temp_dir().join(filename)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unique_path(prefix: &str) -> PathBuf {
+    test_support::filesystem::unique_path(prefix)
+}

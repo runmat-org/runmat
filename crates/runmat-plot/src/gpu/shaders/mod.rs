@@ -14,14 +14,8 @@ pub mod stairs;
 pub mod stem;
 pub mod surface;
 pub mod vertex;
+mod source;
+pub(crate) use source::compute_source;
 
-/// Backwards-compatible re-export so existing code can keep referencing
-/// `shaders::histogram_counts::F32/F64`.
-pub mod histogram_counts {
-    pub use super::histogram::counts::{F32_UNIFORM as F32, F64_UNIFORM as F64};
-}
-
-/// Backwards-compatible wrapper around the histogram conversion shader template.
-pub mod histogram_convert {
-    pub const TEMPLATE: &str = super::histogram::convert::TEMPLATE;
-}
+#[cfg(test)]
+mod validation_tests;

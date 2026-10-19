@@ -23,16 +23,15 @@ use runmat_native_codegen::{
 };
 use runmat_types::{
     BindingId, CapabilityRequirement, CapabilitySet, CollectiveId, DeoptimizationPointId,
-    DistributedValueId, DynamicReason, ForeignAffinity, ForeignCapability, ForeignLifetime,
-    ForeignOwnership, ForeignRequirement, ForeignTypeIdentity, FunctionArgDefaultValue,
-    FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidator, InteropManifest, LabCount,
-    ParallelAccess, ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId,
-    ParallelVariableContract, ParallelVariableRole, ParforContract, ProgramFunctionId,
-    ProgramPointId, ProgramSourceId, ProgramSpan, RegionContract, RegionGuardCondition,
-    RegionGuardContract, RegionGuardId, RegionId, RegionProvenance, RegionValueId, Span,
-    SpmdContract, SpmdLabRequirement, ValueFact, WasmInteropPolicy,
-    INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
-    REGION_CONTRACT_SCHEMA_VERSION,
+    DynamicReason, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
+    ForeignRequirement, ForeignTypeIdentity, FunctionArgDefaultValue, FunctionArgDim,
+    FunctionArgSizeSpec, FunctionArgValidator, InteropManifest, LabCount, ParallelAccess,
+    ParallelManifest, ParallelRandomnessPolicy, ParallelRegionId, ParallelVariableContract,
+    ParallelVariableRole, ParforContract, ProgramFunctionId, ProgramPointId, ProgramSourceId,
+    ProgramSpan, RegionContract, RegionGuardCondition, RegionGuardContract, RegionGuardId,
+    RegionId, RegionProvenance, RegionValueId, SequenceUse, Span, SpmdContract, SpmdLabRequirement,
+    ValueFact, WasmInteropPolicy, INTEROP_MANIFEST_SCHEMA_VERSION,
+    PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
 };
 
 fn component_payloads() -> Vec<ExecutableComponentPayload> {
@@ -49,8 +48,8 @@ fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
         Digest::sha256(b"r12-graph"),
         Digest::sha256(b"r12-sources"),
         ProgramEnvironment::new(
-            1,
-            1,
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
             Digest::sha256(b"r12-runtime"),
             Digest::sha256(b"r12-catalog"),
             "matlab",
@@ -97,8 +96,9 @@ fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
             program,
             root_package: "r12-fixture@1.0.0".into(),
             entrypoint: "main".into(),
-            entrypoint_function: ProgramFunctionId(0),
+            entrypoint_function: Some(ProgramFunctionId(0)),
             entrypoint_kind: ExecutableEntrypointKind::Function,
+            declaration_class: None,
             source_digest: Digest::sha256(b"r12-main.m"),
         },
         revisions,
@@ -116,6 +116,7 @@ fn function(statements: Vec<MirStmt>) -> MirAssembly {
     let span = Span { start: 0, end: 8 };
     let function = FunctionId(0);
     let body = MirBody {
+        catch_scopes: Default::default(),
         function,
         abi: FunctionAbi {
             fixed_inputs: Vec::new(),
@@ -145,7 +146,9 @@ fn function(statements: Vec<MirStmt>) -> MirAssembly {
         name: FunctionName("main".into()),
         parent: None,
         enclosing_class: None,
+        class_method_owner: None,
         kind: FunctionKind::SyntheticEntrypoint,
+        source_role: runmat_types::FunctionSourceRole::Synthetic,
         argument_validations: Vec::new(),
         captures: Vec::new(),
         modifiers: FunctionModifiers::default(),
@@ -155,6 +158,7 @@ fn function(statements: Vec<MirStmt>) -> MirAssembly {
         bodies: [(function, body)].into_iter().collect(),
         functions: [(function, metadata)].into_iter().collect(),
         classes: Vec::new(),
+        class_property_defaults: Vec::new(),
         entrypoints: vec![function],
     }
 }
@@ -169,6 +173,201 @@ fn assignment(number: usize) -> MirStmt {
         },
         span: Span { start: 0, end: 1 },
     }
+}
+
+fn sequence_assignment_mir() -> MirAssembly {
+    let span = Span { start: 0, end: 2 };
+    function(vec![
+        MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::StructLiteral {
+                    fields: vec![(
+                        runmat_types::MemberName("field".into()),
+                        MirOperand::Constant(MirConstant::Number("1".into())),
+                    )],
+                },
+            },
+            span,
+        },
+        MirStmt {
+            kind: MirStmtKind::SequenceAssign {
+                target: runmat_mir::MirSequenceTarget::Member {
+                    base: MirPlace::Local(MirLocalId(0)),
+                    member: runmat_types::MemberName("field".into()),
+                },
+                value: MirRvalue::Member {
+                    base: MirOperand::Local(MirLocalId(0)),
+                    member: runmat_types::MemberName("field".into()),
+                    sequence_use: SequenceUse::SelectDestinationCardinality,
+                },
+            },
+            span,
+        },
+    ])
+}
+
+#[test]
+fn native_sequence_register_requires_one_adjacent_matching_pair() {
+    let valid = lower(&sequence_assignment_mir());
+    valid.verify().unwrap();
+    let producer = valid.functions[0].blocks[0]
+        .instructions
+        .iter()
+        .position(|instruction| {
+            matches!(
+                instruction.operation,
+                runmat_native_codegen::NativeOperation::Rvalue {
+                    result: runmat_native_codegen::NativeRvalueResult::SequenceAssignment(_),
+                    ..
+                }
+            )
+        })
+        .unwrap();
+    let consumer = producer + 1;
+
+    let mut missing_producer = valid.clone();
+    let runmat_native_codegen::NativeOperation::Rvalue { result, .. } =
+        &mut missing_producer.functions[0].blocks[0].instructions[producer].operation
+    else {
+        panic!("expected sequence-register producer")
+    };
+    *result = runmat_native_codegen::NativeRvalueResult::Discard;
+    assert_eq!(
+        missing_producer.verify().unwrap_err().code,
+        "native.ir.sequence_register"
+    );
+
+    let mut missing_consumer = valid.clone();
+    missing_consumer.functions[0].blocks[0]
+        .instructions
+        .truncate(consumer);
+    let duplicate_id = missing_consumer.functions[0].blocks[0].instructions[0].id;
+    let dangling = missing_consumer.functions[0].blocks[0]
+        .instructions
+        .last_mut()
+        .expect("sequence producer remains");
+    dangling.id = duplicate_id;
+    dangling.inputs = vec![runmat_native_codegen::NativeValueId(u32::MAX)];
+    assert_eq!(
+        missing_consumer.verify().unwrap_err().code,
+        "native.ir.sequence_register"
+    );
+
+    let mut intervening = valid.clone();
+    let unrelated = intervening.functions[0].blocks[0].instructions[0].clone();
+    intervening.functions[0].blocks[0]
+        .instructions
+        .insert(consumer, unrelated);
+    assert_eq!(
+        intervening.verify().unwrap_err().code,
+        "native.ir.sequence_register"
+    );
+
+    let mut mismatched = valid;
+    let runmat_native_codegen::NativeOperation::Statement(MirStmtKind::SequenceAssign {
+        target: runmat_mir::MirSequenceTarget::Member { member, .. },
+        ..
+    }) = &mut mismatched.functions[0].blocks[0].instructions[consumer].operation
+    else {
+        panic!("expected sequence-assignment consumer")
+    };
+    *member = runmat_types::MemberName("different".into());
+    assert_eq!(
+        mismatched.verify().unwrap_err().code,
+        "native.ir.sequence_register"
+    );
+}
+
+#[test]
+fn native_ir_rejects_forged_lexical_catch_membership() {
+    let mut assembly = lower(&function(vec![assignment(1)]));
+    assembly.functions[0].blocks[0]
+        .catch_scopes
+        .push(runmat_mir::CatchScopeId(99));
+    assert_eq!(assembly.verify().unwrap_err().code, "native.ir.catch_scope");
+}
+
+#[test]
+fn native_ir_rejects_repeated_and_misparented_catch_membership() {
+    let mut mir = function(vec![assignment(1)]);
+    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
+    let original_return = body.blocks[0].terminator.clone();
+    body.blocks[0].terminator = MirTerminator {
+        kind: MirTerminatorKind::TryCatch {
+            try_block: BasicBlockId(1),
+            catch_block: BasicBlockId(2),
+            catch_binding: None,
+        },
+        span: original_return.span,
+    };
+    body.blocks.push(BasicBlock {
+        id: BasicBlockId(1),
+        statements: Vec::new(),
+        terminator: original_return.clone(),
+    });
+    body.blocks.push(BasicBlock {
+        id: BasicBlockId(2),
+        statements: Vec::new(),
+        terminator: original_return,
+    });
+    body.catch_scopes
+        .insert(BasicBlockId(2), vec![runmat_mir::CatchScopeId(0)]);
+    let valid = lower(&mir);
+    valid.verify().unwrap();
+
+    let mut repeated = valid.clone();
+    repeated.functions[0].blocks[2]
+        .catch_scopes
+        .push(runmat_mir::CatchScopeId(0));
+    assert_eq!(repeated.verify().unwrap_err().code, "native.ir.catch_scope");
+
+    let mut misparented = valid;
+    misparented.functions[0].blocks[1]
+        .catch_scopes
+        .push(runmat_mir::CatchScopeId(0));
+    assert_eq!(
+        misparented.verify().unwrap_err().code,
+        "native.ir.catch_scope"
+    );
+
+    // The repeated scope is separated by a valid inner scope, so an adjacent
+    // windows(2) duplicate check would have accepted the forged ancestry.
+    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
+    let inner_return = body.blocks[2].terminator.clone();
+    body.blocks[2].terminator = MirTerminator {
+        kind: MirTerminatorKind::TryCatch {
+            try_block: BasicBlockId(3),
+            catch_block: BasicBlockId(4),
+            catch_binding: None,
+        },
+        span: inner_return.span,
+    };
+    body.blocks.push(BasicBlock {
+        id: BasicBlockId(3),
+        statements: Vec::new(),
+        terminator: inner_return.clone(),
+    });
+    body.blocks.push(BasicBlock {
+        id: BasicBlockId(4),
+        statements: Vec::new(),
+        terminator: inner_return,
+    });
+    body.catch_scopes
+        .insert(BasicBlockId(3), vec![runmat_mir::CatchScopeId(0)]);
+    body.catch_scopes.insert(
+        BasicBlockId(4),
+        vec![runmat_mir::CatchScopeId(0), runmat_mir::CatchScopeId(2)],
+    );
+    let mut nonadjacent = lower(&mir);
+    nonadjacent.verify().unwrap();
+    nonadjacent.functions[0].blocks[4]
+        .catch_scopes
+        .push(runmat_mir::CatchScopeId(0));
+    assert_eq!(
+        nonadjacent.verify().unwrap_err().code,
+        "native.ir.catch_scope"
+    );
 }
 
 fn lower(mir: &MirAssembly) -> runmat_native_codegen::NativeAssembly {
@@ -189,7 +388,7 @@ fn relocatable_object_is_bound_to_the_exact_native_product() {
     assert_eq!(first.manifest.target, assembly.target);
     assert_eq!(
         first.manifest.object_format,
-        runmat_native_codegen::aot::NativeObjectFormat::for_target(&assembly.target).unwrap()
+        runmat_native_codegen::aot::native_object_format_for_target(&assembly.target).unwrap()
     );
     assert_eq!(
         first.manifest.executable_cache_key,
@@ -202,6 +401,16 @@ fn relocatable_object_is_bound_to_the_exact_native_product() {
     assert_eq!(first.manifest.entrypoint, ProgramFunctionId(0));
     assert_eq!(first.manifest.functions[0].symbol, "runmat_aot_entry");
     assert!(first.manifest.data.is_empty());
+    assert_eq!(
+        first.manifest.product,
+        runmat_execution::host::NativeProductMode::HostUnselected
+    );
+    let mut untagged = serde_json::to_value(&first.manifest).unwrap();
+    untagged.as_object_mut().unwrap().remove("product");
+    assert!(
+        serde_json::from_value::<runmat_native_codegen::aot::NativeObjectManifest>(untagged)
+            .is_err()
+    );
 
     let mut tampered = first;
     tampered.bytes.push(0);
@@ -214,21 +423,65 @@ fn relocatable_object_is_bound_to_the_exact_native_product() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn relocatable_object_embeds_canonical_bounded_runtime_data() {
-    let assembly = lower(&function(vec![assignment(1)]));
+    let mut mir = function(vec![assignment(1)]);
+    mir.functions.get_mut(&FunctionId(0)).unwrap().source = ProgramSourceId(0);
+    let assembly = lower(&mir);
+    let native_ir = assembly.canonical_bytes().unwrap();
+    let text = "value = 1;";
+    let source_map = runmat_execution::ExecutableSourceMapV2::new(vec![
+        runmat_execution::ExecutableSourceRecordV2 {
+            source_id: ProgramSourceId(0),
+            owner_identity: "native-object-data-fixture".into(),
+            relative_path: "main.m".into(),
+            content_revision: Digest::sha256(text),
+            display_name: "main.m".into(),
+            text: text.into(),
+        },
+    ])
+    .unwrap();
+    let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
+        &assembly,
+        Digest::sha256(&native_ir),
+        None,
+        source_map,
+        runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
+        Vec::new(),
+    )
+    .unwrap();
     let data = vec![
         NativeObjectData {
             symbol: "runmat_aot_program".into(),
-            bytes: b"program".to_vec(),
+            bytes: program.canonical_bytes().unwrap(),
             alignment: 1,
         },
         NativeObjectData {
             symbol: "runmat_aot_native_ir".into(),
-            bytes: b"native-ir".to_vec(),
+            bytes: native_ir,
             alignment: 8,
         },
         NativeObjectData {
             symbol: "runmat_aot_resume_points".into(),
             bytes: b"resume-points".to_vec(),
+            alignment: 8,
+        },
+        NativeObjectData {
+            symbol: "runmat_aot_native_interfaces".into(),
+            bytes: b"native-interfaces".to_vec(),
+            alignment: 8,
+        },
+        NativeObjectData {
+            symbol: "runmat_aot_mex_artifacts".into(),
+            bytes: b"mex-artifacts".to_vec(),
+            alignment: 8,
+        },
+        NativeObjectData {
+            symbol: "runmat_aot_java_artifacts".into(),
+            bytes: b"java-artifacts".to_vec(),
+            alignment: 8,
+        },
+        NativeObjectData {
+            symbol: "runmat_aot_python_artifacts".into(),
+            bytes: b"python-artifacts".to_vec(),
             alignment: 8,
         },
     ];
@@ -243,8 +496,12 @@ fn relocatable_object_embeds_canonical_bounded_runtime_data() {
             .map(|item| item.symbol.as_str())
             .collect::<Vec<_>>(),
         [
+            "runmat_aot_java_artifacts",
+            "runmat_aot_mex_artifacts",
+            "runmat_aot_native_interfaces",
             "runmat_aot_native_ir",
             "runmat_aot_program",
+            "runmat_aot_python_artifacts",
             "runmat_aot_resume_points"
         ]
     );
@@ -287,9 +544,211 @@ fn lower_with_bindings(
         mir,
         analysis,
         manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function.unwrap(),
+        )?,
         binding_names,
         target: NativeTarget::current(),
     })
+}
+
+#[test]
+fn native_class_declarations_reject_forged_parent_default_and_constructor_owner() {
+    let mir = function(vec![assignment(1)]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    let original = lower_with(&mir, &analysis, &manifest).expect("valid classless Native IR");
+    let identity = runmat_types::ClassIdentity::new("AotClass").expect("typed class");
+    let mut forged = original.clone();
+    forged
+        .class_declarations
+        .push(runmat_native_codegen::NativeClassDeclaration {
+            class: identity.clone(),
+            parent: Some(identity.clone()),
+            is_sealed: false,
+            is_abstract: false,
+            properties: Vec::new(),
+            methods: Vec::new(),
+            events: Vec::new(),
+            enumerations: Vec::new(),
+            constructor: None,
+        });
+    assert_eq!(
+        forged.verify().unwrap_err().code,
+        "native.ir.super_constructor"
+    );
+    forged.class_declarations[0].parent = None;
+    forged.class_declarations[0]
+        .properties
+        .push(runmat_native_codegen::NativeClassProperty {
+            name: runmat_types::MemberName::from("count"),
+            attributes: runmat_types::PropertyAttributes::default(),
+            has_default: false,
+            default_literal: Some(runmat_native_codegen::NativeClassDefaultLiteral::Num(1.0)),
+        });
+    assert_eq!(
+        forged.verify().unwrap_err().code,
+        "native.ir.super_constructor"
+    );
+    forged.class_declarations[0].properties.clear();
+    forged.class_declarations[0].constructor =
+        Some(runmat_native_codegen::NativeConstructorMethod {
+            function: original.functions[0].id,
+            access: runmat_types::MemberAccess::Public,
+        });
+    assert_eq!(
+        forged.verify().unwrap_err().code,
+        "native.ir.super_constructor"
+    );
+    forged.class_declarations[0].constructor = None;
+    forged
+        .verify()
+        .expect("well-formed extra class is structurally valid");
+    assert_eq!(
+        verify_against_mir(&forged, &mir, None).unwrap_err().code,
+        "native.ir.mir_class_declarations"
+    );
+    let parent = runmat_types::ClassIdentity::new("AotParent").expect("parent");
+    forged.class_declarations[0].parent = Some(parent.clone());
+    forged
+        .verify()
+        .expect("unused open companion is structurally valid in generic native");
+    forged
+        .class_declarations
+        .push(runmat_native_codegen::NativeClassDeclaration {
+            class: parent,
+            parent: Some(identity),
+            is_sealed: false,
+            is_abstract: false,
+            properties: Vec::new(),
+            methods: Vec::new(),
+            events: Vec::new(),
+            enumerations: Vec::new(),
+            constructor: None,
+        });
+    assert_eq!(
+        forged.verify().unwrap_err().code,
+        "native.ir.super_constructor"
+    );
+}
+
+#[test]
+fn generic_native_retains_unused_super_call_without_closing_external_parent() {
+    let mut mir = function(vec![assignment(1)]);
+    let class = runmat_types::ClassIdentity::new("UnusedCompanion").expect("class");
+    let parent = runmat_types::ClassIdentity::new("AbsentCompanionBase").expect("parent");
+    let constructor = FunctionId(1);
+    let method = runmat_types::MethodName::from("UnusedCompanion");
+    let mut body = mir.bodies[&FunctionId(0)].clone();
+    body.function = constructor;
+    body.blocks[0].statements[0].kind = MirStmtKind::Assign {
+        place: MirPlace::Local(MirLocalId(0)),
+        value: MirRvalue::Call(runmat_mir::MirCall {
+            callee: runmat_mir::MirCallee::SuperConstructor {
+                current_class: class.clone(),
+                super_class: parent.clone(),
+            },
+            args: Vec::new(),
+            arg_spans: Vec::new(),
+            syntax: runmat_hir::CallSyntax::Plain,
+            requested_outputs: runmat_hir::RequestedOutputCount::One,
+            fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+            workspace_first_name: None,
+            bare_identifier: false,
+            async_behavior: runmat_mir::AsyncBehaviorFact::NeverSuspends,
+            effects: runmat_builtins::BuiltinEffects::none(),
+            workspace_effect: None,
+            environment_effect: None,
+            purity: runmat_builtins::BuiltinPurity::Pure,
+            semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+        }),
+    };
+    mir.bodies.insert(constructor, body);
+    let mut metadata = mir.functions[&FunctionId(0)].clone();
+    metadata.name = FunctionName("UnusedCompanion".into());
+    metadata.enclosing_class = Some(runmat_types::ClassId(0));
+    metadata.class_method_owner = Some(runmat_types::ClassMethodOwner {
+        declaring_class: class.clone(),
+        method: method.clone(),
+        is_static: false,
+        role: runmat_types::ClassMethodRole::Constructor,
+    });
+    metadata.kind = FunctionKind::ClassMethod {
+        is_static: false,
+        role: runmat_types::ClassMethodRole::Constructor,
+    };
+    metadata.source_role = runmat_types::FunctionSourceRole::Method;
+    mir.functions.insert(constructor, metadata);
+    mir.classes.push(runmat_types::ClassDeclaration {
+        id: runmat_types::ClassId(0),
+        name: runmat_types::QualifiedName(vec![runmat_types::SymbolName("UnusedCompanion".into())]),
+        inheritance: runmat_types::InheritanceDeclaration {
+            declared_super_class: Some("AbsentCompanionBase".into()),
+            ..Default::default()
+        },
+        kind: runmat_types::ClassKind::Value,
+        is_sealed: false,
+        is_abstract: false,
+        declared_attributes: Vec::new(),
+        properties: Vec::new(),
+        methods: vec![runmat_types::MethodDeclaration {
+            role: runmat_types::ClassMethodRole::Constructor,
+            function: constructor,
+            name: method,
+            is_static: false,
+            attributes: Default::default(),
+            declared_attributes: Vec::new(),
+            span: Span { start: 0, end: 8 },
+        }],
+        events: Vec::new(),
+        enumerations: Vec::new(),
+        span: Span { start: 0, end: 8 },
+    });
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let mut executable = manifest(analysis.revision.schema_version);
+    for function in &analysis.functions {
+        executable
+            .capabilities
+            .0
+            .extend(function.capabilities.0.iter().cloned());
+    }
+    let assembly = lower_with(&mir, &analysis, &executable)
+        .expect("unused class does not close an external parent in generic native");
+    assert_eq!(assembly.functions.len(), 2);
+    assert!(assembly.functions.iter().any(|function| {
+        function.class_method_owner.as_ref().is_some_and(|owner| {
+            owner.declaring_class == class
+                && owner.role == runmat_types::ClassMethodRole::Constructor
+        }) && function.super_constructor_calls() == vec![(class.clone(), parent.clone())]
+    }));
+}
+
+#[test]
+fn native_lowering_rejects_compiler_one_with_current_mir_and_analysis() {
+    let mir = function(vec![assignment(1)]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let mut executable = manifest(analysis.revision.schema_version);
+    let current = &executable.identity.program;
+    executable.identity.program = ProgramRevision::new(
+        *current.graph_digest(),
+        *current.source_digest(),
+        ProgramEnvironment::new(
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            1,
+            *current.runtime_fingerprint(),
+            *current.catalog_fingerprint(),
+            current.compatibility_mode().as_str(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let error = lower_with(&mir, &analysis, &executable).unwrap_err();
+    assert_eq!(error.code, "native.lowering.compiler_compatibility");
+    assert!(error
+        .message
+        .contains("compiler schema actual 1 expected 2"));
 }
 
 #[test]
@@ -311,7 +770,10 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
     assert_eq!(local.binding, Some(binding));
     assert_eq!(local.name.as_deref(), Some("answer"));
     assert_eq!(local.kind, runmat_native_codegen::NativeLocalKind::Binding);
-    assert_eq!(assembly.schema_version, 4);
+    assert_eq!(
+        assembly.schema_version,
+        runmat_native_codegen::NATIVE_IR_SCHEMA_VERSION
+    );
     assembly.verify().unwrap();
     verify_against_mir(&assembly, &mir, Some(&names)).unwrap();
 
@@ -322,6 +784,31 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
             .unwrap_err()
             .code,
         "native.ir.mir_locals"
+    );
+}
+
+#[test]
+fn selected_entrypoint_preserves_the_complete_mir_entrypoint_inventory() {
+    let mut mir = function(vec![assignment(1)]);
+    let mut second_body = mir.bodies[&FunctionId(0)].clone();
+    second_body.function = FunctionId(1);
+    let mut second_metadata = mir.functions[&FunctionId(0)].clone();
+    second_metadata.name = FunctionName("second".into());
+    mir.bodies.insert(FunctionId(1), second_body);
+    mir.functions.insert(FunctionId(1), second_metadata);
+    mir.entrypoints.push(FunctionId(1));
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+
+    let assembly = lower_with(&mir, &analysis, &manifest).unwrap();
+    assert_eq!(
+        assembly.entrypoints,
+        vec![ProgramFunctionId(0), ProgramFunctionId(1)]
+    );
+    assert_eq!(assembly.selected_entrypoint, ProgramFunctionId(0));
+    assert_eq!(
+        assembly.selected_portable_entrypoint,
+        manifest.identity.entrypoint_function.unwrap()
     );
 }
 
@@ -411,11 +898,194 @@ fn selector_mask_limit_is_rejected_before_native_execution() {
         span,
     }]);
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let native_manifest = manifest(analysis.revision.schema_version);
     assert_eq!(
-        lower_with(&mir, &analysis, &manifest).unwrap_err().code,
+        lower_with(&mir, &analysis, &native_manifest)
+            .unwrap_err()
+            .code,
         "native.capability.selector_dimension_limit"
     );
+
+    let sequence = runmat_mir::MirSequenceLocalId(0);
+    let mir = function(vec![
+        MirStmt {
+            kind: MirStmtKind::CaptureSequence {
+                destination: sequence,
+                source: runmat_mir::MirExpansionSource::CellContents {
+                    base: MirOperand::Constant(MirConstant::EmptyArray),
+                    indexing: runmat_mir::MirIndexing {
+                        kind: runmat_types::IndexKind::Brace,
+                        plan: runmat_mir::MirIndexPlan::Cell,
+                        components: vec![runmat_mir::MirIndexComponent::Colon; 33],
+                        result_context: runmat_types::IndexResultContext::ReadCommaList,
+                        cell_expand_all: true,
+                    },
+                },
+            },
+            span,
+        },
+        MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::Aggregate {
+                    kind: runmat_mir::MirAggregateKind::Cell,
+                    row_lengths: vec![1],
+                    elements: vec![runmat_mir::MirAggregateElement::CapturedSequence(sequence)],
+                },
+            },
+            span,
+        },
+    ]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let native_manifest = manifest(analysis.revision.schema_version);
+    assert_eq!(
+        lower_with(&mir, &analysis, &native_manifest)
+            .unwrap_err()
+            .code,
+        "native.capability.selector_dimension_limit"
+    );
+}
+
+#[test]
+fn expression_continuation_geometry_counts_constant_statement_selectors_only_when_needed() {
+    let span = Span { start: 0, end: 8 };
+    let pure = lower(&function(vec![MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(MirLocalId(0)),
+            value: MirRvalue::Use(MirOperand::Constant(MirConstant::Bool(true))),
+        },
+        span,
+    }]));
+    assert_eq!(
+        pure.functions[0]
+            .expression_continuation_geometry
+            .region_capacity,
+        0
+    );
+    assert_eq!(
+        pure.functions[0]
+            .expression_continuation_geometry
+            .retained_input_capacity,
+        0
+    );
+    pure.verify().unwrap();
+
+    let prepared = runmat_mir::MirPreparedExpressionRegion::from_lowered(
+        Vec::new(),
+        MirOperand::Constant(MirConstant::Bool(true)),
+    )
+    .unwrap();
+    let mut components =
+        vec![
+            runmat_mir::MirIndexComponent::Expr(MirOperand::Constant(MirConstant::Bool(true)));
+            20
+        ];
+    components.push(runmat_mir::MirIndexComponent::PreparedExpr(prepared));
+    let sequence = runmat_mir::MirSequenceLocalId(0);
+    let statement = MirStmt {
+        kind: MirStmtKind::CaptureSequence {
+            destination: sequence,
+            source: runmat_mir::MirExpansionSource::CellContents {
+                base: MirOperand::Constant(MirConstant::EmptyArray),
+                indexing: runmat_mir::MirIndexing {
+                    kind: runmat_types::IndexKind::Brace,
+                    plan: runmat_mir::MirIndexPlan::Cell,
+                    components,
+                    result_context: runmat_types::IndexResultContext::ReadCommaList,
+                    cell_expand_all: false,
+                },
+            },
+        },
+        span,
+    };
+    let mut native = lower(&function(vec![
+        statement,
+        MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::Aggregate {
+                    kind: runmat_mir::MirAggregateKind::Cell,
+                    row_lengths: vec![1],
+                    elements: vec![runmat_mir::MirAggregateElement::CapturedSequence(sequence)],
+                },
+            },
+            span,
+        },
+    ]));
+    let geometry = native.functions[0].expression_continuation_geometry;
+    assert!(geometry.region_capacity > 0);
+    assert!(geometry.retained_input_capacity >= 23);
+    native.verify().unwrap();
+    native.functions[0]
+        .expression_continuation_geometry
+        .retained_input_capacity -= 1;
+    assert_eq!(
+        native.verify().unwrap_err().code,
+        "native.ir.expression_continuation_geometry"
+    );
+}
+
+#[test]
+fn expression_continuation_geometry_counts_nested_dotted_argument_cursors() {
+    let span = Span { start: 0, end: 8 };
+    let call_argument =
+        runmat_mir::MirDottedInvokeArgument::Call(runmat_mir::MirCallArgumentRegion {
+            steps: Vec::new(),
+            argument: runmat_mir::MirCallArg::Single(MirOperand::Constant(MirConstant::Bool(true))),
+            span,
+        });
+    let prepared = runmat_mir::MirPreparedExpressionRegion::from_lowered(
+        vec![MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(1)),
+                value: MirRvalue::SubscriptChain(runmat_mir::MirSubscriptChain {
+                    root: MirOperand::Constant(MirConstant::Bool(true)),
+                    steps: vec![runmat_mir::MirSubscriptStep::DottedInvoke {
+                        member: runmat_types::MemberName("method".into()),
+                        arguments: vec![call_argument; 3],
+                        semantic_fallback: None,
+                    }],
+                    sequence_use: SequenceUse::RequireSingle,
+                    context: runmat_types::ObjectIndexingContext::Expression,
+                }),
+            },
+            span,
+        }],
+        MirOperand::Local(MirLocalId(1)),
+    )
+    .unwrap();
+    let mut mir = function(vec![MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(MirLocalId(0)),
+            value: MirRvalue::Index {
+                base: MirOperand::Constant(MirConstant::EmptyArray),
+                indexing: runmat_mir::MirIndexing {
+                    kind: runmat_types::IndexKind::Paren,
+                    plan: runmat_mir::MirIndexPlan::Scalar,
+                    components: vec![runmat_mir::MirIndexComponent::PreparedExpr(prepared)],
+                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            },
+        },
+        span,
+    }]);
+    mir.bodies
+        .get_mut(&FunctionId(0))
+        .unwrap()
+        .locals
+        .push(MirLocal {
+            id: MirLocalId(1),
+            binding: None,
+            kind: MirLocalKind::Temporary,
+            span,
+        });
+    let native = lower(&mir);
+    let geometry = native.functions[0].expression_continuation_geometry;
+    // The outer PreparedExpr and all three zero-step dotted Call arguments
+    // have distinct continuation entries, despite sharing one chain step.
+    assert!(geometry.region_capacity >= 4);
+    native.verify().unwrap();
 }
 
 #[test]
@@ -437,92 +1107,20 @@ fn legacy_binding_places_are_rejected_before_native_execution() {
 }
 
 #[test]
-fn end_expression_catalog_is_verified_against_canonical_mir() {
+fn unscoped_end_is_rejected_before_native_lowering() {
     let span = Span { start: 0, end: 3 };
-    let mut mir = function(vec![
-        MirStmt {
-            kind: MirStmtKind::Assign {
-                place: MirPlace::Local(MirLocalId(0)),
-                value: MirRvalue::End,
-            },
-            span,
+    let mir = function(vec![MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(MirLocalId(0)),
+            value: MirRvalue::End,
         },
-        MirStmt {
-            kind: MirStmtKind::Assign {
-                place: MirPlace::Local(MirLocalId(1)),
-                value: MirRvalue::Binary(
-                    MirOperand::Local(MirLocalId(0)),
-                    runmat_types::OperatorKind::Subtract,
-                    MirOperand::Constant(MirConstant::Number("1".into())),
-                ),
-            },
-            span,
-        },
-    ]);
-    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
-    body.locals.push(MirLocal {
-        id: MirLocalId(1),
-        binding: None,
-        kind: MirLocalKind::Temporary,
         span,
-    });
-    body.blocks[0].terminator.kind =
-        MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(1))]);
+    }]);
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
     let manifest = manifest(analysis.revision.schema_version);
-    let assembly = lower_with(&mir, &analysis, &manifest).unwrap();
-    assert_eq!(assembly.functions[0].index_expressions.len(), 2);
-    assert!(matches!(
-        &assembly.functions[0].index_expressions[1].kind,
-        runmat_native_codegen::NativeIndexExpressionKind::Scalar(
-            runmat_runtime::indexing::EndExpr::Sub(_, _)
-        )
-    ));
-
-    let mut structurally_invalid = assembly.clone();
-    structurally_invalid.functions[0].index_expressions[1].kind =
-        runmat_native_codegen::NativeIndexExpressionKind::Scalar(
-            runmat_runtime::indexing::EndExpr::Var(99),
-        );
-    assert_eq!(
-        structurally_invalid.verify().unwrap_err().code,
-        "native.ir.index_expressions"
-    );
-
-    let mut redirected_output = assembly.clone();
-    redirected_output.functions[0].blocks[0].instructions[0].outputs[0].local =
-        Some(runmat_native_codegen::NativeLocalId(1));
-    assert_eq!(
-        redirected_output.verify().unwrap_err().code,
-        "native.ir.output_local_identity"
-    );
-
-    let mut coordinated_redirect = assembly.clone();
-    coordinated_redirect.functions[0].blocks[0].instructions[0].outputs[0].local =
-        Some(runmat_native_codegen::NativeLocalId(1));
-    coordinated_redirect.functions[0].blocks[0].instructions[1].outputs[0].local =
-        Some(runmat_native_codegen::NativeLocalId(1));
-    let runmat_native_codegen::NativeOperation::Statement(MirStmtKind::Assign { place, .. }) =
-        &mut coordinated_redirect.functions[0].blocks[0].instructions[1].operation
-    else {
-        panic!("fixture statement must be an assignment");
-    };
-    *place = MirPlace::Local(MirLocalId(1));
-    coordinated_redirect.verify().unwrap();
-    assert_eq!(
-        verify_against_mir(&coordinated_redirect, &mir, None)
-            .unwrap_err()
-            .code,
-        "native.ir.mir_operation"
-    );
-
-    let mut omitted = assembly;
-    omitted.functions[0].index_expressions.pop();
-    omitted.verify().unwrap();
-    assert_eq!(
-        verify_against_mir(&omitted, &mir, None).unwrap_err().code,
-        "native.ir.mir_index_expressions"
-    );
+    let error = lower_with(&mir, &analysis, &manifest).unwrap_err();
+    assert_eq!(error.code, "native.lowering.expression_region");
+    assert!(error.message.contains("not enclosed"), "{error:?}");
 }
 
 #[test]
@@ -807,8 +1405,18 @@ fn verifier_rejects_omission_stale_effect_state_and_abi_drift() {
     );
 
     let mut wrong_abi = assembly;
-    wrong_abi.target.abi.encoded_version += 1;
-    assert_eq!(wrong_abi.verify().unwrap_err().code, "native.abi.binding");
+    let expected = match &mut wrong_abi.target {
+        NativeTarget::Native { probe, .. } => {
+            probe.abi_encoded_version += 1;
+            "native.target.abi"
+        }
+        NativeTarget::PortableWasm32 { schema_version } => {
+            *schema_version += 1;
+            "native.target.wasm_schema"
+        }
+        NativeTarget::UnavailableHost => panic!("lowered fixture must have an admissible target"),
+    };
+    assert_eq!(wrong_abi.verify().unwrap_err().code, expected);
 }
 
 #[test]
@@ -818,12 +1426,182 @@ fn native_cache_identity_binds_target_and_abi() {
     let mut tampered = assembly.clone();
     tampered.native_cache_key = Digest::sha256(b"wrong-native-key");
     assert_eq!(tampered.verify().unwrap_err().code, "native.ir.cache_key");
+    let mut wrong_selected = assembly.clone();
+    wrong_selected.selected_entrypoint =
+        ProgramFunctionId(wrong_selected.selected_entrypoint.0.saturating_add(1));
+    assert_eq!(
+        wrong_selected.verify().unwrap_err().code,
+        "native.ir.cache_key",
+        "the native cache key must bind the selected compiled entrypoint"
+    );
 
     let mut cross_target = assembly.target;
-    cross_target.architecture = "not-the-current-architecture".into();
+    let expected = match &mut cross_target {
+        NativeTarget::Native { target, .. } => {
+            target.target.architecture = match target.target.architecture {
+                runmat_execution::host::NativeArchitecture::X86_64 => {
+                    runmat_execution::host::NativeArchitecture::Aarch64
+                }
+                runmat_execution::host::NativeArchitecture::Aarch64 => {
+                    runmat_execution::host::NativeArchitecture::X86_64
+                }
+            };
+            "native.target.contract"
+        }
+        NativeTarget::PortableWasm32 { schema_version } => {
+            *schema_version += 1;
+            "native.target.wasm_schema"
+        }
+        NativeTarget::UnavailableHost => panic!("lowered fixture must have an admissible target"),
+    };
+    assert_eq!(cross_target.validate().unwrap_err().code, expected);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn selected_baseline_objects_and_portable_wasm_have_distinct_admission_domains() {
+    use runmat_execution::host::{
+        NativeArchitecture, NativeCpuBaseline, NativeEnvironment, NativeOperatingSystem,
+    };
+    let host_isa_rejection =
+        |target: &NativeTarget| match runmat_native_codegen::cranelift::compilation_isa(
+            target,
+            runmat_native_codegen::cranelift::IsaCompilationPurpose::ExactHostInProcessJit,
+            cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder()),
+        ) {
+            Err(error) => error.code,
+            Ok(_) => panic!("inadmissible target obtained a host-tuned ISA"),
+        };
+    let original = lower(&function(vec![assignment(1)]));
+    original.target.require_host_executable().unwrap();
+    let tuned = runmat_native_codegen::cranelift::compilation_isa(
+        &original.target,
+        runmat_native_codegen::cranelift::IsaCompilationPurpose::ExactHostInProcessJit,
+        cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder()),
+    )
+    .unwrap();
+    let host = cranelift_native::builder()
+        .unwrap()
+        .finish(cranelift_codegen::settings::Flags::new(
+            cranelift_codegen::settings::builder(),
+        ))
+        .unwrap();
+    assert_eq!(tuned.triple(), host.triple());
+    assert_eq!(tuned.isa_flags().iter().map(|flag| (flag.name, flag.value_string())).collect::<Vec<_>>(),
+        host.isa_flags().iter().map(|flag| (flag.name, flag.value_string())).collect::<Vec<_>>(),
+        "process-local JIT preserves canonical host feature detection rather than forcing portable baseline flags");
+    for (architecture, baseline) in [
+        (NativeArchitecture::X86_64, NativeCpuBaseline::X86_64V1),
+        (NativeArchitecture::Aarch64, NativeCpuBaseline::ArmV8A),
+    ] {
+        // Synthetic records exercise encoding/lowering, not target-built probe
+        // provenance, deployed ABI compatibility, or foreign execution.
+        let mut probe = runmat_runtime::native::native_abi_probe();
+        probe.architecture = architecture;
+        probe.operating_system = NativeOperatingSystem::Linux;
+        probe.environment = NativeEnvironment::Gnu;
+        let mut assembly = original.clone();
+        assembly.target = NativeTarget::from_probe(probe, baseline).unwrap();
+        assembly.native_cache_key = assembly
+            .target
+            .cache_key(
+                &assembly.executable_cache_key,
+                assembly.selected_entrypoint,
+                &assembly.selected_entrypoint_body,
+            )
+            .unwrap();
+        assembly.verify().unwrap();
+        let isa = runmat_native_codegen::cranelift::compilation_isa(
+            &assembly.target,
+            runmat_native_codegen::cranelift::IsaCompilationPurpose::SelectedBaselineObject,
+            cranelift_codegen::settings::Flags::new(cranelift_codegen::settings::builder()),
+        )
+        .unwrap();
+        assert!(isa
+            .isa_flags()
+            .iter()
+            .all(|flag| flag.as_bool() != Some(true)));
+        assert_eq!(
+            isa.triple().to_string(),
+            assembly.target.native_parts().unwrap().0.triple().unwrap()
+        );
+        let object = emit_relocatable_object(&assembly, NativeOptimization::Speed).unwrap();
+        assert!(!object.bytes.is_empty());
+        assert_eq!(object.manifest.target, assembly.target);
+        assert_eq!(
+            runmat_native_codegen::NativeAssembly::from_canonical_bytes(
+                &assembly.canonical_bytes().unwrap()
+            )
+            .unwrap(),
+            assembly
+        );
+        if assembly.target != original.target {
+            assert_eq!(
+                assembly.target.require_host_executable().unwrap_err().code,
+                "native.target.host_execution"
+            );
+            assert_eq!(
+                host_isa_rejection(&assembly.target),
+                "native.target.host_execution",
+                "foreign target must reject at the ISA owner before host feature detection"
+            );
+        }
+    }
+    let mut portable = original;
+    let mut shifted_probe = runmat_runtime::native::native_abi_probe();
+    shifted_probe.offsets.swap(0, 1);
+    let shifted = NativeTarget::from_probe(
+        shifted_probe,
+        portable.target.native_parts().unwrap().0.cpu_baseline,
+    )
+    .unwrap();
+    shifted.validate().unwrap();
     assert_eq!(
-        cross_target.validate().unwrap_err().code,
-        "native.target.cross_layout"
+        shifted.require_host_executable().unwrap_err().code,
+        "native.target.host_execution",
+        "self-consistent changed layout metadata is not the actual host ABI"
+    );
+    portable.target = NativeTarget::PortableWasm32 {
+        schema_version: runmat_native_codegen::PORTABLE_WASM_LOWERING_SCHEMA_VERSION,
+    };
+    portable.native_cache_key = portable
+        .target
+        .cache_key(
+            &portable.executable_cache_key,
+            portable.selected_entrypoint,
+            &portable.selected_entrypoint_body,
+        )
+        .unwrap();
+    portable.verify().unwrap();
+    assert_eq!(
+        runmat_native_codegen::NativeAssembly::from_canonical_bytes(
+            &portable.canonical_bytes().unwrap()
+        )
+        .unwrap(),
+        portable
+    );
+    assert_eq!(
+        portable.target.require_host_executable().unwrap_err().code,
+        "native.target.native_required"
+    );
+    assert_eq!(
+        emit_relocatable_object(&portable, NativeOptimization::Speed)
+            .unwrap_err()
+            .code,
+        "native.target.native_required"
+    );
+    let old = serde_json::json!({"architecture": "x86_64", "operating_system": "linux", "pointer_width": 64, "abi": runmat_native_codegen::abi::current_native_abi_binding()});
+    assert!(
+        serde_json::from_value::<NativeTarget>(old).is_err(),
+        "untagged prior target shape must not acquire a domain by default"
+    );
+    assert_eq!(
+        NativeTarget::UnavailableHost.validate().unwrap_err().code,
+        "native.target.host_unavailable"
+    );
+    assert_eq!(
+        host_isa_rejection(&NativeTarget::UnavailableHost),
+        "native.target.host_unavailable"
     );
 }
 
@@ -836,7 +1614,11 @@ fn executable_manifest_binding_rejects_a_coordinated_cache_key_substitution() {
     assembly.executable_cache_key = Digest::sha256(b"substituted-executable");
     assembly.native_cache_key = assembly
         .target
-        .cache_key(&assembly.executable_cache_key)
+        .cache_key(
+            &assembly.executable_cache_key,
+            assembly.selected_entrypoint,
+            &assembly.selected_entrypoint_body,
+        )
         .unwrap();
     assembly.verify().unwrap();
     assert_eq!(
@@ -936,10 +1718,7 @@ fn region_contracts_become_exact_native_ir_boundaries() {
 #[test]
 fn distributed_and_collective_constructs_fail_with_the_stable_predeclared_rejection() {
     let distributed = MirRvalue::Distributed(runmat_mir::parallel::MirDistributedOp::LocalPart {
-        value: DistributedValueId {
-            function: ProgramFunctionId(0),
-            ordinal: 0,
-        },
+        value: MirOperand::Constant(MirConstant::Number("1".into())),
     });
     let region = ParallelRegionId(RegionId {
         function: ProgramFunctionId(0),
@@ -969,10 +1748,7 @@ fn capability_rejection_cannot_hide_inside_short_circuit_payloads() {
     let nested = MirStmt {
         kind: MirStmtKind::Expr(MirRvalue::Distributed(
             runmat_mir::parallel::MirDistributedOp::LocalPart {
-                value: DistributedValueId {
-                    function: ProgramFunctionId(0),
-                    ordinal: 0,
-                },
+                value: MirOperand::Constant(MirConstant::Number("1".into())),
             },
         )),
         span: Span { start: 0, end: 1 },
@@ -986,6 +1762,67 @@ fn capability_rejection_cannot_hide_inside_short_circuit_payloads() {
         }),
         span: Span { start: 0, end: 1 },
     }]);
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    assert_eq!(
+        lower_with(&mir, &analysis, &manifest).unwrap_err().code,
+        "native.capability.distributed_core_pending"
+    );
+}
+
+#[test]
+fn capability_rejection_cannot_hide_inside_sequence_capture_regions() {
+    let span = Span { start: 0, end: 1 };
+    let region = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(1)),
+                    value: MirRvalue::End,
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(2)),
+                    value: MirRvalue::Distributed(
+                        runmat_mir::parallel::MirDistributedOp::LocalPart {
+                            value: MirOperand::Local(MirLocalId(1)),
+                        },
+                    ),
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(2)),
+    )
+    .unwrap();
+    let capture = MirStmt {
+        kind: MirStmtKind::CaptureSequence {
+            destination: runmat_mir::MirSequenceLocalId(0),
+            source: runmat_mir::MirExpansionSource::CellContents {
+                base: MirOperand::Constant(MirConstant::EmptyArray),
+                indexing: runmat_mir::MirIndexing {
+                    kind: runmat_hir::IndexKind::Brace,
+                    plan: runmat_mir::MirIndexPlan::Slice,
+                    components: vec![runmat_mir::MirIndexComponent::ContextualExpr(region)],
+                    result_context: runmat_types::IndexResultContext::ReadCommaList,
+                    cell_expand_all: true,
+                },
+            },
+        },
+        span,
+    };
+    let mut mir = function(vec![capture]);
+    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
+    for id in 1..=2 {
+        body.locals.push(MirLocal {
+            id: MirLocalId(id),
+            binding: None,
+            kind: MirLocalKind::Temporary,
+            span,
+        });
+    }
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
     let manifest = manifest(analysis.revision.schema_version);
     assert_eq!(
@@ -1033,7 +1870,13 @@ fn short_circuit_embedded_constructs_are_explicit_and_verified() {
 #[test]
 fn canonical_construct_taxonomy_is_complete_unique_and_serializable() {
     let all = runmat_mir::MirConstructKind::ALL;
-    assert_eq!(all.len(), 47);
+    // Sequence production and sequence assignment are distinct canonical
+    // constructs; neither may disappear into ordinary expression/assignment
+    // metadata.
+    assert!(all.contains(&runmat_mir::MirConstructKind::CaptureSequence));
+    assert!(all.contains(&runmat_mir::MirConstructKind::SequenceAssign));
+    assert!(all.contains(&runmat_mir::MirConstructKind::WorkspaceFirstStaticProperty));
+    assert_eq!(all.len(), 59);
     assert_eq!(
         all.iter()
             .copied()
@@ -1106,6 +1949,8 @@ fn parfor_and_spmd_fixtures_lower_as_structured_suspend_resume_ir() {
                 id: region,
                 labs: SpmdLabRequirement::Exact { labs: LabCount(2) },
                 captures: Vec::new(),
+                outputs: Vec::new(),
+                effects: Default::default(),
                 capabilities: CapabilitySet::default(),
             });
         } else {
@@ -1118,9 +1963,11 @@ fn parfor_and_spmd_fixtures_lower_as_structured_suspend_resume_ir() {
                     role: ParallelVariableRole::Loop,
                     access: ParallelAccess::ReadWrite,
                     fact: ValueFact::unknown(DynamicReason::RuntimeValue),
-                    transferable: true,
+                    transferability:
+                        runmat_types::ParallelTransferability::RequiresRuntimeValidation,
                 }],
                 maximum_workers: Some(LabCount(4)),
+                effects: Default::default(),
                 capabilities: CapabilitySet::default(),
                 randomness: ParallelRandomnessPolicy::DeterministicSubstreams,
             });
@@ -1180,6 +2027,10 @@ fn future_spawn_and_await_carry_exact_structured_safepoints() {
         .0
         .insert(CapabilityRequirement::ParallelRuntime);
     let assembly = lower_with(&mir, &analysis, &manifest).unwrap();
+    assert!(assembly.functions[0]
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::ParallelRuntime));
     let block = &assembly.functions[0].blocks[0];
     let structured = block
         .instructions
@@ -1198,6 +2049,10 @@ fn future_spawn_and_await_carry_exact_structured_safepoints() {
     );
     assert!(block.terminator.safepoint.is_some());
     assembly.verify().unwrap();
+
+    let mut weakened = assembly;
+    weakened.functions[0].capabilities.0.clear();
+    assert!(weakened.verify().is_err());
 }
 
 #[test]
@@ -1264,9 +2119,40 @@ fn region_contract(id: RegionId) -> RegionContract {
 fn wasm_uses_the_same_generic_ir_contract() {
     let assembly = lower(&function(vec![assignment(1)]));
     assembly.verify().unwrap();
-    assert_eq!(assembly.target.architecture, "wasm32");
+    assert_eq!(
+        assembly.target,
+        NativeTarget::PortableWasm32 {
+            schema_version: runmat_native_codegen::PORTABLE_WASM_LOWERING_SCHEMA_VERSION
+        }
+    );
     assert_eq!(
         assembly,
         serde_json::from_slice(&serde_json::to_vec(&assembly).unwrap()).unwrap()
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn current_native_ir_uses_the_same_canonical_admission_on_native_and_wasm() {
+    let assembly = lower(&function(vec![assignment(1)]));
+    let bytes = assembly.canonical_bytes().unwrap();
+    assert_eq!(
+        runmat_native_codegen::NativeAssembly::from_canonical_bytes(&bytes).unwrap(),
+        assembly
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn frozen_native_ir_five_is_rejected_before_target_or_instruction_admission() {
+    let error = runmat_native_codegen::NativeAssembly::from_canonical_bytes(include_bytes!(
+        "fixtures/native-ir-5.json"
+    ))
+    .unwrap_err();
+    assert_eq!(error.code, "native.ir.schema_version");
+    assert!(error.message.contains("version 5"));
+    assert!(error.message.contains(&format!(
+        "expected {}",
+        runmat_native_codegen::NATIVE_IR_SCHEMA_VERSION
+    )));
 }

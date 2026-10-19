@@ -8,13 +8,17 @@ use runmat_builtins::{
     ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 use runmat_value::{IntValue, NumericDType};
-use runmat_value::{Tensor, Value};
 
 use crate::build_runtime_error;
 use crate::builtins::common::random_args::extract_dims;
 use crate::builtins::common::tensor;
 use crate::builtins::common::{gpu_helpers, random};
+#[path = "normrnd/output.rs"]
+mod output;
 
 const BUILTIN_NAME: &str = "normrnd";
 
@@ -273,12 +277,9 @@ async fn normrnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if sigma < 0.0 {
         return Err(normrnd_error(&NORMRND_ERROR_SIGMA_MUST_BE_NONNEGATIVE));
     }
-    if let Some(value) = try_gpu_normrnd(&output, mu, sigma, &shape)? {
-        return Ok(value);
-    }
-    let len = tensor::element_count(&shape);
-    let data = random::generate_normal_scaled(mu, sigma, len, "normrnd")?;
-    output.finish(data, shape)
+    let mut turn = random::acquire_turn(None, "normrnd").await?;
+    let host = output::generate(&mut turn, mu, sigma, &shape, output.single).await?;
+    output.finish(host)
 }
 
 struct NormrndOutputPlan {
@@ -307,19 +308,7 @@ impl NormrndOutputPlan {
         Ok(Self { single, source })
     }
 
-    fn host_value(&self, data: Vec<f64>, shape: Vec<usize>) -> crate::BuiltinResult<Value> {
-        if self.single {
-            return Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
-                .map(Value::Tensor)
-                .map_err(|err| normrnd_internal_error(format!("normrnd: {err}")));
-        }
-        Tensor::new(data, shape)
-            .map(tensor::tensor_into_value)
-            .map_err(|err| normrnd_internal_error(format!("normrnd: {err}")))
-    }
-
-    fn finish(&self, data: Vec<f64>, shape: Vec<usize>) -> crate::BuiltinResult<Value> {
-        let host = self.host_value(data, shape)?;
+    fn finish(&self, host: Value) -> crate::BuiltinResult<Value> {
         match &self.source {
             Some(source) => {
                 let restored =
@@ -483,87 +472,6 @@ fn normalize_dims(dims: Vec<usize>) -> Vec<usize> {
     }
 }
 
-fn try_gpu_normrnd(
-    output: &NormrndOutputPlan,
-    mu: f64,
-    sigma: f64,
-    shape: &[usize],
-) -> crate::BuiltinResult<Option<Value>> {
-    let Some(source) = &output.source else {
-        return Ok(None);
-    };
-    let Some(provider) = gpu_helpers::exact_provider_for_handle(source) else {
-        return Err(normrnd_internal_error(
-            "normrnd: resident input has no owning provider",
-        ));
-    };
-    let expected_precision = if output.single {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
-    };
-    if provider.precision() != expected_precision {
-        return Ok(None);
-    }
-    let source_metadata = gpu_helpers::snapshot_handle_metadata(source);
-    let provider_result = provider.random_normrnd(mu, sigma, shape);
-    gpu_helpers::restore_handle_metadata(source, &source_metadata);
-    match provider_result {
-        Ok(mut handle) => {
-            let valid = !gpu_helpers::same_gpu_handle(source, &handle)
-                && handle.shape == shape
-                && handle.device_id == provider.device_id()
-                && gpu_helpers::exact_provider_for_handle(&handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
-                && runmat_accelerate_api::handle_storage(&handle)
-                    == runmat_accelerate_api::GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_precision(&handle) == Some(expected_precision)
-                && runmat_accelerate_api::handle_integer_type(&handle).is_none()
-                && !runmat_accelerate_api::handle_is_logical(&handle)
-                && gpu_helpers::gpu_class_metadata_matches(
-                    &handle,
-                    Some(expected_precision),
-                    None,
-                    false,
-                );
-            if !valid {
-                gpu_helpers::free_unprotected_exact_owner(&handle, &[source]);
-                return Err(normrnd_internal_error(
-                    "normrnd: provider returned a malformed, aliased, or foreign random result",
-                ));
-            }
-            let len = tensor::element_count(shape);
-            // Box-Muller emits two normals per two uniform samples.
-            let uniform_count = len.saturating_add(1) / 2 * 2;
-            random::skip_uniform(uniform_count, "normrnd")?;
-            runmat_accelerate_api::set_handle_provenance(
-                &mut handle,
-                runmat_accelerate_api::handle_provenance(source)
-                    .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-            );
-            Ok(Some(gpu_helpers::resident_gpu_value(handle)))
-        }
-        Err(error)
-            if error
-                .chain()
-                .any(|cause| cause.to_string() == "random_normrnd not supported by provider") =>
-        {
-            Ok(None)
-        }
-        Err(error) => Err(build_runtime_error(format!(
-            "normrnd: provider random generation failed: {error}"
-        ))
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(
-            NORMRND_ERROR_INTERNAL
-                .identifier
-                .expect("normrnd internal descriptor identifier"),
-        )
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-        .build()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,7 +515,7 @@ mod tests {
         ];
         let result = block_on(normrnd_builtin(args)).expect("normrnd");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 4]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -620,7 +528,7 @@ mod tests {
         let args = vec![Value::Num(0.0), Value::Num(1.0), Value::Tensor(size)];
         let result = block_on(normrnd_builtin(args)).expect("normrnd");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 4]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -640,7 +548,7 @@ mod tests {
         ]))
         .expect("normrnd");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 3]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -669,11 +577,26 @@ mod tests {
         let _guard = random::test_guard();
         reset();
         let mu = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
-        let out = block_on(normrnd_builtin(vec![mu, Value::Num(1.0)])).unwrap();
+        let out = block_on(normrnd_builtin(vec![
+            mu,
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(3.0),
+        ]))
+        .unwrap();
         let Value::Tensor(out) = out else {
             panic!("expected single tensor output");
         };
         assert_eq!(out.numeric_dtype(), NumericDType::F32);
+        assert_eq!(out.shape(), &[1, 3]);
+        let expected = random::expected_normal_scaled_sequence(0.0, 1.0, 3);
+        assert_eq!(
+            out.materialize_f64(),
+            expected
+                .iter()
+                .map(|value| (*value as f32) as f64)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -701,8 +624,10 @@ mod tests {
         let host = crate::builtins::common::test_support::gather(Value::GpuTensor(out))
             .expect("gather automatic output");
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
-        assert_eq!(host.shape, vec![2, 2]);
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        assert_eq!(host.shape(), &[2, 2]);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let out = block_on(normrnd_builtin(vec![
             Value::GpuTensor(handle),
             Value::Num(1.0),

@@ -8,7 +8,35 @@ use serde::Serialize;
 
 use crate::{BuiltinEffects, BuiltinSemantics};
 
-pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 1;
+pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 10;
+
+/// Whether a callable is part of public builtin discovery or is an executable
+/// runtime fixture. Both audiences share one catalog and one binding registry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub enum BuiltinCatalogAudience {
+    #[default]
+    Public,
+    Fixture,
+}
+
+/// Physical ownership of a catalog declaration.
+///
+/// This is compiler-expanded source evidence for development tooling. It is
+/// deliberately separate from the builtin's semantic identity and contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BuiltinCatalogProvenance {
+    pub source_file: &'static str,
+    pub module_path: &'static str,
+}
+
+impl BuiltinCatalogProvenance {
+    pub const fn new(source_file: &'static str, module_path: &'static str) -> Self {
+        Self {
+            source_file,
+            module_path,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct BuiltinCatalogIdentity {
@@ -21,7 +49,7 @@ pub struct BuiltinBindingIdentity {
     pub variant: &'static str,
 }
 
-const NATIVE_BINDING_SYMBOL_PREFIX: &str = "runmat_builtin_binding_v1_";
+const NATIVE_BINDING_SYMBOL_PREFIX: &str = "runmat_builtin_binding_v3_";
 
 /// Stable native symbol exported by the runtime implementation for one
 /// catalog binding. Encoding both identity components byte-for-byte avoids
@@ -51,14 +79,40 @@ pub enum BuiltinBindingAvailability {
     TargetConditional,
 }
 
+/// Whether an exact canonical binding may execute as invocation-owned work
+/// on a separate browser worker. This is executable catalog authority, not a
+/// promise inferred from purity, name, or a source-level call spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinOwnedWorkerPolicy {
+    Forbidden,
+    PortableHostCpu,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BuiltinBindingDeclaration {
-    pub identity: BuiltinBindingIdentity,
+    pub variant: &'static str,
     pub availability: BuiltinBindingAvailability,
+    pub owned_worker: BuiltinOwnedWorkerPolicy,
 }
+
+pub const REQUIRED_DEFAULT_BINDING: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaration {
+    variant: "default",
+    availability: BuiltinBindingAvailability::Required,
+    owned_worker: BuiltinOwnedWorkerPolicy::Forbidden,
+}];
+
+pub const REQUIRED_OWNED_HOST_CPU_BINDING: [BuiltinBindingDeclaration; 1] =
+    [BuiltinBindingDeclaration {
+        variant: "default",
+        availability: BuiltinBindingAvailability::Required,
+        owned_worker: BuiltinOwnedWorkerPolicy::PortableHostCpu,
+    }];
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct BuiltinCatalogEntry {
+    pub audience: BuiltinCatalogAudience,
+    #[serde(skip)]
+    pub provenance: BuiltinCatalogProvenance,
     pub identity: BuiltinCatalogIdentity,
     pub category: &'static str,
     pub documentation: BuiltinDocumentation,
@@ -74,6 +128,16 @@ pub struct BuiltinCatalogEntry {
 }
 
 impl BuiltinCatalogEntry {
+    pub const fn binding_identity(
+        &self,
+        binding: &BuiltinBindingDeclaration,
+    ) -> BuiltinBindingIdentity {
+        BuiltinBindingIdentity {
+            builtin: self.identity,
+            variant: binding.variant,
+        }
+    }
+
     pub fn legacy_semantics(&self) -> BuiltinSemantics {
         let effects = self.contract.effect_set();
         BuiltinSemantics {
@@ -109,7 +173,7 @@ mod tests {
     fn native_binding_symbols_preserve_the_complete_identity() {
         assert_eq!(
             native_binding_symbol("DataArray.read", "default"),
-            "runmat_builtin_binding_v1_4461746141727261792e72656164_64656661756c74"
+            "runmat_builtin_binding_v3_4461746141727261792e72656164_64656661756c74"
         );
         assert_ne!(
             native_binding_symbol("a.b", "c"),

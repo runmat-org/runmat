@@ -1,7 +1,6 @@
 //! MATLAB-compatible `scatter` builtin.
 
 use glam::{Vec3, Vec4};
-use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -34,13 +33,10 @@ use crate::builtins::common::spec::{
 use std::convert::TryFrom;
 
 use super::common::{gather_tensor_from_gpu, numeric_plot_data_pair};
-use super::gpu_helpers::axis_bounds;
 use super::op_common::line_inputs::NumericInput as ScatterInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::perf::scatter_target_points;
 use super::plotting_error;
-#[cfg(test)]
-use super::point::convert_scalar_color_values;
 use super::point::{
     convert_rgb_color_matrix, convert_rgb_color_matrix_async, convert_scalar_color_values_async,
     convert_size_vector, convert_size_vector_async, default_marker_diameter_px,
@@ -535,20 +531,14 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
         .map_err(map_scatter_invalid_argument)?;
     let plot = if !resolved_style.requires_cpu {
         if let (Some(x_gpu), Some(y_gpu)) = (x_input.gpu_handle(), y_input.gpu_handle()) {
-            match build_scatter_gpu_plot(x_gpu, y_gpu, &resolved_style) {
-                Ok(plot) => Some(plot),
-                Err(err) => {
-                    warn!("scatter GPU path unavailable: {err}");
-                    None
-                }
-            }
+            build_scatter_gpu_plot(x_gpu, y_gpu, &resolved_style)?
         } else {
             None
         }
     } else {
         None
     };
-    let plot = match plot {
+    let mut plot = match plot {
         Some(plot) => plot,
         None => {
             let x_tensor = x_input
@@ -568,9 +558,10 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
                 .map_err(map_scatter_invalid_argument)?
         }
     };
-    let opts = PlotRenderOptions {
-        ..Default::default()
-    };
+    if let Some(visible) = style_args.style.appearance.visible {
+        plot.set_visible(visible);
+    }
+    let opts = PlotRenderOptions::default();
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
@@ -589,8 +580,7 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     let handle =
         crate::builtins::plotting::state::register_scatter_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_scatter_internal(err));
@@ -860,157 +850,7 @@ fn resolve_scatter_style(
     args: &PointArgs,
     context: &'static str,
 ) -> BuiltinResult<ScatterResolvedStyle> {
-    let mut style = ScatterResolvedStyle {
-        uniform_color: default_color(),
-        edge_color: default_color(),
-        edge_thickness: DEFAULT_LINE_WIDTH,
-        marker_style: MarkerStyle::Circle,
-        marker_size: default_marker_diameter_px(),
-        filled: args.filled,
-        per_point_sizes: None,
-        per_point_colors: None,
-        color_values: None,
-        color_limits: None,
-        gpu_sizes: None,
-        gpu_colors: None,
-        colormap: ColorMap::Parula,
-        marker_face_flat: false,
-        marker_edge_flat: false,
-        requires_cpu: false,
-        label: DEFAULT_SCATTER_LABEL.to_string(),
-    };
-
-    if let Some(label) = args.style.label.clone() {
-        style.label = label;
-    }
-
-    let appearance = &args.style.appearance;
-    style.uniform_color = appearance.color;
-    style.edge_color = appearance.color;
-    style.edge_thickness = appearance.line_width.max(0.1);
-
-    if let PointColorArg::Uniform(color) = &args.color {
-        style.uniform_color = *color;
-        style.edge_color = *color;
-    }
-
-    if appearance.marker.is_none() {
-        style.edge_color = style.uniform_color;
-    }
-
-    if let Some(marker) = appearance.marker.as_ref() {
-        style.marker_style = marker.kind.to_plot_marker();
-        if let Some(size) = marker.size {
-            style.marker_size = size.max(0.1);
-        }
-        if matches!(marker.edge_color, MarkerColor::Flat) {
-            style.marker_edge_flat = true;
-        } else {
-            style.edge_color =
-                resolve_marker_color(&marker.edge_color, style.edge_color, style.uniform_color);
-        }
-        match &marker.face_color {
-            MarkerColor::Flat => {
-                style.marker_face_flat = true;
-                style.filled = true;
-            }
-            MarkerColor::None => {
-                style.filled = false;
-            }
-            _ => {
-                let face_color = resolve_marker_color(
-                    &marker.face_color,
-                    style.uniform_color,
-                    style.uniform_color,
-                );
-                if matches!(marker.face_color, MarkerColor::Color(_) | MarkerColor::Auto) {
-                    style.uniform_color = face_color;
-                }
-            }
-        }
-    }
-
-    if let PointSizeArg::Scalar(size) = &args.size {
-        style.marker_size = marker_area_points2_to_diameter_px(*size as f64);
-    }
-
-    if let Some(value) = args.size.value() {
-        match value {
-            Value::GpuTensor(handle) => {
-                validate_gpu_vector_length(handle, point_count, context)?;
-                style.gpu_sizes = Some(handle.clone());
-            }
-            _ => {
-                style.per_point_sizes = Some(convert_size_vector(value, point_count, context)?);
-            }
-        }
-    }
-
-    match &args.color {
-        PointColorArg::ScalarValues(value) => {
-            let scalars = convert_scalar_color_values(value, point_count, context)?;
-            let (colors, limits) = map_scalar_values_to_colors(&scalars, style.colormap.clone());
-            style.color_values = Some(scalars);
-            style.per_point_colors = Some(colors);
-            style.color_limits = Some(limits);
-        }
-        PointColorArg::RgbMatrix(value) => match value {
-            Value::GpuTensor(handle) => {
-                let components = validate_gpu_color_matrix(handle, point_count, context)?;
-                style.gpu_colors = Some(PointGpuColor {
-                    handle: handle.clone(),
-                    components,
-                });
-            }
-            _ => {
-                style.per_point_colors =
-                    Some(convert_rgb_color_matrix(value, point_count, context)?);
-            }
-        },
-        _ => {}
-    }
-
-    // MATLAB leaves markers unfilled unless 'filled' or a MarkerFaceColor asks; with color
-    // data, the edge takes each point's color ('flat') unless MarkerEdgeColor is given.
-    let edge_color_given = args
-        .style
-        .appearance
-        .marker
-        .as_ref()
-        .is_some_and(|marker| !matches!(marker.edge_color, MarkerColor::Auto));
-    if (style.per_point_colors.is_some() || style.gpu_colors.is_some()) && !edge_color_given {
-        style.marker_edge_flat = true;
-    }
-
-    if style.marker_face_flat {
-        if style.per_point_colors.is_none() && style.gpu_colors.is_none() {
-            return Err(scatter_err(format!(
-                "{context}: MarkerFaceColor 'flat' requires per-point color data (C argument)"
-            )));
-        }
-        style.filled = true;
-    }
-
-    if style.marker_edge_flat && style.per_point_colors.is_none() && style.gpu_colors.is_none() {
-        return Err(scatter_err(format!(
-            "{context}: MarkerEdgeColor 'flat' requires per-point color data (C argument)"
-        )));
-    }
-
-    if args.style.line_style_explicit
-        && !matches!(
-            args.style.appearance.line_style,
-            LineStyle::Solid | LineStyle::None
-        )
-    {
-        style.requires_cpu = true;
-    }
-    style.requires_cpu |= args.style.requires_cpu_fallback;
-    if args.style.line_style_order.is_some() {
-        style.requires_cpu = true;
-    }
-
-    Ok(style)
+    futures::executor::block_on(resolve_scatter_style_async(point_count, args, context))
 }
 
 async fn resolve_scatter_style_async(
@@ -1075,93 +915,148 @@ fn build_scatter_gpu_plot(
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     style: &ScatterResolvedStyle,
-) -> BuiltinResult<ScatterPlot> {
-    if runmat_accelerate_api::handle_integer_type(x).is_some()
-        || runmat_accelerate_api::handle_integer_type(y).is_some()
-    {
-        return Err(scatter_err(
-            "scatter: integer gpuArray source requires exact host property retention",
-        ));
-    }
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| scatter_err("scatter: unable to export GPU X data"))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| scatter_err("scatter: unable to export GPU Y data"))?;
-
-    if x_ref.len == 0 {
+) -> BuiltinResult<Option<ScatterPlot>> {
+    let count = super::gpu_helpers::GpuBufferExports::element_count;
+    let point_count = count(x, BUILTIN_NAME)?;
+    if point_count == 0 {
         return Err(scatter_err("scatter: empty input tensor"));
     }
-    if x_ref.len != y_ref.len {
+    u32::try_from(point_count)
+        .map_err(|_| scatter_err("scatter: point count exceeds supported range"))?;
+    if count(y, BUILTIN_NAME)? != point_count {
         return Err(scatter_err(
             "scatter: X and Y inputs must have identical lengths",
         ));
     }
-    if x_ref.precision != y_ref.precision {
-        return Err(scatter_err(
-            "scatter: X and Y gpuArrays must have matching precision",
-        ));
+    if runmat_accelerate_api::handle_precision(x) != runmat_accelerate_api::handle_precision(y) {
+        return Ok(None);
     }
-    let point_count = x_ref.len;
-    let len_u32 = u32::try_from(point_count)
-        .map_err(|_| scatter_err("scatter: point count exceeds supported range"))?;
-    let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
-    let lod_stride = scatter_lod_stride(len_u32);
-
-    let size_buffer = build_size_buffer(style, point_count)?;
-    let has_sizes = size_buffer.has_data();
-    let color_buffer = build_color_buffer(style, point_count)?;
-    let has_colors = color_buffer.has_data();
-
-    let inputs = Scatter2GpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
-        len: len_u32,
-        scalar,
-    };
-    let params = Scatter2GpuParams {
-        color: style.uniform_color,
-        point_size: style.marker_size,
-        sizes: size_buffer,
-        colors: color_buffer,
-        lod_stride,
-    };
-
-    let gpu_vertices = runmat_plot::gpu::scatter2::pack_vertices_from_xy(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| scatter_err(format!("scatter: failed to build GPU vertices: {e}")))?;
-    let drawn_points = gpu_vertices.vertex_count;
-
-    let bounds = build_gpu_bounds(x, y)?;
-    let gpu_style = ScatterGpuStyle {
-        color: style.uniform_color,
-        edge_color: style.edge_color,
-        edge_thickness: style.edge_thickness,
-        marker_size: style.marker_size,
-        marker_style: style.marker_style,
-        filled: style.filled,
-        has_per_point_sizes: has_sizes,
-        has_per_point_colors: has_colors,
-        edge_from_vertex_colors: style.marker_edge_flat,
-    };
-
-    let mut scatter = ScatterPlot::from_gpu_buffer(gpu_vertices, drawn_points, bounds, gpu_style)
-        .with_gpu_source_inputs(inputs)
-        .with_label(style.label.clone());
-    scatter.colormap = style.colormap.clone();
-    scatter.set_edge_color_from_vertex(style.marker_edge_flat);
-    if lod_stride == 1 {
-        if let Some(values) = style.color_values.as_ref() {
-            scatter.color_values = Some(values.clone());
+    if let Some(input) = &style.gpu_sizes {
+        if count(input, BUILTIN_NAME)? != point_count {
+            return Err(scatter_err(format!(
+                "scatter: marker size array must have {point_count} elements"
+            )));
+        }
+        if runmat_accelerate_api::handle_precision(input) != Some(ProviderPrecision::F32) {
+            return Ok(None);
         }
     }
-    scatter.color_limits = style.color_limits;
-    Ok(scatter)
+    if let Some(color) = &style.gpu_colors {
+        let expected = point_count
+            .checked_mul(color.components.stride() as usize)
+            .ok_or_else(|| scatter_err("scatter: color element count overflow"))?;
+        if count(&color.handle, BUILTIN_NAME)? != expected {
+            return Err(scatter_err(format!(
+                "scatter: color array must contain {expected} elements"
+            )));
+        }
+        if runmat_accelerate_api::handle_precision(&color.handle) != Some(ProviderPrecision::F32) {
+            return Ok(None);
+        }
+    }
+    if runmat_accelerate_api::handle_integer_type(x).is_some()
+        || runmat_accelerate_api::handle_integer_type(y).is_some()
+    {
+        return Ok(None);
+    }
+    let mut inputs = vec![x, y];
+    inputs.extend(style.gpu_sizes.iter());
+    inputs.extend(style.gpu_colors.iter().map(|color| &color.handle));
+    let Some((context, mut gpu_exports)) =
+        super::gpu_helpers::GpuBufferExports::prepare(&inputs, BUILTIN_NAME)?
+    else {
+        return Ok(None);
+    };
+    let result = (|| {
+        let x_ref = gpu_exports
+            .export(x, BUILTIN_NAME)?
+            .ok_or_else(|| scatter_err("scatter: unable to export GPU X data"))?;
+        let y_ref = gpu_exports
+            .export(y, BUILTIN_NAME)?
+            .ok_or_else(|| scatter_err("scatter: unable to export GPU Y data"))?;
+
+        if x_ref.len == 0 {
+            return Err(scatter_err("scatter: empty input tensor"));
+        }
+        if x_ref.len != y_ref.len {
+            return Err(scatter_err(
+                "scatter: X and Y inputs must have identical lengths",
+            ));
+        }
+        if x_ref.precision != y_ref.precision {
+            return Err(scatter_err(
+                "scatter: X and Y gpuArrays must have matching precision",
+            ));
+        }
+        let point_count = x_ref.len;
+        let len_u32 = u32::try_from(point_count)
+            .map_err(|_| scatter_err("scatter: point count exceeds supported range"))?;
+        let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
+        let lod_stride = scatter_lod_stride(len_u32);
+
+        let size_buffer = build_size_buffer(style, point_count, &mut gpu_exports)?;
+        let has_sizes = size_buffer.has_data();
+        let color_buffer = build_color_buffer(style, point_count, &mut gpu_exports)?;
+        let has_colors = color_buffer.has_data();
+
+        let inputs = Scatter2GpuInputs {
+            x_buffer: x_ref.clone().into(),
+            y_buffer: y_ref.clone().into(),
+            len: len_u32,
+            scalar,
+        };
+        let params = Scatter2GpuParams {
+            color: style.uniform_color,
+            point_size: style.marker_size,
+            sizes: size_buffer,
+            colors: color_buffer,
+            lod_stride,
+        };
+
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::scatter2::pack_vertices_from_xy(emission, &inputs, &params)
+            })
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    format!("{}: GPU emission unavailable: {source}", BUILTIN_NAME),
+                    source,
+                )
+            })?
+            .map_err(|e| scatter_err(format!("scatter: failed to build GPU vertices: {e}")))?;
+        gpu_exports.record_completed_effect();
+        let drawn_points = gpu_vertices.vertex_count;
+
+        let bounds = build_gpu_bounds(x, y, &gpu_exports.protected_handles())?;
+        let gpu_style = ScatterGpuStyle {
+            color: style.uniform_color,
+            edge_color: style.edge_color,
+            edge_thickness: style.edge_thickness,
+            marker_size: style.marker_size,
+            marker_style: style.marker_style,
+            filled: style.filled,
+            has_per_point_sizes: has_sizes,
+            has_per_point_colors: has_colors,
+            edge_from_vertex_colors: style.marker_edge_flat,
+        };
+
+        let mut scatter =
+            ScatterPlot::from_gpu_buffer(gpu_vertices, drawn_points, bounds, gpu_style)
+                .with_gpu_source_inputs(inputs)
+                .with_label(style.label.clone());
+        scatter.colormap = style.colormap.clone();
+        scatter.set_edge_color_from_vertex(style.marker_edge_flat);
+        if lod_stride == 1 {
+            if let Some(values) = style.color_values.as_ref() {
+                scatter.color_values = Some(values.clone());
+            }
+        }
+        scatter.color_limits = style.color_limits;
+        Ok(scatter)
+    })();
+    gpu_exports.complete(result, BUILTIN_NAME).map(Some)
 }
 
 fn scatter_lod_stride(point_count: u32) -> u32 {
@@ -1173,9 +1068,22 @@ fn scatter_lod_stride(point_count: u32) -> u32 {
     }
 }
 
-fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> BuiltinResult<BoundingBox> {
-    let (min_x, max_x) = axis_bounds(x, BUILTIN_NAME)?;
-    let (min_y, max_y) = axis_bounds(y, BUILTIN_NAME)?;
+fn build_gpu_bounds(
+    x: &GpuTensorHandle,
+    y: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
+) -> BuiltinResult<BoundingBox> {
+    let (min_x, max_x) = futures::executor::block_on(super::gpu_helpers::axis_bounds_protecting(
+        x,
+        protected,
+        BUILTIN_NAME,
+    ))?;
+    let (min_y, max_y) = futures::executor::block_on(super::gpu_helpers::axis_bounds_protecting(
+        y,
+        protected,
+        BUILTIN_NAME,
+    ))
+    .map_err(|error| super::gpu_helpers::preparation_after_effect(error, BUILTIN_NAME))?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, 0.0),
         Vec3::new(max_x, max_y, 0.0),
@@ -1185,9 +1093,11 @@ fn build_gpu_bounds(x: &GpuTensorHandle, y: &GpuTensorHandle) -> BuiltinResult<B
 fn build_size_buffer(
     style: &ScatterResolvedStyle,
     point_count: usize,
+    gpu_exports: &mut super::gpu_helpers::GpuBufferExports,
 ) -> BuiltinResult<ScatterAttributeBuffer> {
     if let Some(handle) = style.gpu_sizes.as_ref() {
-        let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
+        let exported = gpu_exports
+            .export(handle, BUILTIN_NAME)?
             .ok_or_else(|| scatter_err("scatter: unable to export GPU marker sizes"))?;
         if exported.len != point_count {
             return Err(scatter_err(format!(
@@ -1200,7 +1110,7 @@ fn build_size_buffer(
                 "scatter: GPU marker sizes must be single-precision (cast before plotting)",
             ));
         }
-        return Ok(ScatterAttributeBuffer::Gpu(exported.buffer));
+        return Ok(ScatterAttributeBuffer::Gpu(exported.into()));
     }
 
     if let Some(sizes) = style.per_point_sizes.as_ref() {
@@ -1217,9 +1127,11 @@ fn build_size_buffer(
 fn build_color_buffer(
     style: &ScatterResolvedStyle,
     point_count: usize,
+    gpu_exports: &mut super::gpu_helpers::GpuBufferExports,
 ) -> BuiltinResult<ScatterColorBuffer> {
     if let Some(gpu_color) = style.gpu_colors.as_ref() {
-        let exported = runmat_accelerate_api::export_wgpu_buffer(&gpu_color.handle)
+        let exported = gpu_exports
+            .export(&gpu_color.handle, BUILTIN_NAME)?
             .ok_or_else(|| scatter_err("scatter: unable to export GPU color data"))?;
         let expected = point_count * gpu_color.components.stride() as usize;
         if exported.len != expected {
@@ -1234,7 +1146,7 @@ fn build_color_buffer(
             ));
         }
         return Ok(ScatterColorBuffer::Gpu {
-            buffer: exported.buffer,
+            buffer: exported.into(),
             components: gpu_color.components.stride(),
         });
     }
@@ -1355,9 +1267,8 @@ pub(crate) mod tests {
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
-        let lower = err.to_string().to_lowercase();
         assert!(
-            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            crate::builtins::plotting::state::presentation_unavailable(err),
             "unexpected error: {err}"
         );
     }

@@ -14,10 +14,6 @@ fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     )
 }
 
-fn map_slice_acceleration_error(err: impl std::fmt::Display) -> RuntimeError {
-    crate::runtime_error::semantic_error("AccelerationOperationFailed", format!("slice: {err}"))
-}
-
 fn numeric_selection_value(
     tensor: &Tensor,
     indices: &[usize],
@@ -66,8 +62,8 @@ pub fn try_tensor_slice_2d_fast_path(
     if dims != 2 {
         return Ok(None);
     }
-    let rows = tensor.shape.first().copied().unwrap_or(1);
-    let cols = tensor.shape.get(1).copied().unwrap_or(1);
+    let rows = tensor.shape().first().copied().unwrap_or(1);
+    let cols = tensor.shape().get(1).copied().unwrap_or(1);
     match (&selectors[0], &selectors[1]) {
         (SliceSelector::Colon, SliceSelector::Scalar(j)) => {
             let j0 = *j - 1;
@@ -135,11 +131,11 @@ pub async fn read_tensor_slice_nd(
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
     let selectors =
-        build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
+        build_slice_selectors(dims, colon_mask, end_mask, numeric, tensor.shape()).await?;
     if let Some(value) = try_tensor_slice_2d_fast_path(tensor, dims, &selectors)? {
         return Ok(value);
     }
-    let plan = build_index_plan(&selectors, dims, &tensor.shape)?;
+    let plan = build_index_plan(&selectors, dims, tensor.shape())?;
     let indices: Vec<usize> = plan.indices.iter().map(|&index| index as usize).collect();
     numeric_selection_value(tensor, &indices, plan.output_shape)
 }
@@ -187,6 +183,15 @@ fn sparse_scalar_value(
         return Ok(Value::SparseTensor(scalar));
     }
 
+    if sparse.is_complex() {
+        let scalar = match sparse.complex_at(row, col) {
+            Some(value) => sparse.new_complex_like(1, 1, vec![0, 1], vec![0], vec![value]),
+            None => Ok(sparse.zeros_like(1, 1)),
+        }
+        .map_err(map_slice_shape_error)?;
+        return Ok(Value::SparseTensor(scalar));
+    }
+
     if sparse.numeric_dtype() == Some(NumericDType::F32) {
         let value = sparse.get(row, col).unwrap_or(0.0) as f32;
         let scalar = if value == 0.0 {
@@ -213,15 +218,7 @@ fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
 }
 
 fn sparse_zeros_like(sparse: &SparseTensor, rows: usize, cols: usize) -> SparseTensor {
-    if sparse.is_logical() {
-        SparseTensor::zeros_logical(rows, cols)
-    } else if let Some(storage) = sparse.integer_storage() {
-        SparseTensor::zeros_with_integer_storage(rows, cols, storage)
-    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        SparseTensor::zeros_f32(rows, cols)
-    } else {
-        SparseTensor::zeros(rows, cols)
-    }
+    sparse.zeros_like(rows, cols)
 }
 
 fn typed_sparse_from_column_entries(
@@ -272,6 +269,16 @@ fn linear_sparse_slice(
                 vec![0, sparse.nnz()],
                 row_indices,
                 storage.clone(),
+            )
+        } else if sparse.is_complex() {
+            sparse.new_complex_like(
+                total,
+                1,
+                vec![0, sparse.nnz()],
+                row_indices,
+                sparse
+                    .materialize_complex_f64()
+                    .map_err(map_slice_shape_error)?,
             )
         } else if let Some(values) = sparse.as_f32_slice() {
             SparseTensor::new_f32(
@@ -372,6 +379,21 @@ fn linear_sparse_slice(
         return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
     }
 
+    if sparse.is_complex() {
+        let mut col_entries: Vec<Vec<(usize, (f64, f64))>> = vec![Vec::new(); out_cols];
+        for (out_pos, &index) in indices.iter().enumerate() {
+            let base_lin = index - 1;
+            let base_row = base_lin % sparse.rows;
+            let base_col = base_lin / sparse.rows;
+            if let Some(value) = sparse.complex_at(base_row, base_col) {
+                let out_row = out_pos % out_rows;
+                let out_col = out_pos / out_rows;
+                col_entries[out_col].push((out_row, value));
+            }
+        }
+        return sparse_complex_from_column_entries(sparse, out_rows, out_cols, col_entries);
+    }
+
     if sparse.numeric_dtype() == Some(NumericDType::F32) {
         let mut col_entries: Vec<Vec<(usize, f32)>> = vec![Vec::new(); out_cols];
         for (out_pos, &index) in indices.iter().enumerate() {
@@ -460,6 +482,32 @@ fn sparse_f32_from_column_entries(
         col_ptrs.push(values.len());
     }
     let sparse = SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
+        .map_err(map_slice_shape_error)?;
+    Ok(Value::SparseTensor(sparse))
+}
+
+fn sparse_complex_from_column_entries(
+    prototype: &SparseTensor,
+    rows: usize,
+    cols: usize,
+    mut col_entries: Vec<Vec<(usize, (f64, f64))>>,
+) -> Result<Value, RuntimeError> {
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::new();
+    let mut values = Vec::new();
+    col_ptrs.push(0);
+    for entries in col_entries.iter_mut().take(cols) {
+        entries.sort_by_key(|(row, _)| *row);
+        for &(row, value) in entries.iter() {
+            if value.0 != 0.0 || value.1 != 0.0 {
+                row_indices.push(row);
+                values.push(value);
+            }
+        }
+        col_ptrs.push(values.len());
+    }
+    let sparse = prototype
+        .new_complex_like(rows, cols, col_ptrs, row_indices, values)
         .map_err(map_slice_shape_error)?;
     Ok(Value::SparseTensor(sparse))
 }
@@ -575,6 +623,41 @@ fn matrix_sparse_slice(
             return Ok(Value::SparseTensor(scalar));
         }
         return sparse_logical_from_column_rows(out_rows, out_cols, col_rows);
+    }
+
+    if sparse.is_complex() {
+        let mut col_entries = vec![Vec::new(); out_cols];
+        for (out_col, &col) in cols.iter().enumerate() {
+            let base_col = col - 1;
+            let start = sparse.col_ptrs[base_col];
+            let end = sparse.col_ptrs[base_col + 1];
+            for (index, &base_row) in sparse.row_indices[start..end].iter().enumerate() {
+                let value = sparse
+                    .complex_value_at(start + index)
+                    .expect("complex sparse storage is consistent")
+                    .into();
+                if all_rows {
+                    col_entries[out_col].push((base_row, value));
+                } else if let Some(output_rows) = row_positions.get(&base_row) {
+                    for &out_row in output_rows {
+                        col_entries[out_col].push((out_row, value));
+                    }
+                }
+            }
+        }
+        if out_rows == 1 && out_cols == 1 {
+            let value = col_entries
+                .first()
+                .and_then(|entries| entries.first())
+                .map(|(_, value)| *value);
+            let scalar = match value {
+                Some(value) => sparse.new_complex_like(1, 1, vec![0, 1], vec![0], vec![value]),
+                None => Ok(sparse.zeros_like(1, 1)),
+            }
+            .map_err(map_slice_shape_error)?;
+            return Ok(Value::SparseTensor(scalar));
+        }
+        return sparse_complex_from_column_entries(sparse, out_rows, out_cols, col_entries);
     }
 
     if let Some(values) = sparse.as_f32_slice() {
@@ -747,6 +830,38 @@ pub fn read_sparse_slice_from_plan(
         .map_err(map_slice_shape_error)?;
         return Ok(Value::SparseTensor(out));
     }
+    if sparse.is_complex() {
+        let mut complex_values = Vec::new();
+        for out_col in 0..out_cols {
+            for out_row in 0..out_rows {
+                let out_lin = out_row + out_col * out_rows;
+                let Some(&base_lin) = plan.indices.get(out_lin) else {
+                    return Err(crate::runtime_error::semantic_error(
+                        "ShapeMismatch",
+                        "sparse slice plan output shape does not match selected indices",
+                    ));
+                };
+                let base_lin = base_lin as usize;
+                if sparse.rows == 0 || base_lin >= total {
+                    return Err(crate::runtime_error::semantic_error(
+                        "IndexOutOfBounds",
+                        "Index out of bounds",
+                    ));
+                }
+                let base_row = base_lin % sparse.rows;
+                let base_col = base_lin / sparse.rows;
+                if let Some(value) = sparse.complex_at(base_row, base_col) {
+                    row_indices.push(out_row);
+                    complex_values.push(value);
+                }
+            }
+            col_ptrs.push(complex_values.len());
+        }
+        let out = sparse
+            .new_complex_like(out_rows, out_cols, col_ptrs, row_indices, complex_values)
+            .map_err(map_slice_shape_error)?;
+        return Ok(Value::SparseTensor(out));
+    }
     for out_col in 0..out_cols {
         for out_row in 0..out_rows {
             let out_lin = out_row + out_col * out_rows;
@@ -800,8 +915,8 @@ pub async fn read_complex_slice(
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
     let selectors =
-        build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
-    let plan = build_index_plan(&selectors, dims, &tensor.shape)?;
+        build_slice_selectors(dims, colon_mask, end_mask, numeric, tensor.shape()).await?;
+    let plan = build_index_plan(&selectors, dims, tensor.shape())?;
     read_complex_slice_from_plan(tensor, &plan)
 }
 
@@ -851,13 +966,13 @@ fn read_integer_complex_slice_from_plan(
     let mut imag_values = Vec::with_capacity(plan.indices.len());
     for &linear_index in &plan.indices {
         let index = linear_index as usize;
-        let real = storage.real.value_at(index).ok_or_else(|| {
+        let real = storage.real().value_at(index).ok_or_else(|| {
             crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
             )
         })?;
-        let imag = storage.imag.value_at(index).ok_or_else(|| {
+        let imag = storage.imag().value_at(index).ok_or_else(|| {
             crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: complex index out of bounds",
@@ -868,11 +983,11 @@ fn read_integer_complex_slice_from_plan(
     }
 
     let real = storage
-        .real
+        .real()
         .from_same_class_values(real_values)
         .map_err(map_slice_shape_error)?;
     let imag = storage
-        .imag
+        .imag()
         .from_same_class_values(imag_values)
         .map_err(map_slice_shape_error)?;
     let result = ComplexTensor::new_integer(
@@ -890,7 +1005,7 @@ pub async fn read_gpu_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let base_shape = handle.shape.clone();
+    let base_shape = handle.shape().to_vec();
     let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &base_shape).await?;
     let plan = build_index_plan(&selectors, dims, &base_shape)?;
     read_gpu_slice_from_plan(handle, &plan)
@@ -900,52 +1015,15 @@ pub fn read_gpu_slice_from_plan(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
-    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-        crate::runtime_error::semantic_error(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered for slice source",
-        )
-    })?;
+    let provider = super::resident::owner(handle)?;
+    let _residency = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle);
     if plan.indices.is_empty() {
-        if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
-            return upload_empty_integer_gpu_slice(provider, integer_type, &plan.output_shape);
-        }
-        let zeros = provider
-            .zeros(&plan.output_shape)
-            .map_err(map_slice_acceleration_error)?;
-        Ok(Value::GpuTensor(zeros))
-    } else {
-        let result = provider
-            .gather_linear(handle, &plan.indices, &plan.output_shape)
-            .map_err(map_slice_acceleration_error)?;
-        Ok(Value::GpuTensor(result))
+        return super::resident::empty_read(handle, &plan.output_shape);
     }
-}
-
-fn upload_empty_integer_gpu_slice(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    integer_type: runmat_accelerate_api::IntegerElementType,
-    output_shape: &[usize],
-) -> Result<Value, RuntimeError> {
-    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, IntegerElementType};
-
-    let data = match integer_type {
-        IntegerElementType::I8 => HostIntegerDataView::I8(&[]),
-        IntegerElementType::I16 => HostIntegerDataView::I16(&[]),
-        IntegerElementType::I32 => HostIntegerDataView::I32(&[]),
-        IntegerElementType::I64 => HostIntegerDataView::I64(&[]),
-        IntegerElementType::U8 => HostIntegerDataView::U8(&[]),
-        IntegerElementType::U16 => HostIntegerDataView::U16(&[]),
-        IntegerElementType::U32 => HostIntegerDataView::U32(&[]),
-        IntegerElementType::U64 => HostIntegerDataView::U64(&[]),
-    };
-    provider
-        .upload_integer(&HostIntegerTensorView {
-            data,
-            shape: output_shape,
-        })
-        .map(Value::GpuTensor)
-        .map_err(map_slice_acceleration_error)
+    let result = provider
+        .gather_linear(handle, &plan.indices, &plan.output_shape)
+        .map_err(|cause| super::resident::failure("indexed gather", cause.into()))?;
+    super::resident::admit_read(result, handle, &plan.output_shape)
 }
 
 pub async fn read_string_slice(
@@ -994,17 +1072,38 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
 #[cfg(test)]
 mod tests {
     use super::{
-        gather_string_slice, map_slice_acceleration_error, read_complex_slice_from_plan,
-        read_gpu_slice_from_plan, read_sparse_slice_from_plan, read_string_slice,
+        gather_string_slice, read_complex_slice_from_plan, read_gpu_slice_from_plan,
+        read_sparse_slice, read_sparse_slice_from_plan, read_string_slice,
         read_tensor_slice_from_plan, try_tensor_slice_2d_fast_path,
     };
     use crate::indexing::plan::IndexPlan;
     use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
     use runmat_value::{
-        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericScalar,
-        SparseTensor, StringArray, Tensor, Value,
+        ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType,
+        NumericScalar, SparseTensor, StringArray, Tensor, Value,
     };
+
+    #[test]
+    fn sparse_linear_numeric_vector_selection_uses_source_orientation() {
+        let column =
+            SparseTensor::new(4, 1, vec![0, 2], vec![1, 2], vec![5.0, 6.0]).expect("column source");
+        let row = SparseTensor::new(1, 4, vec![0, 0, 1, 2, 2], vec![0, 0], vec![5.0, 6.0])
+            .expect("row source");
+        for (source, index_shape, expected) in [
+            (&column, vec![1, 2], vec![2, 1]),
+            (&row, vec![2, 1], vec![1, 2]),
+        ] {
+            let selector = Value::Tensor(Tensor::new(vec![2.0, 3.0], index_shape).unwrap());
+            let Value::SparseTensor(output) =
+                block_on(read_sparse_slice(source, 1, 0, 0, &[selector])).unwrap()
+            else {
+                panic!("sparse vector result");
+            };
+            assert_eq!(output.shape(), expected);
+            assert_eq!(output.nnz(), 2);
+        }
+    }
 
     #[test]
     fn tensor_slice_plan_preserves_exact_uint64_storage() {
@@ -1103,6 +1202,69 @@ mod tests {
         assert!(empty.is_logical());
         assert_eq!(empty.shape(), vec![0, 1]);
         assert_eq!(empty.nnz(), 0);
+    }
+
+    #[test]
+    fn sparse_slice_plan_preserves_complex_storage_and_empty_class() {
+        let sparse = SparseTensor::new_complex(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(1.0, 2.0), (3.0, -4.0)],
+        )
+        .expect("complex sparse");
+        let plan = IndexPlan::new(vec![0, 3, 1, 2], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let Value::SparseTensor(output) =
+            read_sparse_slice_from_plan(&sparse, &plan).expect("slice")
+        else {
+            panic!("expected sparse output");
+        };
+        assert!(output.is_complex());
+        assert_eq!(
+            output.materialize_complex_f64().expect("complex values"),
+            vec![(1.0, 2.0), (3.0, -4.0)]
+        );
+
+        let empty_plan = IndexPlan::new(Vec::new(), vec![0, 1], vec![0], 1, vec![2, 2]);
+        let Value::SparseTensor(empty) =
+            read_sparse_slice_from_plan(&sparse, &empty_plan).expect("empty slice")
+        else {
+            panic!("expected sparse output");
+        };
+        assert!(empty.is_complex());
+        assert_eq!(empty.shape(), vec![0, 1]);
+        assert_eq!(empty.nnz(), 0);
+    }
+
+    #[test]
+    fn sparse_slice_plan_preserves_complex_single_storage() {
+        let sparse = SparseTensor::new_complex_f32(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(1.0, 2.0), (3.0, -4.0)],
+        )
+        .expect("complex single sparse");
+        let plan = IndexPlan::new(vec![0, 3, 1, 2], vec![2, 2], vec![2, 2], 2, vec![2, 2]);
+        let Value::SparseTensor(output) =
+            read_sparse_slice_from_plan(&sparse, &plan).expect("slice")
+        else {
+            panic!("expected sparse output");
+        };
+        assert!(output.is_complex());
+        assert_eq!(output.numeric_dtype(), Some(NumericDType::F32));
+
+        let empty_plan = IndexPlan::new(Vec::new(), vec![0, 1], vec![0], 1, vec![2, 2]);
+        let Value::SparseTensor(empty) =
+            read_sparse_slice_from_plan(&sparse, &empty_plan).expect("empty slice")
+        else {
+            panic!("expected sparse output");
+        };
+        assert!(empty.is_complex());
+        assert_eq!(empty.numeric_dtype(), Some(NumericDType::F32));
+        assert_eq!(empty.shape(), vec![0, 1]);
     }
 
     #[test]
@@ -1231,7 +1393,7 @@ mod tests {
             panic!("expected native-single tensor result");
         };
         assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.shape(), [1, 2]);
         assert_eq!(out.numeric_value_at(0), Some(NumericScalar::F32(3.75)));
         assert_eq!(out.numeric_value_at(1), Some(NumericScalar::F32(1.25)));
     }
@@ -1301,7 +1463,7 @@ mod tests {
         else {
             panic!("typed complex selection must remain a complex tensor");
         };
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), [1, 2]);
         assert_eq!(
             result.integer_storage().cloned(),
             Some(
@@ -1350,7 +1512,8 @@ mod tests {
 
     #[test]
     fn slice_acceleration_error_mapping_reports_identifier() {
-        let err = map_slice_acceleration_error("provider failed");
+        let err =
+            crate::indexing::resident::failure("slice", anyhow::anyhow!("provider failed").into());
         assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
     }
 }

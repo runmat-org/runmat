@@ -9,6 +9,15 @@ impl LocalDriver {
         &self,
         snapshot: &DriverSnapshot,
     ) -> NativeExecutionResult<NativeCheckpointEvidence> {
+        #[cfg(test)]
+        if self
+            .fail_next_checkpoint
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            return Err(crate::NativeExecutionError::Protocol(
+                "injected post-accept checkpoint failure".into(),
+            ));
+        }
         let publication = self.checkpoints.write(snapshot);
         let evidence = match &publication {
             Ok(outcome) => NativeCheckpointEvidence::from_publication(outcome.clone()),

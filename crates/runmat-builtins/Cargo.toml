@@ -17,6 +17,11 @@ thiserror = { workspace = true }
 runmat-async = { workspace = true }
 runmat-value = { workspace = true }
 runmat-types = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 runmat-macros = { workspace = true }
+syn = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

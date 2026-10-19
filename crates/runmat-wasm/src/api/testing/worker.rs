@@ -1,6 +1,3 @@
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-
 use wasm_bindgen::prelude::*;
 
 use crate::api::session::{install_wasm_interrupt, RunMatWasm};
@@ -11,24 +8,23 @@ impl RunMatWasm {
     /// Execute one exact planned test in this session. Browser worker adapters
     /// use this narrow endpoint; scheduling remains in the portable Rust
     /// coordinator.
-    // A RunMatWasm session is intentionally single-owner and non-reentrant.
-    // The mutable borrow is the execution lease for the complete async attempt.
-    #[allow(clippy::await_holding_refcell_ref)]
+    // The owning in-flight guard preserves the real session across await and
+    // rejects a concurrent request before replacing cancellation authority.
     #[wasm_bindgen(js_name = executeTestAttempt)]
     pub async fn execute_test_attempt_js(&self, input: JsValue) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
         let input: TestAttemptInput = serde_wasm_bindgen::from_value(input)
             .map_err(|error| js_error(&format!("Test attempt input is invalid: {error}")))?;
-        let cancellation = Arc::new(AtomicBool::new(false));
+        let mut session = self.take_session()?;
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let _interrupt = install_wasm_interrupt(&self.active_interrupt, cancellation.clone());
-        let mut session = self.session.borrow_mut();
         let attempt = session
             .execute_planned_test(
                 &input.snapshot,
                 &input.plan,
                 &input.test_id,
                 input.attempt,
-                cancellation,
+                cancellation.token(),
             )
             .await
             .map_err(|error| js_error(&format!("Test attempt failed: {error}")))?;

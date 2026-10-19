@@ -7,104 +7,22 @@
 //! `sin(x*pi/180)`.
 
 use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::SIND_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SIND_ERROR_INTERNAL, SIND_ERROR_INVALID_INPUT,
+    SIND_INTEGER_INPUT_EXTENSION, SIND_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, Tensor, Value};
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::trigonometry::degree_helpers::reduce_degrees;
-use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sind";
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
-pub const SIND_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sind-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sind with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SindIntegerInputExtension"),
-};
-pub const SIND_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sind-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sind with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SindLogicalInputExtension"),
-};
-pub const SIND_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [SIND_INTEGER_INPUT_EXTENSION, SIND_LOGICAL_INPUT_EXTENSION];
-const SIND_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed-integer degree input is outside the documented single/double domain and crosses the waveform boundary only when binary64-exact.",
-    }];
-pub const SIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = sind(integer_X)",
-        inputs: &SIND_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "RunMat mode preserves exact canonical degree results after the checked conversion boundary; automatic residency gathers transparently.",
-    }];
-
-const SIND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Element-wise sine result with degree input semantics.",
-}];
-
-const SIND_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, array, logical array, complex value, or gpuArray.",
-}];
-
-const SIND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = sind(X)",
-    inputs: &SIND_INPUTS,
-    outputs: &SIND_OUTPUT,
-}];
-
-const SIND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIND.INVALID_INPUT",
-    identifier: Some("RunMat:sind:InvalidInput"),
-    when: "Input cannot be interpreted as supported numeric/logical/complex data.",
-    message: "sind: invalid input",
-};
-
-const SIND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SIND.INTERNAL",
-    identifier: Some("RunMat:sind:Internal"),
-    when: "Internal gather/conversion/allocation flow failed.",
-    message: "sind: internal error",
-};
-
-const SIND_ERRORS: [BuiltinErrorDescriptor; 2] = [SIND_ERROR_INVALID_INPUT, SIND_ERROR_INTERNAL];
-
-pub const SIND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SIND_ERRORS,
-};
-
 fn sind_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
@@ -163,21 +81,20 @@ fn sind_complex(re: f64, im: f64) -> (f64, f64) {
 
 #[runtime_builtin(
     name = "sind",
-    category = "math/trigonometry",
-    summary = "Compute element-wise sine values for degree-based angles.",
-    keywords = "sind,sine,degrees,trigonometry",
-    accel = "unary",
-    type_resolver(numeric_unary_type),
-    descriptor(crate::builtins::math::trigonometry::sind::SIND_DESCRIPTOR),
-    extensions(SIND_EXTENSIONS),
-    integer_capabilities(SIND_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::trigonometry::sind"
 )]
 async fn sind_builtin(value: Value) -> BuiltinResult<Value> {
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SIND_DESCRIPTOR,
+        &runmat_builtins::SIND_ERROR_TOO_MANY_OUTPUTS,
+        "sind",
+    )?;
+    crate::builtins::common::validation::ensure_runmat_real_integer_f64_boundary(
         &value,
         &SIND_INTEGER_INPUT_EXTENSION,
-        BUILTIN_NAME,
+        runmat_builtins::SIND_CATALOG_ENTRY.identity,
+        &runmat_builtins::SIND_ERROR_INVALID_INPUT,
         "X",
     )
     .await?;
@@ -189,7 +106,6 @@ async fn sind_builtin(value: Value) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "sind")?;
     match value {
         Value::GpuTensor(handle) => sind_gpu(handle).await,
         Value::Complex(re, im) => {
@@ -214,22 +130,47 @@ fn sind_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sind_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
+    if tensor.numeric_dtype() == NumericDType::F32 {
+        let data = tensor
+            .as_f32_slice()
+            .expect("single tensor storage")
+            .iter()
+            .map(|&value| sind_scalar(f64::from(value)) as f32)
+            .collect();
+        return Tensor::from_f32(data, tensor.shape().to_vec())
+            .map_err(|err| sind_error_with_detail(&SIND_ERROR_INTERNAL, err));
+    }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| sind_scalar(value))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|err| sind_error_with_detail(&SIND_ERROR_INTERNAL, err))
 }
 
 fn sind_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let data = tensor
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| sind_complex(re, im))
-        .collect::<Vec<_>>();
-    let converted = ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|err| sind_error_with_detail(&SIND_ERROR_INTERNAL, err))?;
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let converted = match storage {
+        ComplexStorage::F32(values) => ComplexTensor::from_f32(
+            values
+                .into_iter()
+                .map(|(re, im)| {
+                    let (re, im) = sind_complex(f64::from(re), f64::from(im));
+                    (re as f32, im as f32)
+                })
+                .collect(),
+            shape,
+        ),
+        ComplexStorage::F64(values) => ComplexTensor::new(
+            values
+                .into_iter()
+                .map(|(re, im)| sind_complex(re, im))
+                .collect(),
+            shape,
+        ),
+        ComplexStorage::Integer(_) => Err("typed complex integer input is unsupported".into()),
+    }
+    .map_err(|err| sind_error_with_detail(&SIND_ERROR_INTERNAL, err))?;
     Ok(complex_tensor_into_value(converted))
 }
 
@@ -237,7 +178,6 @@ fn sind_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn sind_builtin(value: Value) -> BuiltinResult<Value> {
@@ -263,22 +203,6 @@ pub(crate) mod tests {
             Value::Num(v) => v,
             other => panic!("expected scalar result, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn sind_type_preserves_tensor_shape() {
-        let out = numeric_unary_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -307,20 +231,37 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn sind_int_input_returns_exact() {
+    fn sind_integer_extension_covers_all_classes_and_exactness_boundary() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = sind_builtin(Value::Int(IntValue::U8(30)))
+            .expect_err("strict mode rejects integer extension");
+        assert_eq!(
+            err.identifier(),
+            SIND_INTEGER_INPUT_EXTENSION.error_identifier
+        );
+        drop(_strict);
+
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        assert_eq!(
-            expect_num(sind_builtin(Value::Int(IntValue::I32(180))).unwrap()),
-            0.0,
-        );
-        assert_eq!(
-            expect_num(sind_builtin(Value::Int(IntValue::I32(30))).unwrap()),
-            0.5,
-        );
+        for value in [
+            IntValue::I8(0),
+            IntValue::I16(0),
+            IntValue::I32(0),
+            IntValue::I64(0),
+            IntValue::U8(0),
+            IntValue::U16(0),
+            IntValue::U32(0),
+            IntValue::U64(0),
+        ] {
+            assert_eq!(expect_num(sind_builtin(Value::Int(value)).unwrap()), 0.0);
+        }
         assert_eq!(
             expect_num(sind_builtin(Value::Int(IntValue::I64(-90))).unwrap()),
-            -1.0,
+            -1.0
         );
+        assert!(sind_builtin(Value::Int(IntValue::U64(1_u64 << 63))).is_ok());
+        let err = sind_builtin(Value::Int(IntValue::U64((1_u64 << 53) + 1)))
+            .expect_err("inexact binary64 boundary must reject");
+        assert!(err.message().contains("exactly representable as double"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -333,17 +274,53 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn sind_preserves_rank_zero_scalarization_and_rank_one_shape() {
+        let scalar = sind_builtin(Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()))
+            .expect("rank-zero sind");
+        assert_eq!(scalar, Value::Num(0.0));
+
+        let vector = sind_builtin(Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()))
+            .expect("rank-one sind");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![0.0, 0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sind_tensor_preserves_shape() {
         let tensor = Tensor::new(vec![0.0, 30.0, 90.0, 180.0], vec![2, 2]).unwrap();
         let result = sind_builtin(Value::Tensor(tensor)).expect("sind");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.5, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sind_preserves_real_and_complex_single() {
+        let Value::Tensor(real) = sind_builtin(Value::Tensor(
+            Tensor::from_f32(vec![30.0, 90.0], vec![1, 2]).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected single tensor");
+        };
+        assert_eq!(real.numeric_dtype(), NumericDType::F32);
+        assert_eq!(real.as_f32_slice().unwrap(), &[0.5, 1.0]);
+
+        let Value::ComplexTensor(complex) = sind_builtin(Value::ComplexTensor(
+            ComplexTensor::from_f32(vec![(60.0, 30.0)], vec![1, 1]).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected complex single tensor");
+        };
+        assert_eq!(complex.numeric_dtype(), NumericDType::F32);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -358,7 +335,7 @@ pub(crate) mod tests {
 
         match sind_builtin(Value::Tensor(tensor)).expect("sind") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [0.0, 0.5, 1.0];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -377,7 +354,7 @@ pub(crate) mod tests {
         let result = sind_builtin(Value::LogicalArray(logical)).expect("sind");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 assert_eq!(t.materialize_f64()[0], 0.0);
                 let expected = (1.0_f64 * DEG_TO_RAD).sin();
                 assert!((t.materialize_f64()[1] - expected).abs() < 1e-12);

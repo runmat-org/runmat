@@ -1,164 +1,43 @@
 //! MATLAB-compatible `findobj` builtin over RunMat graphics handles.
 
 use regex::Regex;
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
+    FINDOBJ_DESCRIPTOR, FINDOBJ_INTEGER_CAPABILITIES,
+};
+use runmat_builtins::{
+    FINDOBJ_ERROR_INVALID_ARGUMENT, FINDOBJ_ERROR_PROPERTY_ACCESS, FINDOBJ_INTEGER_ROOT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
-use super::properties::{get_properties, map_figure_error, resolve_plot_handle, PlotHandle};
+use super::properties::{get_properties_async, map_figure_error, resolve_plot_handle, PlotHandle};
 use super::state::{self, FigureHandle, PlotObjectKind};
 use super::style::{parse_color_value, LineStyleParseOptions};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::handles::numeric_handle_from_integer;
-use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "findobj";
 
-const FINDOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Graphics handles that satisfy the requested hierarchy and property filters.",
-}];
-
-const FINDOBJ_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const FINDOBJ_INPUTS_FILTERS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filters",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Property/value predicates, -property, -regexp, -not, and logical operators.",
-}];
-
-const FINDOBJ_INPUTS_ROOTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "objhandles",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Graphics handle or handle array that restricts the search root.",
-    },
-    BuiltinParamDescriptor {
-        name: "filters",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional depth/flat options and property predicates.",
-    },
-];
-
-const FINDOBJ_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "h = findobj()",
-        inputs: &FINDOBJ_INPUTS_NONE,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = findobj(prop, value, ...)",
-        inputs: &FINDOBJ_INPUTS_FILTERS,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = findobj(objhandles, '-depth', d, filters...)",
-        inputs: &FINDOBJ_INPUTS_ROOTS,
-        outputs: &FINDOBJ_OUTPUT,
-    },
-];
-
-const FINDOBJ_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FINDOBJ.INVALID_ARGUMENT",
-    identifier: Some("RunMat:findobj:InvalidArgument"),
-    when: "Arguments, search roots, depth, operators, property names, or regexp patterns are malformed.",
-    message: "findobj: invalid argument",
-};
-
-const FINDOBJ_ERRORS: [BuiltinErrorDescriptor; 1] = [FINDOBJ_ERROR_INVALID_ARGUMENT];
-
-pub const FINDOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FINDOBJ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FINDOBJ_ERRORS,
-};
-
-pub const FINDOBJ_INTEGER_ROOT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "findobj-integer-root-aliases",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "findobj with typed-integer numeric graphics-handle aliases is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FindobjIntegerRootExtension"),
-};
-
-pub const FINDOBJ_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FINDOBJ_INTEGER_ROOT_EXTENSION];
-
-const FINDOBJ_INTEGER_ROOT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "objhandles",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode accepts exactly representable nonnegative host integers as aliases for its numeric graphics-handle registry; MATLAB accepts graphics objects.",
-    }];
-const FINDOBJ_INTEGER_DEPTH: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "d",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented nonnegative integer depth is read exactly from any built-in integer scalar; positive double Inf retains its documented unlimited-depth meaning.",
-    }];
-const FINDOBJ_INTEGER_PROPERTY_VALUE: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Property values may use any legal property class; integer values compare from authoritative storage with class-sensitive exact equality.",
-    }];
-const FINDOBJ_RESIDENT_INTEGER: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "resident root, depth, or property value",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Graphics search is host metadata work; resident numeric buffers are not graphics objects or metadata values and are never gathered.",
-    }];
-
-pub const FINDOBJ_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(integer_objhandles, ...)", inputs: &FINDOBJ_INTEGER_ROOT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "A separately gated RunMat alias validates exact representability before searching the host graphics hierarchy; output follows RunMat's current double handle representation." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(objhandles, '-depth', integer_d, ...)", inputs: &FINDOBJ_INTEGER_DEPTH, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "Depth remains exact through nonnegative platform-bound validation and controls traversal without a floating computation boundary." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = findobj(..., prop, integer_value, ...)", inputs: &FINDOBJ_INTEGER_PROPERTY_VALUE, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer scalar and array property values compare class-sensitively from authoritative storage, including values above flintmax; no numeric coercion is performed." },
-    BuiltinIntegerCapabilityDescriptor { form: "findobj(resident_integer, ...)", inputs: &FINDOBJ_RESIDENT_INTEGER, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Host graphics metadata search rejects resident numeric values without provider lookup, transfer, or kernel dispatch." },
-];
-
 #[runtime_builtin(
     name = "findobj",
-    category = "plotting",
-    summary = "Find graphics objects with matching properties.",
-    keywords = "findobj,graphics,handle,property,plotting",
-    suppress_auto_output = true,
-    extensions(crate::builtins::plotting::findobj::FINDOBJ_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::findobj::FINDOBJ_INTEGER_CAPABILITIES),
-    type_resolver(handle_array_type),
-    descriptor(crate::builtins::plotting::findobj::FINDOBJ_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::findobj"
 )]
-pub fn findobj_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn findobj_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let request = FindRequest::parse(args)?;
     let mut matches = Vec::new();
     for root in request.roots {
-        collect_matches(root, 0, request.max_depth, &request.expr, &mut matches)?;
+        collect_matches(root, request.max_depth, &request.expr, &mut matches).await?;
     }
     Ok(handle_array(matches))
+}
+
+#[cfg(test)]
+pub fn findobj_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    futures::executor::block_on(findobj_builtin_async(args))
 }
 
 #[derive(Clone)]
@@ -297,24 +176,37 @@ enum Expr {
 }
 
 impl Expr {
-    fn matches(&self, handle: f64) -> bool {
-        match self {
-            Expr::True => true,
-            Expr::HasProperty(prop) => property_value(handle, prop).is_some(),
-            Expr::Equals(prop, expected) => property_value(handle, prop)
-                .is_some_and(|actual| values_match(prop, &actual, expected)),
-            Expr::Regex(prop, regexes) => property_value(handle, prop)
-                .map(value_texts)
-                .is_some_and(|texts| {
-                    texts
-                        .iter()
-                        .any(|text| regexes.iter().any(|regex| regex.is_match(text)))
-                }),
-            Expr::Not(expr) => !expr.matches(handle),
-            Expr::And(left, right) => left.matches(handle) && right.matches(handle),
-            Expr::Or(left, right) => left.matches(handle) || right.matches(handle),
-            Expr::Xor(left, right) => left.matches(handle) ^ right.matches(handle),
-        }
+    fn matches<'a>(
+        &'a self,
+        handle: f64,
+    ) -> futures::future::LocalBoxFuture<'a, crate::BuiltinResult<bool>> {
+        Box::pin(async move {
+            Ok(match self {
+                Expr::True => true,
+                Expr::HasProperty(prop) => property_value_async(handle, prop).await?.is_some(),
+                Expr::Equals(prop, expected) => property_value_async(handle, prop)
+                    .await?
+                    .is_some_and(|actual| values_match(prop, &actual, expected)),
+                Expr::Regex(prop, regexes) => property_value_async(handle, prop)
+                    .await?
+                    .map(value_texts)
+                    .is_some_and(|texts| {
+                        texts
+                            .iter()
+                            .any(|text| regexes.iter().any(|regex| regex.is_match(text)))
+                    }),
+                Expr::Not(expr) => !expr.matches(handle).await?,
+                Expr::And(left, right) => {
+                    left.matches(handle).await? && right.matches(handle).await?
+                }
+                Expr::Or(left, right) => {
+                    left.matches(handle).await? || right.matches(handle).await?
+                }
+                Expr::Xor(left, right) => {
+                    left.matches(handle).await? ^ right.matches(handle).await?
+                }
+            })
+        })
     }
 }
 
@@ -425,21 +317,23 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
         .collect()
 }
 
-fn collect_matches(
-    handle: f64,
-    depth: usize,
+async fn collect_matches(
+    root: f64,
     max_depth: Option<usize>,
     expr: &Expr,
     out: &mut Vec<f64>,
 ) -> crate::BuiltinResult<()> {
-    if expr.matches(handle) {
-        out.push(handle);
-    }
-    if max_depth.is_some_and(|max| depth >= max) {
-        return Ok(());
-    }
-    for child in child_handles(handle)? {
-        collect_matches(child, depth.saturating_add(1), max_depth, expr, out)?;
+    let mut stack = vec![(root, 0usize)];
+    while let Some((handle, depth)) = stack.pop() {
+        if expr.matches(handle).await? {
+            out.push(handle);
+        }
+        if max_depth.is_some_and(|max| depth >= max) {
+            continue;
+        }
+        for child in child_handles(handle)?.into_iter().rev() {
+            stack.push((child, depth.saturating_add(1)));
+        }
     }
     Ok(())
 }
@@ -537,9 +431,38 @@ fn axes_children(figure: FigureHandle, axes_index: usize) -> crate::BuiltinResul
     Ok(children)
 }
 
+async fn property_value_async(handle: f64, property: &str) -> crate::BuiltinResult<Option<Value>> {
+    let Ok(resolved) = resolve_plot_handle(&Value::Num(handle), BUILTIN_NAME) else {
+        return Ok(None);
+    };
+    match get_properties_async(resolved, Some(property), BUILTIN_NAME).await {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.source.is_none() => Ok(None),
+        Err(error) => {
+            let span = error.span;
+            let retry = error.gpu_gather_retry();
+            let mut builder = build_runtime_error(format!(
+                "{}: {}",
+                FINDOBJ_ERROR_PROPERTY_ACCESS.message, error.message
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_gpu_gather_retry(retry)
+            .with_source(error);
+            if let Some(identifier) = FINDOBJ_ERROR_PROPERTY_ACCESS.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            if let Some(span) = span {
+                builder = builder.with_span(span);
+            }
+            Err(builder.build())
+        }
+    }
+}
+
+#[cfg(test)]
 fn property_value(handle: f64, property: &str) -> Option<Value> {
-    let resolved = resolve_plot_handle(&Value::Num(handle), BUILTIN_NAME).ok()?;
-    get_properties(resolved, Some(property), BUILTIN_NAME).ok()
+    futures::executor::block_on(property_value_async(handle, property))
+        .expect("property lookup should not fail operationally")
 }
 
 fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
@@ -576,7 +499,7 @@ fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
             &left.data.iter().collect::<String>() == right
         }
         (Value::Tensor(left), Value::Tensor(right)) => {
-            left.shape == right.shape && tensor_values_match(left, right)
+            left.shape() == right.shape() && tensor_values_match(left, right)
         }
         (Value::StringArray(left), Value::StringArray(right)) => {
             left.shape == right.shape && left.data == right.data

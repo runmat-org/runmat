@@ -15,7 +15,7 @@ pub(crate) async fn execute(
         };
     }
     if request.artifact.form != ExecutableForm::ExecutableUnitV4 {
-        return runmat_vm::execute_program_request(request).await;
+        return super::execute_local_program(request).await;
     }
     match invoke(&request, execution).await {
         Ok(outputs) => ProgramExecutionResponse::from_success_outputs(outputs, vec![]),

@@ -6,24 +6,33 @@ pub fn print_native_ir(assembly: &NativeAssembly) -> String {
     let mut output = String::new();
     let _ = writeln!(
         output,
-        "native-ir v{} source={} executable={} native={} target={}-{}-{} abi={}:{}",
+        "native-ir v{} source={} executable={} native={} target={}",
         assembly.schema_version,
         assembly.program.source_digest(),
         assembly.executable_cache_key,
         assembly.native_cache_key,
-        assembly.target.architecture,
-        assembly.target.operating_system,
-        assembly.target.pointer_width,
-        assembly.target.abi.schema_version,
-        assembly.target.abi.encoded_version
+        match &assembly.target {
+            crate::NativeTarget::Native { target, probe } => format!(
+                "{:?}-{:?}-{} abi={}:{}",
+                target.target.architecture,
+                target.target.operating_system,
+                probe.pointer_width,
+                probe.abi_schema_version,
+                probe.abi_encoded_version
+            ),
+            crate::NativeTarget::PortableWasm32 { schema_version } =>
+                format!("portable-wasm32-v{schema_version}"),
+            crate::NativeTarget::UnavailableHost => "native-host-unavailable".to_string(),
+        }
     );
     for function in &assembly.functions {
         let _ = writeln!(
             output,
-            "function f{} {} source={} locals={} entry=b{}",
+            "function f{} {} source={} capabilities={:?} locals={} entry=b{}",
             function.id.0,
             function.name,
             function.source.0,
+            function.capabilities,
             function.local_count(),
             function.entry.0
         );
@@ -43,13 +52,6 @@ pub fn print_native_ir(assembly: &NativeAssembly) -> String {
                 validation.class_name,
                 validation.validators,
                 validation.default_value
-            );
-        }
-        for expression in &function.index_expressions {
-            let _ = writeln!(
-                output,
-                "  index-expression l{} {:?}",
-                expression.local.0, expression.kind
             );
         }
         for block in &function.blocks {

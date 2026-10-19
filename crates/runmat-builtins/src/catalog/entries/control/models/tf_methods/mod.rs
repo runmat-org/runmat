@@ -1,0 +1,18 @@
+use crate::*;
+
+mod contract;
+mod documentation;
+mod entries;
+mod inference;
+#[cfg(test)]
+mod tests;
+
+pub use contract::TF_METHOD_ERROR_COEFFICIENT_CAPACITY;
+pub use entries::{
+    TF_LDIVIDE_CATALOG_ENTRY, TF_MINUS_CATALOG_ENTRY, TF_MLDIVIDE_CATALOG_ENTRY,
+    TF_MPOWER_CATALOG_ENTRY, TF_MRDIVIDE_CATALOG_ENTRY, TF_MTIMES_CATALOG_ENTRY,
+    TF_PLUS_CATALOG_ENTRY, TF_POWER_CATALOG_ENTRY, TF_RDIVIDE_CATALOG_ENTRY,
+    TF_TIMES_CATALOG_ENTRY, TF_UMINUS_CATALOG_ENTRY, TF_UPLUS_CATALOG_ENTRY,
+};
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = entries::ENTRIES;

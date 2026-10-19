@@ -1,5 +1,5 @@
 use runmat_execution::resource::{
-    AcceleratorRequest, Capability, ResourceInventory, ResourceRequest as TaskResources,
+    AcceleratorDevice, Capability, ResourceInventory, ResourceRequest as TaskResources,
 };
 use runmat_execution_transport_native::control::ResourceRequest as AllocationResources;
 
@@ -7,22 +7,29 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub(super) fn inventory(
     resources: &AllocationResources,
+    accelerator_devices: &[AcceleratorDevice],
 ) -> NativeExecutionResult<ResourceInventory> {
-    let accelerators = accelerators(resources)?;
     let mut capabilities = native_worker_capabilities()?;
     capabilities.extend(
-        accelerators
+        accelerator_devices
             .iter()
             .map(|accelerator| Capability::Accelerator(accelerator.class.clone())),
     );
-    Ok(ResourceInventory {
+    let inventory = ResourceInventory {
         cpu_millicores: u32::try_from(resources.cpu_millicores)
             .map_err(|_| protocol("worker CPU request overflows scheduler units"))?,
         memory_bytes: resources.memory_bytes,
         scratch_bytes: resources.scratch_bytes,
-        accelerators,
+        accelerators: accelerator_devices.to_vec(),
+        // Allocation resources are requested capacity, not authenticated
+        // evidence of the launched worker binary's V11 support; only native
+        // host-runtime capabilities of this executable are implied.
         capabilities,
-    })
+    };
+    inventory
+        .validate()
+        .map_err(|error| protocol(format!("worker inventory is invalid: {error}")))?;
+    Ok(inventory)
 }
 
 pub(super) fn native_worker_capabilities(
@@ -60,29 +67,22 @@ pub(super) fn pool_inventory(
     resources: &AllocationResources,
     workers: u32,
 ) -> NativeExecutionResult<ResourceInventory> {
-    let mut inventory = inventory(resources)?;
-    inventory.cpu_millicores = inventory
-        .cpu_millicores
-        .checked_mul(workers)
-        .ok_or_else(|| protocol("worker pool CPU capacity overflows scheduler units"))?;
-    inventory.memory_bytes = inventory
-        .memory_bytes
-        .checked_mul(u64::from(workers))
-        .ok_or_else(|| protocol("worker pool memory capacity overflows scheduler units"))?;
-    inventory.scratch_bytes = inventory
-        .scratch_bytes
-        .checked_mul(u64::from(workers))
-        .ok_or_else(|| protocol("worker pool scratch capacity overflows scheduler units"))?;
-    for accelerator in &mut inventory.accelerators {
-        accelerator.count =
-            accelerator
-                .count
-                .checked_mul(u16::try_from(workers).map_err(|_| {
-                    protocol("worker pool size overflows accelerator scheduler units")
-                })?)
-                .ok_or_else(|| protocol("worker pool accelerators overflow scheduler units"))?;
-    }
-    Ok(inventory)
+    Ok(ResourceInventory {
+        cpu_millicores: u32::try_from(resources.cpu_millicores)
+            .map_err(|_| protocol("worker CPU request overflows scheduler units"))?
+            .checked_mul(workers)
+            .ok_or_else(|| protocol("worker pool CPU capacity overflows scheduler units"))?,
+        memory_bytes: resources
+            .memory_bytes
+            .checked_mul(u64::from(workers))
+            .ok_or_else(|| protocol("worker pool memory capacity overflows scheduler units"))?,
+        scratch_bytes: resources
+            .scratch_bytes
+            .checked_mul(u64::from(workers))
+            .ok_or_else(|| protocol("worker pool scratch capacity overflows scheduler units"))?,
+        accelerators: Vec::new(),
+        capabilities: Default::default(),
+    })
 }
 
 pub(super) fn task_resources(
@@ -97,7 +97,7 @@ pub(super) fn task_resources(
         max_artifact_bytes: 64 * 1024 * 1024,
         max_egress_bytes: 64 * 1024 * 1024,
         max_relay_bytes: 4 * 1024 * 1024 * 1024,
-        accelerators: accelerators(resources)?,
+        accelerators: resources.accelerators.clone(),
         required_capabilities: Default::default(),
     })
 }
@@ -114,22 +114,6 @@ pub(super) fn task_deadline_unix_millis(
         .ok_or_else(|| protocol("task deadline overflows scheduler milliseconds"))
 }
 
-fn accelerators(resources: &AllocationResources) -> NativeExecutionResult<Vec<AcceleratorRequest>> {
-    match (
-        resources.accelerator_count,
-        resources.accelerator_class.as_ref(),
-    ) {
-        (0, _) => Ok(Vec::new()),
-        (count, Some(class)) => Ok(vec![AcceleratorRequest {
-            class: class.clone(),
-            count: u16::try_from(count)
-                .map_err(|_| protocol("worker accelerator count overflows scheduler units"))?,
-            memory_bytes_each: resources.accelerator_memory_bytes / u64::from(count),
-        }]),
-        _ => Err(protocol("worker accelerator class is missing")),
-    }
-}
-
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
 }
@@ -141,14 +125,12 @@ mod tests {
 
     use super::{inventory, native_worker_capabilities, task_resources};
 
-    fn allocated_gpu() -> ResourceRequest {
+    fn allocated_cpu() -> ResourceRequest {
         ResourceRequest {
             cpu_millicores: 2_000,
             memory_bytes: 8 * 1024 * 1024 * 1024,
             scratch_bytes: 1024,
-            accelerator_count: 1,
-            accelerator_class: Some("nvidia-l4".into()),
-            accelerator_memory_bytes: 24 * 1024 * 1024 * 1024,
+            accelerators: Vec::new(),
             maximum_wall_millis: 60_000,
         }
     }
@@ -232,20 +214,18 @@ mod tests {
     }
 
     #[test]
-    fn remote_allocation_uses_one_accelerator_contract_for_inventory_and_tasks() {
-        let allocation = allocated_gpu();
-        let inventory = inventory(&allocation).unwrap();
+    fn remote_allocation_inventory_carries_native_capabilities_and_task_accelerators() {
+        let allocation = allocated_cpu();
+        let inventory = inventory(&allocation, &[]).unwrap();
         let resources = task_resources(&allocation).unwrap();
 
-        assert_eq!(inventory.accelerators, resources.accelerators);
-        assert_eq!(inventory.accelerators[0].class, "nvidia-l4");
-        assert_eq!(inventory.accelerators[0].count, 1);
-        assert_eq!(
-            inventory.accelerators[0].memory_bytes_each,
-            24 * 1024 * 1024 * 1024
-        );
-        assert!(inventory
+        assert!(inventory.accelerators.is_empty());
+        assert_eq!(resources.accelerators, allocation.accelerators);
+        assert!(native_worker_capabilities()
+            .unwrap()
+            .is_subset(&inventory.capabilities));
+        assert!(!inventory
             .capabilities
-            .contains(&Capability::Accelerator("nvidia-l4".into())));
+            .contains(&Capability::GraphSelectedValuesV11));
     }
 }

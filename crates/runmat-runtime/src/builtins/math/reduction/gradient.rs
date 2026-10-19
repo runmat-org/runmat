@@ -251,6 +251,15 @@ fn gradient_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     gradient_descriptor_error_with_detail(&GRADIENT_ERROR_INTERNAL, detail)
 }
 
+#[path = "gradient/kernel_error.rs"]
+pub mod kernel_error;
+pub use kernel_error::GradientKernelError;
+use kernel_error::GradientKernelResult;
+
+#[cfg(test)]
+#[path = "gradient/kernel_fault_tests.rs"]
+mod kernel_fault_tests;
+
 #[derive(Clone, Debug, PartialEq)]
 enum GradientSpacing {
     Scalar(f64),
@@ -341,7 +350,7 @@ async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
     .await?;
 
     if crate::output_count::current_output_count().is_some() {
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
 
     Ok(outputs
@@ -396,7 +405,7 @@ fn value_is_integer_or_logical(value: &Value) -> bool {
 }
 
 fn ensure_exact_integer_boundary(value: &Value, role: &str) -> BuiltinResult<()> {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor
@@ -501,8 +510,7 @@ async fn gradient_gpu_outputs(
     all_spacings: &[GradientSpacing],
     requires_host_gpu: bool,
 ) -> BuiltinResult<Vec<Value>> {
-    let owner = runmat_accelerate_api::provider_for_handle(&handle)
-        .filter(|owner| owner.device_id() == handle.device_id);
+    let owner = gpu_helpers::exact_provider_for_handle(&handle);
     let complex_storage =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 
@@ -529,7 +537,7 @@ async fn gradient_gpu_outputs(
                 GradientSpacing::Coordinates(_) => unreachable!("coordinates use host fallback"),
             };
             match device_result {
-                Ok(device_result)
+                Ok(mut device_result)
                     if valid_gradient_provider_result(
                         &device_result,
                         &handle,
@@ -538,25 +546,53 @@ async fn gradient_gpu_outputs(
                         complex_storage,
                     ) =>
                 {
-                    if complex_storage
-                        || runmat_accelerate_api::handle_storage(&device_result)
-                            == GpuTensorStorage::ComplexInterleaved
-                    {
-                        outputs.push(gpu_helpers::complex_gpu_value(device_result));
-                    } else {
-                        outputs.push(gpu_helpers::resident_gpu_value(device_result));
+                    let adoption =
+                        gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])
+                            .and_then(|()| {
+                                device_result
+                                    .allocation_lease()
+                                    .validate_live()
+                                    .map_err(|source| {
+                                        crate::build_runtime_error(format!(
+                                            "gradient: cannot adopt provider output: {source}"
+                                        ))
+                                        .with_source(source)
+                                        .build()
+                                    })
+                            });
+                    if let Err(error) = adoption {
+                        let error = gpu_helpers::reject_gpu_output(device_result, error);
+                        return Err(reject_gradient_outputs(outputs, error));
                     }
+                    runmat_accelerate_api::mark_residency(&device_result);
+                    outputs.push(Value::GpuTensor(device_result));
                 }
                 Ok(device_result) => {
-                    free_gradient_handle_if_fresh(&device_result, &handle, &outputs);
-                    free_gradient_outputs(&outputs, &handle);
+                    let mut error = gradient_internal_error(
+                        "provider returned malformed or aliased gradient output",
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    let error = gpu_helpers::reject_gpu_output(device_result, error);
+                    return Err(reject_gradient_outputs(outputs, error));
+                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                    if !outputs.is_empty() {
+                        let mut failure = gradient_internal_error(
+                            "provider declined gradient after producing an earlier output",
+                        );
+                        failure = kernel_error::with_provider_source(failure, error.into());
+                        failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        return Err(reject_gradient_outputs(outputs, failure));
+                    }
                     return gradient_host_fallback(&handle, owner, requested_dims, all_spacings)
                         .await;
                 }
-                Err(_) => {
-                    free_gradient_outputs(&outputs, &handle);
-                    return gradient_host_fallback(&handle, owner, requested_dims, all_spacings)
-                        .await;
+                Err(source) => {
+                    let mut error =
+                        gradient_internal_error(format!("provider gradient failed: {source}"));
+                    error = kernel_error::with_provider_source(error, source.into());
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(reject_gradient_outputs(outputs, error));
                 }
             }
         }
@@ -565,6 +601,10 @@ async fn gradient_gpu_outputs(
 
     gradient_host_fallback(&handle, None, requested_dims, all_spacings).await
 }
+
+#[cfg(test)]
+#[path = "gradient/owning_tests.rs"]
+mod owning_tests;
 
 async fn gradient_host_fallback(
     handle: &GpuTensorHandle,
@@ -578,7 +618,7 @@ async fn gradient_host_fallback(
 }
 
 fn gradient_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.shares_allocation_with(rhs)
 }
 
 fn gradient_output_handle(value: &Value) -> Option<&GpuTensorHandle> {
@@ -586,6 +626,16 @@ fn gradient_output_handle(value: &Value) -> Option<&GpuTensorHandle> {
         Value::GpuTensor(handle) => Some(handle),
         _ => None,
     }
+}
+
+fn reject_gradient_outputs(outputs: Vec<Value>, error: RuntimeError) -> RuntimeError {
+    gpu_helpers::reject_gpu_outputs(
+        outputs.into_iter().filter_map(|output| match output {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        }),
+        error,
+    )
 }
 
 fn valid_gradient_provider_result(
@@ -600,8 +650,8 @@ fn valid_gradient_provider_result(
     } else {
         GpuTensorStorage::Real
     };
-    output.shape == input.shape
-        && output.device_id == input.device_id
+    output.shape() == matlab_gradient_shape(input.shape(), product(input.shape()))
+        && output.device_id() == input.device_id()
         && !gradient_handles_alias(output, input)
         && prior_outputs
             .iter()
@@ -612,45 +662,8 @@ fn valid_gradient_provider_result(
             == runmat_accelerate_api::handle_precision(input)
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::provider_for_handle(output)
-            .filter(|owner| owner.device_id() == output.device_id)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_gradient_handle_if_fresh(
-    handle: &GpuTensorHandle,
-    input: &GpuTensorHandle,
-    protected_outputs: &[Value],
-) {
-    if gradient_handles_alias(handle, input)
-        || protected_outputs
-            .iter()
-            .filter_map(gradient_output_handle)
-            .any(|protected| gradient_handles_alias(handle, protected))
-    {
-        return;
-    }
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
-    {
-        let _ = owner.free(handle);
-    }
-}
-
-fn free_gradient_outputs(outputs: &[Value], input: &GpuTensorHandle) {
-    let mut freed = std::collections::BTreeSet::new();
-    for handle in outputs.iter().filter_map(gradient_output_handle) {
-        if gradient_handles_alias(handle, input)
-            || !freed.insert((handle.device_id, handle.buffer_id))
-        {
-            continue;
-        }
-        if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle)
-            .filter(|owner| owner.device_id() == handle.device_id)
-        {
-            let _ = owner.free(handle);
-        }
-    }
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn restore_gradient_outputs_if_supported(
@@ -658,41 +671,19 @@ fn restore_gradient_outputs_if_supported(
     prototype: &GpuTensorHandle,
     outputs: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
-    let Some(provider) = provider else {
+    if provider.is_none() {
         return Ok(outputs);
-    };
+    }
     let mut restored = Vec::with_capacity(outputs.len());
-    for output in outputs.iter().cloned() {
-        let protected = std::iter::once(prototype.clone())
-            .chain(restored.iter().filter_map(gradient_output_handle).cloned())
+    for output in outputs {
+        let protected = restored
+            .iter()
+            .filter_map(gradient_output_handle)
             .collect::<Vec<_>>();
-        match crate::builtins::math::trigonometry::inverse_helpers::upload_value_protected(
-            provider, output, NAME, &protected,
-        ) {
-            Ok(output) => {
-                let valid = gradient_output_handle(&output).is_some_and(|handle| {
-                    handle.device_id == prototype.device_id
-                        && !gradient_handles_alias(handle, prototype)
-                        && restored
-                            .iter()
-                            .filter_map(gradient_output_handle)
-                            .all(|prior| !gradient_handles_alias(handle, prior))
-                });
-                if valid {
-                    restored.push(output);
-                    continue;
-                }
-                if let Some(handle) = gradient_output_handle(&output) {
-                    free_gradient_handle_if_fresh(handle, prototype, &restored);
-                }
-                free_gradient_outputs(&restored, prototype);
-                return Ok(outputs);
-            }
-            Err(_) => {
-                free_gradient_outputs(&restored, prototype);
-                return Ok(outputs);
-            }
-        }
+        let output = gpu_helpers::restore_class_preserving_value_protecting(
+            prototype, output, NAME, &protected,
+        )?;
+        restored.push(output);
     }
     Ok(restored)
 }
@@ -833,10 +824,10 @@ fn validate_coordinate_spacing(coords: &[f64], dim_len: usize) -> BuiltinResult<
 
 fn value_shape(value: &Value) -> &[usize] {
     match value {
-        Value::Tensor(tensor) => &tensor.shape,
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(logical) => &logical.shape,
-        Value::ComplexTensor(tensor) => &tensor.shape,
-        Value::GpuTensor(handle) => &handle.shape,
+        Value::ComplexTensor(tensor) => tensor.shape(),
+        Value::GpuTensor(handle) => handle.shape(),
         _ => &[],
     }
 }
@@ -846,7 +837,7 @@ fn value_len(value: &Value) -> usize {
         Value::Tensor(tensor) => tensor_len(tensor),
         Value::LogicalArray(logical) => logical.data.len(),
         Value::ComplexTensor(tensor) => tensor.materialize_f64().len(),
-        Value::GpuTensor(handle) => product(&handle.shape),
+        Value::GpuTensor(handle) => product(handle.shape()),
         _ => 1,
     }
 }
@@ -925,7 +916,7 @@ pub fn gradient_real_tensor_host(
     tensor: Tensor,
     dim: usize,
     spacing: f64,
-) -> BuiltinResult<Tensor> {
+) -> GradientKernelResult<Tensor> {
     let spacing = GradientSpacing::Scalar(spacing);
     gradient_real_tensor_host_with_spacing(tensor, dim, &spacing)
 }
@@ -935,7 +926,7 @@ pub fn gradient_real_tensor_host_with_coordinates(
     tensor: Tensor,
     dim: usize,
     coordinates: Vec<f64>,
-) -> BuiltinResult<Tensor> {
+) -> GradientKernelResult<Tensor> {
     let spacing = GradientSpacing::Coordinates(coordinates);
     gradient_real_tensor_host_with_spacing(tensor, dim, &spacing)
 }
@@ -944,11 +935,11 @@ fn gradient_real_tensor_host_with_spacing(
     tensor: Tensor,
     dim: usize,
     spacing: &GradientSpacing,
-) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+) -> GradientKernelResult<Tensor> {
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
-        .map_err(|error| gradient_internal_error(format!("gradient: {error}")))?;
+        .map_err(|error| GradientKernelError::new(format!("gradient: {error}")))?;
     let output_dtype = match storage.numeric_dtype() {
         NumericDType::F32 => NumericDType::F32,
         NumericDType::F64
@@ -972,7 +963,7 @@ fn gradient_real_tensor_host_with_spacing(
         // matlab_gradient_shape returned an empty vec (untyped empty tensor).
         let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
         return Tensor::new_with_dtype(Vec::new(), empty_shape, output_dtype)
-            .map_err(|e| gradient_internal_error(format!("gradient: {e}")));
+            .map_err(|e| GradientKernelError::new(format!("gradient: {e}")));
     }
 
     while shape.len() <= dim_index {
@@ -999,11 +990,11 @@ fn gradient_real_tensor_host_with_spacing(
     if len_dim > 1 {
         let block = stride_before
             .checked_mul(len_dim)
-            .ok_or_else(|| gradient_internal_error("gradient: block size overflow"))?;
+            .ok_or_else(|| GradientKernelError::new("gradient: block size overflow"))?;
         for after in 0..stride_after {
             let base = after
                 .checked_mul(block)
-                .ok_or_else(|| gradient_internal_error("gradient: indexing overflow"))?;
+                .ok_or_else(|| GradientKernelError::new("gradient: indexing overflow"))?;
             for before in 0..stride_before {
                 for k in 0..len_dim {
                     let idx = base + before + k * stride_before;
@@ -1023,14 +1014,14 @@ fn gradient_real_tensor_host_with_spacing(
     }
 
     Tensor::new_with_dtype(out, shape, output_dtype)
-        .map_err(|e| gradient_internal_error(format!("gradient: {e}")))
+        .map_err(|e| GradientKernelError::new(format!("gradient: {e}")))
 }
 
 pub fn gradient_complex_tensor_host(
     tensor: ComplexTensor,
     dim: usize,
     spacing: f64,
-) -> BuiltinResult<ComplexTensor> {
+) -> GradientKernelResult<ComplexTensor> {
     let spacing = GradientSpacing::Scalar(spacing);
     gradient_complex_tensor_host_with_spacing(tensor, dim, &spacing)
 }
@@ -1040,7 +1031,7 @@ pub fn gradient_complex_tensor_host_with_coordinates(
     tensor: ComplexTensor,
     dim: usize,
     coordinates: Vec<f64>,
-) -> BuiltinResult<ComplexTensor> {
+) -> GradientKernelResult<ComplexTensor> {
     let spacing = GradientSpacing::Coordinates(coordinates);
     gradient_complex_tensor_host_with_spacing(tensor, dim, &spacing)
 }
@@ -1049,13 +1040,13 @@ fn gradient_complex_tensor_host_with_spacing(
     tensor: ComplexTensor,
     dim: usize,
     spacing: &GradientSpacing,
-) -> BuiltinResult<ComplexTensor> {
+) -> GradientKernelResult<ComplexTensor> {
     let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
         NumericDType::F32
     } else {
         NumericDType::F64
     };
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = tensor.materialize_f64();
     let dim_index = dim.saturating_sub(1);
     let mut shape = matlab_gradient_shape(&shape, data.len());
@@ -1065,7 +1056,7 @@ fn gradient_complex_tensor_host_with_spacing(
         // before the early return, which would produce product ≠ 0 for empty data.
         let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
         return ComplexTensor::from_f64_values_with_dtype(Vec::new(), empty_shape, output_dtype)
-            .map_err(|e| gradient_internal_error(format!("gradient: {e}")));
+            .map_err(|e| GradientKernelError::new(format!("gradient: {e}")));
     }
 
     while shape.len() <= dim_index {
@@ -1092,11 +1083,11 @@ fn gradient_complex_tensor_host_with_spacing(
     if len_dim > 1 {
         let block = stride_before
             .checked_mul(len_dim)
-            .ok_or_else(|| gradient_internal_error("gradient: block size overflow"))?;
+            .ok_or_else(|| GradientKernelError::new("gradient: block size overflow"))?;
         for after in 0..stride_after {
             let base = after
                 .checked_mul(block)
-                .ok_or_else(|| gradient_internal_error("gradient: indexing overflow"))?;
+                .ok_or_else(|| GradientKernelError::new("gradient: indexing overflow"))?;
             for before in 0..stride_before {
                 for k in 0..len_dim {
                     let idx = base + before + k * stride_before;
@@ -1122,7 +1113,7 @@ fn gradient_complex_tensor_host_with_spacing(
     }
 
     ComplexTensor::from_f64_values_with_dtype(out, shape, output_dtype)
-        .map_err(|e| gradient_internal_error(format!("gradient: {e}")))
+        .map_err(|e| GradientKernelError::new(format!("gradient: {e}")))
 }
 
 fn spacing_denominator(spacing: &GradientSpacing, k: usize, len_dim: usize) -> f64 {
@@ -1263,7 +1254,7 @@ mod tests {
             gradient_builtin(Value::Tensor(tensor), vec![Value::Num(2.0)]).expect("gradient");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.5, 2.0, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1273,7 +1264,7 @@ mod tests {
     #[test]
     fn gradient_matrix_outputs_follow_matlab_order() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
         match result {
             Value::OutputList(outputs) => {
@@ -1319,7 +1310,7 @@ mod tests {
         let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.numeric_dtype(), NumericDType::F64);
                 assert!(out.integer_storage().is_none());
                 assert_eq!(out.materialize_f64(), vec![3.0, 4.0, 5.0]);
@@ -1332,18 +1323,17 @@ mod tests {
     fn gradient_multi_output_uses_typed_integer_storage_length_without_mirror() {
         let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).expect("input");
-        let _guard = crate::output_count::push_output_count(Some(2));
-
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
         match result {
             Value::OutputList(outputs) => {
                 let fx = test_support::gather(outputs[0].clone()).expect("fx");
                 let fy = test_support::gather(outputs[1].clone()).expect("fy");
-                assert_eq!(fx.shape, vec![2, 2]);
+                assert_eq!(fx.shape(), [2, 2]);
                 assert_eq!(fx.numeric_dtype(), NumericDType::F64);
                 assert!(fx.integer_storage().is_none());
                 assert_eq!(fx.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0]);
-                assert_eq!(fy.shape, vec![2, 2]);
+                assert_eq!(fy.shape(), [2, 2]);
                 assert_eq!(fy.numeric_dtype(), NumericDType::F64);
                 assert!(fy.integer_storage().is_none());
                 assert_eq!(fy.materialize_f64(), vec![2.0, 2.0, 2.0, 2.0]);
@@ -1390,7 +1380,7 @@ mod tests {
             .expect("gradient");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 8.0 / 3.0, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1407,7 +1397,7 @@ mod tests {
             .expect("gradient");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 8.0 / 3.0, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1418,7 +1408,7 @@ mod tests {
     fn gradient_mixed_scalar_and_coordinate_vector_spacing_for_matrix() {
         let tensor = Tensor::new(vec![0.0, 20.0, 1.0, 21.0, 9.0, 29.0], vec![2, 3]).unwrap();
         let x = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = gradient_builtin(
             Value::Tensor(tensor),
             vec![Value::Tensor(x), Value::Num(2.0)],
@@ -1428,9 +1418,9 @@ mod tests {
             Value::OutputList(outputs) => {
                 let fx = test_support::gather(outputs[0].clone()).expect("fx");
                 let fy = test_support::gather(outputs[1].clone()).expect("fy");
-                assert_eq!(fx.shape, vec![2, 3]);
+                assert_eq!(fx.shape(), [2, 3]);
                 assert_eq!(fx.materialize_f64(), vec![1.0, 1.0, 3.0, 3.0, 4.0, 4.0]);
-                assert_eq!(fy.shape, vec![2, 3]);
+                assert_eq!(fy.shape(), [2, 3]);
                 assert_eq!(
                     fy.materialize_f64(),
                     vec![10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
@@ -1449,7 +1439,7 @@ mod tests {
             .expect("gradient");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(3.0, 2.0), (8.0 / 3.0, 2.0), (2.5, 2.0)]
@@ -1494,7 +1484,7 @@ mod tests {
     #[test]
     fn gradient_rejects_too_many_outputs() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let err = gradient_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
         assert_eq!(err.identifier(), GRADIENT_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("requested 2 outputs"));
@@ -1513,7 +1503,7 @@ mod tests {
             Tensor::new_with_dtype(vec![1.0, 4.0, 9.0], vec![1, 3], NumericDType::F32).unwrap();
         let view = HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result =
@@ -1541,7 +1531,7 @@ mod tests {
             Tensor::new_with_dtype(vec![1.0, 4.0, 9.0], vec![1, 3], NumericDType::F32).unwrap();
         let view = HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
@@ -1550,7 +1540,7 @@ mod tests {
         match result {
             Value::GpuTensor(out) => {
                 let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-                assert_eq!(gathered.shape, vec![1, 3]);
+                assert_eq!(gathered.shape(), [1, 3]);
                 assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
                 let expected = [3.0, 8.0 / 3.0, 2.5];
                 for (idx, (actual, expected)) in
@@ -1585,7 +1575,7 @@ mod tests {
         let result =
             gradient_builtin(Value::GpuTensor(handle), vec![Value::Num(2.0)]).expect("gradient");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 3]);
+        assert_eq!(gathered.shape(), [1, 3]);
         assert_eq!(gathered.materialize_f64(), vec![1.5, 2.0, 2.5]);
     }
 
@@ -1601,10 +1591,11 @@ mod tests {
         let host = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
-        let _out_guard = crate::output_count::push_output_count(Some(2));
+        let _out_guard =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = gradient_builtin(Value::GpuTensor(handle), Vec::new()).expect("gradient");
         match result {
             Value::OutputList(outputs) => {
@@ -1621,7 +1612,7 @@ mod tests {
             let host = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
@@ -1630,7 +1621,7 @@ mod tests {
             match result {
                 Value::GpuTensor(out_handle) => {
                     let out = test_support::gather(Value::GpuTensor(out_handle)).expect("gather");
-                    assert_eq!(out.shape, vec![1, 3]);
+                    assert_eq!(out.shape(), [1, 3]);
                     assert_eq!(out.materialize_f64(), vec![3.0, 8.0 / 3.0, 2.5]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
@@ -1644,11 +1635,12 @@ mod tests {
             let host = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let spacing = Tensor::new(vec![0.0, 2.0], vec![2, 1]).unwrap();
-            let _out_guard = crate::output_count::push_output_count(Some(2));
+            let _out_guard =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let result = gradient_builtin(
                 Value::GpuTensor(handle),
                 vec![Value::Tensor(spacing), Value::Num(2.0)],
@@ -1660,9 +1652,9 @@ mod tests {
                     assert!(matches!(outputs[1], Value::GpuTensor(_)));
                     let first = test_support::gather(outputs[0].clone()).expect("gather first");
                     let second = test_support::gather(outputs[1].clone()).expect("gather second");
-                    assert_eq!(first.shape, vec![2, 2]);
+                    assert_eq!(first.shape(), [2, 2]);
                     assert_eq!(first.materialize_f64(), vec![0.5, 0.5, 0.5, 0.5]);
-                    assert_eq!(second.shape, vec![2, 2]);
+                    assert_eq!(second.shape(), [2, 2]);
                     assert_eq!(second.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0]);
                 }
                 other => panic!("expected output list, got {other:?}"),
@@ -1701,7 +1693,7 @@ mod tests {
                 crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
             )
             .expect("gather complex gradient");
-            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.shape(), expected.shape());
             assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
@@ -1742,7 +1734,7 @@ mod tests {
             crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
         )
         .expect("gather complex gradient");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         for (idx, (actual, expected)) in gathered
             .materialize_f64()
             .iter()

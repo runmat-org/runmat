@@ -20,9 +20,11 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 runmat-execution-transport-native = { workspace = true }
 runmat-execution = { workspace = true }
+runmat-accelerate-api = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-server-client = { workspace = true }
+runmat-core = { workspace = true, default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8.1"

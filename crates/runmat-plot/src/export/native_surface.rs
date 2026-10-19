@@ -1,8 +1,9 @@
-use std::{any::Any, panic, sync::Arc};
+use runmat_accelerate_api::{WgpuDeviceAccess, WgpuEmission};
+use std::{any::Any, panic};
 
 use crate::core::{Camera, PlotRenderConfig, PlotRenderer, RenderResult};
 use crate::geometry_scene::{GeometryScene, GeometryScenePresentation};
-use crate::gpu::util::map_read_async;
+use crate::gpu::util::readback_bytes;
 use crate::plots::Figure;
 #[cfg(feature = "egui-overlay")]
 use crate::styling::ModernDarkTheme;
@@ -44,6 +45,24 @@ pub enum NativeSurfaceHostAction {
 enum BackgroundPolicy {
     ThemeDriven,
     Explicit(glam::Vec4),
+}
+
+struct PreparedOverlayRender {
+    result: RenderResult,
+    preparation: Vec<wgpu::CommandBuffer>,
+}
+
+impl PreparedOverlayRender {
+    fn submit(self, queue: &wgpu::Queue, encoder: wgpu::CommandEncoder) -> RenderResult {
+        // egui's buffer preparation may encode work outside the main render encoder.
+        // Keep that work ordered before the scene and overlay in one submission.
+        queue.submit(
+            self.preparation
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
+        self.result
+    }
 }
 
 #[cfg(feature = "egui-overlay")]
@@ -131,8 +150,7 @@ impl PresentedFrame {
 impl NativeSurfaceRenderContext {
     /// Create a context that can render into external texture views.
     pub async fn new(
-        device: Arc<wgpu::Device>,
-        queue: Arc<wgpu::Queue>,
+        access: WgpuDeviceAccess,
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
@@ -147,7 +165,7 @@ impl NativeSurfaceRenderContext {
             view_formats: vec![],
             desired_maximum_frame_latency: 1,
         };
-        let renderer = PlotRenderer::new(device, queue, surface_config)
+        let renderer = PlotRenderer::new(access.clone(), surface_config)
             .await
             .map_err(|err| format!("native surface renderer init failed: {err}"))?;
         let config = PlotRenderConfig {
@@ -159,12 +177,11 @@ impl NativeSurfaceRenderContext {
         let overlay = {
             let egui_ctx = egui::Context::default();
             ModernDarkTheme::default().apply_to_egui(&egui_ctx);
-            let egui_renderer = crate::wgpu_compat::egui_renderer_new(
-                &renderer.wgpu_renderer.device,
-                format,
-                None,
-                1,
-            );
+            let egui_renderer = access
+                .with_shared(|emission| {
+                    crate::wgpu_compat::egui_renderer_new(emission.device(), format, None, 1)
+                })
+                .map_err(|error| error.to_string())?;
             Some(NativeOverlayState {
                 egui_ctx,
                 egui_renderer,
@@ -247,14 +264,19 @@ impl NativeSurfaceRenderContext {
     }
 
     /// Resize renderer viewport state.
-    pub fn resize(&mut self, width: u32, height: u32) {
-        let next_width = width.max(1);
-        let next_height = height.max(1);
-        self.config.width = next_width;
-        self.config.height = next_height;
-        self.renderer.wgpu_renderer.surface_config.width = next_width;
-        self.renderer.wgpu_renderer.surface_config.height = next_height;
-        self.renderer.on_surface_config_updated();
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        let access = self.renderer.wgpu_renderer.access.clone();
+        access
+            .with_shared(|emission| {
+                let next_width = width.max(1);
+                let next_height = height.max(1);
+                self.config.width = next_width;
+                self.config.height = next_height;
+                self.renderer.wgpu_renderer.surface_config.width = next_width;
+                self.renderer.wgpu_renderer.surface_config.height = next_height;
+                self.renderer.on_surface_config_updated(emission);
+            })
+            .map_err(|error| error.to_string())
     }
 
     pub fn set_pixels_per_point(&mut self, pixels_per_point: f32) {
@@ -399,22 +421,28 @@ impl NativeSurfaceRenderContext {
         axes_cameras: Option<&[Camera]>,
         axes_camera_user_controlled: Option<&[bool]>,
     ) -> Result<RenderResult, String> {
-        self.prepare_scene(figure, camera, axes_cameras, axes_camera_user_controlled);
+        let access = self.renderer.wgpu_renderer.access.clone();
+        access
+            .with_shared(|emission| {
+                self.prepare_scene(
+                    emission,
+                    figure,
+                    camera,
+                    axes_cameras,
+                    axes_camera_user_controlled,
+                );
 
-        let mut encoder = self.renderer.wgpu_renderer.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor {
-                label: Some("Native Surface Render Encoder"),
-            },
-        );
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Native Surface Render Encoder"),
+                        });
 
-        let render_result = self.render_scene_with_overlay(&mut encoder, view)?;
-
-        self.renderer
-            .wgpu_renderer
-            .queue
-            .submit(std::iter::once(encoder.finish()));
-
-        Ok(render_result)
+                let prepared = self.render_scene_with_overlay(emission, &mut encoder, view)?;
+                Ok(prepared.submit(emission.queue(), encoder))
+            })
+            .map_err(|error| error.to_string())?
     }
 
     /// Render a chunked geometry scene directly into an externally-owned texture view.
@@ -434,22 +462,22 @@ impl NativeSurfaceRenderContext {
         camera: Option<&Camera>,
         presentation: Option<&GeometryScenePresentation>,
     ) -> Result<RenderResult, String> {
-        self.prepare_geometry_scene(scene, camera, presentation);
+        let access = self.renderer.wgpu_renderer.access.clone();
+        access
+            .with_shared(|emission| {
+                self.prepare_geometry_scene(scene, camera, presentation);
 
-        let mut encoder = self.renderer.wgpu_renderer.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor {
-                label: Some("Native Geometry Scene Render Encoder"),
-            },
-        );
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Native Geometry Scene Render Encoder"),
+                        });
 
-        let render_result = self.render_scene_with_overlay(&mut encoder, view)?;
-
-        self.renderer
-            .wgpu_renderer
-            .queue
-            .submit(std::iter::once(encoder.finish()));
-
-        Ok(render_result)
+                let prepared = self.render_scene_with_overlay(emission, &mut encoder, view)?;
+                Ok(prepared.submit(emission.queue(), encoder))
+            })
+            .map_err(|error| error.to_string())?
     }
 
     /// Render a figure into an offscreen texture and read back RGBA8 bytes.
@@ -477,13 +505,14 @@ impl NativeSurfaceRenderContext {
             figure.axes_metadata.len(),
             axes_cameras.map(|items| items.len()).unwrap_or(0)
         );
-        self.prepare_scene(figure, camera, axes_cameras, axes_camera_user_controlled);
-
         let width = self.config.width.max(1);
         let height = self.config.height.max(1);
         let format = self.renderer.wgpu_renderer.surface_config.format;
-        let device = self.renderer.wgpu_renderer.device.clone();
-        let queue = self.renderer.wgpu_renderer.queue.clone();
+        let access = self.renderer.wgpu_renderer.access.clone();
+        let (output_buffer, padded_bytes_per_row) = access.with_shared(|emission| {
+        let device = emission.device();
+        let queue = emission.queue();
+        self.prepare_scene(emission, figure, camera, axes_cameras, axes_camera_user_controlled);
 
         let color_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("native_surface_offscreen_color"),
@@ -509,9 +538,9 @@ impl NativeSurfaceRenderContext {
             width,
             height
         );
-        self.render_scene_with_overlay(&mut encoder, &color_view)?;
+        let prepared = self.render_scene_with_overlay(emission, &mut encoder, &color_view)?;
         log::debug!("runmat-plot: native_surface.render_to_rgba.render_scene_ok");
-        queue.submit(std::iter::once(encoder.finish()));
+        prepared.submit(queue, encoder);
 
         let bytes_per_pixel = 4u32;
         let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(256) * 256;
@@ -554,10 +583,10 @@ impl NativeSurfaceRenderContext {
             height
         );
 
-        let slice = output_buffer.slice(..);
-        map_read_async(device.as_ref(), &slice).await?;
+        Ok::<_, String>((output_buffer, padded_bytes_per_row))
+        }).map_err(|error| error.to_string())??;
+        let data = readback_bytes(&access, &output_buffer, output_buffer.size() as usize).await?;
         log::debug!("runmat-plot: native_surface.render_to_rgba.readback_ready");
-        let data = slice.get_mapped_range();
         let mut pixels = vec![0u8; (width * height * 4) as usize];
         for row in 0..height as usize {
             let src_start = row * padded_bytes_per_row as usize;
@@ -566,7 +595,6 @@ impl NativeSurfaceRenderContext {
                 .copy_from_slice(&data[src_start..src_start + width as usize * 4]);
         }
         drop(data);
-        output_buffer.unmap();
         log::debug!(
             "runmat-plot: native_surface.render_to_rgba.ok bytes={}",
             pixels.len()
@@ -596,70 +624,76 @@ impl NativeSurfaceRenderContext {
         let width = self.config.width.max(1);
         let height = self.config.height.max(1);
         let format = self.renderer.wgpu_renderer.surface_config.format;
-        let device = self.renderer.wgpu_renderer.device.clone();
-        let queue = self.renderer.wgpu_renderer.queue.clone();
+        let access = self.renderer.wgpu_renderer.access.clone();
+        let (output_buffer, padded_bytes_per_row) = access
+            .with_shared(|emission| {
+                let device = emission.device();
+                let queue = emission.queue();
 
-        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("native_surface_geometry_offscreen_color"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("native_surface_geometry_offscreen_color"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Native Geometry Surface RGBA Render Encoder"),
-        });
-        self.render_scene_with_overlay(&mut encoder, &color_view)?;
-        queue.submit(std::iter::once(encoder.finish()));
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Native Geometry Surface RGBA Render Encoder"),
+                });
+                let prepared =
+                    self.render_scene_with_overlay(emission, &mut encoder, &color_view)?;
+                prepared.submit(queue, encoder);
 
-        let bytes_per_pixel = 4u32;
-        let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(256) * 256;
-        let output_buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
-        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("native_surface_geometry_offscreen_readback"),
-            size: output_buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+                let bytes_per_pixel = 4u32;
+                let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(256) * 256;
+                let output_buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
+                let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("native_surface_geometry_offscreen_readback"),
+                    size: output_buffer_size,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
 
-        let mut copy_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Native Geometry Surface RGBA Copy Encoder"),
-        });
-        copy_encoder.copy_texture_to_buffer(
-            crate::wgpu_compat::TexelCopyTextureInfo {
-                texture: &color_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            crate::wgpu_compat::TexelCopyBufferInfo {
-                buffer: &output_buffer,
-                layout: crate::wgpu_compat::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit(std::iter::once(copy_encoder.finish()));
+                let mut copy_encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Native Geometry Surface RGBA Copy Encoder"),
+                    });
+                copy_encoder.copy_texture_to_buffer(
+                    crate::wgpu_compat::TexelCopyTextureInfo {
+                        texture: &color_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    crate::wgpu_compat::TexelCopyBufferInfo {
+                        buffer: &output_buffer,
+                        layout: crate::wgpu_compat::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(padded_bytes_per_row),
+                            rows_per_image: Some(height),
+                        },
+                    },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                queue.submit(std::iter::once(copy_encoder.finish()));
 
-        let slice = output_buffer.slice(..);
-        map_read_async(device.as_ref(), &slice).await?;
-        let data = slice.get_mapped_range();
+                Ok::<_, String>((output_buffer, padded_bytes_per_row))
+            })
+            .map_err(|error| error.to_string())??;
+        let data = readback_bytes(&access, &output_buffer, output_buffer.size() as usize).await?;
         let mut pixels = vec![0u8; (width * height * 4) as usize];
         for row in 0..height as usize {
             let src_start = row * padded_bytes_per_row as usize;
@@ -668,12 +702,12 @@ impl NativeSurfaceRenderContext {
                 .copy_from_slice(&data[src_start..src_start + width as usize * 4]);
         }
         drop(data);
-        output_buffer.unmap();
         Ok(pixels)
     }
 
     fn prepare_scene(
         &mut self,
+        emission: &WgpuEmission<'_>,
         figure: &Figure,
         camera: Option<&Camera>,
         axes_cameras: Option<&[Camera]>,
@@ -696,14 +730,16 @@ impl NativeSurfaceRenderContext {
                 .any(|meta| meta.grid_enabled || meta.minor_grid_enabled);
         self.config.show_title = figure.has_any_titles();
 
-        self.renderer.set_figure(figure.clone());
+        self.renderer.set_figure(emission, figure.clone());
         if let Some(camera) = camera {
             *self.renderer.camera_mut() = camera.clone();
+            self.renderer.cancel_figure_viewport_fit(0);
         }
         if let Some(overrides) = axes_cameras {
             for (index, override_camera) in overrides.iter().enumerate() {
                 if let Some(target) = self.renderer.axes_camera_mut(index) {
                     *target = override_camera.clone();
+                    self.renderer.cancel_figure_viewport_fit(index);
                 }
             }
         }
@@ -736,19 +772,28 @@ impl NativeSurfaceRenderContext {
 
     fn render_scene_with_overlay(
         &mut self,
+        emission: &WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
-    ) -> Result<RenderResult, String> {
+    ) -> Result<PreparedOverlayRender, String> {
         #[cfg(feature = "egui-overlay")]
         {
             let Some(overlay) = self.overlay.as_mut() else {
                 log::debug!(
                     "runmat-plot: native_surface.render_scene_with_overlay.branch_no_overlay"
                 );
-                return self
+                self.renderer.fit_pending_figure_cameras_for_surface(
+                    self.config.width.max(1),
+                    self.config.height.max(1),
+                );
+                let result = self
                     .renderer
-                    .render_scene_to_target(encoder, target_view, &self.config)
-                    .map_err(|err| format!("native surface render failed: {err}"));
+                    .render_scene_to_target(emission, encoder, target_view, &self.config)
+                    .map_err(|err| format!("native surface render failed: {err}"))?;
+                return Ok(PreparedOverlayRender {
+                    result,
+                    preparation: Vec::new(),
+                });
             };
 
             let start_time = Instant::now();
@@ -789,18 +834,9 @@ impl NativeSurfaceRenderContext {
                     font_scale: 1.25,
                     show_axes: true,
                     show_title: self.renderer.geometry_overlay().is_none(),
-                    title: self
-                        .renderer
-                        .overlay_title()
-                        .cloned(),
-                    x_label: self
-                        .renderer
-                        .overlay_x_label()
-                        .cloned(),
-                    y_label: self
-                        .renderer
-                        .overlay_y_label()
-                        .cloned(),
+                    title: self.renderer.overlay_title().cloned(),
+                    x_label: self.renderer.overlay_x_label().cloned(),
+                    y_label: self.renderer.overlay_y_label().cloned(),
                     show_sidebar: false,
                     ..Default::default()
                 };
@@ -812,7 +848,7 @@ impl NativeSurfaceRenderContext {
                 };
                 let frame_info = overlay.plot_overlay.render(
                     ctx,
-                    &self.renderer,
+                    &mut self.renderer,
                     &overlay_config,
                     overlay_metrics,
                 );
@@ -860,8 +896,8 @@ impl NativeSurfaceRenderContext {
                 .tessellate(full_output.shapes, full_output.pixels_per_point);
             for (id, image_delta) in &full_output.textures_delta.set {
                 overlay.egui_renderer.update_texture(
-                    &self.renderer.wgpu_renderer.device,
-                    &self.renderer.wgpu_renderer.queue,
+                    emission.device(),
+                    emission.queue(),
                     *id,
                     image_delta,
                 );
@@ -871,9 +907,9 @@ impl NativeSurfaceRenderContext {
                 size_in_pixels: [self.config.width.max(1), self.config.height.max(1)],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            overlay.egui_renderer.update_buffers(
-                &self.renderer.wgpu_renderer.device,
-                &self.renderer.wgpu_renderer.queue,
+            let preparation = overlay.egui_renderer.update_buffers(
+                emission.device(),
+                emission.queue(),
                 encoder,
                 &paint_jobs,
                 &screen_descriptor,
@@ -1003,9 +1039,13 @@ impl NativeSurfaceRenderContext {
                     .map(|&(_, _, w, h)| (w.max(1), h.max(1)))
                     .collect();
                 self.renderer
-                    .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
+                    .ensure_scene_viewport_dependent_geometry_for_axes(
+                        emission,
+                        &axes_plot_sizes_px,
+                    );
                 self.renderer
                     .render_axes_to_viewports(
+                        emission,
                         encoder,
                         target_view,
                         &viewports,
@@ -1054,9 +1094,13 @@ impl NativeSurfaceRenderContext {
                     .unwrap_or_else(|| self.renderer.camera().clone());
                 let axes_plot_sizes_px = vec![(vw.max(1), vh.max(1))];
                 self.renderer
-                    .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
+                    .ensure_scene_viewport_dependent_geometry_for_axes(
+                        emission,
+                        &axes_plot_sizes_px,
+                    );
                 self.renderer
                     .render_camera_to_viewport(
+                        emission,
                         encoder,
                         target_view,
                         (vx, vy, vw, vh),
@@ -1072,24 +1116,22 @@ impl NativeSurfaceRenderContext {
             }
 
             {
-                let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("runmat-native-egui-overlay"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: target_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-                #[cfg(target_arch = "wasm32")]
-                let mut render_pass = render_pass.forget_lifetime();
-                #[cfg(not(target_arch = "wasm32"))]
-                let mut render_pass = render_pass;
+                let mut render_pass = encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("runmat-native-egui-overlay"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: target_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    })
+                    .forget_lifetime();
                 overlay
                     .egui_renderer
                     .render(&mut render_pass, &paint_jobs, &screen_descriptor);
@@ -1105,21 +1147,33 @@ impl NativeSurfaceRenderContext {
                 overlay.egui_renderer.free_texture(id);
             }
 
-            Ok(RenderResult {
-                success: true,
-                data_bounds: self.renderer.data_bounds(),
-                axes_viewports_px,
-                vertex_count: scene_stats.total_vertices,
-                triangle_count: scene_stats.total_triangles,
-                render_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+            Ok(PreparedOverlayRender {
+                result: RenderResult {
+                    success: true,
+                    data_bounds: self.renderer.data_bounds(),
+                    axes_viewports_px,
+                    vertex_count: scene_stats.total_vertices,
+                    triangle_count: scene_stats.total_triangles,
+                    render_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+                },
+                preparation,
             })
         }
 
         #[cfg(not(feature = "egui-overlay"))]
         {
-            self.renderer
-                .render_scene_to_target(encoder, target_view, &self.config)
-                .map_err(|err| format!("native surface render failed: {err}"))
+            self.renderer.fit_pending_figure_cameras_for_surface(
+                self.config.width.max(1),
+                self.config.height.max(1),
+            );
+            let result = self
+                .renderer
+                .render_scene_to_target(emission, encoder, target_view, &self.config)
+                .map_err(|err| format!("native surface render failed: {err}"))?;
+            Ok(PreparedOverlayRender {
+                result,
+                preparation: Vec::new(),
+            })
         }
     }
 
@@ -1141,6 +1195,10 @@ fn is_default_figure_bg(bg: glam::Vec4) -> bool {
         && (bg.w - 1.0).abs() <= EPS
 }
 
+#[cfg(all(test, feature = "egui-overlay", not(target_arch = "wasm32")))]
+#[path = "native_surface/preparation_tests.rs"]
+mod preparation_tests;
+
 pub async fn create_headless_context(
     width: u32,
     height: u32,
@@ -1155,7 +1213,7 @@ pub async fn create_headless_context(
             width,
             height
         );
-        return NativeSurfaceRenderContext::new(ctx.device, ctx.queue, width, height, format).await;
+        return NativeSurfaceRenderContext::new(ctx.access, width, height, format).await;
     }
 
     log::debug!(
@@ -1185,9 +1243,13 @@ pub async fn create_headless_context(
         .request_device(&crate::wgpu_compat::default_device_descriptor(), None)
         .await
         .map_err(|err| format!("{HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX} {err}"))?;
-    let context =
-        NativeSurfaceRenderContext::new(Arc::new(device), Arc::new(queue), width, height, format)
-            .await?;
+    let context = NativeSurfaceRenderContext::new(
+        WgpuDeviceAccess::new(device, queue),
+        width,
+        height,
+        format,
+    )
+    .await?;
     log::debug!(
         "runmat-plot: native_surface.headless_context.ready width={} height={}",
         width,

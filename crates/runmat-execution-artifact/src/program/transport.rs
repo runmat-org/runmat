@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use super::request::validate_externalized_inventory;
 use super::{
-    ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_ARGUMENTS,
-    MAX_PROGRAM_EXECUTION_RESULT_OBJECTS, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_RESULT_OBJECTS,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use crate::{ArtifactError, ArtifactResult};
 
@@ -248,47 +248,26 @@ impl ProgramExecutionObjectClosure {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProgramExecutionInputs {
-    pub schema_version: u16,
-    pub arguments: Vec<ValuePayload>,
-    pub objects: Vec<ProgramExecutionObjectLocation>,
-}
-
-impl ProgramExecutionInputs {
-    pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V3
-            || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
-        {
+/// Every external program argument must be a portable driver object listed
+/// exactly once in the input inventory.
+pub(super) fn validate_input_objects(
+    arguments: &[ValuePayload],
+    objects: &[ProgramExecutionObjectLocation],
+) -> ArtifactResult<()> {
+    validate_locations(objects, ValueRefKind::DriverObject, "input")?;
+    for reference in collect_references(arguments) {
+        if reference.kind != ValueRefKind::DriverObject {
             return Err(ArtifactError::Invalid(
-                "program inputs use an unsupported schema or exceed their bound".into(),
+                "program inputs contain a non-portable external argument".into(),
             ));
         }
-        for argument in &self.arguments {
-            argument
-                .validate(ValueLimits::default())
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        if !objects.iter().any(|object| object.reference == *reference) {
+            return Err(ArtifactError::Invalid(
+                "program input object inventory omits an external argument".into(),
+            ));
         }
-        validate_locations(&self.objects, ValueRefKind::DriverObject, "input")?;
-        for reference in collect_references(&self.arguments) {
-            if reference.kind != ValueRefKind::DriverObject {
-                return Err(ArtifactError::Invalid(
-                    "program inputs contain a non-portable external argument".into(),
-                ));
-            }
-            if !self
-                .objects
-                .iter()
-                .any(|object| object.reference == *reference)
-            {
-                return Err(ArtifactError::Invalid(
-                    "program input object inventory omits an external argument".into(),
-                ));
-            }
-        }
-        Ok(())
     }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -305,7 +284,7 @@ impl ProgramExecutionOutputs {
         objects: Vec<ProgramExecutionObjectLocation>,
     ) -> ArtifactResult<Self> {
         let outputs = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             response,
             objects,
         };
@@ -314,17 +293,19 @@ impl ProgramExecutionOutputs {
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V3 {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION {
             return Err(ArtifactError::Invalid(
                 "program outputs use an unsupported schema".into(),
             ));
         }
         validate_locations(&self.objects, ValueRefKind::ResultObject, "result")?;
         match &self.response {
-            ProgramExecutionResponse::Success { value } => {
-                value
-                    .validate(ValueLimits::default())
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+            ProgramExecutionResponse::Success { outputs } => {
+                for value in outputs {
+                    value
+                        .validate(ValueLimits::default())
+                        .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                }
                 if !self.objects.is_empty() {
                     return Err(ArtifactError::Invalid(
                         "inline program output carries external objects".into(),
@@ -348,7 +329,7 @@ impl ProgramExecutionOutputs {
                         "program response and result object inventory differ".into(),
                     ));
                 }
-                validate_externalized_inventory(outputs, result_objects, requested_outputs)?;
+                validate_externalized_inventory(outputs, result_objects, requested_outputs, None)?;
             }
             ProgramExecutionResponse::Failure { message } => {
                 if message.is_empty() || message.len() > 1024 * 1024 || !self.objects.is_empty() {
@@ -356,6 +337,22 @@ impl ProgramExecutionOutputs {
                         "failed program output is malformed".into(),
                     ));
                 }
+            }
+            ProgramExecutionResponse::RuntimeFailure { failure } => {
+                failure
+                    .validate()
+                    .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                if !self.objects.is_empty() {
+                    return Err(ArtifactError::Invalid(
+                        "failed program output carries external objects".into(),
+                    ));
+                }
+            }
+            ProgramExecutionResponse::GraphSuccess { .. }
+            | ProgramExecutionResponse::SpmdSuccess { .. } => {
+                return Err(ArtifactError::Invalid(
+                    "object-backed program outputs carry only direct value results".into(),
+                ));
             }
         }
         Ok(())
@@ -499,6 +496,7 @@ mod tests {
     use runmat_execution::Digest;
 
     use super::*;
+    use crate::ProgramExecutionInputs;
 
     fn result_reference(bytes: &[u8]) -> ValueRef {
         let logical_digest = Digest::sha256(bytes);
@@ -573,7 +571,8 @@ mod tests {
         let bytes = b"canonical input object".to_vec();
         let root = input_reference(&bytes);
         let inputs = ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            context: runmat_execution::ProgramInvocationContext::Direct,
             arguments: vec![ValuePayload::Object(Box::new(root.clone()))],
             objects: vec![ProgramExecutionObjectLocation {
                 reference: root.clone(),
@@ -598,7 +597,8 @@ mod tests {
         assert!(duplicate.validate().is_err());
 
         let mut resident = ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            context: runmat_execution::ProgramInvocationContext::Direct,
             arguments: vec![ValuePayload::Object(Box::new(input_reference(b"resident")))],
             objects: Vec::new(),
         };
@@ -643,9 +643,9 @@ mod tests {
 
         ProgramExecutionOutputs::new(
             ProgramExecutionResponse::Success {
-                value: ValuePayload::Inline(Box::new(
+                outputs: vec![ValuePayload::Inline(Box::new(
                     runmat_execution::value::InlineValue::String("done".into()),
-                )),
+                ))],
             },
             Vec::new(),
         )
@@ -813,7 +813,8 @@ mod tests {
             .unwrap()
             .clone();
         let inputs = |object: ProgramExecutionObjectLocation| ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            context: runmat_execution::ProgramInvocationContext::Direct,
             arguments: vec![ValuePayload::Object(Box::new(object.reference.clone()))],
             objects: vec![object],
         };

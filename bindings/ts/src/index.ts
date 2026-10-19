@@ -397,6 +397,8 @@ export type BrowserExecutionTopology = "coordinator" | "flat" | "serial";
 export interface BrowserExecutionHostCapabilities {
   topology: BrowserExecutionTopology;
   maxWorkers: number;
+  /** Exact owned builtin route; successful launch responses and cancelOwned acknowledgments certify task settlement. */
+  ownedBuiltinWork?: boolean;
 }
 
 export interface BrowserProgramLaunchRequest {
@@ -408,7 +410,12 @@ export interface BrowserProgramLaunchRequest {
 export interface RunMatExecutionHost {
   capabilities: BrowserExecutionHostCapabilities;
   launch(request: BrowserProgramLaunchRequest): Promise<Record<string, unknown>>;
-  cancel(taskId: string): void;
+  cancel(taskId: string): void | Promise<void>;
+  /** Required when ownedBuiltinWork is true. Only this task-bound physical-exit acknowledgment releases retained work. */
+  cancelOwned?(taskId: string): Promise<{
+    taskId: string;
+    state: "terminated" | "notRunning";
+  }>;
 }
 
 export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
@@ -439,6 +446,13 @@ export interface FigureLayout {
   axesRows: number;
   axesCols: number;
   axesIndices: number[];
+  axesGridCells?: Array<AxesGridCell | null>;
+}
+
+export interface AxesGridCell {
+  rows: number;
+  columns: number;
+  index: number;
 }
 
 export interface FigureMetadata {
@@ -780,6 +794,9 @@ export interface RunMatErrorDetails {
   identifier?: string;
   diagnostic: string;
   span?: RunMatErrorSpan;
+  sourceId?: number;
+  sourceName?: string;
+  sourcePath?: string;
   callstack: string[];
   callstackElided?: number;
 }
@@ -789,6 +806,9 @@ export class RunMatExecutionError extends Error {
   readonly identifier?: string;
   readonly diagnostic: string;
   readonly span?: RunMatErrorSpan;
+  readonly sourceId?: number;
+  readonly sourceName?: string;
+  readonly sourcePath?: string;
   readonly callstack: string[];
   readonly callstackElided?: number;
 
@@ -799,6 +819,9 @@ export class RunMatExecutionError extends Error {
     this.identifier = details.identifier;
     this.diagnostic = details.diagnostic;
     this.span = details.span;
+    this.sourceId = details.sourceId;
+    this.sourceName = details.sourceName;
+    this.sourcePath = details.sourcePath;
     this.callstack = details.callstack;
     this.callstackElided = details.callstackElided;
   }
@@ -1405,6 +1428,9 @@ interface RunMatNativeModule {
   executeProgramArtifact?: (
     request: Record<string, unknown>
   ) => Promise<Record<string, unknown>>;
+  executeWorkerProgram?: (
+    request: Record<string, unknown>
+  ) => Promise<Record<string, unknown>>;
   buildGitSnapshot?: (
     repository: string,
     subdir: string,
@@ -1621,6 +1647,18 @@ export async function executeProgramArtifact(
     throw new Error("The loaded RunMat module does not support portable program execution.");
   }
   return native.executeProgramArtifact(request);
+}
+
+/** Execute a previously admitted worker request inside the worker realm. */
+export async function executeWorkerProgram(
+  request: Record<string, unknown>,
+  wasmModule?: WasmInitInput
+): Promise<Record<string, unknown>> {
+  const native = await loadNativeModule(wasmModule);
+  if (typeof native.executeWorkerProgram !== "function") {
+    throw new Error("The loaded RunMat module does not support worker program execution.");
+  }
+  return native.executeWorkerProgram(request);
 }
 
 export async function fetchGitSnapshot(
@@ -2724,6 +2762,9 @@ type RunMatErrorPayload = {
   identifier?: string;
   diagnostic: string;
   span?: RunMatErrorSpan;
+  sourceId?: number;
+  sourceName?: string;
+  sourcePath?: string;
   callstack?: string[];
   callstackElided?: number;
 };
@@ -2748,6 +2789,9 @@ function coerceRunMatError(value: unknown): RunMatExecutionError {
       identifier: value.identifier,
       diagnostic: value.diagnostic,
       span: value.span,
+      sourceId: value.sourceId,
+      sourceName: value.sourceName,
+      sourcePath: value.sourcePath,
       callstack: value.callstack ?? [],
       callstackElided: value.callstackElided
     });

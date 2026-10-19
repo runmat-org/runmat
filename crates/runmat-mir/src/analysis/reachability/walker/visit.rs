@@ -8,6 +8,17 @@ use crate::{
 use super::{Certainty, Kind, Reason, Walker};
 
 impl Walker<'_> {
+    fn region(&mut self, from: &str, region: crate::MirExpressionRegionRef<'_>) {
+        for step in region.steps() {
+            match step {
+                crate::MirExpressionStep::Let { value, .. } => self.rvalue(from, value),
+                crate::MirExpressionStep::CaptureSequence { source, .. } => source
+                    .visit_operands(|operand| self.operand(from, operand, Reason::FunctionHandle)),
+            }
+        }
+        self.operand(from, region.result(), Reason::FunctionHandle);
+    }
+
     fn operand(&mut self, from: &str, operand: &MirOperand, reason: Reason) {
         if let MirOperand::FunctionHandle(identity) = operand {
             self.identity(from, identity, reason);
@@ -17,19 +28,27 @@ impl Walker<'_> {
     fn call_arg(&mut self, from: &str, argument: &MirCallArg) {
         match argument {
             MirCallArg::Single(operand) => self.operand(from, operand, Reason::FunctionHandle),
-            MirCallArg::Expansion { base, indices, .. } => {
-                self.operand(from, base, Reason::FunctionHandle);
-                for index in indices {
-                    self.operand(from, index, Reason::FunctionHandle);
-                }
+            MirCallArg::Expansion(source) => {
+                source
+                    .visit_operands(|operand| self.operand(from, operand, Reason::FunctionHandle));
             }
+            MirCallArg::CapturedSequence(_) => {}
         }
     }
 
     fn indexing(&mut self, from: &str, indexing: &MirIndexing) {
         for component in &indexing.components {
-            if let MirIndexComponent::Expr(operand) = component {
-                self.operand(from, operand, Reason::FunctionHandle);
+            match component {
+                MirIndexComponent::Expr(operand) => {
+                    self.operand(from, operand, Reason::FunctionHandle)
+                }
+                MirIndexComponent::ContextualExpr(region) => {
+                    self.region(from, crate::MirExpressionRegionRef::Contextual(region))
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.region(from, crate::MirExpressionRegionRef::Prepared(region))
+                }
+                MirIndexComponent::Colon => {}
             }
         }
     }
@@ -134,7 +153,14 @@ impl Walker<'_> {
                 }
                 if let Some(name) = dynamic_target_builtin {
                     if let Some(target) = call.args.first() {
-                        self.dynamic_target(from, target.operand(), &format!("{name} target"));
+                        if let Some(operand) = target.operand() {
+                            self.dynamic_target(from, operand, &format!("{name} target"));
+                        } else {
+                            self.unknown_dynamic(
+                                from,
+                                &format!("{name} target is a value sequence"),
+                            );
+                        }
                     } else {
                         self.unknown_dynamic(from, &format!("{name} target is absent"));
                     }
@@ -145,7 +171,9 @@ impl Walker<'_> {
             }
             MirRvalue::Aggregate { elements, .. } => {
                 for element in elements {
-                    self.operand(from, element, Reason::FunctionHandle);
+                    if let Some(operand) = element.operand() {
+                        self.operand(from, operand, Reason::FunctionHandle);
+                    }
                 }
             }
             MirRvalue::StructLiteral { fields } => {
@@ -154,13 +182,11 @@ impl Walker<'_> {
                 }
             }
             MirRvalue::ObjectLiteral { class_name, fields } => {
-                self.class(
-                    from,
-                    &class_name
-                        .display_name()
-                        .unwrap_or_else(|| "<class>".into()),
-                    Reason::ClassReference,
-                );
+                if let Ok(class_identity) =
+                    runmat_types::ClassIdentity::from_qualified_name(class_name)
+                {
+                    self.class(from, &class_identity, Reason::ClassReference);
+                }
                 for (_, value) in fields {
                     self.operand(from, value, Reason::FunctionHandle);
                 }
@@ -169,21 +195,88 @@ impl Walker<'_> {
                 self.operand(from, base, Reason::FunctionHandle);
                 self.indexing(from, indexing);
             }
+            MirRvalue::SubscriptChain(chain) => {
+                self.operand(from, &chain.root, Reason::FunctionHandle);
+                for step in &chain.steps {
+                    match step {
+                        crate::MirSubscriptStep::Index(indexing) => self.indexing(from, indexing),
+                        crate::MirSubscriptStep::DottedInvoke {
+                            arguments,
+                            semantic_fallback,
+                            ..
+                        } => {
+                            if let Some(identity) = semantic_fallback {
+                                match identity {
+                                    CallableIdentity::BoundFunction(function)
+                                    | CallableIdentity::AnonymousFunction(function)
+                                    | CallableIdentity::ExternalFunction { function, .. } => {
+                                        self.retain_function(
+                                            *function,
+                                            Certainty::FiniteDynamic,
+                                            Some(from.into()),
+                                            Reason::MethodDispatch,
+                                            identity.display_name(),
+                                        );
+                                    }
+                                    other => self.identity(from, other, Reason::MethodDispatch),
+                                }
+                            }
+                            for argument in arguments {
+                                match argument {
+                                    crate::MirDottedInvokeArgument::Colon => {}
+                                    crate::MirDottedInvokeArgument::Contextual(region) => self
+                                        .region(
+                                            from,
+                                            crate::MirExpressionRegionRef::Contextual(region),
+                                        ),
+                                    crate::MirDottedInvokeArgument::Call(region) => {
+                                        for step in &region.steps {
+                                            match step {
+                                                crate::MirExpressionStep::Let { value, .. } => {
+                                                    self.rvalue(from, value)
+                                                }
+                                                crate::MirExpressionStep::CaptureSequence {
+                                                    source,
+                                                    ..
+                                                } => source.visit_operands(|operand| {
+                                                    self.operand(
+                                                        from,
+                                                        operand,
+                                                        Reason::FunctionHandle,
+                                                    )
+                                                }),
+                                            }
+                                        }
+                                        self.call_arg(from, &region.argument);
+                                    }
+                                }
+                            }
+                        }
+                        crate::MirSubscriptStep::DynamicMember(member) => {
+                            self.operand(from, member, Reason::FunctionHandle)
+                        }
+                        crate::MirSubscriptStep::PreparedDynamicMember(region) => {
+                            self.region(from, crate::MirExpressionRegionRef::Prepared(region))
+                        }
+                        crate::MirSubscriptStep::Member(_) => {}
+                    }
+                }
+            }
             MirRvalue::Member { base, .. } => self.operand(from, base, Reason::FunctionHandle),
-            MirRvalue::DynamicMember { base, member } => {
+            MirRvalue::DynamicMember { base, member, .. } => {
                 self.operand(from, base, Reason::FunctionHandle);
                 self.operand(from, member, Reason::FunctionHandle);
             }
             MirRvalue::WorkspaceFirstStaticProperty { class_name, .. } => {
                 self.class(from, class_name, Reason::ClassReference);
             }
-            MirRvalue::MetaClass(class_name) => self.class(
-                from,
-                &class_name
-                    .display_name()
-                    .unwrap_or_else(|| "<class>".into()),
-                Reason::ClassReference,
-            ),
+            MirRvalue::MetaClass(class_name) => {
+                if let Ok(class_identity) =
+                    runmat_types::ClassIdentity::from_qualified_name(class_name)
+                {
+                    self.class(from, &class_identity, Reason::ClassReference);
+                }
+            }
             MirRvalue::Future { function, args, .. } => {
                 self.retain_function(
                     *function,
@@ -215,30 +308,18 @@ impl Walker<'_> {
                 }
             }
             MirRvalue::Distributed(operation) => {
-                if let crate::parallel::MirDistributedOp::Create { input, .. } = operation {
-                    self.operand(from, input, Reason::FunctionHandle);
+                for operand in operation.operands() {
+                    self.operand(from, operand, Reason::FunctionHandle);
                 }
             }
-            MirRvalue::Collective(operation) => match operation {
-                crate::parallel::MirCollectiveOp::Broadcast { input, .. }
-                | crate::parallel::MirCollectiveOp::Gather { input, .. }
-                | crate::parallel::MirCollectiveOp::Scatter { input, .. }
-                | crate::parallel::MirCollectiveOp::AllGather { input, .. }
-                | crate::parallel::MirCollectiveOp::Send { input, .. } => {
-                    self.operand(from, input, Reason::FunctionHandle);
+            MirRvalue::Collective(operation) => {
+                for operand in operation.operands() {
+                    self.operand(from, operand, Reason::FunctionHandle);
                 }
-                crate::parallel::MirCollectiveOp::Reduce {
-                    input, operator, ..
+                if let Some(operator) = operation.operator() {
+                    self.operator(from, operator);
                 }
-                | crate::parallel::MirCollectiveOp::AllReduce {
-                    input, operator, ..
-                } => {
-                    self.operand(from, input, Reason::FunctionHandle);
-                    self.operator(from, *operator);
-                }
-                crate::parallel::MirCollectiveOp::Barrier { .. }
-                | crate::parallel::MirCollectiveOp::Receive { .. } => {}
-            },
+            }
             MirRvalue::Colon | MirRvalue::End => {}
         }
     }
@@ -251,11 +332,33 @@ impl Walker<'_> {
             }
             MirStmtKind::MultiAssign { targets, value } => {
                 for target in &targets.targets {
-                    if let crate::MirOutputTarget::Place(place) = target {
-                        self.place(from, place);
+                    match target {
+                        crate::MirOutputTarget::Place(place) => self.place(from, place),
+                        crate::MirOutputTarget::Sequence(target) => {
+                            self.sequence_target(from, target)
+                        }
+                        crate::MirOutputTarget::Discard => {}
                     }
                 }
                 self.rvalue(from, value);
+            }
+            MirStmtKind::SequenceAssign { target, value } => {
+                match target {
+                    crate::MirSequenceTarget::Member { base, .. } => self.place(from, base),
+                    crate::MirSequenceTarget::DynamicMember { base, member } => {
+                        self.place(from, base);
+                        self.operand(from, member, Reason::FunctionHandle);
+                    }
+                    crate::MirSequenceTarget::CellContents { base, indexing } => {
+                        self.place(from, base);
+                        self.indexing(from, indexing);
+                    }
+                }
+                self.rvalue(from, value);
+            }
+            MirStmtKind::CaptureSequence { source, .. } => {
+                source
+                    .visit_operands(|operand| self.operand(from, operand, Reason::FunctionHandle));
             }
             MirStmtKind::Expr(value) => self.rvalue(from, value),
             MirStmtKind::PlaceMutation(mutation) => self.place(from, &mutation.place),
@@ -285,7 +388,7 @@ impl Walker<'_> {
                     let id = format!("{family}:{symbol}");
                     self.node(
                         id.clone(),
-                        kind,
+                        kind.clone(),
                         "workspace".into(),
                         symbol,
                         Certainty::Definite,
@@ -293,7 +396,21 @@ impl Walker<'_> {
                     self.edge(Some(from.into()), id, Certainty::Definite, reason, None);
                 }
             }
-            MirStmtKind::EnvironmentEffect(_) => {}
+            MirStmtKind::StatementOutput(_) | MirStmtKind::EnvironmentEffect(_) => {}
+        }
+    }
+
+    fn sequence_target(&mut self, from: &str, target: &crate::MirSequenceTarget) {
+        match target {
+            crate::MirSequenceTarget::Member { base, .. } => self.place(from, base),
+            crate::MirSequenceTarget::DynamicMember { base, member } => {
+                self.place(from, base);
+                self.operand(from, member, Reason::FunctionHandle);
+            }
+            crate::MirSequenceTarget::CellContents { base, indexing } => {
+                self.place(from, base);
+                self.indexing(from, indexing);
+            }
         }
     }
 

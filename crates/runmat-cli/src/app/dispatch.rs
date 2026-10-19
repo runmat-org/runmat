@@ -3,12 +3,20 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{
-    accel, batch, benchmark, check, compile, config, fea, gc, job, mesh, package, repl, script,
-    test, version,
+    accel, batch, benchmark, check, compile, config, fea, gc, job, mesh, mex, native_interface,
+    package, repl, script, test, version,
 };
 use crate::remote;
 
 pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
+    dispatch_with_graphics(cli, config, &runmat_core::SessionGraphicsHost::Unavailable).await
+}
+
+pub(crate) async fn dispatch_with_graphics(
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
     let command = cli.command.clone();
     let mut script_path = cli.script.clone();
     let mut emit_bytecode = cli.emit_bytecode.clone();
@@ -27,11 +35,24 @@ pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
     }
 
     match (command, script_path) {
-        (Some(command), None) => execute_command(command, cli, config).await,
+        (Some(command), None) => execute_command(command, cli, config, graphics).await,
         (None, Some(script_path)) => {
-            script::execute_script(script_path, emit_bytecode, cli, config).await
+            script::execute_script_with_graphics(
+                script_path,
+                vec![],
+                emit_bytecode,
+                cli,
+                config,
+                false,
+                crate::cli::ExecutionTargetArgs::default(),
+                graphics,
+            )
+            .await
         }
-        (None, None) => repl::execute_repl(config, cli).await,
+        (None, None) if !atty::is(atty::Stream::Stdin) => {
+            script::execute_stdin_script_with_graphics(emit_bytecode, cli, config, graphics).await
+        }
+        (None, None) => repl::execute_repl_with_graphics(config, cli, graphics).await,
         (Some(_), Some(_)) => {
             log::error!("Cannot specify both command and script file");
             std::process::exit(1);
@@ -39,12 +60,17 @@ pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
     }
 }
 
-async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
+async fn execute_command(
+    command: Commands,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
     match command {
         Commands::Repl { verbose } => {
             let mut repl_config = config.clone();
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
-            repl::execute_repl(&repl_config, cli).await
+            repl::execute_repl_with_graphics(&repl_config, cli, graphics).await
         }
         Commands::Run {
             file,
@@ -52,7 +78,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             json,
             args,
         } => {
-            script::execute_script_with_args(
+            script::execute_script_with_graphics(
                 file,
                 args,
                 cli.emit_bytecode.clone(),
@@ -60,6 +86,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
                 config,
                 json,
                 execution,
+                graphics,
             )
             .await
         }
@@ -105,6 +132,9 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             explain_link,
             link_plan_json,
             linker,
+            selected_pack_manifest,
+            selected_components,
+            selected_host_admission,
             keep_temps,
             force,
         } => {
@@ -117,6 +147,9 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
                     explain_link,
                     link_plan_json,
                     linker,
+                    selected_pack_manifest,
+                    selected_components,
+                    selected_host_admission,
                     keep_temps,
                     force,
                 },
@@ -125,6 +158,9 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             )
             .await
         }
+        Commands::Mex(args) => mex::execute(args),
+        Commands::Mexcuda(args) => mex::execute_cuda(args),
+        Commands::NativeInterface { command } => native_interface::execute(command),
         Commands::Check {
             file,
             json,
@@ -137,14 +173,15 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             version::show_version(detailed);
             Ok(())
         }
-        Commands::Info => version::show_system_info(config).await,
+        Commands::Info { json } => version::show_system_info(config, json).await,
         Commands::AccelInfo { json, reset } => accel::show_accel_info(json, reset).await,
         #[cfg(feature = "wgpu")]
         Commands::AccelCalibrate {
             input,
+            refresh,
             dry_run,
             json,
-        } => accel::execute_accel_calibrate(input, dry_run, json).await,
+        } => accel::execute_accel_calibrate(input, refresh, dry_run, json).await,
         Commands::Gc { gc_command } => gc::execute_gc_command(gc_command).await,
         Commands::Benchmark {
             file,

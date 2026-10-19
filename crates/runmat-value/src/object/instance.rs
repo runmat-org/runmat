@@ -1,25 +1,350 @@
-use super::DynamicPropertyDef;
-use crate::Value;
+use super::{
+    ContainersMapStorage, DynamicPropertyDef, GraphicsReceiverRef, MemmapReceiverAuthority,
+    MemmapReceiverState, SelectedObjectClassFacts,
+};
+use crate::{ForeignRef, Value};
+use runmat_gc_api::{Trace, Tracer};
+use runmat_types::ClassIdentity;
 use std::collections::HashMap;
+use std::rc::Rc;
 
+// Clone and structural equality include native payloads. Public handle
+// equality remains identity-based through HandleRef, not this comparison.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectInstance {
-    pub class_name: String,
+    pub class_name: ClassIdentity,
     pub properties: HashMap<String, Value>,
     pub dynamic_properties: Option<Box<HashMap<String, DynamicPropertyDef>>>,
+    selected_class: Option<Rc<SelectedObjectClassFacts>>,
+    native_payload: Option<Box<NativeObjectPayload>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum NativeObjectPayload {
+    ContainersMap(ContainersMapStorage),
+    ForeignHostControl(ForeignRef),
+    DatasetAuthority(ForeignRef),
+    MatFileAuthority(ForeignRef),
+    MemmapReceiver(MemmapReceiverState),
+    TcpAuthority(ForeignRef),
+    GraphicsReceiver(GraphicsReceiverRef),
+}
+
+/// Whether a value object carries host- or session-owned native state.
+/// Serialization must match this exhaustive classification, not class text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectPersistencePayloadKind {
+    PlainValue,
+    SelectedClass,
+    MixedSelectedNative,
+    ContainersMap,
+    ForeignHostControl,
+    DatasetAuthority,
+    MatFileAuthority,
+    MemmapReceiver,
+    TcpAuthority,
+    GraphicsReceiver,
+}
+
+impl Trace for NativeObjectPayload {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        match self {
+            Self::ContainersMap(storage) => storage.trace(tracer),
+            Self::ForeignHostControl(_) => {}
+            Self::DatasetAuthority(_) => {}
+            Self::MatFileAuthority(_) => {}
+            Self::MemmapReceiver(receiver) => {
+                if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
+                    snapshot.trace(tracer);
+                }
+            }
+            Self::TcpAuthority(_) => {}
+            Self::GraphicsReceiver(_) => {}
+        }
+    }
 }
 
 impl ObjectInstance {
-    pub fn new(class_name: String) -> Self {
-        Self {
-            class_name,
-            properties: HashMap::new(),
-            dynamic_properties: None,
+    pub fn persistence_payload_kind(&self) -> ObjectPersistencePayloadKind {
+        if self.selected_class.is_some() && self.native_payload.is_some() {
+            return ObjectPersistencePayloadKind::MixedSelectedNative;
+        }
+        if self.selected_class.is_some() {
+            return ObjectPersistencePayloadKind::SelectedClass;
+        }
+        match self.native_payload.as_deref() {
+            None => ObjectPersistencePayloadKind::PlainValue,
+            Some(NativeObjectPayload::ContainersMap(_)) => {
+                ObjectPersistencePayloadKind::ContainersMap
+            }
+            Some(NativeObjectPayload::ForeignHostControl(_)) => {
+                ObjectPersistencePayloadKind::ForeignHostControl
+            }
+            Some(NativeObjectPayload::DatasetAuthority(_)) => {
+                ObjectPersistencePayloadKind::DatasetAuthority
+            }
+            Some(NativeObjectPayload::MatFileAuthority(_)) => {
+                ObjectPersistencePayloadKind::MatFileAuthority
+            }
+            Some(NativeObjectPayload::MemmapReceiver(_)) => {
+                ObjectPersistencePayloadKind::MemmapReceiver
+            }
+            Some(NativeObjectPayload::TcpAuthority(_)) => {
+                ObjectPersistencePayloadKind::TcpAuthority
+            }
+            Some(NativeObjectPayload::GraphicsReceiver(_)) => {
+                ObjectPersistencePayloadKind::GraphicsReceiver
+            }
         }
     }
 
-    pub fn is_class(&self, name: &str) -> bool {
-        self.class_name == name
+    pub fn dynamic_property_definitions(
+        &self,
+    ) -> impl Iterator<Item = (&String, &DynamicPropertyDef)> {
+        self.dynamic_properties
+            .iter()
+            .flat_map(|properties| properties.iter())
+    }
+
+    pub fn new(class_name: impl Into<ClassIdentity>) -> Self {
+        Self {
+            class_name: class_name.into(),
+            properties: HashMap::new(),
+            dynamic_properties: None,
+            selected_class: None,
+            native_payload: None,
+        }
+    }
+
+    /// Preserve a selected constructor's receiver facts with value copies and
+    /// handle-object GC targets. This is storage, not issuance authority:
+    /// method invocation must still validate its exact typed binding/owner.
+    pub fn with_selected_class(mut self, selected: Rc<SelectedObjectClassFacts>) -> Option<Self> {
+        if self.class_name != *selected.class()
+            || self.selected_class.is_some()
+            || self.native_payload.is_some()
+        {
+            return None;
+        }
+        self.selected_class = Some(selected);
+        Some(self)
+    }
+
+    pub fn selected_class(&self) -> Option<&Rc<SelectedObjectClassFacts>> {
+        self.selected_class.as_ref()
+    }
+
+    pub fn with_containers_map_payload(mut self, storage: ContainersMapStorage) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::ContainersMap(storage)));
+        self
+    }
+
+    pub fn with_foreign_host_control(mut self, reference: ForeignRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::ForeignHostControl(reference)));
+        self
+    }
+
+    pub fn foreign_host_control(&self) -> Option<&ForeignRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::ForeignHostControl(reference)) => Some(reference),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn with_dataset_authority(mut self, reference: ForeignRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::DatasetAuthority(reference)));
+        self
+    }
+
+    pub fn dataset_authority(&self) -> Option<&ForeignRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::DatasetAuthority(reference)) => Some(reference),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn with_matfile_authority(mut self, reference: ForeignRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::MatFileAuthority(reference)));
+        self
+    }
+
+    pub fn matfile_authority(&self) -> Option<&ForeignRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::MatFileAuthority(reference)) => Some(reference),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn with_tcp_authority(mut self, reference: ForeignRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::TcpAuthority(reference)));
+        self
+    }
+
+    pub fn tcp_authority(&self) -> Option<&ForeignRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::TcpAuthority(reference)) => Some(reference),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn with_graphics_receiver(mut self, receiver: GraphicsReceiverRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::GraphicsReceiver(receiver)));
+        self
+    }
+
+    pub fn graphics_receiver(&self) -> Option<&GraphicsReceiverRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::GraphicsReceiver(receiver)) => Some(receiver),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | None => None,
+        }
+    }
+
+    pub fn with_memmap_receiver(mut self, receiver: MemmapReceiverState) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::MemmapReceiver(receiver)));
+        self
+    }
+
+    pub fn memmap_receiver(&self) -> Option<&MemmapReceiverState> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => Some(receiver),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn memmap_receiver_mut(&mut self) -> Option<&mut MemmapReceiverState> {
+        match self.native_payload.as_deref_mut() {
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => Some(receiver),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn containers_map_payload(&self) -> Option<&ContainersMapStorage> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
+            Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn containers_map_payload_mut(&mut self) -> Option<&mut ContainersMapStorage> {
+        match self.native_payload.as_deref_mut() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
+            Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn has_native_payload(&self) -> bool {
+        self.native_payload.is_some()
+    }
+
+    pub fn for_each_native_value<'a>(&'a self, mut visitor: impl FnMut(&'a Value)) {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => {
+                storage.for_each_value(&mut visitor);
+            }
+            Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => {}
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
+                if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
+                    visitor(snapshot);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn trace_native_value_at(&self, index: usize) -> Option<&Value> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => storage.trace_value_at(index),
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
+                if index == 0 {
+                    if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
+                        return Some(snapshot);
+                    }
+                }
+                None
+            }
+            Some(
+                NativeObjectPayload::ForeignHostControl(_)
+                | NativeObjectPayload::DatasetAuthority(_)
+                | NativeObjectPayload::MatFileAuthority(_)
+                | NativeObjectPayload::TcpAuthority(_)
+                | NativeObjectPayload::GraphicsReceiver(_),
+            )
+            | None => None,
+        }
+    }
+
+    pub(crate) fn trace_dynamic_property_values(
+        &self,
+    ) -> Option<std::collections::hash_map::Values<'_, String, DynamicPropertyDef>> {
+        self.dynamic_properties.as_deref().map(HashMap::values)
+    }
+
+    pub(crate) fn trace_native_payload(&self, tracer: &mut dyn Tracer) {
+        if let Some(payload) = &self.native_payload {
+            payload.trace(tracer);
+        }
+    }
+
+    pub fn is_class(&self, identity: runmat_types::StaticClassIdentity) -> bool {
+        self.class_name.is(identity)
     }
 
     pub fn dynamic_property(&self, name: &str) -> Option<&DynamicPropertyDef> {

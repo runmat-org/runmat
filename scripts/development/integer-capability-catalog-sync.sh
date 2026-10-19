@@ -74,7 +74,7 @@ names_json=$(printf '%s\n' "${names[@]}" | jq -R . | jq -s .)
 unique_count=$(jq 'unique | length' <<<"${names_json}")
 [[ "${unique_count}" == "${#names[@]}" ]] || die 'cohort contains duplicate names'
 
-jq -e --argjson names "${names_json}" '[$names[] as $name | ([.builtins[] | select(.name == $name)] | length) == 1] | all' "${catalog}" >/dev/null || die 'every cohort name must occur exactly once in the checked catalog'
+jq -e --argjson names "${names_json}" '[$names[] as $name | ([.builtins[] | select(.name == $name)] | length) <= 1] | all' "${catalog}" >/dev/null || die 'a cohort name occurs more than once in the checked catalog'
 jq -e --argjson names "${names_json}" '[$names[] as $name | ([.builtins[] | select(.name == $name)] | length) == 1] | all' "${live}" >/dev/null || die 'every cohort name must occur exactly once in the live catalog'
 
 canonical_hash() {
@@ -92,7 +92,11 @@ trap 'rm -f "${candidate}"' EXIT
 cp -p "${catalog}" "${candidate}"
 jq --slurpfile live "${live}" --argjson names "${names_json}" '
   ($live[0].builtins | map({key: .name, value: .}) | from_entries) as $live_by_name
-  | .builtins |= map(.name as $name | if ($names | index($name)) != null then $live_by_name[$name] else . end)
+  | (.builtins | map(.name)) as $checked_names
+  | .builtins |= (
+      map(.name as $name | if ($names | index($name)) != null then $live_by_name[$name] else . end)
+      + [$names[] as $name | select(($checked_names | index($name)) == null) | $live_by_name[$name]]
+    )
 ' "${catalog}" >"${candidate}"
 
 jq -e . "${candidate}" >/dev/null

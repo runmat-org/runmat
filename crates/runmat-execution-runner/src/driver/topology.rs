@@ -1,5 +1,7 @@
 use runmat_execution::identity::WorkerId;
+use runmat_execution::state::PoolState;
 use runmat_execution::state::TaskState;
+use runmat_execution::PoolId;
 
 use crate::pool::{WorkerLifecycle, WorkerRecord, WorkerSpec};
 use crate::port::BackendReport;
@@ -7,7 +9,8 @@ use crate::task::{AttemptReport, TaskRecord, TaskSubmission};
 use crate::{RunnerError, RunnerResult};
 
 use super::state::attempt_state_is_terminal;
-use super::{Driver, DriverAction, DriverEventKind};
+use super::{Driver, DriverAction, DriverCommand, DriverEventKind};
+use crate::pool::ResizeRequest;
 
 impl Driver {
     /// Borrow the current scheduler-owned pool while the caller holds driver authority.
@@ -22,7 +25,89 @@ impl Driver {
             .ok_or(RunnerError::UnknownPool(pool_id))
     }
 
+    /// Reconciles a pool whose complete worker inventory is already registered.
+    ///
+    /// Process-local and browser hosts use stable logical workers whose backing
+    /// execution contexts are created on demand. Resizing those pools changes
+    /// which registered workers may accept new attempts; it does not provision
+    /// infrastructure. Remote hosts consume `DriverAction::ResizePool` instead.
+    pub fn resize_registered_pool(
+        &mut self,
+        pool_id: PoolId,
+        desired_workers: u32,
+    ) -> RunnerResult<Vec<DriverAction>> {
+        let resize_actions = self.handle(DriverCommand::ResizePool {
+            pool_id,
+            request: ResizeRequest { desired_workers },
+        })?;
+        let requested_resize = resize_actions.iter().any(|action| {
+            matches!(
+                action,
+                DriverAction::ResizePool {
+                    pool_id: action_pool,
+                    desired_workers: action_workers,
+                } if *action_pool == pool_id && *action_workers == desired_workers
+            )
+        });
+        if !requested_resize {
+            return Ok(resize_actions);
+        }
+
+        let pool = self
+            .snapshot
+            .pools
+            .get(&pool_id)
+            .ok_or(RunnerError::UnknownPool(pool_id))?;
+        let ready = pool
+            .workers
+            .values()
+            .filter(|worker| worker.accepts_work())
+            .map(|worker| worker.spec.id)
+            .collect::<Vec<_>>();
+        let ready_count = u32::try_from(ready.len())
+            .map_err(|_| RunnerError::Invalid("pool worker count exceeds u32".into()))?;
+        let mut actions = Vec::new();
+        if desired_workers < ready_count {
+            let count = usize::try_from(ready_count - desired_workers)
+                .map_err(|_| RunnerError::Invalid("pool resize count exceeds usize".into()))?;
+            for worker_id in ready.into_iter().rev().take(count) {
+                actions.extend(self.handle(DriverCommand::DrainWorker(worker_id))?);
+            }
+        } else if desired_workers > ready_count {
+            let count = usize::try_from(desired_workers - ready_count)
+                .map_err(|_| RunnerError::Invalid("pool resize count exceeds usize".into()))?;
+            let candidates = pool
+                .workers
+                .values()
+                .filter(|worker| {
+                    matches!(
+                        worker.lifecycle,
+                        WorkerLifecycle::Draining | WorkerLifecycle::Stopped
+                    )
+                })
+                .map(|worker| worker.spec.id)
+                .take(count)
+                .collect::<Vec<_>>();
+            if candidates.len() != count {
+                return Err(RunnerError::Invalid(format!(
+                    "pool {pool_id} does not have enough registered workers to reach {desired_workers}"
+                )));
+            }
+            for worker_id in candidates {
+                actions.extend(self.handle(DriverCommand::ActivateWorker(worker_id))?);
+            }
+        }
+        actions.extend(self.handle(DriverCommand::SetPoolState {
+            pool_id,
+            state: PoolState::Ready,
+        })?);
+        Ok(actions)
+    }
+
     pub(super) fn register_worker(&mut self, spec: WorkerSpec) -> RunnerResult<()> {
+        spec.host.validate().map_err(|error| {
+            RunnerError::Invalid(format!("worker host inventory is invalid: {error}"))
+        })?;
         let pool = self.pool_mut(spec.pool_id)?;
         if let Some(existing) = pool.workers.get(&spec.id) {
             if existing.lifecycle == WorkerLifecycle::Lost
@@ -62,6 +147,18 @@ impl Driver {
         let pool_id = spec.pool_id;
         pool.workers.insert(worker_id, WorkerRecord::new(spec));
         self.emit(DriverEventKind::WorkerRegistered { worker_id, pool_id });
+        Ok(())
+    }
+
+    pub(super) fn activate_worker(&mut self, worker_id: WorkerId) -> RunnerResult<()> {
+        let worker = self.worker_mut(worker_id)?;
+        if worker.lifecycle == WorkerLifecycle::Lost {
+            return Err(RunnerError::Invalid(format!(
+                "lost worker {worker_id} cannot be activated"
+            )));
+        }
+        worker.lifecycle = WorkerLifecycle::Ready;
+        self.emit(DriverEventKind::WorkerActivated { worker_id });
         Ok(())
     }
 
@@ -133,9 +230,33 @@ impl Driver {
 
     pub(super) fn submit(&mut self, submission: TaskSubmission) -> RunnerResult<()> {
         submission.retry_resource_envelope()?;
+        submission.request.validate_executable().map_err(|error| {
+            RunnerError::Invalid(format!("task executable identity is invalid: {error}"))
+        })?;
         submission.request.resources.validate().map_err(|error| {
             RunnerError::Invalid(format!("task resource request is invalid: {error}"))
         })?;
+        submission.request.host.validate().map_err(|error| {
+            RunnerError::Invalid(format!("task host requirement is invalid: {error}"))
+        })?;
+        let value_limits = match &submission.request.executable {
+            runmat_execution::TaskExecutableIdentity::ProgramArtifact(_) => {
+                runmat_execution::value::ValueLimits::default()
+            }
+            runmat_execution::TaskExecutableIdentity::OwnedBuiltin(_) => {
+                runmat_execution::OWNED_BUILTIN_VALUE_LIMITS
+            }
+        };
+        for input in &submission.request.inputs {
+            input
+                .validate_for_transport(
+                    value_limits,
+                    runmat_execution::value::ValueTransportContext::Portable,
+                )
+                .map_err(|error| {
+                    RunnerError::Invalid(format!("task input is not portable: {error}"))
+                })?;
+        }
         if !self
             .snapshot
             .cancellation
@@ -160,11 +281,24 @@ impl Driver {
             .pools
             .get(&submission.request.pool_id)
             .ok_or(RunnerError::UnknownPool(submission.request.pool_id))?;
-        if !crate::scheduler::fits(
+        if !crate::scheduler::scalar_resources_fit(
             &pool.spec.resource_limit,
             &Default::default(),
             &submission.request.resources,
-        ) {
+        ) || (!pool.workers.is_empty()
+            && !pool.workers.values().any(|worker| {
+                submission
+                    .request
+                    .host
+                    .is_satisfied_by(&worker.spec.host)
+                    .is_ok()
+                    && crate::scheduler::fits(
+                        &worker.spec.resources,
+                        &Default::default(),
+                        &submission.request.resources,
+                    )
+            }))
+        {
             return Err(RunnerError::Invalid(
                 "task resource request cannot be satisfied by the target pool".into(),
             ));
@@ -232,6 +366,20 @@ impl Driver {
         }
         self.snapshot.tasks.insert(task_id, record);
         self.emit(DriverEventKind::TaskSubmitted { task_id, state });
+        Ok(())
+    }
+
+    pub(super) fn submit_batch(&mut self, submissions: Vec<TaskSubmission>) -> RunnerResult<()> {
+        if submissions.is_empty() {
+            return Err(RunnerError::Invalid(
+                "task submission batch must not be empty".into(),
+            ));
+        }
+        let mut staged = Driver::from_snapshot(self.snapshot.clone())?;
+        for submission in submissions {
+            staged.submit(submission)?;
+        }
+        self.snapshot = staged.snapshot;
         Ok(())
     }
 }

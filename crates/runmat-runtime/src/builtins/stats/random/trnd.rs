@@ -192,7 +192,8 @@ pub(crate) async fn trnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )?;
     }
     let len = tensor::element_count(&shape);
-    let data = random::generate_student_t(&nu, len, BUILTIN_NAME)?;
+    let mut turn = random::acquire_turn(None, BUILTIN_NAME).await?;
+    let data = random::generate_student_t(&mut turn, &nu, len, BUILTIN_NAME)?;
     build_output(data, shape, output_precision, gpu_source)
 }
 
@@ -234,17 +235,21 @@ fn build_output(
     .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))?;
 
     if let Some(source) = gpu_source {
-        let provider = runmat_accelerate_api::provider_for_handle(&source)
-            .or_else(runmat_accelerate_api::provider)
-            .ok_or_else(|| {
-                trnd_error(
-                    &ERROR_INTERNAL,
-                    "trnd: no acceleration provider registered for GPU output",
+        let provider = runmat_accelerate_api::provider_for_handle(&source).ok_or_else(|| {
+            trnd_error(
+                &ERROR_INTERNAL,
+                "trnd: no acceleration provider registered for GPU output",
+            )
+        })?;
+        let handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[&source])
+            .map_err(|err| {
+                crate::runtime_error::with_provider_execution_source(
+                    trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")),
+                    runmat_accelerate_api::ProviderExecutionError::from_source(err),
                 )
             })?;
-        let handle = gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))?;
-        return Ok(gpu_helpers::resident_gpu_value(handle));
+        let handle = gpu_helpers::propagate_owned_output_provenance(handle, [&source])?;
+        return gpu_helpers::resident_gpu_value(handle);
     }
 
     match output_precision {
@@ -281,7 +286,7 @@ async fn parse_args(
         .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
     let nu = tensor::value_into_tensor_for(BUILTIN_NAME, nu_value)
         .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
-    let nu_shape = nu.shape.clone();
+    let nu_shape = nu.shape().to_vec();
     let nu = tensor::tensor_into_values_f64(nu);
     if nu.iter().any(|value| value.is_nan() || *value <= 0.0) {
         return Err(trnd_error(
@@ -400,7 +405,7 @@ mod tests {
         ]))
         .expect("trnd");
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![3, 4]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[3, 4]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -408,9 +413,31 @@ mod tests {
         let out = block_on(trnd_builtin(vec![Value::Num(5.0), Value::Tensor(size)]))
             .expect("trnd size vector");
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn trnd_normalizes_rank_zero_and_rank_one_nu_shapes() {
+        let _guard = random::test_guard();
+        let _guard = reset();
+
+        let scalar = block_on(trnd_builtin(vec![Value::Tensor(
+            Tensor::new(vec![5.0], Vec::new()).unwrap(),
+        )]))
+        .expect("rank-zero nu");
+        assert!(matches!(scalar, Value::Num(value) if value.is_finite()));
+
+        let vector = block_on(trnd_builtin(vec![Value::Tensor(
+            Tensor::new(vec![5.0, 6.0], vec![2]).unwrap(),
+        )]))
+        .expect("rank-one nu");
+        let Value::Tensor(vector) = vector else {
+            panic!("rank-one output");
+        };
+        assert_eq!(vector.shape(), &[2, 1]);
     }
 
     #[test]
@@ -418,7 +445,7 @@ mod tests {
         let nu = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let out = block_on(trnd_builtin(vec![Value::Tensor(nu.clone())])).expect("trnd");
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![3, 1]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[3, 1]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -440,7 +467,7 @@ mod tests {
         let out = block_on(trnd_builtin(vec![Value::Tensor(nu)])).expect("trnd");
         match out {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![3, 1]);
+                assert_eq!(tensor.shape(), &[3, 1]);
                 assert!(tensor
                     .materialize_f64()
                     .iter()
@@ -454,7 +481,7 @@ mod tests {
         let out =
             block_on(trnd_builtin(vec![Value::Tensor(nu), Value::Tensor(size)])).expect("trnd");
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -488,16 +515,14 @@ mod tests {
                 Some("RunMat:compatibility:TrndIntegerSizeExtension")
             );
 
-            let resident_nu = GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 9_305_001,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::U16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let resident_nu = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::U16,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle;
             let error = block_on(trnd_builtin(vec![Value::GpuTensor(resident_nu.clone())]))
                 .expect_err("MATLAB mode rejects resident integer nu before gather");
             assert_eq!(
@@ -505,16 +530,14 @@ mod tests {
                 Some("RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension")
             );
 
-            let resident_size = GpuTensorHandle {
-                shape: vec![1, 2],
-                device_id: 0,
-                buffer_id: 9_305_002,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::U16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let resident_size = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 2],
+                    runmat_accelerate_api::NumericElementType::U16,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle;
             let error = block_on(trnd_builtin(vec![
                 Value::Num(5.0),
                 Value::GpuTensor(resident_size.clone()),
@@ -536,7 +559,7 @@ mod tests {
             let Value::Tensor(tensor) = out else {
                 panic!("expected tensor output");
             };
-            assert_eq!(tensor.shape, vec![2, 3]);
+            assert_eq!(tensor.shape(), &[2, 3]);
         }
     }
 
@@ -550,7 +573,7 @@ mod tests {
             panic!("expected native-single tensor");
         };
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert!(tensor
             .materialize_f64()
             .iter()
@@ -573,7 +596,7 @@ mod tests {
                 runmat_accelerate_api::handle_precision(&handle),
                 Some(ProviderPrecision::F32)
             );
-            assert_eq!(handle.shape, vec![2, 1]);
+            assert_eq!(handle.shape(), &[2, 1]);
         });
     }
 

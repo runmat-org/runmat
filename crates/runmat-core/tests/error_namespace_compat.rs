@@ -11,6 +11,7 @@ fn extract_identifier_and_message(error: RunError) -> (Option<String>, String) {
     match error {
         RunError::Semantic(err) => (err.identifier, err.message),
         RunError::Compile(err) => (err.identifier, err.message),
+        RunError::SourceCompile(bound) => (bound.error.identifier, bound.error.message),
         RunError::Runtime(err) => (
             err.identifier().map(ToString::to_string),
             err.message().to_string(),
@@ -25,7 +26,7 @@ fn assert_error_prefix(namespace: &str, code: &str) {
 
     let request = runmat_core::abi::ExecutionRequest::for_source(
         runmat_core::abi::SourceInput::Text {
-            name: "<test>".to_string(),
+            name: "<test>".into(),
             text: code.to_string(),
         },
         CompatMode::Matlab,

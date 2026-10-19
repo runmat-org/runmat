@@ -6,7 +6,7 @@ use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
     ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_geometry_core::{
     decode_geometry_document, encode_geometry_document, GeometryDocument, GeometryModel,
@@ -311,10 +311,16 @@ impl MeshingHostWorkload {
         let request = ProgramExecutionRequest {
             console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
-            function: 0,
+            callable: runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                None,
+            ),
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
             arguments,
             requested_outputs: 1,
         };
@@ -381,7 +387,9 @@ impl MeshingHostWorkload {
             .iter()
             .map(|value| match value {
                 ValuePayload::Object(root) => Ok((**root).clone()),
-                ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
+                ValuePayload::Inline(_)
+                | ValuePayload::Distributed(_)
+                | ValuePayload::Composite(_) => Err(MeshingExecutionError::Invalid(
                     "meshing host inputs must be externalized root manifests".into(),
                 )),
             })

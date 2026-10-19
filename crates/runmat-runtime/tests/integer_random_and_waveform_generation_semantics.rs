@@ -1,5 +1,8 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle, IntegerElementType};
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage,
+    HostNumericDataOwned, HostNumericTensorOwned,
+};
 use runmat_value::{IntValue, IntegerStorage, NumericDType, Tensor, Value};
 
 const PACKET: [(&str, usize, &[usize]); 9] = [
@@ -22,7 +25,10 @@ fn floating_tensor(values: Vec<f64>, shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new(values, shape.to_vec()).expect("floating tensor"))
 }
 
-fn call(name: &str, args: Vec<Value>) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+fn call(
+    name: &str,
+    args: Vec<Value>,
+) -> Result<runmat_runtime::execution::RootedValue, Box<runmat_runtime::RuntimeError>> {
     block_on(runmat_runtime::call_builtin_async(name, &args)).map_err(Box::new)
 }
 
@@ -39,18 +45,22 @@ fn all_integer_scalars(value: i8) -> Vec<IntValue> {
     ]
 }
 
-fn synthetic_resident_integer(buffer_id: u64, shape: Vec<usize>) -> GpuTensorHandle {
-    let handle = GpuTensorHandle {
-        shape,
-        device_id: u32::MAX - 17,
-        buffer_id,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::U64.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    handle.with_provenance(GpuHandleProvenance::Explicit)
+fn resident_integer(shape: Vec<usize>) -> GpuTensorHandle {
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::U64(vec![u64::MAX; shape.iter().product()]),
+            shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(!runmat_accelerate_api::registered_providers()
+        .iter()
+        .any(|provider| provider.device_id() == allocation.handle.device_id()));
+    allocation
+        .handle
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap()
 }
 
 #[test]
@@ -244,10 +254,7 @@ fn strict_mode_rejects_every_new_typed_integer_extension_by_stable_identifier() 
 #[test]
 fn strict_resident_integer_gates_run_before_provider_lookup() {
     let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
-    let handles = [
-        synthetic_resident_integer(1, vec![1, 2]),
-        synthetic_resident_integer(2, vec![1, 1]),
-    ];
+    let handles = [resident_integer(vec![1, 2]), resident_integer(vec![1, 1])];
     let cases = [
         (
             "rectpuls",
@@ -265,7 +272,13 @@ fn strict_resident_integer_gates_run_before_provider_lookup() {
         assert_eq!(error.identifier(), Some(identifier), "{name}: {error:?}");
     }
     for handle in handles {
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        let physical = handle.allocation_lease().downgrade();
+        assert_eq!(
+            handle.physical().element_type(),
+            runmat_accelerate_api::NumericElementType::U64
+        );
+        drop(handle);
+        assert!(physical.acquire().is_none());
     }
 }
 
@@ -310,13 +323,13 @@ fn documented_random_size_controls_accept_all_eight_integer_classes() {
         ] {
             let value =
                 call(name, args).unwrap_or_else(|error| panic!("{name}/{size:?}: {error:?}"));
-            let Value::Tensor(tensor) = value else {
+            let Value::Tensor(tensor) = value.value() else {
                 panic!("{name}/{size:?}: expected tensor");
             };
             if name == "randperm" {
-                assert_eq!(tensor.shape, vec![1, 2], "{name}/{size:?}");
+                assert_eq!(tensor.shape(), &[1, 2], "{name}/{size:?}");
             } else {
-                assert_eq!(tensor.shape, vec![2, 2], "{name}/{size:?}");
+                assert_eq!(tensor.shape(), &[2, 2], "{name}/{size:?}");
             }
             assert_eq!(tensor.numeric_dtype(), NumericDType::F64, "{name}/{size:?}");
         }
@@ -326,7 +339,8 @@ fn documented_random_size_controls_accept_all_eight_integer_classes() {
 #[test]
 fn rectpuls_uses_left_closed_right_open_edges() {
     let values = floating_tensor(vec![-0.5, 0.0, 0.5], &[1, 3]);
-    let Value::Tensor(output) = call("rectpuls", vec![values]).expect("rectpuls") else {
+    let output = call("rectpuls", vec![values]).expect("rectpuls");
+    let Value::Tensor(output) = output.value() else {
         panic!("expected tensor");
     };
     assert_eq!(output.materialize_f64(), vec![1.0, 1.0, 0.0]);
@@ -337,12 +351,12 @@ fn randsample_preserves_exact_wide_integer_population_values() {
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let base = 9_007_199_254_740_992_u64;
     let population = integer_tensor(IntegerStorage::U64(vec![base, base + 1]), &[1, 2]);
-    let Value::Tensor(output) =
-        call("randsample", vec![population, Value::Num(2.0)]).expect("wide integer population")
-    else {
+    let output =
+        call("randsample", vec![population, Value::Num(2.0)]).expect("wide integer population");
+    let Value::Tensor(output) = output.value() else {
         panic!("expected integer tensor");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     let IntegerStorage::U64(values) = output.integer_storage().expect("uint64 storage") else {
         panic!("expected uint64 storage");
     };

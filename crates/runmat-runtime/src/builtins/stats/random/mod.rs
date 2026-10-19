@@ -1,5 +1,6 @@
 pub(crate) mod distribution_random;
 pub(crate) mod exprnd;
+pub(crate) mod gpurng;
 pub(crate) mod lhsdesign;
 pub(crate) mod mvnrnd;
 pub(crate) mod normrnd;

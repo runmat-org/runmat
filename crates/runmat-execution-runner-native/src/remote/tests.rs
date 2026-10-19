@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use runmat_execution::security::{
     EndpointIdentityEvidence, EndpointRecipientKey, ExecutionTrustTier,
 };
-use runmat_execution::{Digest, OutputContract, ProgramRevision};
+use runmat_execution::{
+    Digest, OutputContract, ProgramCallable, ProgramFunctionId, ProgramRevision,
+};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     encode_run_key_envelope, EncryptionPurpose, PortableExecutionEncryption, RunKeyMaterial,
@@ -16,7 +18,7 @@ use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
     ProgramExecutionObjectClosure, ProgramExecutionObjectLocation, ProgramExecutionOutputs,
-    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_transport_native::control::{
     CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
@@ -197,15 +199,15 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
     let recipe = recipe(revision.clone());
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        serde_json::to_vec(&registry).unwrap(),
+        ExecutableForm::InterpreterBytecodeV2,
+        runmat_vm::encode_interpreter_program_v2(&registry).unwrap(),
     )
     .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             artifact.executable_bytes.clone(),
         )
         .build()
@@ -256,7 +258,7 @@ async fn remote_driver_commits_verified_externalized_results() {
     let run_id = "run-externalized-result";
     let bytes = b"canonical analysis result object".to_vec();
     let reference = runmat_execution::value::ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: runmat_execution::identity::ValueId::derive(&[b"remote-result", &bytes]),
         logical_digest: Digest::sha256(&bytes),
         encoded_length: bytes.len() as u64,
@@ -452,10 +454,13 @@ async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
     let request = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function: 0,
+        callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: Vec::new(),
         requested_outputs: 1,
     };
@@ -610,7 +615,9 @@ async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
         1,
     )
     .unwrap();
-    let request = workload.program_request().unwrap();
+    let request = workload
+        .program_request(runmat_types::InteropManifest::empty())
+        .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, request.recipe.program_revision.clone())
         .unwrap()
         .with_materialized_program(
@@ -621,10 +628,13 @@ async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
         .build()
         .unwrap();
     let response = run_encrypted_remote_request("run-remote-test-conformance", bundle).await;
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         panic!("remote driver rejected an exact test workload: {response:?}");
     };
-    let execution = decode_execution(&value).unwrap();
+    let [value] = outputs.as_slice() else {
+        panic!("expected one test output")
+    };
+    let execution = decode_execution(value).unwrap();
     assert_eq!(
         execution.result.state.disposition,
         TerminalDisposition::Passed,
@@ -700,6 +710,7 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(
             resolved.frozen.clone(),
         ))
+        .await
         .unwrap();
     let prepared = session
         .prepare_tests(&snapshot, &TestSelector::default())
@@ -711,7 +722,9 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
         1,
     )
     .unwrap();
-    let request = workload.program_request().unwrap();
+    let request = workload
+        .program_request(runmat_types::InteropManifest::empty())
+        .unwrap();
     let bundle =
         ExecutionBundleBuilder::native(&resolved.frozen, request.recipe.program_revision.clone())
             .unwrap()
@@ -727,10 +740,13 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
 
     let response =
         run_encrypted_remote_request("run-private-registry-package-conformance", bundle).await;
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         panic!("credential-free remote private package execution failed: {response:?}");
     };
-    let execution = decode_execution(&value).unwrap();
+    let [value] = outputs.as_slice() else {
+        panic!("expected one test output")
+    };
+    let execution = decode_execution(value).unwrap();
     assert_eq!(
         execution.result.state.disposition,
         TerminalDisposition::Passed,
@@ -888,14 +904,15 @@ async fn run_encrypted_remote_request_with_prior_sequence(
             bundle.manifest.portable_environment.clone(),
         )
         .unwrap(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function: 0,
+        callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
         requested_outputs: 1,
     };
     let inputs_contract = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: Vec::new(),
         objects: Vec::new(),
     };
@@ -985,6 +1002,7 @@ async fn run_encrypted_remote_request_with_prior_sequence(
                 .map(|(download, _)| download.clone()),
             cancellation_requested: false,
             driver_resources: resource_request(),
+            driver_accelerator_devices: Vec::new(),
             desired_worker_count: 0,
             worker_resources: resource_request(),
         },
@@ -1005,6 +1023,7 @@ async fn run_encrypted_remote_request_with_prior_sequence(
     let config = RemoteDriverConfig {
         authority,
         endpoint_identity_file: identity_path,
+        ready_v1: false,
     };
 
     run_remote_driver(config, control.clone()).await.unwrap();
@@ -1077,9 +1096,7 @@ fn resource_request() -> runmat_execution_transport_native::control::ResourceReq
         cpu_millicores: 1_000,
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 60_000,
     }
 }
@@ -1091,12 +1108,16 @@ fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
         entrypoint: "0".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-test"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     }
 }
@@ -1180,7 +1201,7 @@ fn download(index: usize, kind: &str, bytes: &[u8]) -> DriverArtifactDownload {
 fn result_object(run_id: &str, bytes: &[u8]) -> ProgramExecutionObject {
     ProgramExecutionObject {
         reference: runmat_execution::value::ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
             id: runmat_execution::identity::ValueId::derive(&[b"recovery-object", bytes]),
             logical_digest: Digest::sha256(bytes),
             encoded_length: bytes.len() as u64,

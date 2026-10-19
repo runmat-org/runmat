@@ -1,6 +1,10 @@
 const MAX_NATIVE_IR_BYTES: usize = 512 * 1024 * 1024;
 const MAX_PROGRAM_BYTES: usize = 512 * 1024 * 1024;
 const MAX_RESUME_POINT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_NATIVE_INTERFACE_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_MEX_ARTIFACT_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_JAVA_ARTIFACT_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_PYTHON_ARTIFACT_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_ARGUMENTS: i32 = 16_384;
 pub type AotFunctionResolver = unsafe extern "C" fn(function: u32) -> *const std::ffi::c_void;
 pub type AotBuiltinResolver = unsafe extern "C" fn(binding: u32) -> *const std::ffi::c_void;
@@ -11,12 +15,21 @@ pub struct LinkedProcessImage {
     pub argv: *const *const std::ffi::c_char,
     pub function_resolver: *const std::ffi::c_void,
     pub builtin_resolver: *const std::ffi::c_void,
+    pub source_service_factory: *const std::ffi::c_void,
     pub native_ir: *const u8,
     pub native_ir_len: u64,
     pub program: *const u8,
     pub program_len: u64,
     pub resume_points: *const u8,
     pub resume_points_len: u64,
+    pub native_interfaces: *const u8,
+    pub native_interfaces_len: u64,
+    pub mex_artifacts: *const u8,
+    pub mex_artifacts_len: u64,
+    pub java_artifacts: *const u8,
+    pub java_artifacts_len: u64,
+    pub python_artifacts: *const u8,
+    pub python_artifacts_len: u64,
 }
 
 pub struct AotProcessInput {
@@ -25,6 +38,36 @@ pub struct AotProcessInput {
     pub native_ir: Vec<u8>,
     pub program: Vec<u8>,
     pub resume_points: Vec<u8>,
+    pub native_interfaces: Vec<u8>,
+    pub mex_artifacts: Vec<u8>,
+    pub java_artifacts: Vec<u8>,
+    pub python_artifacts: Vec<u8>,
+}
+
+/// Process bytes copied from the generated, qualified linked-image entry.
+/// Owned inputs supplied by embedders cannot construct this authority.
+pub(crate) struct LinkedAotProcessInput {
+    input: AotProcessInput,
+    source_service_factory: *const std::ffi::c_void,
+}
+
+impl LinkedAotProcessInput {
+    /// # Safety
+    /// The caller must be `runmat_aot_main` reached from the generated launcher
+    /// linked with the exact verified selected object and runtime closure.
+    pub(crate) unsafe fn from_verified_link(
+        input: AotProcessInput,
+        source_service_factory: *const std::ffi::c_void,
+    ) -> Self {
+        Self {
+            input,
+            source_service_factory,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (AotProcessInput, *const std::ffi::c_void) {
+        (self.input, self.source_service_factory)
+    }
 }
 
 impl AotProcessInput {
@@ -83,14 +126,77 @@ impl AotProcessInput {
                 "resume-point",
             )
         }?;
+        let native_interfaces = unsafe {
+            copy_bounded(
+                input.native_interfaces,
+                input.native_interfaces_len,
+                MAX_NATIVE_INTERFACE_BYTES,
+                "native-interface",
+            )
+        }?;
+        let mex_artifacts = unsafe {
+            copy_bounded(
+                input.mex_artifacts,
+                input.mex_artifacts_len,
+                MAX_MEX_ARTIFACT_BYTES,
+                "MEX artifact",
+            )
+        }?;
+        let java_artifacts = unsafe {
+            copy_bounded(
+                input.java_artifacts,
+                input.java_artifacts_len,
+                MAX_JAVA_ARTIFACT_BYTES,
+                "Java artifact",
+            )
+        }?;
+        let python_artifacts = unsafe {
+            copy_bounded(
+                input.python_artifacts,
+                input.python_artifacts_len,
+                MAX_PYTHON_ARTIFACT_BYTES,
+                "Python artifact",
+            )
+        }?;
         Ok(Self {
             function_resolver,
             builtin_resolver,
             native_ir,
             program,
             resume_points,
+            native_interfaces,
+            mex_artifacts,
+            java_artifacts,
+            python_artifacts,
         })
     }
+}
+
+/// Copy the launcher's C argument vector for private-mode dispatch.
+///
+/// # Safety
+///
+/// A positive `argc` requires `argv` to point to an array of at least `argc`
+/// valid, null-terminated C strings.
+pub unsafe fn copy_process_arguments(
+    argc: i32,
+    argv: *const *const std::ffi::c_char,
+) -> Result<Vec<std::ffi::OsString>, String> {
+    if !(0..=MAX_ARGUMENTS).contains(&argc) || (argc > 0 && argv.is_null()) {
+        return Err("standalone launcher arguments are invalid".into());
+    }
+    let mut arguments = Vec::with_capacity(argc as usize);
+    for index in 0..argc as usize {
+        // SAFETY: the caller guarantees an argv array with at least argc entries.
+        let pointer = unsafe { *argv.add(index) };
+        if pointer.is_null() {
+            return Err("standalone launcher contains a null argument".into());
+        }
+        // SAFETY: every argv entry is guaranteed to be a null-terminated C string.
+        let value = unsafe { std::ffi::CStr::from_ptr(pointer) };
+        arguments.push(value.to_string_lossy().into_owned().into());
+    }
+    Ok(arguments)
 }
 
 unsafe fn copy_bounded(
@@ -113,7 +219,7 @@ unsafe fn copy_bounded(
 
 #[cfg(test)]
 mod tests {
-    use super::{AotProcessInput, LinkedProcessImage};
+    use super::{copy_process_arguments, AotProcessInput, LinkedProcessImage};
 
     #[test]
     fn raw_boundary_rejects_null_and_oversized_payloads_before_reading() {
@@ -124,12 +230,21 @@ mod tests {
                 argv: std::ptr::null(),
                 function_resolver: std::ptr::null(),
                 builtin_resolver: std::ptr::null(),
+                source_service_factory: std::ptr::null(),
                 native_ir: std::ptr::null(),
                 native_ir_len: 1,
                 program: one.as_ptr(),
                 program_len: 1,
                 resume_points: one.as_ptr(),
                 resume_points_len: 1,
+                native_interfaces: one.as_ptr(),
+                native_interfaces_len: 1,
+                mex_artifacts: one.as_ptr(),
+                mex_artifacts_len: 1,
+                java_artifacts: one.as_ptr(),
+                java_artifacts_len: 1,
+                python_artifacts: one.as_ptr(),
+                python_artifacts_len: 1,
             })
         };
         assert!(invalid.is_err());
@@ -140,14 +255,33 @@ mod tests {
                 argv: std::ptr::null(),
                 function_resolver: std::ptr::dangling(),
                 builtin_resolver: std::ptr::dangling(),
+                source_service_factory: std::ptr::null(),
                 native_ir: one.as_ptr(),
                 native_ir_len: (512_u64 * 1024 * 1024) + 1,
                 program: one.as_ptr(),
                 program_len: 1,
                 resume_points: one.as_ptr(),
                 resume_points_len: 1,
+                native_interfaces: one.as_ptr(),
+                native_interfaces_len: 1,
+                mex_artifacts: one.as_ptr(),
+                mex_artifacts_len: 1,
+                java_artifacts: one.as_ptr(),
+                java_artifacts_len: 1,
+                python_artifacts: one.as_ptr(),
+                python_artifacts_len: 1,
             })
         };
         assert!(oversized.is_err());
+    }
+
+    #[test]
+    fn process_arguments_are_copied_before_private_mode_dispatch() {
+        let executable = std::ffi::CString::new("compiled-program").unwrap();
+        let marker = std::ffi::CString::new("--__runmat-extension-host").unwrap();
+        let pointers = [executable.as_ptr(), marker.as_ptr()];
+        let arguments = unsafe { copy_process_arguments(2, pointers.as_ptr()) }.unwrap();
+        assert_eq!(arguments[1], "--__runmat-extension-host");
+        assert!(unsafe { copy_process_arguments(1, std::ptr::null()) }.is_err());
     }
 }

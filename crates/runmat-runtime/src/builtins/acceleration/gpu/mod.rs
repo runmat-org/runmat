@@ -4,9 +4,9 @@
 //! provider interface. If no provider is registered, calls will return an error.
 
 pub mod arrayfun;
+mod device_metadata;
 pub mod gather;
 pub mod gpuarray;
 pub mod gpudevice;
 pub mod gpuinfo;
 pub mod pagefun;
-pub(crate) mod type_resolvers;

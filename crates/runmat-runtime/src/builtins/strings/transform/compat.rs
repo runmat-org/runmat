@@ -1,6 +1,12 @@
 //! MATLAB text transformation compatibility helpers.
 
 use regex::Regex;
+
+#[cfg(test)]
+use super::{
+    extractafter::extract_after_builtin, extractbefore::extract_before_builtin,
+    insertafter::insert_after_builtin, insertbefore::insert_before_builtin,
+};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
@@ -8,7 +14,18 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
+    BuiltinSignatureDescriptor, ResolveContext, Type, ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
+    ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION, ERASE_PUNCTUATION_ERROR_INVALID_INPUT,
+    ERASE_PUNCTUATION_ERROR_INVALID_OPTION, ERASE_URLS_BROAD_CELL_EXTENSION,
+    ERASE_URLS_CHAR_MATRIX_EXTENSION, ERASE_URLS_ERROR_INVALID_INPUT, EXTRACT_AFTER_ERRORS,
+    EXTRACT_BEFORE_ERRORS, INSERT_AFTER_BROAD_TEXT_EXTENSION,
+    INSERT_AFTER_RESIDENT_POSITION_EXTENSION, INSERT_BEFORE_BROAD_TEXT_EXTENSION,
+    INSERT_BEFORE_RESIDENT_POSITION_EXTENSION, INSERT_ERRORS,
+};
+#[cfg(test)]
+use runmat_builtins::{
+    EXTRACT_AFTER_DESCRIPTOR, EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION,
+    EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION, EXTRACT_BEFORE_DESCRIPTOR,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntValue, NumericScalar, StringArray, Value};
@@ -31,22 +48,6 @@ const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Output value.",
-}];
-
-const OUT_NEW_STR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newStr",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text with matching content erased.",
-}];
-
-const OUT_NEW_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated tokenized documents.",
 }];
 
 const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -82,32 +83,6 @@ const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const IN_TEXT_BOUNDARY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "text",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input string array, character vector, or cell array of character vectors.",
-    },
-    BuiltinParamDescriptor {
-        name: "boundary",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description:
-            "Text/pattern boundary or positive numeric position, scalar or the same size as text.",
-    },
-];
-
-const REST: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "arg",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Values to append.",
-}];
-
 const NO_ERRORS: [BuiltinErrorDescriptor; 0] = [];
 
 macro_rules! descriptor {
@@ -125,24 +100,11 @@ macro_rules! descriptor {
     };
 }
 
-descriptor!(APPEND_DESCRIPTOR, "s = append(arg1, ...)", &REST, &OUT_ANY);
-
-pub const APPEND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "append combines string arrays, character vectors, or cell arrays of character vectors. Numeric and integer values are not text inputs; all eight integer classes and resident numeric handles reject without implicit string conversion or provider gather.",
-};
 descriptor!(REVERSE_DESCRIPTOR, "s = reverse(text)", &IN_TEXT, &OUT_ANY);
 pub const REVERSE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
     notes: "reverse accepts string arrays, character vectors, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
-};
-descriptor!(DEBLANK_DESCRIPTOR, "s = deblank(text)", &IN_TEXT, &OUT_ANY);
-pub const DEBLANK_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "deblank accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider gather.",
 };
 descriptor!(
     STRJUST_DESCRIPTOR,
@@ -167,315 +129,6 @@ pub const SPLITLINES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "splitlines accepts host string, character, or cell text and returns a string or cell text container. Numeric, logical, symbolic, and provider-resident values reject before gather or provider access.",
     };
-const EXTRACT_BEFORE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BuiltinErrorDescriptor {
-        code: "RM.EXTRACT_BEFORE.INVALID_INPUT",
-        identifier: Some("RunMat:extractBefore:InvalidInput"),
-        when: "The call does not contain exactly one documented text input and one boundary.",
-        message: "extractBefore: invalid input",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.EXTRACT_BEFORE.INVALID_BOUNDARY",
-        identifier: Some("RunMat:extractBefore:InvalidBoundary"),
-        when: "A numeric boundary is not a positive integer or a text/pattern boundary is invalid.",
-        message: "extractBefore: invalid boundary",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.EXTRACT_BEFORE.SIZE_MISMATCH",
-        identifier: Some("RunMat:extractBefore:SizeMismatch"),
-        when: "A nonscalar boundary does not have the same shape as the text input.",
-        message: "extractBefore: boundary size must match text",
-    },
-];
-pub const EXTRACT_BEFORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "s = extractBefore(text, boundary)",
-        inputs: &IN_TEXT_BOUNDARY,
-        outputs: &OUT_ANY,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &EXTRACT_BEFORE_ERRORS,
-};
-const EXTRACT_AFTER_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BuiltinErrorDescriptor {
-        code: "RM.EXTRACT_AFTER.INVALID_INPUT",
-        identifier: Some("RunMat:extractAfter:InvalidInput"),
-        when: "The call does not contain exactly one documented text input and one boundary.",
-        message: "extractAfter: invalid input",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.EXTRACT_AFTER.INVALID_BOUNDARY",
-        identifier: Some("RunMat:extractAfter:InvalidBoundary"),
-        when: "A numeric boundary is not a positive integer or a text/pattern boundary is invalid.",
-        message: "extractAfter: invalid boundary",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.EXTRACT_AFTER.SIZE_MISMATCH",
-        identifier: Some("RunMat:extractAfter:SizeMismatch"),
-        when: "A nonscalar boundary does not have the same shape as the text input.",
-        message: "extractAfter: boundary size must match text",
-    },
-];
-pub const EXTRACT_AFTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "s = extractAfter(text, boundary)",
-        inputs: &IN_TEXT_BOUNDARY,
-        outputs: &OUT_ANY,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &EXTRACT_AFTER_ERRORS,
-};
-
-const EXTRACT_BOUNDARY_POSITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "pos",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The numeric position is a one-based structural control and accepts scalar or same-size arrays from every built-in integer class.",
-    }];
-const EXTRACT_BOUNDARY_TEXT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "str",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The first argument is text; integer data is rejected before provider access.",
-    }];
-pub const EXTRACT_BEFORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    extract_boundary_position_capability("newStr = extractBefore(str, integer_pos)"),
-    extract_boundary_text_capability("newStr = extractBefore(integer_str, boundary)"),
-];
-pub const EXTRACT_AFTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    extract_boundary_position_capability("newStr = extractAfter(str, integer_pos)"),
-    extract_boundary_text_capability("newStr = extractAfter(integer_str, boundary)"),
-];
-
-const fn extract_boundary_position_capability(
-    form: &'static str,
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs: &EXTRACT_BOUNDARY_POSITION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
-        notes: "Positions are read exactly with one-based indexing; the output preserves the input text container class and shape.",
-    }
-}
-
-const fn extract_boundary_text_capability(
-    form: &'static str,
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs: &EXTRACT_BOUNDARY_TEXT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer text input is outside the public text domain and rejects without numeric-to-text conversion.",
-    }
-}
-
-const EXTRACT_BEFORE_RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor =
-    extract_boundary_extension(
-        "extractbefore-resident-position",
-        "extractBefore with a resident numeric position is a RunMat extension",
-        "RunMat:compatibility:ExtractBeforeResidentPositionExtension",
-    );
-const EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = extract_boundary_extension(
-    "extractbefore-char-matrix",
-    "extractBefore row-wise character-matrix input is a RunMat extension",
-    "RunMat:compatibility:ExtractBeforeCharMatrixExtension",
-);
-const EXTRACT_BEFORE_STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = extract_boundary_extension(
-    "extractbefore-string-cell",
-    "extractBefore cells containing string scalars or nested cells are a RunMat extension",
-    "RunMat:compatibility:ExtractBeforeStringCellExtension",
-);
-const EXTRACT_BEFORE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    EXTRACT_BEFORE_RESIDENT_POSITION_EXTENSION,
-    EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION,
-    EXTRACT_BEFORE_STRING_CELL_EXTENSION,
-];
-const EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor =
-    extract_boundary_extension(
-        "extractafter-resident-position",
-        "extractAfter with a resident numeric position is a RunMat extension",
-        "RunMat:compatibility:ExtractAfterResidentPositionExtension",
-    );
-const EXTRACT_AFTER_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = extract_boundary_extension(
-    "extractafter-char-matrix",
-    "extractAfter row-wise character-matrix input is a RunMat extension",
-    "RunMat:compatibility:ExtractAfterCharMatrixExtension",
-);
-const EXTRACT_AFTER_STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = extract_boundary_extension(
-    "extractafter-string-cell",
-    "extractAfter cells containing string scalars or nested cells are a RunMat extension",
-    "RunMat:compatibility:ExtractAfterStringCellExtension",
-);
-const EXTRACT_AFTER_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION,
-    EXTRACT_AFTER_CHAR_MATRIX_EXTENSION,
-    EXTRACT_AFTER_STRING_CELL_EXTENSION,
-];
-
-const fn extract_boundary_extension(
-    id: &'static str,
-    description: &'static str,
-    error_identifier: &'static str,
-) -> BuiltinExtensionDescriptor {
-    BuiltinExtensionDescriptor {
-        id,
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description,
-        error_identifier: Some(error_identifier),
-    }
-}
-const INSERT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BuiltinErrorDescriptor {
-        code: "RM.INSERT.INVALID_INPUT",
-        identifier: Some("RunMat:insert:InvalidInput"),
-        when: "The call does not contain exactly one text input, one text or numeric boundary, and one replacement-text input.",
-        message: "text insertion: invalid input",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.INSERT.INVALID_BOUNDARY",
-        identifier: Some("RunMat:insert:InvalidBoundary"),
-        when: "A numeric position is not a positive integer or a textual boundary is invalid or absent.",
-        message: "text insertion: invalid boundary",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.INSERT.SIZE_MISMATCH",
-        identifier: Some("RunMat:insert:SizeMismatch"),
-        when: "A nonscalar boundary or replacement-text array does not have the same shape as the input text array.",
-        message: "text insertion: array size must match input text",
-    },
-];
-pub const INSERT_BEFORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "newStr = insertBefore(str, patOrPos, newText)",
-        inputs: &IN_TEXT_REST,
-        outputs: &OUT_ANY,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INSERT_ERRORS,
-};
-pub const INSERT_AFTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "newStr = insertAfter(str, patOrPos, newText)",
-        inputs: &IN_TEXT_REST,
-        outputs: &OUT_ANY,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INSERT_ERRORS,
-};
-
-const INSERT_POSITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "pos",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The numeric position is a one-based structural control and accepts scalar or same-size arrays from every built-in integer class, single, or double; logical is not numeric.",
-    }];
-const INSERT_TEXT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "str",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The source is text; integer data is rejected before provider access.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "newText",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The inserted value is text; integer data is rejected before provider access.",
-    },
-];
-const fn insert_position_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs: &INSERT_POSITION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
-        notes: "Positions are read exactly and output preserves the source text container class and shape.",
-    }
-}
-const fn insert_text_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs: &INSERT_TEXT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer source and replacement inputs are outside the public text domain and reject without numeric-to-text conversion.",
-    }
-}
-pub const INSERT_BEFORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    insert_position_capability("newStr = insertBefore(str, integer_pos, newText)"),
-    insert_text_capability("newStr = insertBefore(integer_str, boundary, integer_newText)"),
-];
-pub const INSERT_AFTER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    insert_position_capability("newStr = insertAfter(str, integer_pos, newText)"),
-    insert_text_capability("newStr = insertAfter(integer_str, boundary, integer_newText)"),
-];
-
-const INSERT_BEFORE_RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor = insert_extension(
-    "insertbefore-resident-position",
-    "insertBefore with an interactive resident numeric position is a RunMat extension",
-    "RunMat:compatibility:InsertBeforeResidentPositionExtension",
-);
-const INSERT_AFTER_RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor = insert_extension(
-    "insertafter-resident-position",
-    "insertAfter with an interactive resident numeric position is a RunMat extension",
-    "RunMat:compatibility:InsertAfterResidentPositionExtension",
-);
-const INSERT_BEFORE_BROAD_TEXT_EXTENSION: BuiltinExtensionDescriptor = insert_extension(
-    "insertbefore-broad-text-containers",
-    "insertBefore row-wise character matrices and non-cellstr text cells are RunMat extensions",
-    "RunMat:compatibility:InsertBeforeBroadTextExtension",
-);
-const INSERT_AFTER_BROAD_TEXT_EXTENSION: BuiltinExtensionDescriptor = insert_extension(
-    "insertafter-broad-text-containers",
-    "insertAfter row-wise character matrices and non-cellstr text cells are RunMat extensions",
-    "RunMat:compatibility:InsertAfterBroadTextExtension",
-);
-const fn insert_extension(
-    id: &'static str,
-    description: &'static str,
-    error_identifier: &'static str,
-) -> BuiltinExtensionDescriptor {
-    BuiltinExtensionDescriptor {
-        id,
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description,
-        error_identifier: Some(error_identifier),
-    }
-}
-pub const INSERT_BEFORE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    INSERT_BEFORE_RESIDENT_POSITION_EXTENSION,
-    INSERT_BEFORE_BROAD_TEXT_EXTENSION,
-];
-pub const INSERT_AFTER_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    INSERT_AFTER_RESIDENT_POSITION_EXTENSION,
-    INSERT_AFTER_BROAD_TEXT_EXTENSION,
-];
 descriptor!(
     REPLACE_BETWEEN_DESCRIPTOR,
     "s = replaceBetween(text, start, end, newText)",
@@ -529,116 +182,6 @@ pub const REPLACE_BETWEEN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescrip
         overload: BuiltinIntegerOverloadKind::FunctionSpecific,
         notes: "Integer data is outside the public text roles and is never converted to decimal text.",
     },
-];
-const ERASE_URLS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "newStr = eraseURLs(str)",
-        inputs: &IN_TEXT,
-        outputs: &OUT_NEW_STR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newDocuments = eraseURLs(documents)",
-        inputs: &IN_TEXT,
-        outputs: &OUT_NEW_DOCUMENTS,
-    },
-];
-const ERASE_PUNCTUATION_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "newStr = erasePunctuation(str)",
-        inputs: &IN_TEXT,
-        outputs: &OUT_NEW_STR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newDocuments = erasePunctuation(documents)",
-        inputs: &IN_TEXT,
-        outputs: &OUT_NEW_DOCUMENTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newDocuments = erasePunctuation(documents, 'TokenTypes', types)",
-        inputs: &IN_TEXT_REST,
-        outputs: &OUT_NEW_DOCUMENTS,
-    },
-];
-const ERASE_URLS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_URLS.INVALID_INPUT",
-    identifier: Some("RunMat:eraseURLs:InvalidInput"),
-    when: "Input is not documented host text or a tokenizedDocument object.",
-    message: "eraseURLs: input must be text or tokenizedDocument",
-};
-const ERASE_PUNCTUATION_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_PUNCTUATION.INVALID_INPUT",
-    identifier: Some("RunMat:erasePunctuation:InvalidInput"),
-    when: "Input is not documented host text or a tokenizedDocument object.",
-    message: "erasePunctuation: input must be text or tokenizedDocument",
-};
-const ERASE_PUNCTUATION_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_PUNCTUATION.INVALID_OPTION",
-    identifier: Some("RunMat:erasePunctuation:InvalidOption"),
-    when: "TokenTypes is malformed, empty, or used with non-document text.",
-    message: "erasePunctuation: invalid TokenTypes option",
-};
-const ERASE_URLS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERASE_URLS_ERROR_INVALID_INPUT];
-const ERASE_PUNCTUATION_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    ERASE_PUNCTUATION_ERROR_INVALID_INPUT,
-    ERASE_PUNCTUATION_ERROR_INVALID_OPTION,
-];
-pub const ERASE_URLS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ERASE_URLS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERASE_URLS_ERRORS,
-};
-pub const ERASE_PUNCTUATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ERASE_PUNCTUATION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERASE_PUNCTUATION_ERRORS,
-};
-pub const ERASE_URLS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "eraseURLs accepts host text or tokenizedDocument input only. All eight integer classes, logical values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
-    };
-pub const ERASE_PUNCTUATION_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "erasePunctuation accepts host text, tokenizedDocument, and textual TokenTypes values only. All eight integer classes, logical values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
-    };
-const ERASE_URLS_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "erase-urls-char-matrix-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eraseURLs with a multirow character matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EraseURLsCharMatrixExtension"),
-};
-const ERASE_URLS_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "erase-urls-broad-cell-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eraseURLs with nested cells or non-character cell elements is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EraseURLsBroadCellExtension"),
-};
-const ERASE_URLS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    ERASE_URLS_CHAR_MATRIX_EXTENSION,
-    ERASE_URLS_BROAD_CELL_EXTENSION,
-];
-const ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "erase-punctuation-char-matrix-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "erasePunctuation with a multirow character matrix is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ErasePunctuationCharMatrixExtension"),
-    };
-const ERASE_PUNCTUATION_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "erase-punctuation-broad-cell-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "erasePunctuation with nested cells or non-character cell elements is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ErasePunctuationBroadCellExtension"),
-    };
-const ERASE_PUNCTUATION_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION,
-    ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
 ];
 descriptor!(
     MATCHES_DESCRIPTOR,
@@ -698,13 +241,7 @@ fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::Runtim
 
 #[runtime_builtin(
     name = "append",
-    category = "strings/transform",
-    summary = "Append text inputs elementwise.",
-    keywords = "append,string,char,text,concatenate",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::APPEND_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::compat::APPEND_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn append_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -863,13 +400,7 @@ async fn reverse_builtin(text: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "deblank",
-    category = "strings/transform",
-    summary = "Remove trailing whitespace from text.",
-    keywords = "deblank,trailing whitespace,string,char,text",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::DEBLANK_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::compat::DEBLANK_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn deblank_builtin(text: Value) -> BuiltinResult<Value> {
@@ -963,94 +494,6 @@ async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
 }
 
 #[runtime_builtin(
-    name = "extractBefore",
-    category = "strings/transform",
-    summary = "Extract text before a position or boundary.",
-    keywords = "extractBefore,string,text,boundary",
-    accel = "sink",
-    extensions(EXTRACT_BEFORE_EXTENSIONS),
-    integer_capabilities(EXTRACT_BEFORE_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::EXTRACT_BEFORE_DESCRIPTOR),
-    builtin_path = "crate::builtins::strings::transform::compat"
-)]
-async fn extract_before_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    boundary_transform(
-        text,
-        rest,
-        "extractBefore",
-        &EXTRACT_BEFORE_RESIDENT_POSITION_EXTENSION,
-        &EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION,
-        &EXTRACT_BEFORE_STRING_CELL_EXTENSION,
-        |s, boundary| {
-            let (start, _) = locate_boundary(s, boundary)?;
-            Ok(s[..start].to_string())
-        },
-    )
-    .await
-}
-
-#[runtime_builtin(
-    name = "extractAfter",
-    category = "strings/transform",
-    summary = "Extract text after a position or boundary.",
-    keywords = "extractAfter,string,text,boundary",
-    accel = "sink",
-    extensions(EXTRACT_AFTER_EXTENSIONS),
-    integer_capabilities(EXTRACT_AFTER_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::EXTRACT_AFTER_DESCRIPTOR),
-    builtin_path = "crate::builtins::strings::transform::compat"
-)]
-async fn extract_after_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    boundary_transform(
-        text,
-        rest,
-        "extractAfter",
-        &EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION,
-        &EXTRACT_AFTER_CHAR_MATRIX_EXTENSION,
-        &EXTRACT_AFTER_STRING_CELL_EXTENSION,
-        |s, boundary| {
-            let (_, end) = locate_boundary(s, boundary)?;
-            Ok(s[end..].to_string())
-        },
-    )
-    .await
-}
-
-#[runtime_builtin(
-    name = "insertBefore",
-    category = "strings/transform",
-    summary = "Insert text before a position or boundary.",
-    keywords = "insertBefore,string,text,boundary",
-    accel = "sink",
-    extensions(INSERT_BEFORE_EXTENSIONS),
-    integer_capabilities(INSERT_BEFORE_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::INSERT_BEFORE_DESCRIPTOR),
-    builtin_path = "crate::builtins::strings::transform::compat"
-)]
-async fn insert_before_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    insert_transform(text, rest, "insertBefore", false).await
-}
-
-#[runtime_builtin(
-    name = "insertAfter",
-    category = "strings/transform",
-    summary = "Insert text after a position or boundary.",
-    keywords = "insertAfter,string,text,boundary",
-    accel = "sink",
-    extensions(INSERT_AFTER_EXTENSIONS),
-    integer_capabilities(INSERT_AFTER_INTEGER_CAPABILITIES),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::INSERT_AFTER_DESCRIPTOR),
-    builtin_path = "crate::builtins::strings::transform::compat"
-)]
-async fn insert_after_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    insert_transform(text, rest, "insertAfter", true).await
-}
-
-#[runtime_builtin(
     name = "replaceBetween",
     category = "strings/transform",
     summary = "Replace text between positions or boundary markers.",
@@ -1118,14 +561,7 @@ async fn replace_between_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult
 
 #[runtime_builtin(
     name = "eraseURLs",
-    category = "strings/transform",
-    summary = "Remove URL substrings from text.",
-    keywords = "eraseURLs,url,text analytics,string",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::ERASE_URLS_DESCRIPTOR),
-    extensions(ERASE_URLS_EXTENSIONS),
-    integer_audit(crate::builtins::strings::transform::compat::ERASE_URLS_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
@@ -1152,14 +588,7 @@ async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "erasePunctuation",
-    category = "strings/transform",
-    summary = "Remove Unicode punctuation and symbol characters from text.",
-    keywords = "erasePunctuation,punctuation,symbol,text analytics,string",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::ERASE_PUNCTUATION_DESCRIPTOR),
-    extensions(ERASE_PUNCTUATION_EXTENSIONS),
-    integer_audit(crate::builtins::strings::transform::compat::ERASE_PUNCTUATION_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn erase_punctuation_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1296,7 +725,7 @@ async fn matches_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
     logical_value(out, list.shape, "matches")
 }
 
-async fn boundary_transform(
+pub(super) async fn boundary_transform(
     text: Value,
     rest: Vec<Value>,
     fn_name: &'static str,
@@ -1312,14 +741,21 @@ async fn boundary_transform(
             format!("{fn_name}: expected exactly text and one boundary argument"),
         ));
     }
-    if numeric_or_resident_value(&text) || contains_numeric_or_resident(&text) {
+    if !valid_extract_text_input(&text, false) {
         return Err(extract_error(
             fn_name,
             ExtractErrorKind::InvalidInput,
             format!("{fn_name}: expected text input"),
         ));
     }
-    if contains_resident_value(&rest[0]) {
+    if !valid_raw_boundary_form(&rest[0]) {
+        return Err(extract_error(
+            fn_name,
+            ExtractErrorKind::InvalidBoundary,
+            format!("{fn_name}: expected a text, pattern, or numeric boundary"),
+        ));
+    }
+    if matches!(rest[0], Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(resident_extension, fn_name)?;
     }
     if is_multirow_char(&text) || is_multirow_char(&rest[0]) {
@@ -1371,7 +807,7 @@ async fn boundary_transform(
     })
 }
 
-async fn insert_transform(
+pub(super) async fn insert_transform(
     text: Value,
     rest: Vec<Value>,
     fn_name: &'static str,
@@ -1395,16 +831,21 @@ async fn insert_transform(
             &INSERT_BEFORE_BROAD_TEXT_EXTENSION,
         )
     };
-    if crate::dispatcher::value_contains_gpu(&text)
-        || crate::dispatcher::value_contains_gpu(&rest[1])
-    {
+    if !valid_extract_text_input(&text, false) || !valid_insert_replacement(&rest[1]) {
         return Err(insert_error(
             fn_name,
             0,
             format!("{fn_name}: source and inserted values must be host text"),
         ));
     }
-    if crate::dispatcher::value_contains_gpu(&rest[0]) {
+    if !valid_raw_boundary_form(&rest[0]) {
+        return Err(insert_error(
+            fn_name,
+            1,
+            format!("{fn_name}: expected a text, pattern, or numeric boundary"),
+        ));
+    }
+    if matches!(rest[0], Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(resident_extension, fn_name)?;
     }
     if [&text, &rest[0], &rest[1]]
@@ -1449,7 +890,7 @@ fn insert_error(name: &str, error_index: usize, message: impl Into<String>) -> c
 }
 
 #[derive(Clone)]
-enum Boundary {
+pub(super) enum Boundary {
     Position(usize),
     Text(String),
     Pattern(String),
@@ -1558,7 +999,7 @@ impl BoundaryList {
                 }
                 Ok(Self {
                     data,
-                    shape: tensor.shape.clone(),
+                    shape: tensor.shape().to_vec(),
                 })
             }
             Value::String(text) => Ok(Self {
@@ -1647,7 +1088,7 @@ fn parse_boundary_float(value: f64, fn_name: &str) -> BuiltinResult<usize> {
     Ok(parsed)
 }
 
-fn locate_boundary(text: &str, boundary: &Boundary) -> BuiltinResult<(usize, usize)> {
+pub(super) fn locate_boundary(text: &str, boundary: &Boundary) -> BuiltinResult<(usize, usize)> {
     match boundary {
         Boundary::Position(pos) => {
             let char_len = text.chars().count();
@@ -1677,34 +1118,28 @@ fn locate_boundary(text: &str, boundary: &Boundary) -> BuiltinResult<(usize, usi
     }
 }
 
-fn numeric_or_resident_value(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Num(_)
-            | Value::Int(_)
-            | Value::Bool(_)
-            | Value::Tensor(_)
-            | Value::LogicalArray(_)
-            | Value::Complex(_, _)
-            | Value::ComplexTensor(_)
-            | Value::GpuTensor(_)
-    )
-}
-
-fn contains_numeric_or_resident(value: &Value) -> bool {
+/// Validate the boundary's container before recursive gather. Only a top-level
+/// real numeric resident handle is a position control; a resident value inside
+/// a cell or pattern object cannot become a valid boundary after download.
+fn valid_raw_boundary_form(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .any(|value| numeric_or_resident_value(value) || contains_numeric_or_resident(value)),
-        _ => false,
-    }
-}
-
-fn contains_resident_value(value: &Value) -> bool {
-    match value {
-        Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_resident_value),
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) => true,
+        Value::GpuTensor(handle) => {
+            !runmat_accelerate_api::handle_is_logical(handle)
+                && handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
+        }
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
+        Value::Cell(cell) => cell.data.iter().all(|item| match item {
+            Value::String(_) => true,
+            Value::StringArray(array) => array.data.len() == 1,
+            Value::CharArray(array) => array.rows <= 1,
+            _ => false,
+        }),
+        Value::Object(object) => {
+            object.is_class(runmat_types::standard::PATTERN)
+                && matches!(object.properties.get("Regex"), Some(Value::String(_)))
+                && !crate::dispatcher::value_contains_gpu(value)
+        }
         _ => false,
     }
 }
@@ -1734,6 +1169,19 @@ fn valid_extract_text_input(value: &Value, nested: bool) -> bool {
             .data
             .iter()
             .all(|value| valid_extract_text_input(value, true)),
+        _ => false,
+    }
+}
+
+fn valid_insert_replacement(value: &Value) -> bool {
+    match value {
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
+        Value::Cell(cell) => cell.data.iter().all(|item| match item {
+            Value::String(_) => true,
+            Value::StringArray(array) => array.data.len() == 1,
+            Value::CharArray(array) => array.rows <= 1,
+            _ => false,
+        }),
         _ => false,
     }
 }
@@ -2302,916 +1750,4 @@ fn justify(text: &str, side: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use runmat_builtins::BuiltinIntegerAuditKind;
-    use runmat_value::{CellArray, IntValue, IntegerStorage, StructValue, Tensor};
-
-    fn block(
-        value: impl std::future::Future<Output = BuiltinResult<Value>>,
-    ) -> BuiltinResult<Value> {
-        futures::executor::block_on(value)
-    }
-
-    #[test]
-    fn append_extract_insert_and_replace_work() {
-        assert_eq!(
-            block(append_builtin(vec![
-                Value::String("run".into()),
-                Value::String("mat".into())
-            ]))
-            .unwrap(),
-            Value::String("runmat".into())
-        );
-        assert_eq!(
-            block(extract_before_builtin(
-                Value::String("alpha.beta".into()),
-                vec![Value::String(".".into())],
-            ))
-            .unwrap(),
-            Value::String("alpha".into())
-        );
-        assert_eq!(
-            block(insert_after_builtin(
-                Value::String("run".into()),
-                vec![Value::Num(3.0), Value::String("mat".into())],
-            ))
-            .unwrap(),
-            Value::String("runmat".into())
-        );
-        assert_eq!(
-            block(extract_after_builtin(
-                Value::String("alpha.beta".into()),
-                vec![Value::String(".".into())],
-            ))
-            .unwrap(),
-            Value::String("beta".into())
-        );
-        assert_eq!(
-            block(insert_before_builtin(
-                Value::String("run".into()),
-                vec![Value::Num(1.0), Value::String("pre".into())],
-            ))
-            .unwrap(),
-            Value::String("prerun".into())
-        );
-        assert_eq!(
-            block(replace_between_builtin(
-                Value::String("a[old]b".into()),
-                vec![
-                    Value::String("[".into()),
-                    Value::String("]".into()),
-                    Value::String("new".into()),
-                ],
-            ))
-            .unwrap(),
-            Value::String("a[new]b".into())
-        );
-    }
-
-    #[test]
-    fn append_integer_audit_is_explicitly_inapplicable() {
-        assert_eq!(
-            APPEND_INTEGER_AUDIT.kind,
-            BuiltinIntegerAuditKind::NotApplicable
-        );
-        assert!(APPEND_INTEGER_AUDIT.canonical_builtin.is_none());
-        assert!(APPEND_INTEGER_AUDIT.notes.contains("all eight integer"));
-    }
-
-    #[test]
-    fn append_preserves_documented_text_output_precedence_and_whitespace() {
-        assert_eq!(
-            block(append_builtin(vec![
-                Value::CharArray(CharArray::new_row("Hello ")),
-                Value::CharArray(CharArray::new_row("World")),
-            ]))
-            .expect("all-char append"),
-            Value::CharArray(CharArray::new_row("Hello World"))
-        );
-
-        let cell = CellArray::new(
-            vec![
-                Value::CharArray(CharArray::new_row("alpha")),
-                Value::CharArray(CharArray::new_row("beta")),
-            ],
-            1,
-            2,
-        )
-        .expect("cellstr");
-        let result = block(append_builtin(vec![
-            Value::Cell(cell.clone()),
-            Value::CharArray(CharArray::new_row(" ")),
-        ]))
-        .expect("cell append");
-        let Value::Cell(cell_result) = result else {
-            panic!("expected cellstr output");
-        };
-        assert_eq!(cell_result.shape, vec![1, 2]);
-        assert_eq!(
-            cell_result.data,
-            vec![
-                Value::CharArray(CharArray::new_row("alpha ")),
-                Value::CharArray(CharArray::new_row("beta ")),
-            ]
-        );
-
-        let strings = StringArray::new(vec!["A".into(), "B".into()], vec![2, 1]).expect("strings");
-        let result = block(append_builtin(vec![
-            Value::StringArray(strings),
-            Value::Cell(cell),
-        ]))
-        .expect("string-cell append");
-        let Value::StringArray(string_result) = result else {
-            panic!("expected string-array output");
-        };
-        assert_eq!(string_result.shape, vec![2, 2]);
-        assert_eq!(
-            string_result.data,
-            vec!["Aalpha", "Balpha", "Abeta", "Bbeta"]
-        );
-    }
-
-    #[test]
-    fn append_rejects_every_integer_class_without_numeric_conversion() {
-        let cases = [
-            ("int8", IntValue::I8(-1), IntegerStorage::I8(vec![-1, 2])),
-            ("int16", IntValue::I16(-2), IntegerStorage::I16(vec![-2, 3])),
-            ("int32", IntValue::I32(-3), IntegerStorage::I32(vec![-3, 4])),
-            (
-                "int64",
-                IntValue::I64(i64::MIN),
-                IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
-            ),
-            (
-                "uint8",
-                IntValue::U8(5),
-                IntegerStorage::U8(vec![5, u8::MAX]),
-            ),
-            (
-                "uint16",
-                IntValue::U16(6),
-                IntegerStorage::U16(vec![6, u16::MAX]),
-            ),
-            (
-                "uint32",
-                IntValue::U32(7),
-                IntegerStorage::U32(vec![7, u32::MAX]),
-            ),
-            (
-                "uint64",
-                IntValue::U64(u64::MAX),
-                IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
-            ),
-        ];
-        for (class, scalar, storage) in cases {
-            for value in [
-                Value::Int(scalar),
-                Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor")),
-            ] {
-                let error = block(append_builtin(vec![
-                    value,
-                    Value::CharArray(CharArray::new_row("suffix")),
-                ]))
-                .expect_err("numeric append input must reject");
-                assert!(
-                    error.message().contains(
-                        "expected string, character vector, or cell array of character vectors"
-                    ),
-                    "{class}: {error}"
-                );
-            }
-        }
-
-        for value in [Value::Num(1.0), Value::Bool(true)] {
-            let error = block(append_builtin(vec![
-                value,
-                Value::CharArray(CharArray::new_row("suffix")),
-            ]))
-            .expect_err("nontext append input must reject");
-            assert!(error.message().contains("expected string"), "{error}");
-        }
-
-        let invalid_cell =
-            CellArray::new(vec![Value::String("not a character vector".into())], 1, 1)
-                .expect("cell");
-        let error = block(append_builtin(vec![Value::Cell(invalid_cell)]))
-            .expect_err("non-cellstr input must reject");
-        assert!(
-            error
-                .message()
-                .contains("must contain only character vectors"),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn append_rejects_resident_integer_handles_before_provider_gather() {
-        for (offset, element_type) in [
-            (0, runmat_accelerate_api::IntegerElementType::I8),
-            (1, runmat_accelerate_api::IntegerElementType::I16),
-            (2, runmat_accelerate_api::IntegerElementType::I32),
-            (3, runmat_accelerate_api::IntegerElementType::I64),
-            (4, runmat_accelerate_api::IntegerElementType::U8),
-            (5, runmat_accelerate_api::IntegerElementType::U16),
-            (6, runmat_accelerate_api::IntegerElementType::U32),
-            (7, runmat_accelerate_api::IntegerElementType::U64),
-        ] {
-            let handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX - 350 - offset,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                element_type.into(),
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
-            let result = block(append_builtin(vec![
-                Value::GpuTensor(handle.clone()),
-                Value::String("suffix".into()),
-            ]));
-            let error = result.expect_err("resident numeric append input must reject");
-            assert!(error.message().contains("expected string"), "{error}");
-        }
-    }
-
-    #[test]
-    fn text_boundary_positions_read_typed_integer_storage_exactly() {
-        let boundary =
-            Tensor::new_integer(IntegerStorage::U16(vec![3]), vec![1, 1]).expect("boundary");
-
-        assert_eq!(
-            block(insert_after_builtin(
-                Value::String("run".into()),
-                vec![Value::Tensor(boundary), Value::String("mat".into())],
-            ))
-            .unwrap(),
-            Value::String("runmat".into())
-        );
-
-        let start = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("start");
-        let stop = Tensor::new_integer(IntegerStorage::U16(vec![4]), vec![1, 1]).expect("stop");
-
-        assert_eq!(
-            block(replace_between_builtin(
-                Value::String("abcde".into()),
-                vec![
-                    Value::Tensor(start),
-                    Value::Tensor(stop),
-                    Value::String("X".into()),
-                ],
-            ))
-            .unwrap(),
-            Value::String("aXe".into())
-        );
-    }
-
-    #[test]
-    fn replace_between_accepts_all_integer_position_classes_and_same_size_arrays() {
-        for position in [
-            IntValue::I8(2),
-            IntValue::I16(2),
-            IntValue::I32(2),
-            IntValue::I64(2),
-            IntValue::U8(2),
-            IntValue::U16(2),
-            IntValue::U32(2),
-            IntValue::U64(2),
-        ] {
-            assert_eq!(
-                block(replace_between_builtin(
-                    Value::String("abc".into()),
-                    vec![
-                        Value::Int(position.clone()),
-                        Value::Int(position),
-                        Value::String("X".into()),
-                    ],
-                ))
-                .expect("integer positions"),
-                Value::String("aXc".into())
-            );
-        }
-
-        let text = Value::StringArray(
-            StringArray::new(vec!["abcde".into(), "vwxyz".into()], vec![2, 1]).unwrap(),
-        );
-        let starts = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![2, 1]).unwrap(),
-        );
-        let stops = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U64(vec![4, 5]), vec![2, 1]).unwrap(),
-        );
-        let replacements =
-            Value::StringArray(StringArray::new(vec!["X".into(), "Q".into()], vec![2, 1]).unwrap());
-        let Value::StringArray(output) = block(replace_between_builtin(
-            text,
-            vec![starts, stops, replacements],
-        ))
-        .expect("same-size positions") else {
-            panic!("string array")
-        };
-        assert_eq!(output.data, vec!["aXe", "vwQ"]);
-    }
-
-    #[test]
-    fn text_boundary_positions_reject_invalid_integer_and_double_values() {
-        let zero = Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("boundary");
-        assert!(block(insert_after_builtin(
-            Value::String("run".into()),
-            vec![Value::Tensor(zero), Value::String("mat".into())],
-        ))
-        .is_err());
-
-        assert!(block(insert_after_builtin(
-            Value::String("run".into()),
-            vec![Value::Num(1.0e300), Value::String("mat".into())],
-        ))
-        .is_err());
-    }
-
-    #[test]
-    fn insert_before_and_after_accept_all_integer_position_classes() {
-        for position in [
-            IntValue::I8(2),
-            IntValue::I16(2),
-            IntValue::I32(2),
-            IntValue::I64(2),
-            IntValue::U8(2),
-            IntValue::U16(2),
-            IntValue::U32(2),
-            IntValue::U64(2),
-        ] {
-            assert_eq!(
-                block(insert_before_builtin(
-                    Value::String("abc".into()),
-                    vec![Value::Int(position.clone()), Value::String("X".into())],
-                ))
-                .unwrap(),
-                Value::String("aXbc".into())
-            );
-            assert_eq!(
-                block(insert_after_builtin(
-                    Value::String("abc".into()),
-                    vec![Value::Int(position), Value::String("X".into())],
-                ))
-                .unwrap(),
-                Value::String("abXc".into())
-            );
-        }
-        for storage in [
-            IntegerStorage::I8(vec![2]),
-            IntegerStorage::I16(vec![2]),
-            IntegerStorage::I32(vec![2]),
-            IntegerStorage::I64(vec![2]),
-            IntegerStorage::U8(vec![2]),
-            IntegerStorage::U16(vec![2]),
-            IntegerStorage::U32(vec![2]),
-            IntegerStorage::U64(vec![2]),
-        ] {
-            let position = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
-            assert_eq!(
-                block(insert_after_builtin(
-                    Value::String("abc".into()),
-                    vec![position, Value::String("X".into())],
-                ))
-                .unwrap(),
-                Value::String("abXc".into())
-            );
-        }
-        for position in [
-            Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
-            Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap()),
-        ] {
-            assert_eq!(
-                block(insert_before_builtin(
-                    Value::String("abc".into()),
-                    vec![position, Value::String("X".into())],
-                ))
-                .unwrap(),
-                Value::String("aXbc".into())
-            );
-        }
-        assert!(block(insert_after_builtin(
-            Value::String("abc".into()),
-            vec![Value::Bool(true), Value::String("X".into())],
-        ))
-        .is_err());
-    }
-
-    #[test]
-    fn insertion_broadcasts_scalar_or_same_size_positions_and_new_text() {
-        let source = Value::StringArray(
-            StringArray::new(vec!["abcd".into(), "wxyz".into()], vec![2, 1]).unwrap(),
-        );
-        let positions = Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![2, 1]).unwrap(),
-        );
-        let replacements =
-            Value::StringArray(StringArray::new(vec!["A".into(), "B".into()], vec![2, 1]).unwrap());
-        assert_eq!(
-            block(insert_before_builtin(
-                source.clone(),
-                vec![positions, replacements]
-            ))
-            .unwrap(),
-            Value::StringArray(
-                StringArray::new(vec!["aAbcd".into(), "wxByz".into()], vec![2, 1]).unwrap()
-            )
-        );
-        assert_eq!(
-            block(insert_after_builtin(
-                source,
-                vec![Value::Num(1.0), Value::String("!".into())]
-            ))
-            .unwrap(),
-            Value::StringArray(
-                StringArray::new(vec!["a!bcd".into(), "w!xyz".into()], vec![2, 1]).unwrap()
-            )
-        );
-    }
-
-    #[test]
-    fn insertion_applies_text_boundaries_at_every_occurrence() {
-        assert_eq!(
-            block(insert_before_builtin(
-                Value::String("a-b-c".into()),
-                vec![Value::String("-".into()), Value::String("X".into())],
-            ))
-            .unwrap(),
-            Value::String("aX-bX-c".into())
-        );
-        assert_eq!(
-            block(insert_after_builtin(
-                Value::String("a-b-c".into()),
-                vec![Value::String("-".into()), Value::String("X".into())],
-            ))
-            .unwrap(),
-            Value::String("a-Xb-Xc".into())
-        );
-    }
-
-    #[test]
-    fn insertion_requires_exact_arity_and_matching_array_shapes() {
-        assert!(block(insert_before_builtin(
-            Value::String("abc".into()),
-            vec![
-                Value::Num(1.0),
-                Value::String("X".into()),
-                Value::String("ignored".into()),
-            ],
-        ))
-        .is_err());
-        let source =
-            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap());
-        let positions = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
-        assert!(block(insert_after_builtin(
-            source,
-            vec![positions, Value::String("X".into())]
-        ))
-        .is_err());
-    }
-
-    #[test]
-    fn insertion_compatibility_gates_precede_resident_gather() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        let error = block(insert_after_builtin(
-            Value::String("abc".into()),
-            vec![resident, Value::String("X".into())],
-        ))
-        .unwrap_err();
-        assert_eq!(
-            error.identifier(),
-            INSERT_AFTER_RESIDENT_POSITION_EXTENSION.error_identifier
-        );
-
-        let matrix = Value::CharArray(
-            CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"),
-        );
-        let error = block(insert_before_builtin(
-            matrix,
-            vec![Value::Num(1.0), Value::String("X".into())],
-        ))
-        .unwrap_err();
-        assert_eq!(
-            error.identifier(),
-            INSERT_BEFORE_BROAD_TEXT_EXTENSION.error_identifier
-        );
-    }
-
-    #[test]
-    fn splitlines_reverse_deblank_and_matches_work() {
-        assert_eq!(
-            block(reverse_builtin(Value::String("abc".into()))).unwrap(),
-            Value::String("cba".into())
-        );
-        assert_eq!(
-            block(deblank_builtin(Value::CharArray(CharArray::new_row(
-                "abc   "
-            ))))
-            .unwrap(),
-            Value::CharArray(CharArray::new_row("abc"))
-        );
-        assert_eq!(
-            block(matches_builtin(
-                Value::String("A12".into()),
-                crate::builtins::strings::core::compat::pattern_object(r"A\d+"),
-            ))
-            .unwrap(),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            block(erase_urls_builtin(Value::String(
-                "see https://example.com now".into()
-            )))
-            .unwrap(),
-            Value::String("see  now".into())
-        );
-        assert_eq!(
-            block(erase_punctuation_builtin(
-                Value::String("it's one and/or two.".into()),
-                vec![]
-            ))
-            .unwrap(),
-            Value::String("its one andor two".into())
-        );
-        assert_eq!(
-            block(erase_punctuation_builtin(
-                Value::CharArray(CharArray::new_row("cost: $5.00!")),
-                vec![]
-            ))
-            .unwrap(),
-            Value::CharArray(CharArray::new_row("cost 500"))
-        );
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let cell = CellArray::new(
-            vec![
-                Value::CharArray(CharArray::new_row("alpha,beta!")),
-                Value::String("C++ and C#".into()),
-            ],
-            1,
-            2,
-        )
-        .unwrap();
-        match block(erase_punctuation_builtin(Value::Cell(cell), vec![])).unwrap() {
-            Value::Cell(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(
-                    out.data[0],
-                    Value::CharArray(CharArray::new_row("alphabeta"))
-                );
-                assert_eq!(out.data[1], Value::String("C and C".into()));
-            }
-            other => panic!("expected cell array, got {other:?}"),
-        }
-        assert_eq!(
-            block(strjust_builtin(
-                Value::CharArray(CharArray::new_row("  x")),
-                vec![Value::String("left".into())],
-            ))
-            .unwrap(),
-            Value::CharArray(CharArray::new_row("x  "))
-        );
-    }
-
-    #[test]
-    fn erase_descriptors_and_integer_audits_are_settled() {
-        assert_eq!(ERASE_URLS_DESCRIPTOR.signatures.len(), 2);
-        assert_eq!(ERASE_PUNCTUATION_DESCRIPTOR.signatures.len(), 3);
-        for name in ["eraseURLs", "erasePunctuation"] {
-            let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered");
-            assert_eq!(
-                builtin.integer_audit.expect("integer audit").kind,
-                BuiltinIntegerAuditKind::NotApplicable
-            );
-        }
-    }
-
-    #[test]
-    fn erase_text_builtins_reject_all_integer_classes_and_logical_values() {
-        for value in [
-            IntValue::I8(-1),
-            IntValue::I16(-1),
-            IntValue::I32(-1),
-            IntValue::I64(-1),
-            IntValue::U8(1),
-            IntValue::U16(1),
-            IntValue::U32(1),
-            IntValue::U64(u64::MAX),
-        ] {
-            assert!(block(erase_urls_builtin(Value::Int(value.clone()))).is_err());
-            assert!(block(erase_punctuation_builtin(Value::Int(value), vec![])).is_err());
-        }
-        assert!(block(erase_urls_builtin(Value::Bool(true))).is_err());
-        assert!(block(erase_punctuation_builtin(Value::Bool(true), vec![])).is_err());
-    }
-
-    #[test]
-    fn erase_text_broad_container_extensions_are_independently_gated() {
-        let matrix = Value::CharArray(
-            CharArray::new(vec!['a', '!', 'b', '?'], 2, 2).expect("character matrix"),
-        );
-        let broad_cell = Value::Cell(
-            CellArray::new(vec![Value::String("https://example.com!".into())], 1, 1)
-                .expect("broad text cell"),
-        );
-        let nested_cell = Value::Cell(
-            CellArray::new(
-                vec![Value::Cell(
-                    CellArray::new(vec![Value::CharArray(CharArray::new_row("nested!"))], 1, 1)
-                        .expect("inner cell"),
-                )],
-                1,
-                1,
-            )
-            .expect("outer cell"),
-        );
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        for (value, identifier) in [
-            (
-                matrix.clone(),
-                "RunMat:compatibility:EraseURLsCharMatrixExtension",
-            ),
-            (
-                broad_cell.clone(),
-                "RunMat:compatibility:EraseURLsBroadCellExtension",
-            ),
-        ] {
-            let error = block(erase_urls_builtin(value)).expect_err("strict eraseURLs gate");
-            assert_eq!(error.identifier(), Some(identifier));
-        }
-        for (value, identifier) in [
-            (
-                matrix,
-                "RunMat:compatibility:ErasePunctuationCharMatrixExtension",
-            ),
-            (
-                broad_cell,
-                "RunMat:compatibility:ErasePunctuationBroadCellExtension",
-            ),
-            (
-                nested_cell,
-                "RunMat:compatibility:ErasePunctuationBroadCellExtension",
-            ),
-        ] {
-            let error = block(erase_punctuation_builtin(value, vec![]))
-                .expect_err("strict erasePunctuation gate");
-            assert_eq!(error.identifier(), Some(identifier));
-        }
-    }
-
-    #[test]
-    fn erase_text_builtins_reject_resident_numeric_without_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        let url_error = block(erase_urls_builtin(resident.clone())).unwrap_err();
-        assert_eq!(
-            url_error.identifier(),
-            ERASE_URLS_ERROR_INVALID_INPUT.identifier
-        );
-        let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
-        let punctuation_error = block(erase_punctuation_builtin(nested, vec![])).unwrap_err();
-        assert_eq!(
-            punctuation_error.identifier(),
-            ERASE_PUNCTUATION_ERROR_INVALID_INPUT.identifier
-        );
-    }
-
-    #[test]
-    fn extract_before_and_after_accept_every_integer_scalar_class_exactly() {
-        assert_eq!(EXTRACT_BEFORE_DESCRIPTOR.errors.len(), 3);
-        assert_eq!(EXTRACT_AFTER_DESCRIPTOR.errors.len(), 3);
-        for position in [
-            IntValue::I8(2),
-            IntValue::I16(2),
-            IntValue::I32(2),
-            IntValue::I64(2),
-            IntValue::U8(2),
-            IntValue::U16(2),
-            IntValue::U32(2),
-            IntValue::U64(2),
-        ] {
-            assert_eq!(
-                block(extract_before_builtin(
-                    Value::String("abcdef".into()),
-                    vec![Value::Int(position.clone())],
-                ))
-                .expect("extractBefore"),
-                Value::String("a".into())
-            );
-            assert_eq!(
-                block(extract_after_builtin(
-                    Value::String("abcdef".into()),
-                    vec![Value::Int(position)],
-                ))
-                .expect("extractAfter"),
-                Value::String("cdef".into())
-            );
-        }
-    }
-
-    #[test]
-    fn extract_before_and_after_apply_same_size_native_integer_positions() {
-        let text = Value::StringArray(
-            StringArray::new(vec!["abcd".into(), "wxyz".into()], vec![2, 1]).unwrap(),
-        );
-        for storage in [
-            IntegerStorage::I8(vec![2, 3]),
-            IntegerStorage::I16(vec![2, 3]),
-            IntegerStorage::I32(vec![2, 3]),
-            IntegerStorage::I64(vec![2, 3]),
-            IntegerStorage::U8(vec![2, 3]),
-            IntegerStorage::U16(vec![2, 3]),
-            IntegerStorage::U32(vec![2, 3]),
-            IntegerStorage::U64(vec![2, 3]),
-        ] {
-            let positions = Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap());
-            assert_eq!(
-                block(extract_before_builtin(
-                    text.clone(),
-                    vec![positions.clone()]
-                ))
-                .unwrap(),
-                Value::StringArray(
-                    StringArray::new(vec!["a".into(), "wx".into()], vec![2, 1]).unwrap()
-                )
-            );
-            assert_eq!(
-                block(extract_after_builtin(text.clone(), vec![positions])).unwrap(),
-                Value::StringArray(
-                    StringArray::new(vec!["cd".into(), "z".into()], vec![2, 1]).unwrap()
-                )
-            );
-        }
-    }
-
-    #[test]
-    fn extract_before_and_after_enforce_strict_extensions_before_gather() {
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let matrix = Value::CharArray(
-            CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"),
-        );
-        let before = block(extract_before_builtin(
-            matrix,
-            vec![Value::Int(IntValue::U8(1))],
-        ))
-        .expect_err("strict char matrix gate");
-        assert_eq!(
-            before.identifier(),
-            EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION.error_identifier
-        );
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        let after = block(extract_after_builtin(
-            Value::String("abc".into()),
-            vec![resident],
-        ))
-        .expect_err("strict resident gate");
-        assert_eq!(
-            after.identifier(),
-            EXTRACT_AFTER_RESIDENT_POSITION_EXTENSION.error_identifier
-        );
-    }
-
-    #[cfg(target_pointer_width = "64")]
-    #[test]
-    fn extract_boundary_preserves_wide_u64_position_without_f64_conversion() {
-        let position = (1_u64 << 53) + 1;
-        let boundaries =
-            BoundaryList::from_value(&Value::Int(IntValue::U64(position)), "extractBefore")
-                .unwrap();
-        assert!(matches!(
-            boundaries.data.as_slice(),
-            [Boundary::Position(value)] if *value == position as usize
-        ));
-    }
-
-    #[test]
-    fn extract_before_and_after_reject_extra_arguments() {
-        assert!(block(extract_before_builtin(
-            Value::String("abc".into()),
-            vec![Value::Num(2.0), Value::Num(3.0)],
-        ))
-        .is_err());
-        assert!(block(extract_after_builtin(
-            Value::String("abc".into()),
-            vec![Value::Num(2.0), Value::Num(3.0)],
-        ))
-        .is_err());
-    }
-
-    #[test]
-    fn extract_before_and_after_reject_zero_floating_positions() {
-        for position in [
-            Value::Num(0.0),
-            Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
-            Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
-        ] {
-            let before = block(extract_before_builtin(
-                Value::String("abc".into()),
-                vec![position.clone()],
-            ))
-            .expect_err("zero extractBefore position must reject");
-            assert_eq!(
-                before.identifier(),
-                Some("RunMat:extractBefore:InvalidBoundary")
-            );
-            let after = block(extract_after_builtin(
-                Value::String("abc".into()),
-                vec![position],
-            ))
-            .expect_err("zero extractAfter position must reject");
-            assert_eq!(
-                after.identifier(),
-                Some("RunMat:extractAfter:InvalidBoundary")
-            );
-        }
-    }
-
-    #[test]
-    fn extract_before_and_after_accept_empty_character_boundary_without_panicking() {
-        let boundary = Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap());
-        assert_eq!(
-            block(extract_before_builtin(
-                Value::String("abc".into()),
-                vec![boundary.clone()],
-            ))
-            .expect("empty character boundary"),
-            Value::String(String::new())
-        );
-        assert_eq!(
-            block(extract_after_builtin(
-                Value::String("abc".into()),
-                vec![boundary],
-            ))
-            .expect("empty character boundary"),
-            Value::String("abc".into())
-        );
-    }
-
-    #[test]
-    fn extract_before_and_after_classify_unsupported_text_cell_elements_as_invalid_input() {
-        let text = Value::Cell(
-            CellArray::new(vec![Value::Struct(StructValue::new())], 1, 1).expect("text cell"),
-        );
-        let before = block(extract_before_builtin(
-            text.clone(),
-            vec![Value::Int(IntValue::U8(1))],
-        ))
-        .expect_err("unsupported extractBefore text cell");
-        assert_eq!(
-            before.identifier(),
-            Some("RunMat:extractBefore:InvalidInput")
-        );
-        let after = block(extract_after_builtin(
-            text,
-            vec![Value::Int(IntValue::U8(1))],
-        ))
-        .expect_err("unsupported extractAfter text cell");
-        assert_eq!(after.identifier(), Some("RunMat:extractAfter:InvalidInput"));
-    }
-
-    #[test]
-    fn deblank_rejects_every_integer_class_without_text_conversion() {
-        for value in [
-            IntValue::I8(-1),
-            IntValue::I16(-1),
-            IntValue::I32(-1),
-            IntValue::I64(-1),
-            IntValue::U8(1),
-            IntValue::U16(1),
-            IntValue::U32(1),
-            IntValue::U64(u64::MAX),
-        ] {
-            assert!(block(deblank_builtin(Value::Int(value))).is_err());
-        }
-        assert!(block(deblank_builtin(Value::Tensor(
-            runmat_value::Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
-                .unwrap()
-        )))
-        .is_err());
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
-        let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
-        let err = block(deblank_builtin(nested)).unwrap_err();
-        assert!(!err.to_string().contains("provider"));
-    }
-}
+mod tests;

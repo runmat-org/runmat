@@ -16,10 +16,10 @@ pub enum Value {
     Tensor(Tensor), ComplexTensor(ComplexTensor),
     LogicalArray(LogicalArray), StringArray(StringArray), CharArray(CharArray),
     // Aggregates
-    Cell(CellArray), Struct(StructValue),
+    Cell(CellArray), Struct(StructValue), StructArray(StructArray),
     // Objects and handles
     Object(ObjectInstance), HandleObject(HandleRef), Listener(Listener),
-    ClassRef(String), MException(MException),
+    ClassRef(runmat_types::ClassIdentity), MException(MException),
     // Callables
     FunctionHandle(String), ExternalFunctionHandle(String),
     MethodFunctionHandle(String), BoundFunctionHandle { name: String, function: usize },
@@ -35,13 +35,29 @@ pub enum Value {
 | --- | --- | --- |
 | Scalars | `Int`, `Num`, `Complex`, `Bool`, `String` | Scalar `Num` is a MATLAB double. Integer scalars preserve their integer class through `IntValue`. |
 | Dense arrays | `Tensor`, `ComplexTensor`, `LogicalArray`, `StringArray`, `CharArray` | Dense array payloads own Rust buffers directly. Shapes follow MATLAB column-major semantics. |
-| Aggregates | `Cell`, `Struct` | Cells own `Value` elements directly. Struct fields preserve insertion order through `IndexMap`. |
+| Aggregates | `Cell`, `Struct`, `StructArray` | Cells own arbitrary `Value` elements. Scalar structures preserve insertion order through `IndexMap`; structure arrays store one ordered schema with field-major value columns and an authoritative N-D shape. |
 | Objects and handles | `Object`, `HandleObject`, `Listener`, `ClassRef`, `MException` | These carry class, identity, event, metaclass, or exception semantics for object-oriented and diagnostic paths. |
 | Callables | `FunctionHandle`, `ExternalFunctionHandle`, `MethodFunctionHandle`, `BoundFunctionHandle`, `Closure` | Callable values preserve different resolution policies for builtins, semantic functions, methods, closures, and external-boundary calls. |
 | Acceleration | `GpuTensor` | GPU-resident tensor handle owned by an acceleration provider. Host materialization happens only when an operation requires it. |
 | Execution helpers | `OutputList` | Internal multi-output/destructuring helper used while shaping results. |
 
-The enum lives in `runmat-builtins` because builtins, VM dispatch, runtime services, GC, session state, and WASM all need the same value vocabulary. `runmat-runtime` owns most operations over values, while `runmat-vm` owns instruction-level movement and mutation.
+The enum lives in `runmat-value` because builtins, VM dispatch, runtime services, GC, session state, and WASM all need the same value vocabulary. `runmat-runtime` owns most operations over values, while `runmat-vm` owns instruction-level movement and mutation.
+
+## Structures, Cells, And Value Sequences
+
+`Struct` and `StructArray` are distinct runtime representations. A scalar MATLAB structure is always a `Value::Struct`. A nonscalar or empty structure value is a `Value::StructArray`: it stores the ordered field schema once, stores each field as one column in visible column-major element order, and retains the complete N-D shape even when an extent is zero. Operations that select or transform exactly one structure element normalize the result back to `Value::Struct`; singleton arrays are not a second scalar representation.
+
+`Value::Cell` is different. A cell array remains a cell container at every shape, including `1x1` and empty shapes, and each element can hold any ordinary `Value`. Extracting cell contents with braces is an indexing operation; it does not change the representation of the cell container itself.
+
+A comma-separated list is not a `Value` variant. Runtime member and brace reads can produce a typed, transient value sequence, and the surrounding syntax determines how that sequence is consumed:
+
+- An ordinary scalar expression requires exactly one value.
+- A bracketed output list selects the requested prefix and rejects a shortage.
+- A function argument expands the complete sequence in source order.
+- A discarded expression evaluates the source but retains no values.
+- A bracketed structure-member destination determines the exact output count for its right-hand side and consumes one value per selected structure element.
+
+Sequence-producing expressions and their selectors are evaluated from left to right and exactly once. The VM or native executor may retain a sequence briefly between a verified producer and consumer, but that state is rooted execution state: it cannot be assigned to a variable, placed in a cell or structure field, returned as an ordinary value, or observed by user code.
 
 ## Dense Arrays And Shape
 
@@ -133,7 +149,7 @@ Function-like values preserve the policy needed to call them later:
 | `BoundFunctionHandle` | Handle already bound to a semantic function ID by the compiler/session. |
 | `Closure` | Callable plus captured runtime values. |
 
-`OutputList` is different. It is an internal value used to carry multiple outputs through bytecode, builtin dispatch, and destructuring. Session outcome assembly turns public results into `RuntimeFlow` shapes such as single value, output list, comma list, dynamic list, or no value.
+`OutputList` is different. It is an internal call-ABI value used to carry multiple function outputs through bytecode, builtin dispatch, and destructuring. It is not the representation of a comma-separated list and must not be used to make a value sequence storable. Session outcome assembly turns public results into `RuntimeFlow` shapes such as single value, output list, comma list, dynamic list, or no value.
 
 ## Static Facts
 

@@ -760,6 +760,7 @@ fn ordinary_serial_backend_carries_the_complete_fenced_stage_publication() {
             scope_id,
             pool_id,
             program_artifact_id: ArtifactId::derive(&[fixture.program.artifact.id.0.bytes()]),
+            host: crate::task_tests::host_requirement(),
             artifact_access: fixture.host.artifact_access.clone(),
             cpu_millicores: 1000,
             maximum_egress_bytes: 0,
@@ -777,6 +778,7 @@ fn ordinary_serial_backend_carries_the_complete_fenced_stage_publication() {
         worker_id: WorkerId::derive(&[b"serial-stage-worker"]),
         ordinal: 1,
         driver_fence: 7,
+        resource_assignment: Default::default(),
         task: submission.request,
     };
     let mut backend = SerialBackend::new(move |_: &AttemptRequest| {
@@ -873,7 +875,7 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
     else {
         panic!("successful stage returned a failure response")
     };
-    result_objects.retain(|object| object != &root);
+    result_objects.retain(|object| object != root.as_ref());
     let missing = MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,

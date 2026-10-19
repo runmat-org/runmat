@@ -13,8 +13,8 @@ use super::filesystem::{
     unix_millis,
 };
 use super::model::{
-    BatchSubmission, DriverCompletion, DriverMarker, JobAttachment, LocalJobRecord, LocalJobState,
-    ProgramBatchSubmission,
+    BatchSubmission, DriverCompletion, DriverMarker, GraphBatchSubmission, JobAttachment,
+    LocalJobRecord, LocalJobState, LocalJobWorkloadKind, ProgramBatchSubmission,
 };
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -83,6 +83,56 @@ pub(super) struct PersistedRequest<W = PersistedWorkload> {
     pub(super) retention_millis: u64,
 }
 
+impl PersistedRequest {
+    /// The stored digest field is not itself proof of the workload tag: Show
+    /// and InspectKind must bind that tag to the exact persisted request before
+    /// choosing the Direct or Graph result decoder.
+    fn validate_content_digest(&self, job_dir: &Path) -> NativeExecutionResult<()> {
+        let digest = match &self.workload {
+            PersistedWorkload::Script {
+                source_digest,
+                source_name,
+                arguments,
+                working_directory,
+            } => {
+                if Path::new(source_name).components().count() != 1
+                    || !matches!(
+                        Path::new(source_name).components().next(),
+                        Some(std::path::Component::Normal(_))
+                    )
+                {
+                    return Err(NativeExecutionError::Protocol(
+                        "durable script source name is not local to its job".into(),
+                    ));
+                }
+                let source = fs::read(job_dir.join(source_name)).map_err(io_error)?;
+                if Digest::sha256(&source) != *source_digest {
+                    return Err(NativeExecutionError::Protocol(
+                        "durable script source differs from its frozen request".into(),
+                    ));
+                }
+                BatchSubmission {
+                    source_name: source_name.clone(),
+                    source,
+                    arguments: arguments.clone(),
+                    working_directory: working_directory.clone(),
+                    idempotency_key: None,
+                    retention_millis: self.retention_millis,
+                }
+                .request_digest()?
+            }
+            PersistedWorkload::Program { submission } => submission.request_digest()?,
+            PersistedWorkload::Graph { submission } => submission.request_digest()?,
+        };
+        if digest != self.request_digest {
+            return Err(NativeExecutionError::Protocol(
+                "durable job workload differs from its request digest".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub(super) enum PersistedWorkload<P = Box<ProgramBatchSubmission>> {
@@ -95,13 +145,25 @@ pub(super) enum PersistedWorkload<P = Box<ProgramBatchSubmission>> {
     Program {
         submission: P,
     },
+    Graph {
+        submission: Box<GraphBatchSubmission>,
+    },
 }
 
 impl<P: Borrow<ProgramBatchSubmission>> PersistedWorkload<P> {
+    fn kind(&self) -> LocalJobWorkloadKind {
+        match self {
+            Self::Script { .. } => LocalJobWorkloadKind::Script,
+            Self::Program { .. } => LocalJobWorkloadKind::Program,
+            Self::Graph { .. } => LocalJobWorkloadKind::Graph,
+        }
+    }
+
     fn digest(&self) -> Digest {
         match self {
             Self::Script { source_digest, .. } => *source_digest,
             Self::Program { submission } => submission.borrow().artifact.id.0,
+            Self::Graph { submission } => submission.request.artifact.id.0,
         }
     }
 }
@@ -159,6 +221,37 @@ impl JobStore {
         )
     }
 
+    #[cfg(test)]
+    pub(super) fn create_graph(
+        &self,
+        submission: GraphBatchSubmission,
+        now: u64,
+    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+        self.create_graph_validated(submission.into_validated()?, now)
+    }
+
+    pub(super) fn create_graph_validated(
+        &self,
+        validated: super::model::ValidatedGraphBatchSubmission,
+        now: u64,
+    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+        let super::model::ValidatedGraphBatchSubmission {
+            submission,
+            request_digest,
+            idempotency_key_digest,
+        } = validated;
+        self.create_record(
+            request_digest,
+            idempotency_key_digest,
+            submission.retention_millis,
+            PersistedWorkload::<Box<ProgramBatchSubmission>>::Graph {
+                submission: Box::new(submission),
+            },
+            now,
+            None,
+        )
+    }
+
     fn create_record<P: Borrow<ProgramBatchSubmission> + Serialize>(
         &self,
         request_digest: Digest,
@@ -188,12 +281,16 @@ impl JobStore {
         let requested_outputs = match &workload {
             PersistedWorkload::Script { .. } => 0,
             PersistedWorkload::Program { submission } => submission.borrow().requested_outputs,
+            PersistedWorkload::Graph { submission } => submission.request.requested_outputs,
         };
         let handle = JobHandle {
             id: job_id,
             run_id,
             generation: 1,
-            outputs: OutputContract { requested_outputs },
+            outputs: OutputContract {
+                requested_outputs,
+                owned_work: None,
+            },
         };
         let job_dir = self.job_dir(job_id);
         secure_directory(&job_dir)?;
@@ -212,6 +309,7 @@ impl JobStore {
         let record = LocalJobRecord {
             schema_version: 1,
             handle,
+            workload_kind: workload.kind(),
             state: LocalJobState::Queued,
             request_digest,
             workload_digest: workload.digest(),
@@ -228,10 +326,28 @@ impl JobStore {
     }
 
     pub(super) fn record(&self, job_id: JobId) -> NativeExecutionResult<LocalJobRecord> {
-        let record: LocalJobRecord = read_json(&self.job_dir(job_id).join("record.json"))?;
+        let mut record: LocalJobRecord = read_json(&self.job_dir(job_id).join("record.json"))?;
         if record.handle.id != job_id {
             return Err(NativeExecutionError::Protocol(
                 "durable job record is stored under the wrong identity".into(),
+            ));
+        }
+        let request: PersistedRequest = read_json(&self.job_dir(job_id).join("request.json"))?;
+        if request.schema_version != 1
+            || request.handle != record.handle
+            || request.request_digest != record.request_digest
+        {
+            return Err(NativeExecutionError::Protocol(
+                "durable job workload differs from its stored identity".into(),
+            ));
+        }
+        request.validate_content_digest(&self.job_dir(job_id))?;
+        let selected_kind = request.workload.kind();
+        if record.workload_kind == LocalJobWorkloadKind::Legacy {
+            record.workload_kind = selected_kind;
+        } else if record.workload_kind != selected_kind {
+            return Err(NativeExecutionError::Protocol(
+                "durable job workload kind differs from its persisted request".into(),
             ));
         }
         record.validate()?;
@@ -274,6 +390,21 @@ impl JobStore {
             return Ok(None);
         };
         completion.validate()?;
+        let request: PersistedRequest = read_json(&self.job_dir(job_id).join("request.json"))?;
+        match (&request.workload, &completion.response) {
+            (PersistedWorkload::Script { .. }, None) => {}
+            // A detached Graph driver that fails before execution commits no response.
+            (PersistedWorkload::Graph { .. }, None) if !completion.success => {}
+            (PersistedWorkload::Graph { submission }, Some(response)) => submission
+                .request
+                .validate_response(response)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
+            _ => {
+                return Err(NativeExecutionError::Protocol(
+                    "durable completion differs from its persisted workload kind".into(),
+                ));
+            }
+        }
         Ok(Some(completion))
     }
 
@@ -314,7 +445,11 @@ impl JobStore {
             stderr,
             next_stdout_offset,
             next_stderr_offset,
-            response: None,
+            // Graph results are committed with their driver completion; portable
+            // program responses are attached from their provider report.
+            response: self
+                .completion(job_id)?
+                .and_then(|completion| completion.response),
             resources: None,
             execution: None,
             latest_progress: None,
@@ -372,6 +507,7 @@ impl JobStore {
                 let record = LocalJobRecord {
                     schema_version: 1,
                     handle: request.handle,
+                    workload_kind: request.workload.kind(),
                     state: LocalJobState::Indeterminate,
                     request_digest: request.request_digest,
                     workload_digest: request.workload.digest(),

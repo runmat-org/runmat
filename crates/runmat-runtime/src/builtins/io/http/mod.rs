@@ -1,7 +1,9 @@
 //! HTTP client builtins.
 
 pub mod compat;
-pub(crate) mod transport;
+mod api_key;
+mod request_options;
+pub mod transport;
 pub mod weboptions;
 pub mod webread;
 pub mod webwrite;

@@ -1,16 +1,18 @@
 use std::io::{Read, Seek, SeekFrom};
 
 use encoding_rs::{Encoding, UTF_8};
-use runmat_filesystem::File;
 use runmat_value::{CharArray, Tensor, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(crate) fn extract_scalar_string(value: &Value) -> Option<String> {
+    if !crate::builtins::common::validation::value_is_text_scalar(value) {
+        return None;
+    }
     match value {
         Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::CharArray(ca) => Some(ca.data.iter().collect()),
+        Value::StringArray(sa) => Some(sa.data[0].clone()),
         _ => None,
     }
 }
@@ -30,8 +32,8 @@ pub(crate) struct LineRead {
     pub(crate) encountered_eof: bool,
 }
 
-pub(crate) fn read_text_line(
-    file: &mut File,
+pub(crate) fn read_text_line<R: Read + Seek>(
+    file: &mut R,
     limit: Option<usize>,
     builtin_name: &'static str,
 ) -> BuiltinResult<LineRead> {
@@ -155,7 +157,11 @@ pub(crate) fn read_text_line(
     })
 }
 
-fn seek_current(file: &mut File, offset: i64, builtin_name: &'static str) -> BuiltinResult<()> {
+fn seek_current<R: Seek>(
+    file: &mut R,
+    offset: i64,
+    builtin_name: &'static str,
+) -> BuiltinResult<()> {
     file.seek(SeekFrom::Current(offset)).map_err(|err| {
         build_runtime_error(format!("{builtin_name}: failed to seek in file: {err}"))
             .with_builtin(builtin_name)

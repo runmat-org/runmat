@@ -179,6 +179,7 @@ impl NodeControlPlane for HttpNodeControlPlane {
             fencing_token: to_u64(response.fencing_token, "driver fencing token")?,
             credential: response.credential,
             expires_at_millis: response.expires_at.timestamp_millis(),
+            ready_v1: response.ready_v1.unwrap_or(false),
         })
     }
 
@@ -214,6 +215,7 @@ impl NodeControlPlane for HttpNodeControlPlane {
             relay_path: response.relay_path,
             relay_protocol: response.relay_protocol,
             relay_ticket: response.relay_ticket,
+            ready_v1: response.ready_v1.unwrap_or(false),
         })
     }
 
@@ -252,13 +254,14 @@ fn inventory_to_api(value: NodeInventory) -> TransportResult<types::ResourceInve
         cpu_millicores: to_i64(value.cpu_millicores, "CPU inventory")?,
         memory_bytes: to_i64(value.memory_bytes, "memory inventory")?,
         scratch_bytes: to_i64(value.scratch_bytes, "scratch inventory")?,
-        accelerator_count: i32::try_from(value.accelerator_count)
-            .map_err(|_| TransportError::Overflow)?,
-        accelerator_class: value.accelerator_class,
-        accelerator_memory_bytes: to_i64(
-            value.accelerator_memory_bytes,
-            "accelerator memory inventory",
-        )?,
+        accelerators: value
+            .accelerators
+            .into_iter()
+            .map(runmat_server_client::execution::accelerator_device_to_api)
+            .collect::<Result<_, _>>()
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
+        host: runmat_server_client::execution::execution_host_inventory_to_api(value.host)
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
         capabilities: value.capabilities.into_iter().collect(),
     })
 }
@@ -293,15 +296,21 @@ fn allocation_from_api(value: types::AllocationLeaseResponse) -> TransportResult
             cpu_millicores: to_u64(value.resources.cpu_millicores, "requested CPU")?,
             memory_bytes: to_u64(value.resources.memory_bytes, "requested memory")?,
             scratch_bytes: to_u64(value.resources.scratch_bytes, "requested scratch")?,
-            accelerator_count: u32::try_from(value.resources.accelerator_count)
-                .map_err(|_| TransportError::Overflow)?,
-            accelerator_class: value.resources.accelerator_class,
-            accelerator_memory_bytes: to_u64(
-                value.resources.accelerator_memory_bytes,
-                "requested accelerator memory",
-            )?,
+            accelerators: value
+                .resources
+                .accelerators
+                .into_iter()
+                .map(runmat_server_client::execution::accelerator_request_from_api)
+                .collect::<Result<_, _>>()
+                .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
             maximum_wall_millis: to_u64(value.resources.maximum_wall_millis, "maximum wall time")?,
         },
+        accelerator_devices: value
+            .accelerator_devices
+            .into_iter()
+            .map(runmat_server_client::execution::accelerator_device_from_api)
+            .collect::<Result<_, _>>()
+            .map_err(|error| TransportError::MalformedFrame(error.to_string()))?,
         role: match value.role.as_str() {
             "driver" => AllocationRole::Driver,
             "worker" => AllocationRole::Worker,

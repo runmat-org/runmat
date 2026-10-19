@@ -18,6 +18,15 @@ use super::style::{
 const POINTS_TO_PX: f32 = 96.0 / 72.0;
 const DEFAULT_MARKER_AREA_POINTS2: f64 = 36.0;
 
+/// Point colors are rows of RGB or RGBA components.
+fn point_color_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 #[derive(Clone)]
 pub struct PointArgs {
     pub size: PointSizeArg,
@@ -128,28 +137,29 @@ impl PointColorArg {
                 Ok(Self::Uniform(color))
             }
             Value::Tensor(tensor) => {
+                let (rows, cols) = point_color_matrix_dimensions(tensor);
                 if tensor::is_scalar_tensor(tensor) {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
-                } else if tensor.rows == 1 && (tensor.cols == 3 || tensor.cols == 4) {
+                } else if rows == 1 && (cols == 3 || cols == 4) {
                     let r = tensor_value(tensor, 0, 0) as f32;
                     let g = tensor_value(tensor, 0, 1) as f32;
                     let b = tensor_value(tensor, 0, 2) as f32;
-                    let a = if tensor.cols == 4 {
+                    let a = if cols == 4 {
                         tensor_value(tensor, 0, 3) as f32
                     } else {
                         1.0
                     };
                     Ok(Self::Uniform(Vec4::new(r, g, b, a)))
-                } else if tensor.cols == 3 || tensor.cols == 4 {
+                } else if cols == 3 || cols == 4 {
                     Ok(Self::RgbMatrix(Value::Tensor(tensor.clone())))
                 } else {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
                 }
             }
             Value::GpuTensor(handle) => {
-                if total_len(handle.shape.as_slice()) == 1 {
+                if total_len(handle.shape()) == 1 {
                     Ok(Self::ScalarValues(value))
-                } else if matches!(handle.shape.last().copied().unwrap_or_default(), 3 | 4) {
+                } else if matches!(handle.shape().last().copied().unwrap_or_default(), 3 | 4) {
                     Ok(Self::RgbMatrix(value))
                 } else {
                     Ok(Self::ScalarValues(value))
@@ -217,7 +227,7 @@ fn is_filled_token(value: &Value) -> bool {
 fn value_is_empty(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
-        Value::GpuTensor(handle) => total_len(handle.shape.as_slice()) == 0,
+        Value::GpuTensor(handle) => total_len(handle.shape()) == 0,
         Value::CharArray(chars) => chars.data.is_empty(),
         Value::String(s) => s.trim().is_empty(),
         _ => false,
@@ -228,7 +238,7 @@ fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
-        Value::GpuTensor(handle) => total_len(handle.shape.as_slice()) == 1,
+        Value::GpuTensor(handle) => total_len(handle.shape()) == 1,
         _ => false,
     }
 }
@@ -332,14 +342,6 @@ pub(crate) fn default_marker_diameter_px() -> f32 {
     marker_area_points2_to_diameter_px(DEFAULT_MARKER_AREA_POINTS2)
 }
 
-pub(crate) fn convert_scalar_color_values(
-    value: &Value,
-    point_count: usize,
-    context: &'static str,
-) -> BuiltinResult<Vec<f64>> {
-    convert_scalar_color_tensor(tensor_from_value(value, context)?, point_count, context)
-}
-
 pub(crate) async fn convert_scalar_color_values_async(
     value: &Value,
     point_count: usize,
@@ -403,20 +405,20 @@ fn convert_rgb_color_tensor(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<Vec<Vec4>> {
-    if tensor.cols != 3 && tensor.cols != 4 {
+    let (rows, cols) = point_color_matrix_dimensions(&tensor);
+    if cols != 3 && cols != 4 {
         return Err(plotting_error(
             context,
             format!("{context}: color matrices must have three (RGB) or four (RGBA) columns"),
         ));
     }
-    if tensor.rows == 0 {
+    if rows == 0 {
         return Err(plotting_error(
             context,
             format!("{context}: RGB color matrices cannot be empty"),
         ));
     }
 
-    let rows = tensor.rows;
     if point_count > 0 && rows != point_count && rows != 1 {
         return Err(plotting_error(
             context,
@@ -438,7 +440,7 @@ fn convert_rgb_color_tensor(
         let r = tensor_value(&tensor, src_row, 0) as f32;
         let g = tensor_value(&tensor, src_row, 1) as f32;
         let b = tensor_value(&tensor, src_row, 2) as f32;
-        let a = if tensor.cols > 3 {
+        let a = if cols > 3 {
             tensor_value(&tensor, src_row, 3) as f32
         } else {
             1.0
@@ -449,7 +451,7 @@ fn convert_rgb_color_tensor(
 }
 
 fn tensor_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    let rows = tensor.rows.max(1);
+    let rows = point_color_matrix_dimensions(tensor).0.max(1);
     let idx = col * rows + row.min(rows - 1);
     tensor::tensor_values_f64(tensor)
         .get(idx)
@@ -512,7 +514,7 @@ pub fn validate_gpu_vector_length(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<()> {
-    let len = total_len(handle.shape.as_slice());
+    let len = total_len(handle.shape());
     if len != point_count {
         return Err(plotting_error(
             context,
@@ -529,13 +531,13 @@ pub fn validate_gpu_color_matrix(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<PointColorComponents> {
-    if handle.shape.len() < 2 {
+    if handle.shape().len() < 2 {
         return Err(plotting_error(
             context,
             format!("{context}: color gpuArray inputs must be at least 2-D"),
         ));
     }
-    let cols = handle.shape.last().copied().unwrap_or_default();
+    let cols = handle.shape().last().copied().unwrap_or_default();
     let components = match cols {
         3 => PointColorComponents::Rgb,
         4 => PointColorComponents::Rgba,
@@ -548,7 +550,7 @@ pub fn validate_gpu_color_matrix(
             ))
         }
     };
-    let rows = handle.shape[..handle.shape.len() - 1]
+    let rows = handle.shape()[..handle.shape().len() - 1]
         .iter()
         .product::<usize>();
     if rows != point_count {
@@ -565,6 +567,36 @@ mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn point_rgb_colors_keep_rank_one_rows_and_reject_rank_zero_matrices() {
+        let row = Tensor::new(vec![0.25, 0.5, 0.75], vec![3]).unwrap();
+        let arg = PointColorArg::from_value(
+            Value::Tensor(row.clone()),
+            &LineStyleParseOptions::scatter(),
+        )
+        .unwrap();
+        let expected = Vec4::new(0.25, 0.5, 0.75, 1.0);
+        assert!(matches!(arg, PointColorArg::Uniform(color) if color == expected));
+        assert_eq!(
+            convert_rgb_color_tensor(row, 2, "scatter").unwrap(),
+            vec![expected; 2]
+        );
+
+        let scalar = Tensor::new(vec![0.5], Vec::new()).unwrap();
+        let error = convert_rgb_color_tensor(scalar, 1, "scatter")
+            .expect_err("rank-zero color input has no RGB columns");
+        assert!(error
+            .message()
+            .contains("three (RGB) or four (RGBA) columns"));
+
+        let matrix = Tensor::new(vec![0.25, 0.5, 0.5, 0.75, 0.75, 1.0], vec![2, 3]).unwrap();
+        assert_eq!(
+            convert_rgb_color_tensor(matrix, 2, "scatter").unwrap(),
+            vec![expected, Vec4::new(0.5, 0.75, 1.0, 1.0)]
+        );
+    }
+
     #[test]
     fn point_size_and_color_vectors_read_typed_integer_storage() {
         let sizes = Value::Tensor(
@@ -575,7 +607,8 @@ mod tests {
         );
 
         let size_px = convert_size_vector(&sizes, 2, "scatter").expect("sizes");
-        let color_values = convert_scalar_color_values(&colors, 2, "scatter").expect("colors");
+        let color_values =
+            block_on(convert_scalar_color_values_async(&colors, 2, "scatter")).expect("colors");
 
         assert_eq!(size_px.len(), 2);
         assert_eq!(color_values, vec![7.0, 8.0]);

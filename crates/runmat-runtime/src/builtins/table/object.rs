@@ -8,6 +8,9 @@ mod selectors;
 mod structure;
 
 pub use analytics::sortrows_table;
+#[cfg(feature = "plot-core")]
+pub(crate) use analytics::{aggregate_heatmap_table, HeatmapAggregation};
+pub(crate) use structure::table_replace_variables_like_owned;
 pub use structure::{
     is_table_value, is_tabular_object, table_from_columns, table_height,
     table_replace_variables_like, table_variable_names_from_object, table_variables, table_width,
@@ -23,6 +26,7 @@ pub(crate) use rows::{select_rows, selected_row_names, value_row_count};
 pub(super) use selectors::one_based_to_zero;
 pub(crate) use selectors::parse_variable_selector_for_object;
 pub(crate) use structure::table_from_columns_like;
+pub(crate) use structure::table_variables_ref;
 pub(super) use structure::{
     into_table_object, into_timetable_object, is_tabular_class, table_from_columns_with_class,
     table_from_columns_with_properties, table_object,

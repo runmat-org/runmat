@@ -8,6 +8,8 @@ pub enum NativeExecutorError {
     StaleValue,
     #[error("native execution failed: {0}")]
     Runtime(#[source] Box<runmat_runtime::RuntimeError>),
+    #[error("native source admission failed: {0}")]
+    SourceAdmission(#[from] runmat_runtime::context::ProgramSourceSelectionError),
     #[error("native execution host failed: {0}")]
     Host(String),
     #[error("native execution was cancelled")]
@@ -18,6 +20,8 @@ pub enum NativeExecutorError {
     UnsupportedExit(u32),
     #[error("native IR site is not executable by the generic host: {0}")]
     UnsupportedSite(String),
+    #[error("native call suspended for asynchronous completion")]
+    CallSuspended,
     #[error("native execution is unavailable on this platform")]
     Unavailable,
 }
@@ -27,5 +31,11 @@ pub type NativeExecutorResult<T> = Result<T, NativeExecutorError>;
 impl From<runmat_runtime::RuntimeError> for NativeExecutorError {
     fn from(error: runmat_runtime::RuntimeError) -> Self {
         Self::Runtime(Box::new(error))
+    }
+}
+
+impl From<Box<runmat_runtime::RuntimeError>> for NativeExecutorError {
+    fn from(error: Box<runmat_runtime::RuntimeError>) -> Self {
+        Self::Runtime(error)
     }
 }

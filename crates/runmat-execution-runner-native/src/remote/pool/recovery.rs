@@ -87,7 +87,7 @@ impl RemotePoolCheckpoint {
                     .tasks
                     .values()
                     .filter_map(|task| task.committed.as_ref())
-                    .flat_map(|commit| &commit.result_objects),
+                    .flat_map(|commit| commit.result.result_objects()),
             )
         {
             if reference.authorization_scope != self.value_scope {
@@ -154,7 +154,7 @@ impl RemotePoolCheckpoint {
                 .tasks
                 .values()
                 .filter_map(|task| task.committed.as_ref())
-                .flat_map(|commit| &commit.result_objects),
+                .flat_map(|commit| commit.result.result_objects()),
         ) {
             if !matches!(
                 reference.kind,
@@ -174,12 +174,14 @@ impl RemotePoolCheckpoint {
             program.validate().map_err(invalid)?;
             if request.scope_id != self.scope_id
                 || request.pool_id != self.pool_id
-                || request.program_artifact_id
-                    != runmat_execution::identity::ArtifactId::derive(&[program
+                || request.program_artifact_id()
+                    != Some(runmat_execution::identity::ArtifactId::derive(&[program
                         .artifact
                         .id
                         .0
-                        .bytes()])
+                        .bytes()]))
+                || request.callable.program != program.callable
+                || request.invocation_context != program.context
                 || request.environment != program.environment
                 || request.console != program.console
                 || request.inputs != program.arguments
@@ -198,10 +200,14 @@ impl RemotePoolCheckpoint {
             }
             inventories.bind(*id, program)?;
             if let Some(commit) = &task.committed {
-                for output in &commit.outputs {
+                let (outputs, _) = commit
+                    .result
+                    .values()
+                    .ok_or_else(|| invalid("checkpoint commit is not a portable value result"))?;
+                for output in outputs {
                     output.validate(ValueLimits::default()).map_err(invalid)?;
                 }
-                if super::super::value_transfer::collect_references(&commit.outputs)
+                if super::super::value_transfer::collect_references(outputs)
                     .iter()
                     .any(|reference| !objects.iter().any(|stored| same_object(stored, reference)))
                 {
@@ -224,6 +230,11 @@ impl RemotePoolDriver {
         &self,
         generation: u64,
     ) -> NativeExecutionResult<RemotePoolCheckpoint> {
+        let bundle_digest = self
+            .direct_bundle
+            .as_ref()
+            .map(|bundle| bundle.digest)
+            .ok_or_else(|| invalid("graph-only remote pools have no portable checkpoint"))?;
         let inventories = self
             .input_inventories
             .lock()
@@ -238,9 +249,15 @@ impl RemotePoolDriver {
             .tasks
             .keys()
             .map(|id| {
-                let program = programs
-                    .get(id)
-                    .ok_or_else(|| invalid("admitted program missing during checkpoint"))?;
+                let program = match programs.get(id).map(|program| program.as_ref()) {
+                    Some(runmat_execution_artifact::WorkerProgramRequest::Direct(program)) => {
+                        program
+                    }
+                    Some(runmat_execution_artifact::WorkerProgramRequest::Graph(_)) => {
+                        return Err(invalid("graph programs have no portable checkpoint"))
+                    }
+                    None => return Err(invalid("admitted program missing during checkpoint")),
+                };
                 inventories.validate(*id, program)?;
                 Ok((
                     *id,
@@ -260,7 +277,7 @@ impl RemotePoolDriver {
             scope_id: self.scope_id,
             pool_id: self.pool_id,
             value_scope: self.value_scope.clone(),
-            bundle_digest: self.bundle_digest,
+            bundle_digest,
             scheduler: DriverCheckpoint::new(generation, snapshot),
             tasks,
             execution_inputs,
@@ -336,7 +353,8 @@ impl RemotePoolDriver {
                     .filter_map(|task| task.committed.as_ref())
                     .any(|commit| {
                         commit
-                            .result_objects
+                            .result
+                            .result_objects()
                             .iter()
                             .any(|stored| same_object(stored, &reference))
                     })
@@ -356,7 +374,7 @@ impl RemotePoolDriver {
             if let Some(commit) = &task.committed {
                 restored
                     .execution_objects
-                    .commit_results(&commit.result_objects)?;
+                    .commit_results(commit.result.result_objects())?;
             }
         }
         let inventories = restored
@@ -369,7 +387,12 @@ impl RemotePoolDriver {
                 inventories.register(&binding.program, inventory)?;
             }
             inventories.bind(id, &binding.program)?;
-            programs.insert(id, binding.program);
+            programs.insert(
+                id,
+                Arc::new(runmat_execution_artifact::WorkerProgramRequest::Direct(
+                    binding.program,
+                )),
+            );
         }
         *restored.driver.get_mut().expect("new driver") = driver;
         // Install waiters before any worker can run. A completion arriving before

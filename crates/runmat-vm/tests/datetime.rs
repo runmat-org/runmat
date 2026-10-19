@@ -12,7 +12,7 @@ fn datetime_construction_and_component_access_work_in_scripts() {
 
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name == "datetime")));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name.is(runmat_types::StaticClassIdentity::new("datetime")))));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 2024.0).abs() < f64::EPSILON)));

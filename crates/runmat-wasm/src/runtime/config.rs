@@ -11,6 +11,9 @@ use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InitOptions {
+    /// Explicit embedding authority; omitted means the normal browser host.
+    #[serde(default)]
+    pub(crate) application_settings: Option<ApplicationSettingsMode>,
     #[serde(default)]
     pub(crate) enable_jit: Option<bool>,
     #[serde(default)]
@@ -46,6 +49,12 @@ pub(crate) struct InitOptions {
     #[cfg(target_arch = "wasm32")]
     #[serde(skip)]
     pub(crate) telemetry_emitter: Option<JsValue>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ApplicationSettingsMode {
+    IsolatedMemory,
 }
 
 #[derive(Clone)]
@@ -122,6 +131,21 @@ pub(crate) fn error_namespace_for_compat(mode: CompatMode) -> &'static str {
     }
 }
 
+pub(crate) fn request_error_namespace(
+    compatibility: Option<CompatMode>,
+    explicit_namespace: Option<&str>,
+) -> Option<String> {
+    explicit_namespace
+        .map(str::trim)
+        .filter(|namespace| !namespace.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            compatibility
+                .map(error_namespace_for_compat)
+                .map(str::to_string)
+        })
+}
+
 pub(crate) fn apply_plotting_overrides(opts: &InitOptions) {
     if let Some(points) = opts.scatter_target_points {
         set_scatter_target_points(points);
@@ -185,6 +209,21 @@ mod compatibility_tests {
     }
 
     #[wasm_bindgen_test]
+    fn application_settings_requires_an_explicit_supported_mode() {
+        let normal: InitOptions = serde_json::from_str("{}").unwrap();
+        assert_eq!(normal.application_settings, None);
+        let isolated: InitOptions =
+            serde_json::from_str(r#"{"applicationSettings":"isolatedMemory"}"#).unwrap();
+        assert_eq!(
+            isolated.application_settings,
+            Some(ApplicationSettingsMode::IsolatedMemory)
+        );
+        assert!(
+            serde_json::from_str::<InitOptions>(r#"{"applicationSettings":"unknown"}"#).is_err()
+        );
+    }
+
+    #[wasm_bindgen_test]
     fn language_compat_modes_remain_distinct() {
         assert_eq!(parse_language_compat(Some("runmat")), CompatMode::RunMat);
         assert_eq!(parse_language_compat(Some("matlab")), CompatMode::Matlab);
@@ -207,5 +246,18 @@ mod compatibility_tests {
             SessionConfig::from_options(&runmat).error_namespace,
             "RunMat"
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn request_namespace_tracks_a_compatibility_override_unless_explicit() {
+        assert_eq!(
+            request_error_namespace(Some(CompatMode::Matlab), None).as_deref(),
+            Some("MATLAB")
+        );
+        assert_eq!(
+            request_error_namespace(Some(CompatMode::Matlab), Some("Acme")).as_deref(),
+            Some("Acme")
+        );
+        assert_eq!(request_error_namespace(None, None), None);
     }
 }

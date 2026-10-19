@@ -443,7 +443,8 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             .take()
             .unwrap_or_else(|| format!("Series {}", series_idx + 1));
         if let Some((xg, yg, zg)) = plan.data.gpu_handles() {
-            if let Ok(plot) = build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await
+            if let Some(plot) =
+                build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await?
             {
                 plots.push(plot);
                 continue;
@@ -481,8 +482,7 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_line3_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_plot3_internal(err));
@@ -627,14 +627,18 @@ pub(super) fn build_line3_plot_for_builtin(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
-    Ok(Line3Plot::new(x, y, z)
+    let mut plot = Line3Plot::new(x, y, z)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_style(
             appearance.color,
             appearance.line_width,
             appearance.line_style,
         )
-        .with_label(label))
+        .with_label(label);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(plot)
 }
 
 pub(super) fn build_line3_plot_from_numeric_data_for_builtin(
@@ -645,14 +649,18 @@ pub(super) fn build_line3_plot_from_numeric_data_for_builtin(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
-    Ok(Line3Plot::from_numeric_data(x, y, z)
+    let mut plot = Line3Plot::from_numeric_data(x, y, z)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_style(
             appearance.color,
             appearance.line_width,
             appearance.line_style,
         )
-        .with_label(label))
+        .with_label(label);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(plot)
 }
 
 fn build_line3_plot_from_numeric_data(
@@ -671,73 +679,77 @@ async fn build_line3_gpu_plot_async(
     z: &runmat_accelerate_api::GpuTensorHandle,
     label: &str,
     appearance: &LineAppearance,
-) -> crate::BuiltinResult<Line3Plot> {
-    if runmat_accelerate_api::handle_integer_type(x).is_some()
-        || runmat_accelerate_api::handle_integer_type(y).is_some()
-        || runmat_accelerate_api::handle_integer_type(z).is_some()
-    {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "plot3: integer gpuArray source requires exact host property retention",
-        ));
-    }
-    let _ = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU X data"))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Y data"))?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Z data"))?;
-    if x_ref.len == 0 || x_ref.len != y_ref.len || x_ref.len != z_ref.len {
+) -> crate::BuiltinResult<Option<Line3Plot>> {
+    let count = super::gpu_helpers::GpuBufferExports::element_count;
+    let len = count(x, BUILTIN_NAME)?;
+    if len == 0 || len != count(y, BUILTIN_NAME)? || len != count(z, BUILTIN_NAME)? {
         return Err(plotting_error(
             BUILTIN_NAME,
             "plot3: X, Y, and Z inputs must have identical non-empty lengths",
         ));
     }
-    if x_ref.len == 1 {
-        let host_x = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            x.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let host_y = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            y.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let host_z = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            z.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let (host_x, host_y, host_z) =
-            numeric_plot_data_triplet(host_x, host_y, host_z, BUILTIN_NAME)?;
-        return build_line3_plot_from_numeric_data(host_x, host_y, host_z, label, appearance);
+    if len == 1
+        || runmat_accelerate_api::handle_precision(x) != runmat_accelerate_api::handle_precision(y)
+        || runmat_accelerate_api::handle_precision(x) != runmat_accelerate_api::handle_precision(z)
+    {
+        return Ok(None);
     }
-    if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "plot3: gpuArray precision must match across X, Y, and Z",
-        ));
-    }
-    let len = u32::try_from(x_ref.len)
+    u32::try_from(len)
         .map_err(|_| plotting_error(BUILTIN_NAME, "plot3: point count exceeds supported range"))?;
-    let inputs = Line3GpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
-        z_buffer: z_ref.buffer.clone(),
-        len,
-        scalar: ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64),
+    let Some((_context, mut gpu_exports)) =
+        super::gpu_helpers::GpuBufferExports::prepare(&[x, y, z], BUILTIN_NAME)?
+    else {
+        return Ok(None);
     };
-    let bounds = gpu_xyz_bounds_async(x, y, z, BUILTIN_NAME).await?;
-    Ok(runmat_plot::plots::Line3Plot::from_gpu_xyz(
-        inputs,
-        appearance.color,
-        appearance.line_width,
-        appearance.line_style,
-        bounds,
-    )
-    .with_label(label))
+    let result = async {
+        let x_ref = gpu_exports
+            .export(x, BUILTIN_NAME)?
+            .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU X data"))?;
+        let y_ref = gpu_exports
+            .export(y, BUILTIN_NAME)?
+            .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Y data"))?;
+        let z_ref = gpu_exports
+            .export(z, BUILTIN_NAME)?
+            .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Z data"))?;
+        if x_ref.len == 0 || x_ref.len != y_ref.len || x_ref.len != z_ref.len {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "plot3: X, Y, and Z inputs must have identical non-empty lengths",
+            ));
+        }
+        if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "plot3: gpuArray precision must match across X, Y, and Z",
+            ));
+        }
+        let len = u32::try_from(x_ref.len).map_err(|_| {
+            plotting_error(BUILTIN_NAME, "plot3: point count exceeds supported range")
+        })?;
+        let inputs = Line3GpuInputs {
+            x_buffer: x_ref.clone().into(),
+            y_buffer: y_ref.clone().into(),
+            z_buffer: z_ref.clone().into(),
+            len,
+            scalar: ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64),
+        };
+        let bounds = gpu_xyz_bounds_async(x, y, z, BUILTIN_NAME).await?;
+        gpu_exports.record_completed_effect();
+        let mut plot = runmat_plot::plots::Line3Plot::from_gpu_xyz(
+            inputs,
+            appearance.color,
+            appearance.line_width,
+            appearance.line_style,
+            bounds,
+        )
+        .with_label(label);
+        if let Some(visible) = appearance.visible {
+            plot.set_visible(visible);
+        }
+        Ok(plot)
+    }
+    .await;
+    gpu_exports.complete(result, BUILTIN_NAME).map(Some)
 }
 
 #[cfg(test)]

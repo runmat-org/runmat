@@ -1,5 +1,11 @@
 use runmat_plot::plots::Figure;
 
+#[path = "engine/capability.rs"]
+mod capability;
+pub(crate) use capability::ensure_png_export_available;
+#[cfg(all(test, not(feature = "plot-core")))]
+pub(crate) use capability::PngExportUnavailable;
+
 #[cfg(not(any(feature = "gui", all(target_arch = "wasm32", feature = "plot-web"))))]
 use super::common::ERR_PLOTTING_UNAVAILABLE;
 use super::state::{clone_figure, FigureHandle};
@@ -12,8 +18,6 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[derive(Debug, Error)]
 #[allow(dead_code)]
 enum PlottingBackendError {
-    #[error("interactive backend error: {0}")]
-    Interactive(String),
     #[error("static backend error: {0}")]
     Static(String),
     #[error("export initialization error: {0}")]
@@ -30,7 +34,7 @@ fn engine_error(message: impl Into<String>) -> RuntimeError {
 
 fn engine_error_with_source(
     message: impl Into<String>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     build_runtime_error(message)
         .with_identifier("RunMat:plot:EngineError")
@@ -49,7 +53,10 @@ pub fn render_figure(handle: FigureHandle, figure: Figure) -> BuiltinResult<Stri
     {
         let _ = handle;
         let _ = figure;
-        Err(engine_error(ERR_PLOTTING_UNAVAILABLE))
+        Err(engine_error_with_source(
+            ERR_PLOTTING_UNAVAILABLE,
+            runmat_plot::PlotPresentationError::Unavailable(ERR_PLOTTING_UNAVAILABLE),
+        ))
     }
 }
 
@@ -531,10 +538,10 @@ pub(crate) mod native {
 
     fn interactive_export(handle: FigureHandle, figure: &mut Figure) -> BuiltinResult<String> {
         let figure_clone = figure.clone();
-        runmat_plot::render_interactive_with_handle(handle.as_u32(), figure_clone).map_err(|err| {
+        runmat_plot::present_interactive_with_handle(handle.as_u32(), figure_clone).map_err(|err| {
             engine_error_with_source(
                 "Interactive plotting failed. Please check GPU/GUI system setup.",
-                PlottingBackendError::Interactive(err),
+                err,
             )
         })
     }

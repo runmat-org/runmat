@@ -6,8 +6,7 @@ use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.assumeEqual",
-    category = "testing/qualifications",
-    summary = "Require equality or filter the current test.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::assume"
 )]
 async fn assume_equal(
@@ -30,8 +29,7 @@ async fn assume_equal(
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.assumeTrue",
-    category = "testing/qualifications",
-    summary = "Require logical truth or filter the current test.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::assume"
 )]
 async fn assume_true(

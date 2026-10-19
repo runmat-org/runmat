@@ -28,11 +28,10 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
             cpu_millicores: 1,
             memory_bytes: 8 * 1024 * 1024 * 1024,
             scratch_bytes: 1024,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: Vec::new(),
             maximum_wall_millis: 10,
         },
+        accelerator_devices: Vec::new(),
         role: AllocationRole::Driver,
         state: "offered".into(),
         fencing_token: 1,
@@ -47,6 +46,7 @@ async fn local_wall_limit_kills_the_owned_process_tree() {
         driver_lease_id: "driver-lease".into(),
         fencing_token: 1,
         credential: "credential".into(),
+        ready_v1: false,
         expires_at_millis: allocation.expires_at_millis,
     };
     processes
@@ -93,11 +93,12 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
             cpu_millicores: 1,
             memory_bytes: 64 * 1024 * 1024,
             scratch_bytes: 1024,
-            accelerator_count: 1,
-            accelerator_class: Some("nvidia-l4".into()),
-            accelerator_memory_bytes: 24 * 1024 * 1024 * 1024,
+            accelerators: vec![
+                runmat_execution::resource::AcceleratorRequest::generic_compute(1).unwrap(),
+            ],
             maximum_wall_millis: 60_000,
         },
+        accelerator_devices: Vec::new(),
         role: AllocationRole::Worker,
         state: "active".into(),
         fencing_token: 3,
@@ -116,6 +117,7 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
         relay_path: "/v1/execution/workers/lease-worker/relay".into(),
         relay_protocol: "runmat-worker-relay-v1".into(),
         relay_ticket: "scoped-ticket".into(),
+        ready_v1: false,
     };
     let mut processes = AllocationProcesses::default();
     processes
@@ -125,6 +127,10 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
             &sandbox,
             "https://server.test",
             &bootstrap,
+            &runmat_node_agent::inventory::host(
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            )
+            .unwrap(),
         )
         .await
         .unwrap();

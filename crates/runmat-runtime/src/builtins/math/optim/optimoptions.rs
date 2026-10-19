@@ -3,12 +3,17 @@
 use std::collections::VecDeque;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, OptimAlgorithm, OptimDisplay, OptimOptionField, OptimSolver as Solver,
+    OptimSwitch, OPTIMOPTIONS_ERROR_FLOW, OPTIMOPTIONS_ERROR_INVALID_ARGUMENT,
+    OPTIMOPTIONS_ERROR_INVALID_OPTION_NAME, OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+    OPTIMOPTIONS_ERROR_INVALID_SOLVER, OPTIMOPTIONS_ERROR_MISSING_OPTION_VALUE,
+    OPTIMOPTIONS_ERROR_UNKNOWN_OPTION,
+    OPTIMOPTIONS_INTEGER_OPTION_EXTENSION as INTEGER_OPTION_EXTENSION,
+    OPTIMOPTIONS_RESIDENT_OPTION_EXTENSION as RESIDENT_OPTION_EXTENSION,
+};
+pub use runmat_builtins::{
+    OPTIMOPTIONS_DESCRIPTOR, OPTIMOPTIONS_EXTENSIONS as EXTENSIONS,
+    OPTIMOPTIONS_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, LogicalArray, StructValue, Value};
@@ -18,191 +23,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::optim::common::canonical_option_name;
-use crate::builtins::math::optim::type_resolvers::optim_options_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "optimoptions";
-
-const INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "optimoptions-integer-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "optimoptions with native-class integer option values is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:OptimoptionsIntegerOptionExtension"),
-};
-const RESIDENT_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "optimoptions-resident-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "optimoptions with explicit gpuArray option values is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:OptimoptionsResidentOptionExtension"),
-};
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [INTEGER_OPTION_EXTENSION, RESIDENT_OPTION_EXTENSION];
-
-const INTEGER_FLOATING_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "floating option value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Optimization tolerances are documented in floating classes; typed integers are gated and must convert exactly.",
-    }];
-const INTEGER_STRUCTURAL_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "count or logical option value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Typed iteration counts and logical flags are RunMat-only option-builder inputs parsed exactly before normalized storage.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "options = optimoptions(___, floating_name, integer_value, ___)", inputs: &INTEGER_FLOATING_OPTION_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat's supported compatibility subset normalizes accepted integer tolerances to double only after an exact representability check." },
-    BuiltinIntegerCapabilityDescriptor { form: "options = optimoptions(___, structural_name, integer_value, ___)", inputs: &INTEGER_STRUCTURAL_OPTION_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Counts use exact integer-to-usize parsing and 0/1 logical controls become logical fields; current RunMat returns a struct rather than MATLAB's options object." },
-];
-
-const OPTIMOPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Options struct for optimization solvers.",
-}];
-
-const OPTIMOPTIONS_INPUTS_SOLVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "solver",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "Solver name, such as coneprog, fminbnd, fminunc, fzero, fsolve, lsqcurvefit, or lsqnonlin.",
-}];
-
-const OPTIMOPTIONS_INPUTS_SOLVER_PAIRS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "solver",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description:
-            "Solver name, such as coneprog, fminbnd, fminunc, fzero, fsolve, lsqcurvefit, or lsqnonlin.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Option field name.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option value(s) and additional name/value pairs.",
-    },
-];
-
-const OPTIMOPTIONS_INPUTS_EXISTING_PAIRS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "oldopts",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Existing options struct to update.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Option field name.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option value(s), additional name/value pairs, or another options struct.",
-    },
-];
-
-const OPTIMOPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "options = optimoptions(solver)",
-        inputs: &OPTIMOPTIONS_INPUTS_SOLVER,
-        outputs: &OPTIMOPTIONS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "options = optimoptions(solver, name, value, ...)",
-        inputs: &OPTIMOPTIONS_INPUTS_SOLVER_PAIRS,
-        outputs: &OPTIMOPTIONS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "options = optimoptions(oldopts, name, value, ...)",
-        inputs: &OPTIMOPTIONS_INPUTS_EXISTING_PAIRS,
-        outputs: &OPTIMOPTIONS_OUTPUT,
-    },
-];
-
-const OPTIMOPTIONS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMOPTIONS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:optimoptions:InvalidArgument"),
-    when: "Argument grammar does not match supported optimoptions forms.",
-    message: "optimoptions: invalid argument",
-};
-const OPTIMOPTIONS_ERROR_INVALID_SOLVER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMOPTIONS.INVALID_SOLVER",
-    identifier: Some("RunMat:optimoptions:InvalidSolver"),
-    when: "The solver argument is not one of the supported optimization builtins.",
-    message: "optimoptions: invalid solver",
-};
-const OPTIMOPTIONS_ERROR_INVALID_OPTION_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMOPTIONS.INVALID_OPTION_NAME",
-    identifier: Some("RunMat:optimoptions:InvalidOptionName"),
-    when: "An option name is not a text scalar.",
-    message: "optimoptions: invalid option name",
-};
-const OPTIMOPTIONS_ERROR_MISSING_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMOPTIONS.MISSING_OPTION_VALUE",
-    identifier: Some("RunMat:optimoptions:MissingOptionValue"),
-    when: "A name-value option key is not followed by a value.",
-    message: "optimoptions: missing option value",
-};
-const OPTIMOPTIONS_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMOPTIONS.UNKNOWN_OPTION",
-    identifier: Some("RunMat:optimoptions:UnknownOption"),
-    when: "An option name is not supported by the selected solver.",
-    message: "optimoptions: unknown option",
-};
-const OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMOPTIONS.INVALID_OPTION_VALUE",
-    identifier: Some("RunMat:optimoptions:InvalidOptionValue"),
-    when: "An option value fails type or domain validation.",
-    message: "optimoptions: invalid option value",
-};
-const OPTIMOPTIONS_ERROR_FLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMOPTIONS.FLOW",
-    identifier: Some("RunMat:optimoptions:Flow"),
-    when: "Nested flow fails while gathering input values.",
-    message: "optimoptions: flow failure",
-};
-
-const OPTIMOPTIONS_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    OPTIMOPTIONS_ERROR_INVALID_ARGUMENT,
-    OPTIMOPTIONS_ERROR_INVALID_SOLVER,
-    OPTIMOPTIONS_ERROR_INVALID_OPTION_NAME,
-    OPTIMOPTIONS_ERROR_MISSING_OPTION_VALUE,
-    OPTIMOPTIONS_ERROR_UNKNOWN_OPTION,
-    OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
-    OPTIMOPTIONS_ERROR_FLOW,
-];
-
-pub const OPTIMOPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OPTIMOPTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &OPTIMOPTIONS_ERRORS,
-};
+mod preflight;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::optim::optimoptions")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -233,18 +57,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "optimoptions",
-    category = "math/optim",
-    summary = "Create or update a typed optimization options structure for coneprog, fminbnd, fminunc, fzero, fsolve, lsqcurvefit, and lsqnonlin.",
-    keywords = "optimoptions,options,TolX,TolFun,FunctionTolerance,StepTolerance,MaxIter,MaxFunEvals,Display,Algorithm,SpecifyObjectiveGradient,coneprog,lsqnonlin",
-    accel = "cpu",
-    type_resolver(optim_options_type),
-    descriptor(crate::builtins::math::optim::optimoptions::OPTIMOPTIONS_DESCRIPTOR),
-    extensions(crate::builtins::math::optim::optimoptions::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::optim::optimoptions::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::optim::optimoptions"
 )]
 async fn optimoptions_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &OPTIMOPTIONS_DESCRIPTOR,
+        &OPTIMOPTIONS_ERROR_INVALID_ARGUMENT,
+        NAME,
+    )?;
     ensure_optimoptions_extensions(&rest)?;
+    preflight::arguments(&rest)?;
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
         gathered.push(gather_if_needed_async(&value).await.map_err(|err| {
@@ -379,105 +202,12 @@ where
 {
     let mut builder = build_runtime_error(message(&err))
         .with_builtin(NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .with_source(err);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Solver {
-    Coneprog,
-    Fminbnd,
-    Fminunc,
-    Fzero,
-    Fsolve,
-    Lsqcurvefit,
-    Lsqnonlin,
-    Generic,
-}
-
-impl Solver {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Coneprog => "coneprog",
-            Self::Fminbnd => "fminbnd",
-            Self::Fminunc => "fminunc",
-            Self::Fzero => "fzero",
-            Self::Fsolve => "fsolve",
-            Self::Lsqcurvefit => "lsqcurvefit",
-            Self::Lsqnonlin => "lsqnonlin",
-            Self::Generic => "",
-        }
-    }
-
-    fn default_display(self) -> &'static str {
-        match self {
-            Self::Fminbnd => "notify",
-            Self::Coneprog
-            | Self::Fminunc
-            | Self::Fzero
-            | Self::Fsolve
-            | Self::Lsqcurvefit
-            | Self::Lsqnonlin
-            | Self::Generic => "off",
-        }
-    }
-
-    fn accepts_tol_fun(self) -> bool {
-        matches!(
-            self,
-            Self::Coneprog
-                | Self::Fminunc
-                | Self::Fsolve
-                | Self::Lsqcurvefit
-                | Self::Lsqnonlin
-                | Self::Generic
-        )
-    }
-
-    fn accepts_option(self, canonical: &str) -> bool {
-        match canonical {
-            "TolX" | "MaxIter" | "MaxFunEvals" | "Display" => true,
-            "TolFun" => self.accepts_tol_fun(),
-            "Algorithm" => matches!(
-                self,
-                Self::Coneprog
-                    | Self::Fminunc
-                    | Self::Lsqcurvefit
-                    | Self::Lsqnonlin
-                    | Self::Generic
-            ),
-            "SpecifyObjectiveGradient" => matches!(self, Self::Fminunc | Self::Generic),
-            _ => false,
-        }
-    }
-
-    fn accepts_display(self, display: &str) -> bool {
-        match self {
-            Self::Fminbnd | Self::Fminunc | Self::Generic => {
-                matches!(display, "off" | "none" | "iter" | "notify" | "final")
-            }
-            Self::Coneprog | Self::Fzero | Self::Fsolve | Self::Lsqcurvefit | Self::Lsqnonlin => {
-                matches!(display, "off" | "none" | "iter" | "final")
-            }
-        }
-    }
-
-    fn accepts_algorithm(self, algorithm: &str) -> bool {
-        match self {
-            Self::Fminunc => matches!(algorithm, "quasi-newton" | "bfgs"),
-            Self::Coneprog => matches!(algorithm, "interior-point" | "interior-point-convex"),
-            Self::Lsqcurvefit | Self::Lsqnonlin | Self::Generic => {
-                matches!(
-                    algorithm,
-                    "quasi-newton" | "bfgs" | "levenberg-marquardt" | "trust-region-reflective"
-                )
-            }
-            _ => false,
-        }
-    }
 }
 
 fn parse_solver(value: &Value) -> BuiltinResult<Solver> {
@@ -490,19 +220,15 @@ fn parse_solver(value: &Value) -> BuiltinResult<Solver> {
 }
 
 fn parse_solver_name(text: &str) -> BuiltinResult<Solver> {
-    match text.trim().to_ascii_lowercase().as_str() {
-        "fminbnd" => Ok(Solver::Fminbnd),
-        "coneprog" => Ok(Solver::Coneprog),
-        "fminunc" => Ok(Solver::Fminunc),
-        "fzero" => Ok(Solver::Fzero),
-        "fsolve" => Ok(Solver::Fsolve),
-        "lsqcurvefit" => Ok(Solver::Lsqcurvefit),
-        "lsqnonlin" => Ok(Solver::Lsqnonlin),
-        other => Err(optimoptions_error_with(
+    Solver::parse(text).ok_or_else(|| {
+        optimoptions_error_with(
             &OPTIMOPTIONS_ERROR_INVALID_SOLVER,
-            format!("optimoptions: unsupported solver '{other}'"),
-        )),
-    }
+            format!(
+                "optimoptions: unsupported solver '{}'",
+                text.trim().to_ascii_lowercase()
+            ),
+        )
+    })
 }
 
 fn solver_from_options(options: &StructValue) -> BuiltinResult<Solver> {
@@ -597,14 +323,15 @@ fn merge_generic_into_defaults(
         if key.eq_ignore_ascii_case("Solver") {
             continue;
         }
-        let canonical = canonical_option_name(key);
-        if !solver.accepts_option(&canonical) {
+        let Some(field) = OptimOptionField::parse(key).filter(|field| solver.accepts(*field))
+        else {
+            continue;
+        };
+        let normalized = normalized_option_value(solver, field, value);
+        if field == OptimOptionField::Display && normalized.is_err() {
             continue;
         }
-        if canonical == "Display" && display_value(solver, value).is_err() {
-            continue;
-        }
-        set_option_field(&mut out, solver, key, value)?;
+        out.insert(field.name(), normalized?);
     }
     Ok(out)
 }
@@ -626,20 +353,37 @@ fn apply_struct_fields(
             target.insert("Solver", Value::from(parsed.name()));
             continue;
         }
-        let canonical = canonical_option_name(key);
+        let field = admitted_option_field(solver, key)?;
+        let normalized = normalized_option_value(solver, field, value)?;
         if let Some(defaults) = &source_defaults {
-            if solver.accepts_option(&canonical)
-                && lookup_case_insensitive(defaults, &canonical).is_some_and(|default| {
-                    normalized_option_value(solver, &canonical, value)
-                        .is_ok_and(|normalized| default == &normalized)
-                })
+            if lookup_case_insensitive(defaults, field.name())
+                .is_some_and(|default| matches_source_default(field, default, &normalized))
             {
                 continue;
             }
         }
-        set_option_field(target, solver, key, value)?;
+        target.insert(field.name(), normalized);
     }
     Ok(())
+}
+
+fn matches_source_default(field: OptimOptionField, default: &Value, normalized: &Value) -> bool {
+    if default == normalized {
+        return true;
+    }
+    if !matches!(
+        field,
+        OptimOptionField::MaxIter | OptimOptionField::MaxFunEvals
+    ) {
+        return false;
+    }
+    match (default, normalized) {
+        (Value::Num(default), Value::Int(integer)) => {
+            crate::builtins::common::validation::integer_is_exact_f64(integer)
+                && *default == integer.to_f64()
+        }
+        _ => false,
+    }
 }
 
 fn set_option_field(
@@ -648,33 +392,46 @@ fn set_option_field(
     name: &str,
     value: &Value,
 ) -> BuiltinResult<()> {
-    let canonical = canonical_option_name(name);
-    if !solver.accepts_option(&canonical) {
-        return Err(optimoptions_error_with(
-            &OPTIMOPTIONS_ERROR_UNKNOWN_OPTION,
-            format!(
-                "optimoptions: option '{}' is not supported for {}",
-                name,
-                solver_label(solver)
-            ),
-        ));
-    }
-
-    let value = normalized_option_value(solver, &canonical, value)?;
-    options.insert(canonical, value);
+    let field = admitted_option_field(solver, name)?;
+    options.insert(field.name(), normalized_option_value(solver, field, value)?);
     Ok(())
 }
 
-fn normalized_option_value(solver: Solver, canonical: &str, value: &Value) -> BuiltinResult<Value> {
-    match canonical {
-        "TolX" | "TolFun" => Ok(Value::Num(positive_finite_scalar(canonical, value)?)),
-        "MaxIter" | "MaxFunEvals" => {
-            Ok(Value::Num(positive_integer_scalar(canonical, value)? as f64))
+fn admitted_option_field(solver: Solver, name: &str) -> BuiltinResult<OptimOptionField> {
+    OptimOptionField::parse(name)
+        .filter(|field| solver.accepts(*field))
+        .ok_or_else(|| {
+            optimoptions_error_with(
+                &OPTIMOPTIONS_ERROR_UNKNOWN_OPTION,
+                format!(
+                    "optimoptions: option '{}' is not supported for {}",
+                    name,
+                    solver_label(solver)
+                ),
+            )
+        })
+}
+
+fn normalized_option_value(
+    solver: Solver,
+    field: OptimOptionField,
+    value: &Value,
+) -> BuiltinResult<Value> {
+    match field {
+        OptimOptionField::TolX | OptimOptionField::TolFun => {
+            Ok(Value::Num(positive_finite_scalar(field.name(), value)?))
         }
-        "Display" => Ok(Value::from(display_value(solver, value)?)),
-        "Algorithm" => Ok(Value::from(algorithm_value(solver, value)?)),
-        "SpecifyObjectiveGradient" => Ok(Value::Bool(logical_value(canonical, value)?)),
-        _ => unreachable!("unsupported option passed accepts_option"),
+        OptimOptionField::MaxIter | OptimOptionField::MaxFunEvals => {
+            let count = positive_integer_scalar(field.name(), value)?;
+            Ok(tensor::scalar_integer_value(value)
+                .map(Value::Int)
+                .unwrap_or_else(|| Value::Num(count as f64)))
+        }
+        OptimOptionField::Display => Ok(Value::from(display_value(solver, value)?.name())),
+        OptimOptionField::Algorithm => Ok(Value::from(algorithm_value(solver, value)?.name())),
+        OptimOptionField::SpecifyObjectiveGradient => {
+            Ok(Value::Bool(logical_value(field.name(), value)?))
+        }
     }
 }
 
@@ -819,17 +576,20 @@ fn logical_from_number(field: &str, value: f64) -> BuiltinResult<bool> {
 }
 
 fn logical_from_text(field: &str, value: &str) -> BuiltinResult<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "on" | "true" | "yes" => Ok(true),
-        "off" | "false" | "no" => Ok(false),
-        other => Err(optimoptions_error_with(
-            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
-            format!("optimoptions: option {field} must be 'on' or 'off', got '{other}'"),
-        )),
-    }
+    OptimSwitch::parse(value)
+        .map(OptimSwitch::enabled)
+        .ok_or_else(|| {
+            optimoptions_error_with(
+                &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                format!(
+                    "optimoptions: option {field} must be 'on' or 'off', got '{}'",
+                    value.trim().to_ascii_lowercase()
+                ),
+            )
+        })
 }
 
-fn display_value(solver: Solver, value: &Value) -> BuiltinResult<String> {
+fn display_value(solver: Solver, value: &Value) -> BuiltinResult<OptimDisplay> {
     let display = expect_string_scalar(
         value,
         "optimoptions: Display must be a character vector or string scalar",
@@ -837,7 +597,9 @@ fn display_value(solver: Solver, value: &Value) -> BuiltinResult<String> {
     )?
     .trim()
     .to_ascii_lowercase();
-    if solver.accepts_display(&display) {
+    if let Some(display) =
+        OptimDisplay::parse(&display).filter(|display| solver.accepts_display(*display))
+    {
         Ok(display)
     } else {
         Err(optimoptions_error_with(
@@ -851,7 +613,7 @@ fn display_value(solver: Solver, value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn algorithm_value(solver: Solver, value: &Value) -> BuiltinResult<String> {
+fn algorithm_value(solver: Solver, value: &Value) -> BuiltinResult<OptimAlgorithm> {
     let algorithm = expect_string_scalar(
         value,
         "optimoptions: Algorithm must be a character vector or string scalar",
@@ -859,7 +621,9 @@ fn algorithm_value(solver: Solver, value: &Value) -> BuiltinResult<String> {
     )?
     .trim()
     .to_ascii_lowercase();
-    if solver.accepts_algorithm(&algorithm) {
+    if let Some(algorithm) =
+        OptimAlgorithm::parse(&algorithm).filter(|algorithm| solver.accepts_algorithm(*algorithm))
+    {
         Ok(algorithm)
     } else {
         Err(optimoptions_error_with(
@@ -907,7 +671,10 @@ mod tests {
         block_on(optimoptions_builtin(rest))
     }
 
-    fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<Value> {
+    fn run_call_builtin(
+        name: &str,
+        args: &[Value],
+    ) -> BuiltinResult<crate::execution::RootedValue> {
         block_on(call_builtin_async(name, args))
     }
 
@@ -1091,6 +858,8 @@ mod tests {
                 Value::Num(1.0e-9),
                 Value::from("StepTolerance"),
                 Value::Num(1.0e-8),
+                Value::from("MaxFunctionEvaluations"),
+                Value::Num(7.0),
                 Value::from("Algorithm"),
                 Value::from("trust-region-reflective"),
             ])
@@ -1098,6 +867,8 @@ mod tests {
         );
         assert_eq!(num_field(&options, "TolFun"), 1.0e-9);
         assert_eq!(num_field(&options, "TolX"), 1.0e-8);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 7.0);
+        assert!(!options.fields.contains_key("MaxFunctionEvaluations"));
         assert_eq!(
             string_field(&options, "Algorithm"),
             "trust-region-reflective"
@@ -1363,7 +1134,49 @@ mod tests {
             ])
             .expect("optimoptions"),
         );
-        assert_eq!(num_field(&options, "MaxIter"), 5.0);
+        assert_eq!(
+            options.fields.get("MaxIter"),
+            Some(&Value::Int(IntValue::U16(5)))
+        );
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn optimoptions_wide_native_counts_survive_roundtrip_merge_and_solver_decode() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let count = (1_u64 << 53) + 1;
+        for integer in [IntValue::I64(count as i64), IntValue::U64(count)] {
+            let original = struct_result(
+                run_optimoptions(vec![
+                    Value::from("coneprog"),
+                    Value::from("MaxIter"),
+                    Value::Int(integer.clone()),
+                ])
+                .expect("exact count"),
+            );
+            let roundtrip =
+                struct_result(run_optimoptions(vec![Value::Struct(original)]).expect("roundtrip"));
+            let merged = struct_result(
+                run_optimoptions(vec![
+                    Value::from("coneprog"),
+                    Value::Struct(roundtrip),
+                    Value::from("Display"),
+                    Value::from("off"),
+                ])
+                .expect("merge"),
+            );
+            assert_eq!(merged.fields.get("MaxIter"), Some(&Value::Int(integer)));
+            assert_eq!(
+                crate::builtins::math::optim::common::option_usize_value(
+                    "coneprog",
+                    merged.fields.get("MaxIter"),
+                    "MaxIter",
+                    200,
+                )
+                .expect("solver count decoding"),
+                count as usize
+            );
+        }
     }
 
     #[test]
@@ -1417,8 +1230,9 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("automatic upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let options = struct_result(
                 run_optimoptions(vec![
                     Value::from("fsolve"),
@@ -1435,8 +1249,9 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("explicit upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = run_optimoptions(vec![
                 Value::from("fsolve"),
@@ -1544,8 +1359,8 @@ mod tests {
             ],
         )
         .expect("fminbnd");
-        match result {
-            Value::Num(value) => assert!((value - std::f64::consts::PI).abs() < 1.0e-4),
+        match result.value() {
+            Value::Num(value) => assert!((*value - std::f64::consts::PI).abs() < 1.0e-4),
             other => panic!("unexpected fminbnd result {other:?}"),
         }
     }
@@ -1569,8 +1384,8 @@ mod tests {
             ],
         )
         .expect("fzero");
-        match result {
-            Value::Num(value) => assert!((value - std::f64::consts::PI).abs() < 1.0e-6),
+        match result.value() {
+            Value::Num(value) => assert!((*value - std::f64::consts::PI).abs() < 1.0e-6),
             other => panic!("unexpected fzero result {other:?}"),
         }
     }
@@ -1595,8 +1410,8 @@ mod tests {
             ],
         )
         .expect("fsolve");
-        match result {
-            Value::Num(value) => assert!((value - std::f64::consts::PI).abs() < 1.0e-6),
+        match result.value() {
+            Value::Num(value) => assert!((*value - std::f64::consts::PI).abs() < 1.0e-6),
             other => panic!("unexpected fsolve result {other:?}"),
         }
     }

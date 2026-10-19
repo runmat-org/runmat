@@ -1,10 +1,7 @@
-use std::future::poll_fn;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::Poll;
 
 use futures::future::{select, Either};
-use futures::task::AtomicWaker;
+use runmat_execution::{cancellation::CancellationSource, CancellationReason};
 
 use crate::host::{CancellationPort, PortFuture};
 
@@ -15,30 +12,38 @@ pub(super) struct InternalCancellation {
 
 #[derive(Debug, Default)]
 struct State {
-    cancelled: AtomicBool,
+    source: CancellationSource,
     reason: Mutex<Option<String>>,
-    waker: AtomicWaker,
 }
 
 impl InternalCancellation {
     pub fn cancel(&self, reason: impl Into<String>) {
-        let mut stored = self
-            .state
-            .reason
-            .lock()
-            .expect("cancellation lock poisoned");
-        if stored.is_none() {
-            *stored = Some(reason.into());
-            self.state.cancelled.store(true, Ordering::Release);
-            self.state.waker.wake();
+        let reason = reason.into();
+        {
+            let mut stored = self
+                .state
+                .reason
+                .lock()
+                .expect("cancellation lock poisoned");
+            if stored.is_none() {
+                *stored = Some(reason);
+            }
         }
+        // Every caller publishes after storing the first diagnostic, so a
+        // concurrent second caller cannot return before notification merely
+        // because the first caller paused between these two operations.
+        // The shared authority wakes all group listeners outside both locks.
+        self.state.source.cancel(CancellationReason::ParentScope);
     }
 
     fn is_cancelled(&self) -> bool {
-        self.state.cancelled.load(Ordering::Acquire)
+        self.state.source.token().is_cancelled()
     }
 
     fn reason(&self) -> Option<String> {
+        if !self.is_cancelled() {
+            return None;
+        }
         self.state
             .reason
             .lock()
@@ -47,20 +52,14 @@ impl InternalCancellation {
     }
 
     async fn cancelled(&self) -> String {
-        poll_fn(|context| {
-            if let Some(reason) = self.reason() {
-                return Poll::Ready(reason);
-            }
-            self.state.waker.register(context.waker());
-            if let Some(reason) = self.reason() {
-                Poll::Ready(reason)
-            } else {
-                Poll::Pending
-            }
-        })
-        .await
+        self.state.source.token().cancelled().await;
+        self.reason()
+            .expect("published cancellation retains its diagnostic")
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 pub(super) struct CombinedCancellation<'a, X> {
     external: &'a X,

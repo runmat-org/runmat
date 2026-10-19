@@ -465,7 +465,7 @@ async fn ismembertol_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinRes
             super::restore_set_outputs(output_provider, NAME, outputs, internal_error_from_string)?;
     }
     if requested_outputs.is_some() {
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     } else {
         Ok(outputs.pop().expect("ismembertol mask output"))
     }
@@ -674,7 +674,7 @@ fn evaluate_elements(
     opts: IsMemberTolOptions,
     loc_request: LocRequest,
 ) -> BuiltinResult<IsMemberTolEvaluation> {
-    let a_shape = a.shape.clone();
+    let a_shape = a.shape().to_vec();
     let a_values = materialize_tolerance_values(a)?;
     let b_values = materialize_tolerance_values(b)?;
     let tol = opts.tol.expect("defaulted tolerance");
@@ -985,10 +985,10 @@ fn row_scales(
 }
 
 fn rows_cols(tensor: &Tensor) -> BuiltinResult<(usize, usize)> {
-    match tensor.shape.len() {
-        0 => Ok((1, 1)),
-        1 => Ok((tensor.shape[0], 1)),
-        2 => Ok((tensor.shape[0], tensor.shape[1])),
+    match tensor.shape() {
+        [] => Ok((1, 1)),
+        [extent] => Ok((*extent, 1)),
+        [rows, cols] => Ok((*rows, *cols)),
         _ => Err(error_with(
             &ERROR_INVALID_ARGUMENT,
             "ismembertol: ByRows requires 2-D arrays",
@@ -1174,6 +1174,47 @@ mod tests {
 
     fn builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(ismembertol_builtin(a, b, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn public_invocation_preserves_rank_zero_rows_and_rank_one_element_geometry() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero input");
+        let Value::OutputList(outputs) = builtin(
+            Value::Tensor(rank_zero.clone()),
+            Value::Tensor(rank_zero),
+            vec![
+                Value::Num(1.0e-12),
+                Value::from("ByRows"),
+                Value::Bool(true),
+            ],
+        )
+        .expect("rank-zero rows membership") else {
+            panic!("expected two outputs");
+        };
+        assert_eq!(outputs.as_slice(), &[Value::Bool(true), Value::Num(1.0)]);
+
+        let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one input");
+        let set = Tensor::new(vec![2.0], vec![1]).expect("rank-one set");
+        let Value::OutputList(outputs) = builtin(
+            Value::Tensor(rank_one),
+            Value::Tensor(set),
+            vec![Value::Num(1.0e-12)],
+        )
+        .expect("rank-one element membership") else {
+            panic!("expected two outputs");
+        };
+        let Value::LogicalArray(mask) = &outputs[0] else {
+            panic!("expected logical rank-one output");
+        };
+        assert_eq!(mask.shape, vec![2]);
+        assert_eq!(mask.data.as_slice(), &[0, 1]);
+        let Value::Tensor(locations) = &outputs[1] else {
+            panic!("expected rank-one location tensor");
+        };
+        assert_eq!(locations.shape(), &[2]);
+        assert_eq!(locations.materialize_f64(), vec![0.0, 1.0]);
     }
 
     #[test]
@@ -1426,7 +1467,7 @@ mod tests {
         let (_, loc) = result.into_pair();
         match loc {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0]);
             }
             other => panic!("expected tensor loc, got {other:?}"),
@@ -1575,7 +1616,8 @@ mod tests {
             let a = Value::GpuTensor(gpu_helpers::upload_tensor(provider, &a).unwrap());
             let b = Value::GpuTensor(gpu_helpers::upload_tensor(provider, &b).unwrap());
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let Value::OutputList(outputs) = builtin(a, b, Vec::new()).unwrap() else {
                 panic!("expected output list");
             };
@@ -1599,7 +1641,7 @@ mod tests {
             );
         });
 
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = builtin(Value::Num(1.0), Value::Num(1.0), Vec::new())
             .expect_err("excess outputs must reject");
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
@@ -1668,7 +1710,8 @@ mod tests {
                     vec![1, 1]
                 );
 
-                let _outputs = crate::output_count::push_output_count(Some(2));
+                let _outputs =
+                    crate::output_count::push_output_count(Some(2)).expect("output-count scope");
                 let Value::OutputList(outputs) = builtin(
                     Value::GpuTensor(data_handle.clone()),
                     Value::GpuTensor(data_handle),
@@ -1694,13 +1737,13 @@ mod tests {
             let handle_a = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &a.materialize_f64(),
-                    shape: &a.shape,
+                    shape: a.shape(),
                 })
                 .expect("upload a");
             let handle_b = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &b.materialize_f64(),
-                    shape: &b.shape,
+                    shape: b.shape(),
                 })
                 .expect("upload b");
             let result = eval(Value::GpuTensor(handle_a), Value::GpuTensor(handle_b), &[]).unwrap();

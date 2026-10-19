@@ -8,213 +8,14 @@
 //! rotation entirely on the device; otherwise it gathers the data, rotates on the
 //! host, and re-uploads the result so downstream operations keep GPU residency.
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Value};
 
 const BUILTIN_NAME: &str = "rot90";
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::rot90")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "rot90",
-    op_kind: GpuOpKind::Custom("rot90"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[
-        ProviderHook::Custom("permute"),
-        ProviderHook::Custom("flip"),
-    ],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes:
-        "Preferred implementation composes provider permute + flip hooks; providers may offer a dedicated rot90 fast path.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::rot90")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "rot90",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes:
-        "Rotations only reorder data; fusion planner treats rot90 as a residency-preserving boundary.",
-};
-
-fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Tensor {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-        Type::Logical { shape: Some(shape) } => {
-            let rows = shape.get(0).copied().unwrap_or(None);
-            let cols = shape.get(1).copied().unwrap_or(None);
-            Type::Logical {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-        Type::Tensor { shape: None } => Type::tensor(),
-        Type::Logical { shape: None } => Type::logical(),
-        Type::Num | Type::Int | Type::Bool => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
-const ROT90_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Array rotated by multiples of 90 degrees around dimensions 1 and 2.",
-}];
-
-const ROT90_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix or N-D array.",
-}];
-
-const ROT90_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix or N-D array.",
-    },
-    BuiltinParamDescriptor {
-        name: "k_or_direction",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Rotation count K or direction string ('clockwise'/'counterclockwise').",
-    },
-];
-
-const ROT90_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = rot90(A)",
-        inputs: &ROT90_INPUTS_A,
-        outputs: &ROT90_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = rot90(A, k_or_direction)",
-        inputs: &ROT90_INPUTS_A_K,
-        outputs: &ROT90_OUTPUT,
-    },
-];
-
-const ROT90_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROT90.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:rot90:TooManyInputs"),
-    when: "More than one optional rotation argument is provided.",
-    message: "rot90: too many input arguments",
-};
-
-const ROT90_ERROR_INVALID_ROTATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROT90.INVALID_ROTATION",
-    identifier: Some("RunMat:rot90:InvalidRotation"),
-    when: "Rotation count/direction argument is invalid.",
-    message: "rot90: invalid rotation argument",
-};
-
-const ROT90_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROT90.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:rot90:UnsupportedInput"),
-    when: "Input value type is unsupported.",
-    message: "rot90: unsupported input type",
-};
-
-const ROT90_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ROT90.INTERNAL",
-    identifier: Some("RunMat:rot90:Internal"),
-    when: "Internal rotation or provider fallback path fails.",
-    message: "rot90: internal operation failed",
-};
-
-const ROT90_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ROT90_ERROR_TOO_MANY_INPUTS,
-    ROT90_ERROR_INVALID_ROTATION,
-    ROT90_ERROR_UNSUPPORTED_INPUT,
-    ROT90_ERROR_INTERNAL,
-];
-
-pub const ROT90_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ROT90_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ROT90_ERRORS,
-};
-
-const ROT90_DIRECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rot90-direction-token",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rot90 accepts textual direction tokens as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Rot90DirectionTokenExtension"),
-};
-pub const ROT90_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ROT90_DIRECTION_EXTENSION];
-const ROT90_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents all eight integer array classes; rotation is a pure permutation of authoritative native storage.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "K",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The integer rotation count is reduced modulo four directly in its native signed or unsigned domain.",
-    },
-];
-pub const ROT90_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = rot90(integer_A [, integer_K])",
-        inputs: &ROT90_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "No numeric conversion occurs. Host storage is reordered exactly; resident integer fallback gathers and re-uploads through the exact owning provider when direct permutation hooks are unavailable.",
-    }];
 
 fn rot90_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     rot90_error_with_message(error.message, error)
@@ -233,17 +34,15 @@ fn rot90_error_with_message(
 
 #[runtime_builtin(
     name = "rot90",
-    category = "array/shape",
-    summary = "Rotate matrices and N-D arrays in 90-degree increments.",
-    keywords = "rot90,rotate,90 degrees,matrix,gpu,clockwise,counterclockwise",
-    accel = "custom",
-    type_resolver(preserve_matrix_type),
-    descriptor(crate::builtins::array::shape::rot90::ROT90_DESCRIPTOR),
-    extensions(crate::builtins::array::shape::rot90::ROT90_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::shape::rot90::ROT90_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::rot90"
 )]
 async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &ROT90_DESCRIPTOR,
+        &ROT90_ERROR_INVALID_ROTATION,
+        BUILTIN_NAME,
+    )?;
     if rest.len() > 1 {
         return Err(rot90_error(&ROT90_ERROR_TOO_MANY_INPUTS));
     }
@@ -275,6 +74,18 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             Ok(rot90_tensor(tensor, steps).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => Ok(rot90_gpu(handle, steps).await?),
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(mut array) => {
+            for _ in 0..steps {
+                let mut order = (0..array.shape().len()).collect::<Vec<_>>();
+                order.swap(0, 1);
+                array = array
+                    .permute(&order)
+                    .and_then(|array| array.flip(0))
+                    .map_err(|error| rot90_error_with_message(error, &ROT90_ERROR_INTERNAL))?;
+            }
+            Ok(Value::StructArray(array))
+        }
         Value::Cell(_) => Err(rot90_error_with_message(
             "rot90: cell arrays are not yet supported",
             &ROT90_ERROR_UNSUPPORTED_INPUT,
@@ -282,10 +93,9 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::SparseTensor(_)
-        | Value::Struct(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -296,6 +106,8 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
@@ -465,7 +277,7 @@ fn rot90_tensor(tensor: Tensor, steps: usize) -> crate::BuiltinResult<Tensor> {
     if steps == 0 {
         return Ok(tensor);
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let indices = (0..tensor.len()).collect::<Vec<_>>();
     let (indices, shape) = rot90_generic(&indices, &shape, steps)?;
     let storage = tensor
@@ -484,7 +296,7 @@ fn rot90_complex_tensor(
         return Ok(tensor);
     }
     let indices = (0..tensor.len()).collect::<Vec<_>>();
-    let (indices, shape) = rot90_generic(&indices, &tensor.shape, steps)?;
+    let (indices, shape) = rot90_generic(&indices, tensor.shape(), steps)?;
     let storage = tensor
         .into_complex_storage()
         .gather(&indices)
@@ -550,7 +362,7 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     }
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if handle.device_id != 0 {
+        if handle.device_id() != 0 {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
@@ -558,59 +370,116 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     }
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
-            if let Some(out) = rot90_gpu_via_provider(provider, &handle, steps) {
+            if let Some(mut out) = rot90_gpu_via_provider(provider, &handle, steps).await? {
+                out = gpu_helpers::propagate_owned_output_provenance(out, [&handle])?;
                 return Ok(Value::GpuTensor(out));
             }
         }
     }
-    let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let rotated = rot90_tensor(host_tensor, steps)?;
-    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        gpu_helpers::upload_tensor(provider, &rotated)
-            .map(Value::GpuTensor)
-            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
-    } else {
-        Ok(tensor::tensor_into_value(rotated))
-    }
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        rot90_error_with_message("rot90: no provider owns the input", &ROT90_ERROR_INTERNAL)
+    })?;
+    let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let rotated = match host {
+        Value::Tensor(value) => tensor::tensor_into_value(rot90_tensor(value, steps)?),
+        Value::ComplexTensor(value) => Value::ComplexTensor(rot90_complex_tensor(value, steps)?),
+        Value::LogicalArray(value) => Value::LogicalArray(rot90_logical(value, steps)?),
+        other => {
+            return Err(rot90_error_with_message(
+                format!("rot90: unexpected downloaded input {other:?}"),
+                &ROT90_ERROR_INTERNAL,
+            ))
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, rotated, "rot90")
 }
 
-fn rot90_gpu_via_provider(
+async fn rot90_gpu_via_provider(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     steps: usize,
-) -> Option<GpuTensorHandle> {
-    let rank = handle.shape.len();
+) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
+    let failure = |source| {
+        crate::runtime_error::with_provider_execution_source(
+            rot90_error_with_message("rot90: provider rotation failed", &ROT90_ERROR_INTERNAL),
+            source,
+        )
+    };
+    let rank = handle.shape().len();
     if rank < 2 {
-        return None;
+        return Ok(None);
     }
-    match steps {
-        1 => {
-            let mut order: Vec<usize> = (0..rank).collect();
-            order.swap(0, 1);
-            match provider.permute(handle, &order) {
-                Ok(perm_handle) => {
-                    let result = provider.flip(&perm_handle, &[0]);
-                    let _ = provider.free(&perm_handle);
-                    result.ok()
-                }
-                Err(_) => None,
+    if steps == 2 {
+        let output = provider.flip(handle, &[0, 1]).map_err(failure)?;
+        if let Some(output) = output {
+            if !gpu_helpers::flip_output_matches(handle, &output, provider, &[0, 1]) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    rot90_error_with_message(
+                        "rot90: invalid provider flip output",
+                        &ROT90_ERROR_INTERNAL,
+                    ),
+                ));
             }
+            return Ok(Some(output));
         }
-        2 => provider.flip(handle, &[0, 1]).ok(),
-        3 => {
-            let mut order: Vec<usize> = (0..rank).collect();
-            order.swap(0, 1);
-            match provider.permute(handle, &order) {
-                Ok(perm_handle) => {
-                    let result = provider.flip(&perm_handle, &[1]);
-                    let _ = provider.free(&perm_handle);
-                    result.ok()
-                }
-                Err(_) => None,
-            }
-        }
-        _ => None,
+        return Ok(None);
     }
+    if !matches!(steps, 1 | 3) {
+        return Ok(None);
+    }
+    let mut order: Vec<usize> = (0..rank).collect();
+    order.swap(0, 1);
+    let Some(mut permuted) = provider.permute(handle, &order).map_err(failure)? else {
+        return Ok(None);
+    };
+    if !gpu_helpers::permutation_output_matches(handle, &permuted, provider, &order) {
+        return Err(gpu_helpers::reject_gpu_output(
+            permuted,
+            rot90_error_with_message(
+                "rot90: invalid provider permutation output",
+                &ROT90_ERROR_INTERNAL,
+            ),
+        ));
+    }
+    permuted = gpu_helpers::propagate_owned_output_provenance(permuted, [handle])?;
+    let axes = [if steps == 1 { 0 } else { 1 }];
+    let stage_failure = |source: runmat_accelerate_api::ProviderExecutionError| {
+        failure(if permuted.shares_allocation_with(handle) {
+            source.with_unproven_effects()
+        } else {
+            source.after_effect()
+        })
+    };
+    let output = provider.flip(&permuted, &axes).map_err(stage_failure)?;
+    let output = if let Some(output) = output {
+        output
+    } else {
+        // Only the remaining flip is adapted. The completed permutation and
+        // its lease stay owned; never replay the original rotation.
+        let value =
+            super::flip::flip_gpu_fallback_with("rot90", provider, &permuted, &[axes[0] + 1])
+                .await
+                .map_err(|error| {
+                    stage_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                        error,
+                    ))
+                })?;
+        let Value::GpuTensor(output) = value else {
+            return Err(rot90_error_with_message(
+                "rot90: flip adaptation lost residency",
+                &ROT90_ERROR_INTERNAL,
+            ));
+        };
+        output
+    };
+    if !gpu_helpers::flip_output_matches(&permuted, &output, provider, &axes) {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            rot90_error_with_message("rot90: invalid provider flip output", &ROT90_ERROR_INTERNAL),
+        ));
+    }
+    Ok(Some(output))
 }
 
 fn rot90_generic<T: Clone>(
@@ -625,7 +494,19 @@ fn rot90_generic<T: Clone>(
     } else {
         shape.to_vec()
     };
-    let total: usize = ext_shape.iter().product();
+    let total = if ext_shape.contains(&0) {
+        0
+    } else {
+        ext_shape
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| {
+                rot90_error_with_message(
+                    "rot90: shape product exceeds platform limits",
+                    &ROT90_ERROR_INTERNAL,
+                )
+            })?
+    };
     if total != data.len() {
         return Err(rot90_error_with_message(
             "rot90: data length does not match shape product",
@@ -639,7 +520,10 @@ fn rot90_generic<T: Clone>(
         out_shape[0] = cols;
         out_shape[1] = rows;
     }
-    let total_out: usize = out_shape.iter().product();
+    if total == 0 {
+        return Ok((Vec::new(), out_shape));
+    }
+    let total_out = total;
     let mut out = if total_out == 0 {
         Vec::new()
     } else {
@@ -731,7 +615,6 @@ pub(crate) mod tests {
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor};
 
     #[test]
@@ -759,22 +642,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn rot90_type_preserves_matrix_shape() {
-        let out = preserve_matrix_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
     fn rot90_preserves_all_exact_real_integer_classes() {
         let storages = [
             IntegerStorage::I8(vec![-2, 7, 9, 11]),
@@ -795,7 +662,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected exact real integer output");
             };
-            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.shape(), &[2, 2]);
             assert_eq!(
                 output.integer_storage(),
                 Some(
@@ -844,7 +711,7 @@ pub(crate) mod tests {
         else {
             panic!("expected exact complex integer output");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(
             output.integer_storage().cloned(),
             Some(
@@ -864,7 +731,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), Vec::new()).expect("rot90");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 2.0, 1.0, 6.0, 5.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -879,7 +746,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), args).expect("rot90 k=2");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), &[2, 3]);
                 assert_eq!(out.materialize_f64(), vec![6.0, 3.0, 5.0, 2.0, 4.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -895,7 +762,7 @@ pub(crate) mod tests {
             .expect("rot90 clockwise");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 6.0, 1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -914,13 +781,13 @@ pub(crate) mod tests {
         .expect("rot90 counterclockwise");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 // 90° counterclockwise should match the default call.
                 let default =
                     rot90_builtin(Value::Tensor(tensor), Vec::new()).expect("rot90 default");
                 match default {
                     Value::Tensor(default_tensor) => {
-                        assert_eq!(out.shape, default_tensor.shape);
+                        assert_eq!(out.shape(), default_tensor.shape());
                         assert_eq!(out.materialize_f64(), default_tensor.materialize_f64());
                     }
                     other => panic!("expected tensor, got {other:?}"),
@@ -938,7 +805,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), args).expect("rot90 k=-1");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -954,7 +821,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), args).expect("rot90 tensor k");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -970,7 +837,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), args).expect("rot90 logical k");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 1.0, 5.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -999,7 +866,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), Vec::new()).expect("rot90 empty");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 0]);
+                assert_eq!(out.shape(), &[3, 0]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1014,7 +881,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), Vec::new()).expect("rot90 3d");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2, 2]);
+                assert_eq!(out.shape(), &[3, 2, 2]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![5.0, 3.0, 1.0, 6.0, 4.0, 2.0, 11.0, 9.0, 7.0, 12.0, 10.0, 8.0]
@@ -1035,7 +902,7 @@ pub(crate) mod tests {
         }
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3, 4]);
+                assert_eq!(out.shape(), &[2, 3, 4]);
                 assert_eq!(out.materialize_f64(), data);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1097,12 +964,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let rotated = rot90_builtin(Value::GpuTensor(handle), Vec::new()).expect("rot90");
             let gathered = test_support::gather(rotated).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 1.0, 5.0, 4.0]);
         });
     }
@@ -1125,13 +992,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = rot90_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu rot90");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather");
 
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

@@ -5,14 +5,13 @@ use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
 use log::trace;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Inputs required to pack line vertices directly on the GPU.
 #[derive(Debug, Clone)]
 pub struct LineGpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
 }
@@ -62,11 +61,12 @@ struct MarkerUniforms {
 }
 
 pub fn pack_vertices_from_xy(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &LineGpuInputs,
     params: &LineGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.len < 2 {
         return Err("plot: line inputs must contain at least two points".to_string());
     }
@@ -151,15 +151,17 @@ pub fn pack_vertices_from_xy(
         });
 
     let output_size = max_vertices * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("line-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("line-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
     let uniforms = LineSegmentUniforms {
         color: params.color.to_array(),
@@ -187,11 +189,19 @@ pub fn pack_vertices_from_xy(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -222,7 +232,7 @@ pub fn pack_vertices_from_xy(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -230,7 +240,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::line::F32,
         ScalarType::F64 => shaders::line::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("line-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -238,11 +248,12 @@ fn compile_shader(
 }
 
 pub fn pack_marker_vertices_from_xy(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &LineGpuInputs,
     params: &LineGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.len < 1 {
         return Err("plot: marker inputs must contain at least one point".to_string());
     }
@@ -313,15 +324,17 @@ pub fn pack_marker_vertices_from_xy(
     // Direct point rendering expands each point into a quad (2 triangles = 6 vertices).
     let expanded_vertices = inputs.len as u64 * 6;
     let output_size = expanded_vertices * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("line-marker-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("line-marker-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
     let uniforms = MarkerUniforms {
         color: params.color.to_array(),
@@ -341,11 +354,19 @@ pub fn pack_marker_vertices_from_xy(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -380,7 +401,7 @@ pub fn pack_marker_vertices_from_xy(
 }
 
 fn compile_marker_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -388,7 +409,7 @@ fn compile_marker_shader(
         ScalarType::F32 => shaders::line::MARKER_F32,
         ScalarType::F64 => shaders::line::MARKER_F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("line-marker-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

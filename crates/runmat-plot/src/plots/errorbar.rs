@@ -45,6 +45,7 @@ pub struct ErrorBar {
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
     gpu_inputs: Option<ErrorBarGpuInputs>,
+    gpu_cap_scale: Option<f32>,
     marker_vertices: Option<Vec<Vertex>>,
     marker_gpu_vertices: Option<GpuVertexBuffer>,
     marker_dirty: bool,
@@ -89,6 +90,7 @@ impl ErrorBar {
             gpu_vertex_count: None,
             gpu_bounds: None,
             gpu_inputs: None,
+            gpu_cap_scale: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
@@ -199,6 +201,7 @@ impl ErrorBar {
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
             gpu_inputs: None,
+            gpu_cap_scale: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
@@ -237,6 +240,7 @@ impl ErrorBar {
             gpu_vertex_count: None,
             gpu_bounds: Some(bounds),
             gpu_inputs: Some(inputs),
+            gpu_cap_scale: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
@@ -286,59 +290,33 @@ impl ErrorBar {
                     .to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
             let y_neg = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &inputs.y_neg_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
             let y_pos = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &inputs.y_pos_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
             let x_neg = if let Some(buffer) = &inputs.x_neg_buffer {
-                readback_scalar_buffer_f64(
-                    &context.device,
-                    &context.queue,
-                    buffer,
-                    len,
-                    inputs.scalar,
-                )
-                .await?
+                readback_scalar_buffer_f64(&context.access, buffer, len, inputs.scalar).await?
             } else {
                 vec![0.0; len]
             };
             let x_pos = if let Some(buffer) = &inputs.x_pos_buffer {
-                readback_scalar_buffer_f64(
-                    &context.device,
-                    &context.queue,
-                    buffer,
-                    len,
-                    inputs.scalar,
-                )
-                .await?
+                readback_scalar_buffer_f64(&context.access, buffer, len, inputs.scalar).await?
             } else {
                 vec![0.0; len]
             };
@@ -686,23 +664,23 @@ impl ErrorBar {
     fn pack_gpu_vertices_if_needed(
         &mut self,
         gpu: &GpuPackContext<'_>,
+        viewport: crate::core::ResolvedViewport,
         viewport_px: (u32, u32),
     ) -> Result<(), String> {
-        if self.gpu_vertices.is_some() {
-            return Ok(());
-        }
         let Some(inputs) = self.gpu_inputs.as_ref() else {
             return Ok(());
         };
         let bounds = self
             .gpu_bounds
             .ok_or_else(|| "errorbar: missing GPU bounds".to_string())?;
-        let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+        let data_per_px = crate::core::data_units_per_px(&viewport.bounds(bounds), viewport_px);
         let cap_size_data = self.cap_size.max(0.0) * data_per_px;
+        if self.gpu_vertices.is_some() && self.gpu_cap_scale == Some(cap_size_data) {
+            return Ok(());
+        }
         let orientation = self.orientation_code();
         let packed = crate::gpu::errorbar::pack_vertical_vertices(
-            gpu.device,
-            gpu.queue,
+            gpu.emission,
             inputs,
             &ErrorBarGpuParams {
                 color: self.color,
@@ -717,6 +695,7 @@ impl ErrorBar {
         };
         self.gpu_vertex_count = Some(inputs.len as usize * segments_per_point);
         self.gpu_vertices = Some(packed);
+        self.gpu_cap_scale = Some(cap_size_data);
         Ok(())
     }
 
@@ -727,9 +706,13 @@ impl ErrorBar {
         log_axes: (bool, bool),
         gpu: Option<&GpuPackContext<'_>>,
     ) -> RenderData {
-        if self.gpu_inputs.is_some() && self.gpu_vertices.is_none() {
+        if self.gpu_inputs.is_some() {
             if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
-                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp) {
+                let viewport = crate::core::ResolvedViewport {
+                    pixels: viewport_px,
+                    view: view_bounds,
+                };
+                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, viewport, vp) {
                     warn!("errorbar gpu pack failed: {err}");
                 }
             }
@@ -805,11 +788,65 @@ impl ErrorBar {
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for values in [
+            &self.x,
+            &self.y,
+            &self.y_neg,
+            &self.y_pos,
+            &self.x_neg,
+            &self.x_pos,
+        ] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for vertices in [&self.vertices, &self.marker_vertices]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vertex>(vertices.capacity())?,
+            )?;
+        }
+        Some(total)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caps_are_sized_from_display_limits_for_thin_and_thick_lines() {
+        for width in [1., 3.] {
+            let mut plot = ErrorBar::new_vertical(vec![0.], vec![0.], vec![1.], vec![1.]).unwrap();
+            plot.line_width = width;
+            let data = plot.render_data_on_axes(
+                Some((100, 100)),
+                Some((-10., 10., -10., 10.)),
+                (false, false),
+            );
+            let min = data
+                .vertices
+                .iter()
+                .map(|v| v.position[0])
+                .fold(f32::INFINITY, f32::min);
+            let max = data
+                .vertices
+                .iter()
+                .map(|v| v.position[0])
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert!(
+                (max - min - 1.2).abs() < 1e-5,
+                "width={width}: {min}..{max}"
+            );
+        }
+    }
 
     #[test]
     fn errorbar_bounds_fit_bars_not_caps() {

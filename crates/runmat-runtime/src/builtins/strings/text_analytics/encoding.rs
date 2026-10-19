@@ -29,7 +29,8 @@ use crate::builtins::strings::text_analytics::embeddings::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
-pub const WORD_ENCODING_CLASS: &str = "wordEncoding";
+pub const WORD_ENCODING_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("wordEncoding");
 
 const WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
@@ -528,8 +529,8 @@ fn is_typed_integer_value(value: &Value) -> bool {
 
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
-        Value::Tensor(tensor) => Some(&tensor.shape),
-        Value::GpuTensor(handle) => Some(&handle.shape),
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
         Value::Num(_) | Value::Int(_) => Some(&[1, 1]),
         _ => None,
     }
@@ -597,6 +598,7 @@ fn value_contains_resident(value: &Value) -> bool {
         Value::GpuTensor(_) => true,
         Value::Cell(value) => value.data.iter().any(value_contains_resident),
         Value::Struct(value) => value.fields.values().any(value_contains_resident),
+        Value::StructArray(array) => array.any_value(value_contains_resident),
         Value::Object(value) => value.properties.values().any(value_contains_resident),
         Value::Closure(value) => value.captures.iter().any(value_contains_resident),
         Value::OutputList(values) => values.iter().any(value_contains_resident),
@@ -676,10 +678,11 @@ fn ensure_word_encoding_class_registered() {
     WORD_ENCODING_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["NumWords", "Vocabulary"] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: WORD_ENCODING_CLASS.to_string(),
+            events: Default::default(),
+            name: WORD_ENCODING_CLASS.into(),
             parent: None,
             properties,
             methods: HashMap::new(),
@@ -689,7 +692,7 @@ fn ensure_word_encoding_class_registered() {
 
 fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
     crate::class_registry::RuntimeProperty {
-        name: name.to_string(),
+        name: name.into(),
         is_static: false,
         is_constant: false,
         is_dependent: false,
@@ -1012,7 +1015,7 @@ fn numeric_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Numer
             };
             Ok(NumericInput {
                 values,
-                shape: tensor.shape.clone(),
+                shape: tensor.shape().to_vec(),
             })
         }
         other => Err(encoding_error(
@@ -1386,7 +1389,7 @@ mod tests {
         let Value::Tensor(indices) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(indices.shape, vec![2, 2]);
+        assert_eq!(indices.shape(), &[2, 2]);
         assert_eq!(indices.materialize_f64()[0], 2.0);
         assert!(indices.materialize_f64()[1].is_nan());
         assert_eq!(indices.materialize_f64()[2], 1.0);
@@ -1431,6 +1434,39 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("exceeds vocabulary"), "{err}");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn ind2word_preserves_rank_zero_and_rank_one_numeric_shapes() {
+        let enc = futures::executor::block_on(word_encoding_builtin(vec![Value::StringArray(
+            StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap(),
+        )]))
+        .unwrap();
+
+        for (indices, expected_shape, expected_words) in [
+            (
+                Tensor::new(vec![2.0], vec![]).unwrap(),
+                Vec::new(),
+                vec!["blue".to_string()],
+            ),
+            (
+                Tensor::new(vec![1.0, 2.0], vec![2]).unwrap(),
+                vec![2],
+                vec!["red".to_string(), "blue".to_string()],
+            ),
+        ] {
+            let value = futures::executor::block_on(ind2word_builtin(vec![
+                enc.clone(),
+                Value::Tensor(indices),
+            ]))
+            .expect("ind2word low-rank input");
+            let Value::StringArray(words) = value else {
+                panic!("expected string array")
+            };
+            assert_eq!(words.shape, expected_shape);
+            assert_eq!(words.data, expected_words);
+        }
     }
 
     #[test]
@@ -1486,7 +1522,8 @@ mod tests {
                 Some("RunMat:compatibility:Ind2wordResidentExtension")
             );
             assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
-            let _ = provider.free(&handle);
+            handle.allocation_lease().validate_live().unwrap();
+            handle.release().expect("release owned resident indices");
         });
     }
 

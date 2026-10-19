@@ -3,6 +3,7 @@ use super::*;
 pub(super) async fn build(
     source_text: &str,
     environment: Vec<(String, String)>,
+    accelerators: Vec<AcceleratorRequest>,
 ) -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
@@ -27,28 +28,41 @@ pub(super) async fn build(
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
         .unwrap();
     let unit = session
         .compile_executable_unit(
-            runmat_core::ExecutableSource::new("root", "src/answer.m", source_text),
+            runmat_core::ExecutableSource::new(
+                project.graph.root.to_string(),
+                "src/answer.m",
+                source_text,
+            ),
             Some(revision.clone()),
         )
         .await
         .unwrap();
     let envelope = unit.portable_envelope_for(Some("answer")).unwrap();
-    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+    let function = envelope
+        .manifest
+        .identity
+        .entrypoint_function
+        .expect("answer fixture has a callable entrypoint");
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
-        entrypoint: function.to_string(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("remote-pool-test"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators,
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let executable_bytes = envelope.canonical_bytes().unwrap();
@@ -81,10 +95,13 @@ pub(super) async fn build(
             bundle.manifest.portable_environment.clone(),
         )
         .unwrap(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function,
+        callable: ProgramCallable::semantic(function, None),
+        context: ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: Vec::new(),
         requested_outputs: 1,
     };

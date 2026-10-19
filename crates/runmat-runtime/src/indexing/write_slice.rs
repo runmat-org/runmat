@@ -1,6 +1,6 @@
 use crate::builtins::common::tensor::{
-    self, complex_tensor_element_len, complex_tensor_values_complex64, is_scalar_tensor,
-    tensor_element_len, tensor_value_f64,
+    complex_tensor_element_len, complex_tensor_values_complex64, tensor_element_len,
+    tensor_value_f64,
 };
 use crate::indexing::integer_assignment::{
     self, ComplexIntegerAssignmentValue, IntegerAssignmentValue,
@@ -8,57 +8,95 @@ use crate::indexing::integer_assignment::{
 use crate::indexing::plan::IndexPlan;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
-use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
 use runmat_value::{
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
-    NumericStorage, SparseTensor, StringArray, Tensor, Value,
+    CharArray, ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage,
+    IntegerStorage, NumericDType, NumericScalar, NumericStorage, SparseTensor, StringArray, Tensor,
+    Value,
 };
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
     mex("ShapeMismatch", format!("{context}: {err}"))
 }
 
-fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    mex("AccelerationOperationFailed", format!("{context}: {err}"))
+fn dense_delete_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
 }
 
 fn is_empty_delete_rhs(value: &Value) -> bool {
     matches!(
         value,
         Value::Tensor(t)
-            if tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0
+            if {
+                let (rows, cols) = dense_delete_dimensions(t.shape());
+                tensor_element_len(t) == 0 || rows == 0 || cols == 0
+            }
     ) || matches!(
         value,
         Value::ComplexTensor(t)
-            if complex_tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0
-    ) || matches!(value, Value::OutputList(values) if values.is_empty())
+            if complex_tensor_element_len(t) == 0 || t.rows() == 0 || t.cols() == 0
+    )
 }
 
 pub(crate) fn real_tensor_to_complex(
     tensor: Tensor,
     context: &str,
 ) -> Result<ComplexTensor, RuntimeError> {
-    let shape = tensor.shape.clone();
-    let storage = tensor
-        .into_numeric_storage()
+    tensor
+        .validate_shape()
         .map_err(|error| map_slice_shape_error(context, error))?;
-    match storage.into_integer_storage() {
-        Ok(real) => {
+    let shape = tensor.shape().to_vec();
+    match tensor.numeric_dtype() {
+        NumericDType::F32 => ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(
+                tensor
+                    .as_f32_slice()
+                    .expect("single tensor has authoritative single storage")
+                    .iter()
+                    .copied()
+                    .map(|real| ComplexElement(real, 0.0))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            shape,
+        )
+        .map_err(|error| map_slice_shape_error(context, error)),
+        NumericDType::F64 => ComplexTensor::from_complex_storage(
+            ComplexStorage::F64(
+                tensor
+                    .as_f64_slice()
+                    .expect("double tensor has authoritative double storage")
+                    .iter()
+                    .copied()
+                    .map(|real| ComplexElement(real, 0.0))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            shape,
+        )
+        .map_err(|error| map_slice_shape_error(context, error)),
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => {
+            let real = tensor
+                .into_numeric_storage()
+                .map_err(|error| map_slice_shape_error(context, error))?
+                .into_integer_storage()
+                .expect("integer tensor has exact integer storage");
             let imag = real.zeros_like(real.len());
             let storage = IntegerComplexStorage::new(real, imag)
                 .expect("same-class real and imaginary integer storage must be valid");
             ComplexTensor::new_integer(storage, shape)
                 .map_err(|error| map_slice_shape_error(context, error))
         }
-        Err(storage) => ComplexTensor::new(
-            storage
-                .materialize_f64()
-                .into_iter()
-                .map(|real| (real, 0.0))
-                .collect(),
-            shape,
-        )
-        .map_err(|error| map_slice_shape_error(context, error)),
     }
 }
 
@@ -120,97 +158,92 @@ pub(crate) fn delete_integer_complex_storage_positions(
     storage: IntegerComplexStorage,
     positions: &[usize],
 ) -> IntegerComplexStorage {
+    let (real, imag) = storage.into_unbounded_components();
     IntegerComplexStorage::new(
-        delete_integer_storage_positions(storage.real, positions),
-        delete_integer_storage_positions(storage.imag, positions),
+        delete_integer_storage_positions(real, positions),
+        delete_integer_storage_positions(imag, positions),
     )
     .expect("paired integer complex storage must retain matching classes and lengths")
 }
 
-fn scalar_integer_value(value: &Value) -> Result<IntegerAssignmentValue, RuntimeError> {
-    match value {
-        Value::Int(value) => Ok(IntegerAssignmentValue::Exact(value.clone())),
-        Value::Num(value) => Ok(IntegerAssignmentValue::Float(*value)),
-        Value::Bool(value) => Ok(IntegerAssignmentValue::Float(if *value {
-            1.0
-        } else {
-            0.0
-        })),
-        Value::Tensor(tensor) if is_scalar_tensor(tensor) => {
-            let value = tensor
-                .numeric_value_at(0)
-                .expect("scalar tensor must contain one numeric value");
-            Ok(match value.into_int_value() {
-                Some(value) => IntegerAssignmentValue::Exact(value),
-                None => IntegerAssignmentValue::Float(value.materialize_f64()),
-            })
-        }
-        Value::LogicalArray(array) if array.data.len() == 1 => {
-            Ok(IntegerAssignmentValue::Float(if array.data[0] == 0 {
-                0.0
-            } else {
-                1.0
-            }))
-        }
-        _ => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            "rhs must be numeric or logical",
-        )),
-    }
-}
+mod empty_rhs;
+mod growth;
+mod host_rhs;
+mod rhs_shape;
+use growth::{grow_complex_tensor, grow_numeric_tensor};
+use rhs_shape::{checked_assignment_element_count, validated_assignment_rhs_shape};
 
-fn validated_assignment_rhs_shape(
-    rhs_shape: &[usize],
-    rhs_len: usize,
-    selection_lengths: &[usize],
-) -> Result<Vec<usize>, RuntimeError> {
-    let dims = selection_lengths.len();
-    if rhs_len == 1 {
-        return Ok(vec![1; dims]);
-    }
-    if dims == 1 {
-        if rhs_len == selection_lengths[0] {
-            return Ok(vec![rhs_len]);
-        }
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    if rhs_shape.len() > dims && rhs_shape.iter().skip(dims).any(|&dimension| dimension != 1) {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    let mut shape = rhs_shape.iter().copied().take(dims).collect::<Vec<_>>();
-    shape.resize(dims, 1);
-    if shape != selection_lengths {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    let expected = shape
-        .iter()
-        .try_fold(1usize, |length, dimension| length.checked_mul(*dimension))
-        .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?;
-    if rhs_len != expected {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    Ok(shape)
-}
-
-pub enum ComplexRhsView {
+pub enum ComplexRhsView<'a> {
     Scalar((f64, f64)),
     Tensor {
         data: Vec<(f64, f64)>,
         shape: Vec<usize>,
         strides: Vec<usize>,
     },
+    RealTensor {
+        data: &'a Tensor,
+        shape: Vec<usize>,
+        strides: Vec<usize>,
+    },
 }
 
-pub fn build_complex_rhs_view(
-    rhs: &Value,
+impl ComplexRhsView<'_> {
+    fn tensor_geometry(&self) -> Option<(usize, &[usize], &[usize])> {
+        match self {
+            Self::Scalar(_) => None,
+            Self::Tensor {
+                data,
+                shape,
+                strides,
+            } => Some((data.len(), shape, strides)),
+            Self::RealTensor {
+                data,
+                shape,
+                strides,
+            } => Some((data.len(), shape, strides)),
+        }
+    }
+
+    fn tensor_value(&self, index: usize) -> (f64, f64) {
+        match self {
+            Self::Tensor { data, .. } => data[index],
+            Self::RealTensor { data, .. } => (tensor_value_f64(data, index), 0.0),
+            Self::Scalar(_) => unreachable!("scalar complex RHS has no tensor index"),
+        }
+    }
+}
+
+pub fn build_complex_rhs_view<'a>(
+    rhs: &'a Value,
     selection_lengths: &[usize],
-) -> Result<ComplexRhsView, RuntimeError> {
+) -> Result<ComplexRhsView<'a>, RuntimeError> {
     match rhs {
         Value::Complex(re, im) => Ok(ComplexRhsView::Scalar((*re, *im))),
         Value::Num(n) => Ok(ComplexRhsView::Scalar((*n, 0.0))),
+        Value::Int(n) => Ok(ComplexRhsView::Scalar((n.to_f64(), 0.0))),
+        Value::Bool(value) => Ok(ComplexRhsView::Scalar((
+            if *value { 1.0 } else { 0.0 },
+            0.0,
+        ))),
+        Value::Tensor(tensor) => {
+            let dims = selection_lengths.len();
+            let shape =
+                validated_assignment_rhs_shape(tensor.shape(), tensor.len(), selection_lengths)?;
+            let mut strides = vec![0usize; dims];
+            let mut stride = 1usize;
+            for dimension in 0..dims {
+                strides[dimension] = stride;
+                stride *= shape[dimension];
+            }
+            Ok(ComplexRhsView::RealTensor {
+                data: tensor,
+                shape,
+                strides,
+            })
+        }
         Value::ComplexTensor(rt) => {
             let dims = selection_lengths.len();
-            let shape = validated_assignment_rhs_shape(&rt.shape, rt.len(), selection_lengths)?;
+            let shape = validated_assignment_rhs_shape(rt.shape(), rt.len(), selection_lengths)?;
             let mut rstrides = vec![0usize; dims];
             let mut racc = 1usize;
             for d in 0..dims {
@@ -233,10 +266,56 @@ pub fn build_complex_rhs_view(
     }
 }
 
+fn materialize_complex_rhs_view_for_plan(
+    rhs_view: &ComplexRhsView<'_>,
+    plan: &IndexPlan,
+) -> Vec<(f64, f64)> {
+    match rhs_view {
+        ComplexRhsView::Scalar(value) => vec![*value; plan.indices.len()],
+        _ if plan.dims == 1 => {
+            let (len, _, _) = rhs_view.tensor_geometry().expect("tensor RHS");
+            if len == 1 {
+                vec![rhs_view.tensor_value(0); plan.indices.len()]
+            } else {
+                (0..len).map(|index| rhs_view.tensor_value(index)).collect()
+            }
+        }
+        _ => {
+            let (_, shape, strides) = rhs_view.tensor_geometry().expect("tensor RHS");
+            let selection_lengths = if plan.selection_lengths.is_empty() {
+                &plan.output_shape
+            } else {
+                &plan.selection_lengths
+            };
+            let mut coordinates = vec![0usize; plan.dims];
+            let mut values = Vec::with_capacity(plan.indices.len());
+            for _ in 0..plan.indices.len() {
+                let source = (0..plan.dims).fold(0usize, |offset, dimension| {
+                    let coordinate = if shape[dimension] == 1 {
+                        0
+                    } else {
+                        coordinates[dimension]
+                    };
+                    offset + coordinate * strides[dimension]
+                });
+                values.push(rhs_view.tensor_value(source));
+                for dimension in 0..plan.dims {
+                    coordinates[dimension] += 1;
+                    if coordinates[dimension] < selection_lengths[dimension].max(1) {
+                        break;
+                    }
+                    coordinates[dimension] = 0;
+                }
+            }
+            values
+        }
+    }
+}
+
 pub fn scatter_complex_with_plan(
     t: &mut ComplexTensor,
     plan: &IndexPlan,
-    rhs_view: &ComplexRhsView,
+    rhs_view: &ComplexRhsView<'_>,
 ) -> Result<(), RuntimeError> {
     let dims = plan.dims;
     let mut idx = vec![0usize; dims];
@@ -265,11 +344,8 @@ pub fn scatter_complex_with_plan(
                 t.set_f64_assignment_at(dst, val.0, val.1)
                     .map_err(|error| map_slice_shape_error("complex slice assign", error))?;
             }
-            ComplexRhsView::Tensor {
-                data,
-                shape,
-                strides,
-            } => {
+            _ => {
+                let (_, shape, strides) = rhs_view.tensor_geometry().expect("tensor RHS");
                 for d in 0..dims {
                     let rhs_len = shape[d];
                     let pos = if rhs_len == 1 { 0 } else { idx[d] };
@@ -285,7 +361,8 @@ pub fn scatter_complex_with_plan(
                     p
                 };
                 let dst = plan.indices[lin_pos] as usize;
-                t.set_f64_assignment_at(dst, data[rlin].0, data[rlin].1)
+                let value = rhs_view.tensor_value(rlin);
+                t.set_f64_assignment_at(dst, value.0, value.1)
                     .map_err(|error| map_slice_shape_error("complex slice assign", error))?;
             }
         }
@@ -312,6 +389,62 @@ pub enum StringRhsView {
         shape: Vec<usize>,
         strides: Vec<usize>,
     },
+}
+
+enum CellStringElement<'a> {
+    Text(&'a str),
+    Chars(&'a CharArray),
+}
+
+fn cell_string_element(value: &Value) -> Result<CellStringElement<'_>, RuntimeError> {
+    match value {
+        Value::String(text) => Ok(CellStringElement::Text(text)),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(CellStringElement::Chars(chars)),
+        Value::CharArray(_) => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs cell character arrays must be row vectors",
+        )),
+        Value::StringArray(strings) if strings.data.len() == 1 => {
+            Ok(CellStringElement::Text(&strings.data[0]))
+        }
+        other => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            format!("rhs cell elements must be string scalars or character vectors, got {other:?}"),
+        )),
+    }
+}
+
+pub fn validate_string_rhs_for_plan(
+    rhs: &Value,
+    selection_lengths: &[usize],
+) -> Result<(), RuntimeError> {
+    match rhs {
+        Value::String(_) => Ok(()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(()),
+        Value::CharArray(_) => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs character array must be a row vector",
+        )),
+        Value::StringArray(strings) => rhs_shape::validate_empty_selection_rhs_shape(
+            &strings.shape,
+            strings.data.len(),
+            selection_lengths,
+        ),
+        Value::Cell(cell) => {
+            for value in &cell.data {
+                cell_string_element(value)?;
+            }
+            rhs_shape::validate_empty_selection_rhs_shape(
+                &cell.shape,
+                cell.data.len(),
+                selection_lengths,
+            )
+        }
+        _ => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs must be string, string array, or cellstr",
+        )),
+    }
 }
 
 pub fn build_string_rhs_view(
@@ -349,26 +482,16 @@ pub fn build_string_rhs_view(
     if let Value::Cell(cell) = rhs {
         let dims = selection_lengths.len();
         let mut data = Vec::with_capacity(cell.data.len());
-        for handle in &cell.data {
-            let value = handle;
-            match value {
-                Value::String(text) => data.push(text.clone()),
-                Value::CharArray(chars) => data.push(chars.row_string().ok_or_else(|| {
-                    mex(
-                        "InvalidSliceAssignmentRhs",
-                        "rhs cell character arrays must be row vectors",
-                    )
-                })?),
-                Value::StringArray(strings) if strings.data.len() == 1 => {
-                    data.push(strings.data[0].clone())
-                }
-                other => {
-                    return Err(mex(
-                        "InvalidSliceAssignmentRhs",
-                        format!(
-                            "rhs cell elements must be string scalars or character vectors, got {other:?}"
-                        ),
-                    ))
+        for value in &cell.data {
+            match cell_string_element(value)? {
+                CellStringElement::Text(text) => data.push(text.to_owned()),
+                CellStringElement::Chars(chars) => {
+                    data.push(chars.row_string().ok_or_else(|| {
+                        mex(
+                            "InvalidSliceAssignmentRhs",
+                            "rhs cell character arrays must be row vectors",
+                        )
+                    })?)
                 }
             }
         }
@@ -466,15 +589,23 @@ pub async fn materialize_rhs_real_for_plan(
     rhs: &Value,
     plan: &IndexPlan,
 ) -> Result<Vec<f64>, RuntimeError> {
+    let host_rhs = crate::dispatcher::gather_if_needed_async(rhs).await?;
+    materialize_rhs_real_for_plan_host(&host_rhs, plan)
+}
+
+pub fn materialize_rhs_real_for_plan_host(
+    rhs: &Value,
+    plan: &IndexPlan,
+) -> Result<Vec<f64>, RuntimeError> {
     if plan.dims == 1 {
         let count = plan.selection_lengths.first().copied().unwrap_or(0);
-        materialize_rhs_linear_real(rhs, count).await
+        materialize_rhs_linear_real_host(rhs, count)
     } else {
-        materialize_rhs_nd_real(rhs, &plan.selection_lengths).await
+        materialize_rhs_nd_real_host(rhs, &plan.selection_lengths)
     }
 }
 
-pub(crate) async fn materialize_integer_rhs_for_plan(
+fn materialize_integer_rhs_for_plan_host(
     rhs: &Value,
     plan: &IndexPlan,
 ) -> Result<Vec<IntegerAssignmentValue>, RuntimeError> {
@@ -486,29 +617,12 @@ pub(crate) async fn materialize_integer_rhs_for_plan(
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             materialize_integer_tensor_rhs_for_plan(tensor, plan)
         }
-        Value::GpuTensor(handle)
-            if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
-        {
-            let tensor = download_integer_tensor(handle).await?;
-            materialize_integer_tensor_rhs_for_plan(&tensor, plan)
-        }
-        Value::OutputList(values) => {
-            if values.len() == plan.indices.len() {
-                return values.iter().map(scalar_integer_value).collect();
-            }
-            if values.len() == 1 {
-                return Ok(vec![scalar_integer_value(&values[0])?; plan.indices.len()]);
-            }
-            Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
-        }
-        _ => materialize_rhs_real_for_plan(rhs, plan)
-            .await
-            .map(|values| {
-                values
-                    .into_iter()
-                    .map(IntegerAssignmentValue::Float)
-                    .collect()
-            }),
+        _ => materialize_rhs_real_for_plan_host(rhs, plan).map(|values| {
+            values
+                .into_iter()
+                .map(IntegerAssignmentValue::Float)
+                .collect()
+        }),
     }
 }
 
@@ -521,7 +635,7 @@ fn materialize_integer_tensor_rhs_for_plan(
             .integer_storage()
             .expect("integer RHS must retain exact storage"),
     );
-    integer_gpu_rhs_indices_for_plan(&tensor.shape, plan)?
+    integer_gpu_rhs_indices_for_plan(tensor.shape(), plan)?
         .into_iter()
         .map(|index| {
             values
@@ -533,7 +647,7 @@ fn materialize_integer_tensor_rhs_for_plan(
         .collect()
 }
 
-async fn materialize_complex_integer_rhs_for_plan(
+fn materialize_complex_integer_rhs_for_plan_host(
     rhs: &Value,
     plan: &IndexPlan,
 ) -> Result<Vec<ComplexIntegerAssignmentValue>, RuntimeError> {
@@ -551,13 +665,13 @@ async fn materialize_complex_integer_rhs_for_plan(
                     .map(|index| ComplexIntegerAssignmentValue {
                         real: IntegerAssignmentValue::Exact(
                             storage
-                                .real
+                                .real()
                                 .value_at(index)
                                 .expect("typed complex storage length was validated"),
                         ),
                         imag: IntegerAssignmentValue::Exact(
                             storage
-                                .imag
+                                .imag()
                                 .value_at(index)
                                 .expect("typed complex storage length was validated"),
                         ),
@@ -573,19 +687,17 @@ async fn materialize_complex_integer_rhs_for_plan(
                     })
                     .collect()
             };
-            materialize_complex_integer_values_for_plan(values, &tensor.shape, plan)
+            materialize_complex_integer_values_for_plan(values, tensor.shape(), plan)
         }
-        _ => materialize_integer_rhs_for_plan(rhs, plan)
-            .await
-            .map(|values| {
-                values
-                    .into_iter()
-                    .map(|real| ComplexIntegerAssignmentValue {
-                        real,
-                        imag: IntegerAssignmentValue::Float(0.0),
-                    })
-                    .collect()
-            }),
+        _ => materialize_integer_rhs_for_plan_host(rhs, plan).map(|values| {
+            values
+                .into_iter()
+                .map(|real| ComplexIntegerAssignmentValue {
+                    real,
+                    imag: IntegerAssignmentValue::Float(0.0),
+                })
+                .collect()
+        }),
     }
 }
 
@@ -663,29 +775,81 @@ pub async fn assign_sparse_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if !matches!(rhs, Value::GpuTensor(_)) || plan.indices.is_empty() || sparse.is_complex() {
+        return assign_sparse_with_plan_host(sparse, plan, rhs);
+    }
+    preflight_sparse_assignment(&sparse, plan, rhs)?;
+    let sparse = expand_sparse_for_plan(sparse, plan)?;
+    let host_rhs = gather_assignment_rhs(rhs, sparse.integer_storage().is_some()).await?;
+    apply_sparse_assignment_host(sparse, plan, &host_rhs)
+}
+
+async fn gather_assignment_rhs(rhs: &Value, integer_target: bool) -> Result<Value, RuntimeError> {
+    if let Value::GpuTensor(handle) = rhs {
+        if integer_target && runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            return download_integer_tensor(handle).await.map(Value::Tensor);
+        }
+    }
+    crate::dispatcher::gather_if_needed_async(rhs).await
+}
+
+fn preflight_sparse_assignment(
+    sparse: &SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<(), RuntimeError> {
     if sparse.integer_storage().is_some() {
         crate::compatibility::ensure_sparse_integer_extension_enabled("indexed assignment")?;
     }
-    if is_empty_delete_rhs(rhs) {
+    // Deletion is a distinct compiler-selected operation. A computed empty RHS
+    // may still assign to an empty selection when its shape is compatible.
+    if !plan.indices.is_empty() && is_empty_delete_rhs(rhs) {
         return Err(mex(
             "SparseAssignmentUnsupported",
             "Sparse indexed deletion is not yet supported",
         ));
     }
+    if plan.indices.is_empty() {
+        empty_rhs::validate_sparse_rhs(sparse, rhs, plan)?;
+    }
+    Ok(())
+}
+
+pub fn assign_sparse_with_plan_host(
+    sparse: SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    preflight_sparse_assignment(&sparse, plan, rhs)?;
+    let sparse = expand_sparse_for_plan(sparse, plan)?;
+    apply_sparse_assignment_host(sparse, plan, rhs)
+}
+
+fn expand_sparse_for_plan(
+    sparse: SparseTensor,
+    plan: &IndexPlan,
+) -> Result<SparseTensor, RuntimeError> {
     let target_rows = plan.base_shape.first().copied().unwrap_or(sparse.rows);
     let target_cols = plan.base_shape.get(1).copied().unwrap_or(sparse.cols);
-    let sparse = if target_rows != sparse.rows || target_cols != sparse.cols {
+    if target_rows != sparse.rows || target_cols != sparse.cols {
         sparse
             .with_expanded_shape(target_rows, target_cols)
-            .map_err(|error| map_slice_shape_error("sparse slice expansion", error))?
+            .map_err(|error| map_slice_shape_error("sparse slice expansion", error))
     } else {
-        sparse
-    };
+        Ok(sparse)
+    }
+}
+
+fn apply_sparse_assignment_host(
+    sparse: SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
         return Ok(Value::SparseTensor(sparse));
     }
     let updated = if sparse.is_logical() {
-        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
         let updates = plan
             .indices
             .iter()
@@ -696,7 +860,7 @@ pub async fn assign_sparse_with_plan(
             .with_updated_logical_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
     } else if let Some(storage) = sparse.integer_storage() {
-        let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_integer_rhs_for_plan_host(rhs, plan)?;
         let updates = plan
             .indices
             .iter()
@@ -711,8 +875,20 @@ pub async fn assign_sparse_with_plan(
         sparse
             .with_updated_integer_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
+    } else if sparse.is_complex() {
+        let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
+        let rhs_values = materialize_complex_rhs_view_for_plan(&rhs_view, plan);
+        let updates = plan
+            .indices
+            .iter()
+            .zip(rhs_values)
+            .map(|(&index, value)| (index as usize, value))
+            .collect::<Vec<_>>();
+        sparse
+            .with_updated_complex_linear_values(&updates)
+            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
     } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
         let updates = plan
             .indices
             .iter()
@@ -723,7 +899,7 @@ pub async fn assign_sparse_with_plan(
             .with_updated_f32_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
     } else {
-        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
         let updates = plan
             .indices
             .iter()
@@ -831,62 +1007,137 @@ pub async fn assign_tensor_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if !matches!(rhs, Value::GpuTensor(_)) || plan.indices.is_empty() {
+        return assign_tensor_with_plan_host(t, plan, rhs);
+    }
+    preflight_tensor_assignment(&t, plan, rhs)?;
+    let host_rhs = gather_assignment_rhs(rhs, t.integer_storage().is_some()).await?;
+    if matches!(host_rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+        // Resident RHS gathering did not historically authorize real-target
+        // complex promotion; that route is selected by a host complex RHS.
+        materialize_rhs_real_for_plan_host(&host_rhs, plan)?;
+    }
+    assign_tensor_with_plan_host(t, plan, &host_rhs)
+}
+
+fn preflight_tensor_assignment(
+    t: &Tensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<(), RuntimeError> {
+    if plan.indices.is_empty() {
+        empty_rhs::validate_real_or_host_complex_rhs(rhs, plan)?;
+        return Ok(());
+    }
+    if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+        t.validate_shape()
+            .map_err(|error| map_slice_shape_error("slice complex promotion", error))?;
+        return Ok(());
+    }
+    let target_len = plan.base_shape.iter().try_fold(1usize, |len, extent| {
+        len.checked_mul(*extent).ok_or_else(|| {
+            mex(
+                "ShapeOverflow",
+                "slice assignment target shape overflows usize",
+            )
+        })
+    })?;
+    t.validate_shape()
+        .map_err(|error| map_slice_shape_error("slice assign", error))?;
+    if target_len < t.len() {
+        return Err(mex(
+            "InvalidAssignmentPlan",
+            "slice assignment plan cannot shrink numeric storage",
+        ));
+    }
+    Ok(())
+}
+
+pub fn assign_tensor_with_plan_host(
+    t: Tensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    preflight_tensor_assignment(&t, plan, rhs)?;
     if plan.indices.is_empty() {
         return Ok(Value::Tensor(t));
     }
     if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
         let tensor = real_tensor_to_complex(t, "slice complex promotion")?;
-        return assign_complex_with_plan(tensor, plan, rhs).await;
+        return assign_complex_with_plan_host(tensor, plan, rhs);
     }
-    let shape = t.shape.clone();
-    let storage = t
-        .into_numeric_storage()
-        .map_err(|error| map_slice_shape_error("slice assign", error))?;
-    let storage = match storage.into_integer_storage() {
-        Ok(mut storage) => {
-            let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
-            integer_assignment::scatter(&mut storage, plan, &rhs_values)?;
-            NumericStorage::from_integer_storage(storage)
-        }
-        Err(mut storage) => {
-            let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
-            scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
-            storage
-        }
+    let target_len = plan.base_shape.iter().try_fold(1usize, |len, extent| {
+        len.checked_mul(*extent).ok_or_else(|| {
+            mex(
+                "ShapeOverflow",
+                "slice assignment target shape overflows usize",
+            )
+        })
+    })?;
+    let storage = if t.integer_storage().is_some() {
+        let rhs_values = materialize_integer_rhs_for_plan_host(rhs, plan)?;
+        let storage = grow_numeric_tensor(t, &plan.base_shape, target_len)?;
+        let Ok(mut storage) = storage.into_integer_storage() else {
+            unreachable!("typed growth retains integer class")
+        };
+        integer_assignment::scatter(&mut storage, plan, &rhs_values)?;
+        NumericStorage::from_integer_storage(storage)
+    } else {
+        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
+        let mut storage = grow_numeric_tensor(t, &plan.base_shape, target_len)?;
+        scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
+        storage
     };
-    Tensor::from_numeric_storage(storage, shape)
+    Tensor::from_numeric_storage(storage, plan.base_shape.clone())
         .map(Value::Tensor)
         .map_err(|error| map_slice_shape_error("slice assign", error))
 }
 
 pub async fn assign_complex_with_plan(
-    mut tensor: ComplexTensor,
+    tensor: ComplexTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !matches!(rhs, Value::GpuTensor(_))
+        || plan.indices.is_empty()
+        || tensor.integer_storage().is_none()
+    {
+        return assign_complex_with_plan_host(tensor, plan, rhs);
+    }
+    let host_rhs = gather_assignment_rhs(rhs, true).await?;
+    assign_complex_with_plan_host(tensor, plan, &host_rhs)
+}
+
+pub fn assign_complex_with_plan_host(
+    tensor: ComplexTensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
+        empty_rhs::validate_complex_rhs(rhs, plan, tensor.integer_storage().is_some())?;
         return Ok(Value::ComplexTensor(tensor));
     }
     if tensor.integer_storage().is_some() {
-        let rhs_values = materialize_complex_integer_rhs_for_plan(rhs, plan).await?;
-        let storage = tensor
-            .integer_storage()
-            .cloned()
-            .expect("typed complex tensor must retain exact storage");
+        let rhs_values = materialize_complex_integer_rhs_for_plan_host(rhs, plan)?;
+        let tensor = grow_complex_tensor(tensor, &plan.base_shape)?;
+        let (storage, shape) = tensor.into_complex_storage_and_shape();
+        let ComplexStorage::Integer(storage) = storage else {
+            unreachable!("typed complex tensor must retain exact storage");
+        };
         let real_values: Vec<IntegerAssignmentValue> =
             rhs_values.iter().map(|value| value.real.clone()).collect();
         let imag_values: Vec<IntegerAssignmentValue> =
             rhs_values.iter().map(|value| value.imag.clone()).collect();
-        let mut real = storage.real;
-        let mut imag = storage.imag;
+        let (mut real, mut imag) = storage.into_unbounded_components();
         integer_assignment::scatter(&mut real, plan, &real_values)?;
         integer_assignment::scatter(&mut imag, plan, &imag_values)?;
         return IntegerComplexStorage::new(real, imag)
-            .and_then(|storage| ComplexTensor::new_integer(storage, tensor.shape))
+            .and_then(|storage| ComplexTensor::new_integer(storage, shape))
             .map(Value::ComplexTensor)
             .map_err(|error| map_slice_shape_error("typed complex slice assign", error));
     }
     let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
+    let mut tensor = grow_complex_tensor(tensor, &plan.base_shape)?;
     scatter_complex_with_plan(&mut tensor, plan, &rhs_view)?;
     Ok(Value::ComplexTensor(tensor))
 }
@@ -905,15 +1156,14 @@ pub fn delete_tensor_with_plan(
     if plan.indices.is_empty() {
         return Ok(Value::Tensor(t));
     }
-    if !(t.rows == 1 || t.cols == 1) {
+    let (rows, cols) = dense_delete_dimensions(t.shape());
+    if !(rows == 1 || cols == 1) {
         return Err(mex(
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
         ));
     }
     let positions = sorted_unique_positions_desc(plan, tensor_element_len(&t))?;
-    let rows = t.rows;
-    let cols = t.cols;
     let mut storage = t
         .into_numeric_storage()
         .map_err(|error| map_slice_shape_error("slice deletion", error))?;
@@ -940,7 +1190,7 @@ pub fn delete_complex_with_plan(
     if plan.indices.is_empty() {
         return Ok(Value::ComplexTensor(t));
     }
-    if !(t.rows == 1 || t.cols == 1) {
+    if !(t.rows() == 1 || t.cols() == 1) {
         return Err(mex(
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
@@ -949,14 +1199,14 @@ pub fn delete_complex_with_plan(
     let positions = sorted_unique_positions_desc(plan, complex_tensor_element_len(&t))?;
     if let Some(storage) = t.integer_storage().cloned() {
         let storage = delete_integer_complex_storage_positions(storage, &positions);
-        let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
+        let shape = deleted_vector_shape(t.rows(), t.cols(), storage.len());
         return ComplexTensor::new_integer(storage, shape)
             .map(Value::ComplexTensor)
             .map_err(|error| map_slice_shape_error("complex slice deletion", error));
     }
     let dtype = t.numeric_dtype();
-    let rows = t.rows;
-    let cols = t.cols;
+    let rows = t.rows();
+    let cols = t.cols();
     let mut values = t.materialize_f64();
     for pos in positions {
         values.remove(pos);
@@ -967,134 +1217,8 @@ pub fn delete_complex_with_plan(
         .map_err(|error| map_slice_shape_error("complex slice deletion", error))
 }
 
-pub async fn assign_gpu_slice_with_plan(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    plan: &IndexPlan,
-    rhs: &Value,
-) -> Result<Value, RuntimeError> {
-    if plan.indices.is_empty() {
-        return Ok(Value::GpuTensor(handle.clone()));
-    }
-    let mut unique_indices = plan.indices.clone();
-    unique_indices.sort_unstable();
-    if unique_indices.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(mex(
-            "RepeatedGpuAssignmentIndex",
-            "gpuArray indexed assignment does not support repeated target subscripts",
-        ));
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider owns the target gpuArray",
-        )
-    })?;
-    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-        if let Value::GpuTensor(rhs_handle) = rhs {
-            if runmat_accelerate_api::handle_integer_type(rhs_handle)
-                == runmat_accelerate_api::handle_integer_type(handle)
-            {
-                if let Ok(rhs_indices) = integer_gpu_rhs_indices_for_plan(&rhs_handle.shape, plan) {
-                    let reuses_rhs = rhs_indices
-                        .iter()
-                        .enumerate()
-                        .all(|(index, &rhs_index)| rhs_index as usize == index);
-                    let values = if reuses_rhs {
-                        rhs_handle.clone()
-                    } else {
-                        provider
-                            .gather_linear(rhs_handle, &rhs_indices, &plan.output_shape)
-                            .map_err(|e| {
-                                map_acceleration_error(
-                                    "expand exact integer gpuArray assignment rhs",
-                                    e,
-                                )
-                            })?
-                    };
-                    let result = provider
-                        .scatter_linear(handle, &plan.indices, &values)
-                        .map_err(|e| {
-                            map_acceleration_error("exact integer gpuArray slice assignment", e)
-                        });
-                    if !reuses_rhs {
-                        let _ = provider.free(&values);
-                    }
-                    result?;
-                    return Ok(Value::GpuTensor(handle.clone()));
-                }
-            }
-        }
-        let tensor = download_integer_tensor(handle).await?;
-        let Value::Tensor(updated) = assign_tensor_with_plan(tensor, plan, rhs).await? else {
-            unreachable!("real integer slice assignment must produce a real tensor")
-        };
-        return upload_tensor_to_gpu(&updated);
-    }
-    if let Value::GpuTensor(vh) = rhs {
-        let rows = plan.base_shape.first().copied().unwrap_or(1);
-        let cols = plan.base_shape.get(1).copied().unwrap_or(1);
-        if let Some(col) = plan.properties.full_column {
-            if col < cols {
-                let v_rows = match vh.shape.len() {
-                    1 | 2 => vh.shape[0],
-                    _ => 0,
-                };
-                if v_rows == rows {
-                    if let Ok(new_h) = provider.scatter_column(handle, col, vh) {
-                        return Ok(Value::GpuTensor(new_h));
-                    }
-                }
-            }
-        }
-        if let Some(row) = plan.properties.full_row {
-            if row < rows {
-                let v_cols = match vh.shape.len() {
-                    1 => vh.shape[0],
-                    2 => vh.shape[1],
-                    _ => 0,
-                };
-                if v_cols == cols {
-                    if let Ok(new_h) = provider.scatter_row(handle, row, vh) {
-                        return Ok(Value::GpuTensor(new_h));
-                    }
-                }
-            }
-        }
-    }
-    let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
-    let value_shape = vec![rhs_values.len().max(1), 1];
-    let upload_result = if rhs_values.is_empty() {
-        provider.zeros(&[0, 1])
-    } else {
-        provider.upload(&runmat_accelerate_api::HostTensorView {
-            data: &rhs_values,
-            shape: &value_shape,
-        })
-    };
-    if let Ok(values_handle) = upload_result {
-        if provider
-            .scatter_linear(handle, &plan.indices, &values_handle)
-            .is_ok()
-        {
-            return Ok(Value::GpuTensor(handle.clone()));
-        }
-    }
-
-    let host = provider
-        .download(handle)
-        .await
-        .map_err(|e| map_acceleration_error("gather for slice assign", e))?;
-    let t =
-        Tensor::new(host.data, host.shape).map_err(|e| map_slice_shape_error("slice assign", e))?;
-    let shape = t.shape.clone();
-    let mut storage = t
-        .into_numeric_storage()
-        .map_err(|error| map_slice_shape_error("slice assign", error))?;
-    scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
-    let t = Tensor::from_numeric_storage(storage, shape)
-        .map_err(|error| map_slice_shape_error("slice assign", error))?;
-    upload_tensor_to_gpu(&t)
-}
+mod resident;
+pub use resident::{assign_gpu_slice_with_plan, delete_gpu_slice_with_plan};
 
 fn integer_gpu_rhs_indices_for_plan(
     rhs_shape: &[usize],
@@ -1166,84 +1290,19 @@ fn integer_gpu_rhs_indices_for_plan(
     Ok(output)
 }
 
-pub async fn delete_gpu_slice_with_plan(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    plan: &IndexPlan,
-    rhs: &Value,
-) -> Result<Value, RuntimeError> {
-    if !is_empty_delete_rhs(rhs) {
-        return Err(mex(
-            "DeletionRequiresEmptyRhs",
-            "Indexed deletion requires empty RHS",
-        ));
-    }
-    if plan.indices.is_empty() {
-        return Ok(Value::GpuTensor(handle.clone()));
-    }
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
-        )
-    })?;
-    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-        let tensor = download_integer_tensor(handle).await?;
-        let Value::Tensor(updated) = delete_tensor_with_plan(tensor, plan, rhs)? else {
-            unreachable!("integer slice deletion must produce a real tensor")
-        };
-        return upload_tensor_to_gpu(&updated);
-    }
-    let host = provider
-        .download(handle)
-        .await
-        .map_err(|e| map_acceleration_error("gather for slice deletion", e))?;
-    let t = Tensor::new(host.data, host.shape)
-        .map_err(|e| map_slice_shape_error("slice deletion", e))?;
-    let Value::Tensor(updated) = delete_tensor_with_plan(t, plan, rhs)? else {
-        unreachable!()
-    };
-    upload_tensor_to_gpu(&updated)
-}
-
 pub async fn materialize_rhs_linear_real(
     rhs: &Value,
     count: usize,
 ) -> Result<Vec<f64>, RuntimeError> {
     let host_rhs = crate::dispatcher::gather_if_needed_async(rhs).await?;
-    match host_rhs {
-        Value::Num(n) => Ok(vec![n; count]),
-        Value::Int(int_val) => Ok(vec![int_val.to_f64(); count]),
-        Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }; count]),
-        Value::Tensor(t) => {
-            let len = tensor_element_len(&t);
-            if len == count {
-                Ok(tensor::tensor_into_values_f64(t))
-            } else if len == 1 {
-                Ok(vec![tensor_value_f64(&t, 0); count])
-            } else {
-                Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
-            }
-        }
-        Value::LogicalArray(la) => {
-            if la.data.len() == count {
-                Ok(la
-                    .data
-                    .into_iter()
-                    .map(|b| if b != 0 { 1.0 } else { 0.0 })
-                    .collect())
-            } else if la.data.len() == 1 {
-                let val = if la.data[0] != 0 { 1.0 } else { 0.0 };
-                Ok(vec![val; count])
-            } else {
-                Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
-            }
-        }
-        Value::OutputList(values) => materialize_output_list_real(&values, count),
-        other => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            format!("slice assign: unsupported RHS type {:?}", other),
-        )),
-    }
+    materialize_rhs_linear_real_host(&host_rhs, count)
+}
+
+pub fn materialize_rhs_linear_real_host(
+    rhs: &Value,
+    count: usize,
+) -> Result<Vec<f64>, RuntimeError> {
+    host_rhs::linear(rhs, count)
 }
 
 pub async fn materialize_rhs_nd_real(
@@ -1251,228 +1310,26 @@ pub async fn materialize_rhs_nd_real(
     selection_lengths: &[usize],
 ) -> Result<Vec<f64>, RuntimeError> {
     let rhs_host = crate::dispatcher::gather_if_needed_async(rhs).await?;
-    enum RhsView {
-        Scalar(f64),
-        Tensor {
-            data: Vec<f64>,
-            shape: Vec<usize>,
-            strides: Vec<usize>,
-        },
-    }
-    let view = match rhs_host {
-        Value::Num(n) => RhsView::Scalar(n),
-        Value::Int(iv) => RhsView::Scalar(iv.to_f64()),
-        Value::Bool(b) => RhsView::Scalar(if b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) => {
-            let shape = validated_assignment_rhs_shape(
-                &t.shape,
-                tensor_element_len(&t),
-                selection_lengths,
-            )?;
-            let mut strides = vec![1usize; selection_lengths.len()];
-            for d in 1..selection_lengths.len() {
-                strides[d] = strides[d - 1] * shape[d - 1].max(1);
-            }
-            let data = tensor::tensor_into_values_f64(t);
-            if data.len()
-                != shape
-                    .iter()
-                    .copied()
-                    .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
-            {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            }
-        }
-        Value::LogicalArray(la) => {
-            let shape =
-                validated_assignment_rhs_shape(&la.shape, la.data.len(), selection_lengths)?;
-            let mut strides = vec![1usize; selection_lengths.len()];
-            for d in 1..selection_lengths.len() {
-                strides[d] = strides[d - 1] * shape[d - 1].max(1);
-            }
-            if la.data.len()
-                != shape
-                    .iter()
-                    .copied()
-                    .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
-            {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-            let data: Vec<f64> = la
-                .data
-                .into_iter()
-                .map(|b| if b != 0 { 1.0 } else { 0.0 })
-                .collect();
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            }
-        }
-        Value::OutputList(values) => {
-            let count = selection_lengths
-                .iter()
-                .copied()
-                .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)));
-            let data = materialize_output_list_real(&values, count)?;
-            let shape = if selection_lengths.is_empty() {
-                vec![1]
-            } else {
-                selection_lengths.to_vec()
-            };
-            let mut strides = vec![1usize; shape.len()];
-            for d in 1..shape.len() {
-                strides[d] = strides[d - 1] * shape[d - 1].max(1);
-            }
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            }
-        }
-        other => {
-            return Err(mex(
-                "InvalidSliceAssignmentRhs",
-                format!("slice assign: unsupported RHS type {:?}", other),
-            ))
-        }
-    };
-
-    let total = selection_lengths
-        .iter()
-        .copied()
-        .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)));
-    let mut out = Vec::with_capacity(total);
-    let mut idx = vec![0usize; selection_lengths.len()];
-    if selection_lengths.is_empty() {
-        return Ok(out);
-    }
-    loop {
-        match &view {
-            RhsView::Scalar(val) => out.push(*val),
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            } => {
-                let mut rlin = 0usize;
-                for d in 0..idx.len() {
-                    let rhs_len = shape[d];
-                    let pos = if rhs_len == 1 { 0 } else { idx[d] };
-                    rlin += pos * strides[d];
-                }
-                out.push(data.get(rlin).copied().unwrap_or(0.0));
-            }
-        }
-        let mut d = 0usize;
-        while d < idx.len() {
-            idx[d] += 1;
-            if idx[d] < selection_lengths[d].max(1) {
-                break;
-            }
-            idx[d] = 0;
-            d += 1;
-        }
-        if d == idx.len() {
-            break;
-        }
-    }
-    Ok(out)
+    materialize_rhs_nd_real_host(&rhs_host, selection_lengths)
 }
 
-fn materialize_output_list_real(values: &[Value], count: usize) -> Result<Vec<f64>, RuntimeError> {
-    if values.len() == count {
-        values.iter().map(value_to_real_scalar).collect()
-    } else if values.len() == 1 {
-        let value = value_to_real_scalar(&values[0])?;
-        Ok(vec![value; count])
-    } else {
-        Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
-    }
-}
-
-fn value_to_real_scalar(value: &Value) -> Result<f64, RuntimeError> {
-    match value {
-        Value::Num(n) => Ok(*n),
-        Value::Int(int_val) => Ok(int_val.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if is_scalar_tensor(t) => Ok(tensor_value_f64(t, 0)),
-        _ => f64::try_from(value).map_err(Into::into),
-    }
-}
-
-pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
-        )
-    })?;
-    let new_h = if let Some(storage) = t.integer_storage() {
-        let view = integer_tensor_view(storage, &t.shape);
-        provider
-            .upload_integer(&view)
-            .map_err(|e| map_acceleration_error("exact integer reupload after slice assign", e))?
-    } else {
-        let data = t.materialize_f64();
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &data,
-            shape: &t.shape,
-        };
-        provider
-            .upload(&view)
-            .map_err(|e| map_acceleration_error("reupload after slice assign", e))?
-    };
-    Ok(Value::GpuTensor(new_h))
+pub fn materialize_rhs_nd_real_host(
+    rhs: &Value,
+    selection_lengths: &[usize],
+) -> Result<Vec<f64>, RuntimeError> {
+    host_rhs::multidimensional(rhs, selection_lengths)
 }
 
 pub(crate) async fn download_integer_tensor(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Result<Tensor, RuntimeError> {
-    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered for integer gpuArray",
-        )
-    })?;
-    let integer = provider
-        .download_integer(handle)
-        .await
-        .map_err(|e| map_acceleration_error("exact integer gather for assignment", e))?;
-    let storage = match integer.data {
-        HostIntegerDataOwned::I8(values) => IntegerStorage::I8(values),
-        HostIntegerDataOwned::I16(values) => IntegerStorage::I16(values),
-        HostIntegerDataOwned::I32(values) => IntegerStorage::I32(values),
-        HostIntegerDataOwned::I64(values) => IntegerStorage::I64(values),
-        HostIntegerDataOwned::U8(values) => IntegerStorage::U8(values),
-        HostIntegerDataOwned::U16(values) => IntegerStorage::U16(values),
-        HostIntegerDataOwned::U32(values) => IntegerStorage::U32(values),
-        HostIntegerDataOwned::U64(values) => IntegerStorage::U64(values),
-    };
-    Tensor::new_integer(storage, integer.shape)
-        .map_err(|e| map_slice_shape_error("integer gpuArray assignment gather", e))
-}
-
-fn integer_tensor_view<'a>(
-    storage: &'a IntegerStorage,
-    shape: &'a [usize],
-) -> HostIntegerTensorView<'a> {
-    let data = match storage {
-        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-    };
-    HostIntegerTensorView { data, shape }
+    match super::resident::gather(handle).await? {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(tensor),
+        _ => Err(mex(
+            "AccelerationOperationFailed",
+            "Expected a native real integer payload",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -1480,11 +1337,12 @@ mod tests {
     use super::{
         assign_complex_with_plan, assign_gpu_slice_with_plan, assign_sparse_with_plan,
         assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
-        delete_complex_with_plan, delete_gpu_slice_with_plan, delete_tensor_with_plan,
-        integer_gpu_rhs_indices_for_plan, map_acceleration_error, materialize_rhs_linear_real,
+        delete_complex_with_plan, delete_gpu_slice_with_plan, delete_sparse_with_plan,
+        delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan, materialize_rhs_linear_real,
         materialize_rhs_nd_real, validated_assignment_rhs_shape, ComplexRhsView, StringRhsView,
     };
-    use crate::indexing::plan::IndexPlan;
+    use crate::indexing::plan::{build_assignment_plan, build_sparse_assignment_plan, IndexPlan};
+    use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
     use runmat_value::{
         CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
@@ -1493,12 +1351,14 @@ mod tests {
 
     #[test]
     fn gpu_assignment_rejects_repeated_target_subscripts_before_provider_access() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 91,
-            buffer_id: 17,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered input")
+            .handle;
         let plan = IndexPlan::new(vec![1, 1], vec![1, 2], vec![2], 1, vec![1, 3]);
         let error = block_on(assign_gpu_slice_with_plan(&handle, &plan, &Value::Num(4.0)))
             .expect_err("repeated gpuArray assignment targets must reject");
@@ -1557,7 +1417,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
-        assert_eq!(deleted.shape, vec![1, 2]);
+        assert_eq!(deleted.shape(), [1, 2]);
         assert_eq!(
             deleted.into_numeric_storage(),
             Ok(NumericStorage::F32(vec![
@@ -1565,6 +1425,50 @@ mod tests {
                 1.234_567_890_123_f64 as f32,
             ]))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rank_zero_and_rank_one_plan_deletion_keep_dense_vector_geometry() {
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero tensor");
+        let rank_zero_plan = IndexPlan::new(vec![0], vec![1], vec![1], 1, vec![]);
+        let rejected = delete_tensor_with_plan(
+            rank_zero.clone(),
+            &rank_zero_plan,
+            &Value::Tensor(rank_zero.clone()),
+        )
+        .expect_err("rank-zero cached geometry is not a vector");
+        assert_eq!(rejected.identifier(), Some("RunMat:UnsupportedDeletion"));
+
+        let rank_one = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one tensor");
+        let rank_one_plan = IndexPlan::new(vec![1], vec![1], vec![1], 1, vec![3]);
+        let Value::Tensor(deleted) =
+            delete_tensor_with_plan(rank_one, &rank_one_plan, &Value::Tensor(rank_zero))
+                .expect("rank-zero RHS keeps cached-empty deletion admission")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(deleted.shape(), [1, 2]);
+        assert_eq!(deleted.materialize_f64(), vec![1.0, 3.0]);
+
+        let complex_rank_zero =
+            ComplexTensor::new(vec![(7.0, -7.0)], vec![]).expect("rank-zero complex tensor");
+        let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
+        let rejected = delete_complex_with_plan(complex_rank_zero, &rank_zero_plan, &empty)
+            .expect_err("rank-zero complex geometry is not a vector");
+        assert_eq!(rejected.identifier(), Some("RunMat:UnsupportedDeletion"));
+
+        let complex_rank_one =
+            ComplexTensor::new(vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0)], vec![3])
+                .expect("rank-one complex tensor");
+        let Value::ComplexTensor(deleted) =
+            delete_complex_with_plan(complex_rank_one, &rank_one_plan, &empty)
+                .expect("rank-one complex deletion")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(deleted.shape(), [1, 2]);
+        assert_eq!(deleted.materialize_f64(), vec![(1.0, -1.0), (3.0, -3.0)]);
     }
 
     #[test]
@@ -1583,14 +1487,16 @@ mod tests {
         };
         assert_eq!(updated.numeric_dtype(), NumericDType::F32);
         assert_eq!(
-            updated.as_f32_slice(),
-            Some(
-                &[
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                    (2.0, -2.0),
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                ][..]
-            )
+            updated.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                (2.0, -2.0),
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+            ])
         );
 
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty"));
@@ -1601,16 +1507,45 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
-        assert_eq!(deleted.shape, vec![1, 2]);
+        assert_eq!(deleted.shape(), [1, 2]);
         assert_eq!(
-            deleted.as_f32_slice(),
-            Some(
-                &[
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                    (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
-                ][..]
-            )
+            deleted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+                (1.234_567_890_123_f64 as f32, -9.876_543_210_987_f64 as f32,),
+            ])
         );
+    }
+
+    #[test]
+    fn real_tensor_rhs_fills_complex_slices_without_changing_target_class() {
+        let plan = IndexPlan::new(vec![1, 2], vec![2, 1], vec![2, 1], 2, vec![4, 2]);
+        let real_rhs = Value::Tensor(Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap());
+        let double = ComplexTensor::new(vec![(0.0, 1.0); 8], vec![4, 2]).unwrap();
+        let Value::ComplexTensor(double) =
+            block_on(assign_complex_with_plan(double, &plan, &real_rhs)).unwrap()
+        else {
+            panic!("complex double result");
+        };
+        assert_eq!(double.materialize_f64()[1..3], [(5.0, 0.0), (6.0, 0.0)]);
+
+        let single = ComplexTensor::from_f32(vec![(0.0, 1.0); 8], vec![4, 2]).unwrap();
+        let Value::ComplexTensor(single) =
+            block_on(assign_complex_with_plan(single, &plan, &real_rhs)).unwrap()
+        else {
+            panic!("complex single result");
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.materialize_f64()[1..3], [(5.0, 0.0), (6.0, 0.0)]);
+
+        let invalid_rhs = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+        let error = block_on(assign_complex_with_plan(single, &plan, &invalid_rhs))
+            .expect_err("real RHS shape must still match");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]
@@ -1625,7 +1560,7 @@ mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, 3]))
@@ -1646,7 +1581,7 @@ mod tests {
         else {
             panic!("expected complex tensor");
         };
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
         assert_eq!(
             output.integer_storage().cloned(),
             Some(
@@ -1770,6 +1705,116 @@ mod tests {
     }
 
     #[test]
+    fn empty_numeric_assignment_validates_rhs_without_mutating_exact_storage() {
+        let plan = IndexPlan::new(vec![], vec![0], vec![0], 1, vec![1, 2]);
+        let target = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .unwrap();
+        for rhs in [
+            Value::Int(runmat_value::IntValue::U64(7)),
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U64(vec![]), vec![0, 1]).unwrap()),
+        ] {
+            let Value::Tensor(output) =
+                block_on(assign_tensor_with_plan(target.clone(), &plan, &rhs)).unwrap()
+            else {
+                panic!("integer target");
+            };
+            assert_eq!(output.shape(), &[1, 2]);
+            assert_eq!(output.integer_storage(), target.integer_storage());
+        }
+        for (rhs, expected) in [
+            (
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                "RunMat:ShapeMismatch",
+            ),
+            (
+                Value::String("invalid".into()),
+                "RunMat:InvalidSliceAssignmentRhs",
+            ),
+        ] {
+            let error = block_on(assign_tensor_with_plan(target.clone(), &plan, &rhs))
+                .expect_err("empty selection still validates RHS");
+            assert_eq!(error.identifier(), Some(expected));
+            assert_eq!(
+                target.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]))
+            );
+        }
+    }
+
+    #[test]
+    fn empty_complex_assignment_preserves_class_specific_rhs_admission() {
+        let plan = IndexPlan::new(vec![], vec![0], vec![0], 1, vec![1, 2]);
+        let floating = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(output) = block_on(assign_complex_with_plan(
+            floating.clone(),
+            &plan,
+            &Value::Complex(7.0, 8.0),
+        ))
+        .unwrap() else {
+            panic!("complex target");
+        };
+        assert_eq!(output, floating);
+        let empty = Value::ComplexTensor(ComplexTensor::new(vec![], vec![0, 1]).unwrap());
+        assert!(block_on(assign_complex_with_plan(floating.clone(), &plan, &empty)).is_ok());
+        let incompatible = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![1, 2]).unwrap(),
+        );
+        let error = block_on(assign_complex_with_plan(
+            floating.clone(),
+            &plan,
+            &incompatible,
+        ))
+        .expect_err("nonempty nonscalar complex RHS");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+        let Value::ComplexTensor(output) = block_on(assign_complex_with_plan(
+            floating.clone(),
+            &plan,
+            &Value::Int(runmat_value::IntValue::U64(1)),
+        ))
+        .expect("real integer scalar is a valid complex RHS") else {
+            panic!("complex target");
+        };
+        assert_eq!(output, floating);
+        let empty_real = Value::Tensor(Tensor::new(vec![], vec![0, 1]).unwrap());
+        assert!(block_on(assign_complex_with_plan(
+            floating.clone(),
+            &plan,
+            &empty_real
+        ))
+        .is_ok());
+        let incompatible_real = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+        let error = block_on(assign_complex_with_plan(
+            floating,
+            &plan,
+            &incompatible_real,
+        ))
+        .expect_err("nonempty nonscalar real RHS");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+
+        let integer = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX, 3]),
+                IntegerStorage::U64(vec![2, 4]),
+            )
+            .unwrap(),
+            vec![1, 2],
+        )
+        .unwrap();
+        let Value::ComplexTensor(output) = block_on(assign_complex_with_plan(
+            integer.clone(),
+            &plan,
+            &Value::Int(runmat_value::IntValue::U64(7)),
+        ))
+        .unwrap() else {
+            panic!("integer complex target");
+        };
+        assert_eq!(output, integer);
+    }
+
+    #[test]
     fn floating_logical_complex_and_string_rhs_reject_singleton_expansion() {
         let floating = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("floating"));
         let error = block_on(materialize_rhs_nd_real(&floating, &[2, 2]))
@@ -1855,6 +1900,73 @@ mod tests {
     }
 
     #[test]
+    fn real_floating_to_complex_assignment_retains_class_and_original_alias() {
+        for (dtype, source) in [
+            (
+                NumericDType::F32,
+                Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+            ),
+            (
+                NumericDType::F64,
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+            ),
+        ] {
+            let original_alias = source.clone();
+            let bounded = build_assignment_plan(
+                &[SliceSelector::Scalar(1), SliceSelector::Scalar(2)],
+                2,
+                source.shape(),
+            )
+            .unwrap();
+            let Value::ComplexTensor(updated) = block_on(assign_tensor_with_plan(
+                source.clone(),
+                &bounded,
+                &Value::Complex(9.0, -8.0),
+            ))
+            .unwrap() else {
+                panic!("bounded real-to-complex assignment must publish complex storage")
+            };
+            assert_eq!(updated.numeric_dtype(), dtype);
+            assert_eq!(updated.shape(), &[2, 2]);
+            assert_eq!(
+                updated.materialize_f64(),
+                vec![(1.0, 0.0), (2.0, 0.0), (9.0, -8.0), (4.0, 0.0)]
+            );
+
+            let growing = build_assignment_plan(
+                &[SliceSelector::Scalar(3), SliceSelector::Scalar(2)],
+                2,
+                source.shape(),
+            )
+            .unwrap();
+            let Value::ComplexTensor(updated) = block_on(assign_tensor_with_plan(
+                source,
+                &growing,
+                &Value::Complex(9.0, -8.0),
+            ))
+            .unwrap() else {
+                panic!("grown real-to-complex assignment must publish complex storage")
+            };
+            assert_eq!(updated.numeric_dtype(), dtype);
+            assert_eq!(updated.shape(), &[3, 2]);
+            assert_eq!(
+                updated.materialize_f64(),
+                vec![
+                    (1.0, 0.0),
+                    (2.0, 0.0),
+                    (0.0, 0.0),
+                    (3.0, 0.0),
+                    (4.0, 0.0),
+                    (9.0, -8.0),
+                ]
+            );
+            assert_eq!(original_alias.numeric_dtype(), dtype);
+            assert_eq!(original_alias.shape(), &[2, 2]);
+            assert_eq!(original_alias.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
+        }
+    }
+
+    #[test]
     fn real_integer_plan_assignment_promotes_to_complex_exact_storage_for_every_class() {
         macro_rules! assert_promotion {
             ($storage:ident, $values:expr, $real:expr, $imag:expr) => {{
@@ -1882,7 +1994,7 @@ mod tests {
                 assert_eq!(
                     output
                         .integer_storage()
-                        .map(|storage| (&storage.real, &storage.imag)),
+                        .map(|storage| (storage.real(), storage.imag())),
                     Some((
                         &IntegerStorage::$storage(vec![$real; 4]),
                         &IntegerStorage::$storage(vec![$imag; 4]),
@@ -1955,12 +2067,12 @@ mod tests {
         let Value::ComplexTensor(output) = result else {
             panic!("integer tensor should promote to complex tensor");
         };
-        assert_eq!(output.shape, vec![2, 1, 2]);
+        assert_eq!(output.shape(), [2, 1, 2]);
         assert_eq!(
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::U64(vec![u64::MAX; 4]),
                 &IntegerStorage::U64(vec![9_223_372_036_854_775_809; 4]),
@@ -2050,7 +2162,7 @@ mod tests {
             output
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((
                 &IntegerStorage::I8(vec![i8::MAX, i8::MAX]),
                 &IntegerStorage::I8(vec![i8::MIN, i8::MIN]),
@@ -2098,6 +2210,89 @@ mod tests {
         let error = block_on(assign_sparse_with_plan(sparse, &plan, &rhs))
             .expect_err("sparse nonscalar singleton expansion must reject");
         assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn sparse_empty_assignment_admits_compatible_computed_empty_rhs_only() {
+        let sparse = SparseTensor::new(1, 2, vec![0, 1, 2], vec![0, 0], vec![5.0, 7.0])
+            .expect("sparse target");
+        let plan = IndexPlan::new(vec![], vec![0, 2], vec![0, 2], 2, vec![1, 2]);
+        let compatible = Value::Tensor(Tensor::new(vec![], vec![0, 2]).unwrap());
+        let Value::SparseTensor(output) =
+            block_on(assign_sparse_with_plan(sparse.clone(), &plan, &compatible))
+                .expect("computed empty RHS matches empty selection")
+        else {
+            panic!("sparse target");
+        };
+        assert_eq!(output, sparse);
+
+        let incompatible = Value::Tensor(Tensor::new(vec![], vec![2, 0]).unwrap());
+        let error = block_on(assign_sparse_with_plan(
+            sparse.clone(),
+            &plan,
+            &incompatible,
+        ))
+        .expect_err("empty RHS dimensions must align with empty selection");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+
+        let occupied = IndexPlan::new(vec![0], vec![1, 1], vec![1, 1], 2, vec![1, 2]);
+        let error = block_on(assign_sparse_with_plan(
+            sparse.clone(),
+            &occupied,
+            &compatible,
+        ))
+        .expect_err("nonempty sparse assignment cannot treat empty RHS as deletion");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:SparseAssignmentUnsupported")
+        );
+        let Value::SparseTensor(deleted) =
+            delete_sparse_with_plan(sparse.clone(), &plan, &compatible)
+                .expect("compiler-selected empty deletion remains separate")
+        else {
+            panic!("sparse deletion");
+        };
+        assert_eq!(deleted, sparse);
+    }
+
+    #[test]
+    fn sparse_empty_selector_growing_plan_retains_current_runmat_shape_behavior() {
+        let sparse = SparseTensor::new(1, 2, vec![0, 1, 2], vec![0, 0], vec![5.0, 7.0])
+            .expect("sparse target");
+        let plan = build_sparse_assignment_plan(
+            &[SliceSelector::Indices(vec![]), SliceSelector::Scalar(5)],
+            2,
+            &[1, 2],
+        )
+        .expect("empty selector may still produce a growing plan");
+        assert!(plan.indices.is_empty());
+        assert_eq!(plan.selection_lengths, vec![0, 1]);
+        assert_eq!(plan.base_shape, vec![1, 5]);
+
+        // This records RunMat's existing sparse growth policy, not verified MATLAB parity.
+        let Value::SparseTensor(output) = block_on(assign_sparse_with_plan(
+            sparse.clone(),
+            &plan,
+            &Value::Num(9.0),
+        ))
+        .expect("scalar RHS is compatible with an empty selection") else {
+            panic!("sparse output");
+        };
+        assert_eq!((output.rows, output.cols), (1, 5));
+        assert_eq!(output.col_ptrs, vec![0, 1, 2, 2, 2, 2]);
+        assert_eq!(output.row_indices, vec![0, 0]);
+        assert_eq!(output.as_f64_slice(), Some(&[5.0, 7.0][..]));
+
+        let incompatible = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+        let error = block_on(assign_sparse_with_plan(
+            sparse.clone(),
+            &plan,
+            &incompatible,
+        ))
+        .expect_err("invalid RHS rejects before sparse expansion");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+        assert_eq!((sparse.rows, sparse.cols), (1, 2));
+        assert_eq!(sparse.as_f64_slice(), Some(&[5.0, 7.0][..]));
     }
 
     #[test]
@@ -2149,6 +2344,62 @@ mod tests {
     }
 
     #[test]
+    fn sparse_complex_plan_assignment_preserves_values_and_last_write_wins() {
+        let sparse = SparseTensor::zeros_complex(2, 2);
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new(
+                vec![(1.0, 2.0), (0.0, 0.0), (3.0, -4.0), (5.0, 6.0)],
+                vec![1, 4],
+            )
+            .expect("rhs"),
+        );
+        let plan = IndexPlan::new(vec![0, 3, 1, 3], vec![1, 4], vec![4], 1, vec![2, 2]);
+        let Value::SparseTensor(output) =
+            block_on(assign_sparse_with_plan(sparse, &plan, &rhs)).expect("assign")
+        else {
+            panic!("expected sparse output");
+        };
+        assert!(output.is_complex());
+        assert_eq!(output.col_ptrs, vec![0, 2, 3]);
+        assert_eq!(output.row_indices, vec![0, 1, 1]);
+        assert_eq!(
+            output.materialize_complex_f64().expect("complex values"),
+            vec![(1.0, 2.0), (3.0, -4.0), (5.0, 6.0)]
+        );
+
+        let real_rhs = Value::Tensor(Tensor::new(vec![8.0, 9.0], vec![2, 1]).unwrap());
+        let plan = IndexPlan::new(vec![0, 1], vec![2, 1], vec![2, 1], 2, vec![2, 2]);
+        let Value::SparseTensor(output) = block_on(assign_sparse_with_plan(
+            SparseTensor::zeros_complex(2, 2),
+            &plan,
+            &real_rhs,
+        ))
+        .expect("real tensor updates complex sparse entries") else {
+            panic!("sparse complex result");
+        };
+        assert_eq!(
+            output.materialize_complex_f64().unwrap(),
+            vec![(8.0, 0.0), (9.0, 0.0)]
+        );
+
+        let empty_plan = IndexPlan::new(vec![], vec![0, 1], vec![0], 1, vec![2, 2]);
+        let empty_real = Value::Tensor(Tensor::new(vec![], vec![0, 1]).unwrap());
+        let Value::SparseTensor(unchanged) = block_on(assign_sparse_with_plan(
+            output.clone(),
+            &empty_plan,
+            &empty_real,
+        ))
+        .expect("empty real RHS keeps complex sparse source") else {
+            panic!("sparse complex result");
+        };
+        assert_eq!(unchanged, output);
+        let invalid = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+        let error = block_on(assign_sparse_with_plan(output, &empty_plan, &invalid))
+            .expect_err("incompatible real RHS rejected before sparse update");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
     fn integer_plan_deletion_preserves_exact_storage() {
         let tensor = Tensor::new_integer(IntegerStorage::I64(vec![1, i64::MAX, 3]), vec![1, 3])
             .expect("tensor");
@@ -2163,7 +2414,7 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I64(vec![1, 3]))
         );
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
     }
 
     #[test]
@@ -2325,7 +2576,10 @@ mod tests {
 
     #[test]
     fn slice_acceleration_error_mapping_reports_identifier() {
-        let err = map_acceleration_error("slice assign", "provider failed");
+        let err = crate::indexing::resident::failure(
+            "slice assign",
+            anyhow::anyhow!("provider failed").into(),
+        );
         assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
     }
 }

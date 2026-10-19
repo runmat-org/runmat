@@ -1,3 +1,4 @@
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_plot::plots::{LegendStyle, TextStyle};
 use runmat_value::NumericScalar;
 use runmat_value::Value;
@@ -14,9 +15,17 @@ use super::handles::numeric_handle_scalar;
 
 #[derive(Clone, Debug)]
 pub struct TextCommand {
-    pub target: (FigureHandle, usize),
+    target: Option<(FigureHandle, usize)>,
     pub text: String,
     pub style: TextStyle,
+}
+
+impl TextCommand {
+    /// The implicit current axes is selected only after text and style
+    /// validation has completed without an error.
+    pub fn resolve_target(&self) -> (FigureHandle, usize) {
+        self.target.unwrap_or_else(current_axes_target)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -60,8 +69,31 @@ pub fn map_figure_error(builtin: &'static str, err: FigureError) -> crate::Runti
     plotting_error_with_source(builtin, message, err)
 }
 
+pub fn annotation_error(
+    builtin: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+    source: crate::RuntimeError,
+) -> crate::RuntimeError {
+    if source.identifier().is_some() {
+        return source;
+    }
+    let mut builder = crate::build_runtime_error(format!("{builtin}: {}", source.message))
+        .with_builtin(builtin)
+        .with_source(source);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResult<TextCommand> {
-    let (target, rest) = split_axes_target(builtin, args)?;
+    if args.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected text input"),
+        ));
+    }
+    let DeferredAxesArguments { target, rest } = split_axes_target_deferred(builtin, args)?;
     if rest.is_empty() {
         return Err(plotting_error(
             builtin,
@@ -89,14 +121,23 @@ pub fn parse_numeric_text_command(
     builtin: &'static str,
     args: &[Value],
 ) -> BuiltinResult<TextCommand> {
+    if args.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected text input"),
+        ));
+    }
     let numeric_text_form = args.len() % 2 == 1
         && args
             .first()
             .is_some_and(|value| format_numeric_text(value).is_some());
-    let (target, rest) = if args.len() == 1 || numeric_text_form {
-        (current_axes_target(), args)
+    let DeferredAxesArguments { target, rest } = if args.len() == 1 || numeric_text_form {
+        DeferredAxesArguments {
+            target: None,
+            rest: args,
+        }
     } else {
-        split_axes_target(builtin, args)?
+        split_axes_target_deferred(builtin, args)?
     };
     if rest.is_empty() {
         return Err(plotting_error(
@@ -223,10 +264,29 @@ pub(crate) fn split_axes_target<'a>(
     builtin: &'static str,
     args: &'a [Value],
 ) -> BuiltinResult<((FigureHandle, usize), &'a [Value])> {
+    let DeferredAxesArguments { target, rest } = split_axes_target_deferred(builtin, args)?;
+    Ok((target.unwrap_or_else(current_axes_target), rest))
+}
+
+/// Resolve an explicit axes handle without creating the implicit current axes.
+/// Callers with potentially pending preparation can publish the implicit scene
+/// only after their input and cancellation checks have completed.
+pub(crate) struct DeferredAxesArguments<'a> {
+    pub(crate) target: Option<(FigureHandle, usize)>,
+    pub(crate) rest: &'a [Value],
+}
+
+pub(crate) fn split_axes_target_deferred<'a>(
+    builtin: &'static str,
+    args: &'a [Value],
+) -> BuiltinResult<DeferredAxesArguments<'a>> {
     if let Some(first) = args.first() {
         if let Some(target) = try_parse_axes_target(first) {
             if axes_handle_exists(target.0, target.1) {
-                return Ok((target, &args[1..]));
+                return Ok(DeferredAxesArguments {
+                    target: Some(target),
+                    rest: &args[1..],
+                });
             }
             return Err(plotting_error(
                 builtin,
@@ -234,7 +294,10 @@ pub(crate) fn split_axes_target<'a>(
             ));
         }
     }
-    Ok((current_axes_target(), args))
+    Ok(DeferredAxesArguments {
+        target: None,
+        rest: args,
+    })
 }
 
 fn try_parse_axes_target(value: &Value) -> Option<(FigureHandle, usize)> {

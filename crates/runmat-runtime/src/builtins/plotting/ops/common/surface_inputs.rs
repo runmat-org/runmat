@@ -2,7 +2,9 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_vector};
+use crate::builtins::plotting::common::{
+    gather_tensor_from_gpu_async, numeric_vector, surface_matrix_dimensions,
+};
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
@@ -70,26 +72,27 @@ pub fn parse_image_call_args(
 fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(usize, usize)> {
     match value {
         Value::GpuTensor(handle) => {
-            if handle.shape.len() < 2 {
+            if handle.shape().len() < 2 {
                 return Err(plotting_error(
                     builtin,
                     format!("{builtin}: Z must contain at least a 2-D grid"),
                 ));
             }
-            let rows = handle.shape[0].max(1);
-            let cols = handle.shape[1].max(1);
+            let rows = handle.shape()[0].max(1);
+            let cols = handle.shape()[1].max(1);
             Ok((rows, cols))
         }
         other => {
             let tensor = tensor_utils::value_into_tensor_for(builtin, other.clone())
                 .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
-            if tensor.rows == 0 || tensor.cols == 0 {
+            let (rows, cols) = surface_matrix_dimensions(&tensor);
+            if rows == 0 || cols == 0 {
                 return Err(plotting_error(
                     builtin,
                     format!("{builtin}: Z must contain at least a 2-D grid"),
                 ));
             }
-            Ok((tensor.rows, tensor.cols))
+            Ok((rows, cols))
         }
     }
 }
@@ -102,6 +105,22 @@ fn default_surface_axis(len: usize) -> Tensor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn surface_defaults_preserve_dense_rank_boundaries() {
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+        let (x, y, _, rest) = parse_surface_call_args_matlab_xy(vec![vector], "surf").unwrap();
+        assert_eq!(
+            Tensor::try_from(&x).unwrap().materialize_f64(),
+            vec![1.0, 2.0, 3.0]
+        );
+        assert_eq!(Tensor::try_from(&y).unwrap().materialize_f64(), vec![1.0]);
+        assert!(rest.is_empty());
+
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        assert!(parse_surface_call_args_matlab_xy(vec![scalar], "surf").is_err());
+    }
 
     #[test]
     fn parse_surface_call_args_matlab_xy_uses_column_then_row_defaults() {
@@ -174,24 +193,26 @@ pub enum AxisSource {
     Gpu(GpuTensorHandle),
 }
 
+#[cfg(feature = "plot-core")]
+mod gpu;
+#[cfg(feature = "plot-core")]
+pub(crate) use gpu::PreparedSurfaceGpu;
+
 impl AxisSource {
     pub fn len(&self) -> usize {
         match self {
             AxisSource::Host(v) => v.len(),
-            AxisSource::Gpu(h) => vector_len_from_shape(&h.shape),
+            AxisSource::Gpu(h) => vector_len_from_shape(h.shape()),
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 }
 
 pub fn is_vector_like(tensor: &Tensor) -> bool {
-    if tensor.shape.is_empty() {
+    if tensor.shape().is_empty() {
         return true;
     }
-    tensor.rows == 1 || tensor.cols == 1
+    let (rows, cols) = surface_matrix_dimensions(tensor);
+    rows == 1 || cols == 1
 }
 
 pub fn is_vector_like_shape(shape: &[usize]) -> bool {
@@ -218,7 +239,7 @@ pub async fn axis_sources_from_xy_values(
 ) -> BuiltinResult<(AxisSource, AxisSource)> {
     match (x, y) {
         (Value::GpuTensor(xh), Value::GpuTensor(yh))
-            if is_vector_like_shape(&xh.shape) && is_vector_like_shape(&yh.shape) =>
+            if is_vector_like_shape(xh.shape()) && is_vector_like_shape(yh.shape()) =>
         {
             Ok((AxisSource::Gpu(xh), AxisSource::Gpu(yh)))
         }
@@ -324,7 +345,7 @@ async fn normalize_image_axis_source(
             axis_name,
         )?)),
         AxisSource::Gpu(handle) => {
-            let len = vector_len_from_shape(&handle.shape);
+            let len = vector_len_from_shape(handle.shape());
             if len == expected_len {
                 Ok(AxisSource::Gpu(handle))
             } else if len == 2 {
@@ -381,8 +402,7 @@ fn expand_image_axis_extent(start: f64, end: f64, len: usize) -> Vec<f64> {
 }
 
 fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let (rows, cols) = surface_matrix_dimensions(tensor);
     if rows == 0 || cols == 0 {
         return false;
     }
@@ -401,8 +421,7 @@ fn matrix_rows_are_identical(tensor: &Tensor) -> bool {
 }
 
 fn matrix_cols_are_identical(tensor: &Tensor) -> bool {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let (rows, cols) = surface_matrix_dimensions(tensor);
     if rows == 0 || cols == 0 {
         return false;
     }
@@ -427,7 +446,8 @@ pub fn extract_meshgrid_axes_from_xy_matrices(
     cols: usize,
     builtin: &'static str,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
-    if x.rows != rows || x.cols != cols || y.rows != rows || y.cols != cols {
+    if surface_matrix_dimensions(x) != (rows, cols) || surface_matrix_dimensions(y) != (rows, cols)
+    {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: when X and Y are matrices, they must match the shape of Z"),

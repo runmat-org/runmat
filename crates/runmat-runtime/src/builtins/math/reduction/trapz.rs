@@ -329,10 +329,10 @@ async fn trapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     if let Value::GpuTensor(handle) = &parsed.y {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let shape = if handle.shape.is_empty() {
+            let shape = if handle.shape().is_empty() {
                 vec![1, 1]
             } else {
-                handle.shape.clone()
+                handle.shape().to_vec()
             };
             let dim = parsed
                 .dim
@@ -678,7 +678,7 @@ pub(crate) mod tests {
         let Value::Tensor(out) = value else {
             panic!("expected tensor result");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         assert_eq!(out.materialize_f64(), vec![4.0, 10.0]);
     }
 
@@ -763,7 +763,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &y.materialize_f64(),
-                    shape: &y.shape,
+                    shape: y.shape(),
                 })
                 .expect("upload");
             let result = run_trapz(Value::GpuTensor(handle), Vec::new()).expect("trapz gpu");
@@ -771,7 +771,7 @@ pub(crate) mod tests {
                 panic!("expected gpu result");
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), &[1, 1]);
             assert_eq!(gathered.materialize_f64(), vec![4.0]);
         });
     }
@@ -803,8 +803,8 @@ pub(crate) mod tests {
             );
             assert_eq!(gathered.shape, vec![1, 1]);
             assert_eq!(gathered.data, vec![4.0, 4.0]);
-            let _ = provider.free(&handle);
-            let _ = provider.free(&out);
+            handle.release().unwrap();
+            out.release().unwrap();
         });
     }
 
@@ -816,7 +816,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &y.materialize_f64(),
-                    shape: &y.shape,
+                    shape: y.shape(),
                 })
                 .expect("upload y");
             let result =
@@ -825,7 +825,7 @@ pub(crate) mod tests {
                 panic!("expected gpu result");
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), &[1, 1]);
             assert_eq!(gathered.materialize_f64(), vec![3.5]);
         });
     }
@@ -838,13 +838,13 @@ pub(crate) mod tests {
             let y_handle = provider
                 .upload(&HostTensorView {
                     data: &y.materialize_f64(),
-                    shape: &y.shape,
+                    shape: y.shape(),
                 })
                 .expect("upload y");
             let x_handle = provider
                 .upload(&HostTensorView {
                     data: &x.materialize_f64(),
-                    shape: &x.shape,
+                    shape: x.shape(),
                 })
                 .expect("upload x");
             let result = run_trapz(
@@ -856,7 +856,7 @@ pub(crate) mod tests {
                 panic!("expected gpu result");
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.shape(), &[2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![6.5, 15.5]);
         });
     }
@@ -877,7 +877,7 @@ pub(crate) mod tests {
         let y_handle = provider
             .upload(&HostTensorView {
                 data: &y.materialize_f64(),
-                shape: &y.shape,
+                shape: y.shape(),
             })
             .unwrap();
         let gpu = run_trapz(Value::Tensor(x), vec![Value::GpuTensor(y_handle)]).unwrap();
@@ -890,7 +890,7 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        assert_eq!(gathered.shape, vec![1, 1]);
+        assert_eq!(gathered.shape(), &[1, 1]);
         assert!((gathered.materialize_f64()[0] - expected).abs() < tol);
     }
 }

@@ -35,9 +35,8 @@ impl ContourFillPlot {
             })?;
             let generated_count = if let Some(indirect) = &gpu_vertices.indirect {
                 let bytes = copy_readback_bytes(
-                    &context.device,
-                    &context.queue,
-                    &indirect.args,
+                    &context.access,
+                    &crate::gpu::GpuInputBuffer::from(indirect.args.clone()),
                     std::mem::size_of::<u32>(),
                 )
                 .await?;
@@ -56,9 +55,8 @@ impl ContourFillPlot {
             let vertex_count = generated_count.min(gpu_vertices.vertex_count);
             let byte_len = vertex_count * std::mem::size_of::<Vertex>();
             let bytes = copy_readback_bytes(
-                &context.device,
-                &context.queue,
-                &gpu_vertices.buffer,
+                &context.access,
+                &crate::gpu::GpuInputBuffer::from(gpu_vertices.buffer.clone()),
                 byte_len,
             )
             .await?;
@@ -180,5 +178,16 @@ impl ContourFillPlot {
             .as_ref()
             .map(|v| v.len() * std::mem::size_of::<Vertex>())
             .unwrap_or(0)
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::optional_string(self.label.as_ref());
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        Some(total)
     }
 }

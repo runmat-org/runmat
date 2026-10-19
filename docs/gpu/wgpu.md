@@ -130,6 +130,10 @@ Complex operations can combine device kernels with host fallback when the backen
 
 The provider validates adapter limits before creating buffers or bind groups. It also classifies buffer usage so residency pooling and cleanup can make reasonable reuse decisions.
 
+### Reduction reuse budget
+
+The WGPU provider may retain native mean and squared-moment outputs for reuse by the same tensor view and reduction dimensions. This cache is separate from the buffer residency pool and does not represent the adapter's total memory capacity. Its defaults are 128 moment pairs and 64 MiB of retained output buffers. Set `RUNMAT_WGPU_MOMENTS_CACHE_MAX_ENTRIES` and `RUNMAT_WGPU_MOMENTS_CACHE_MAX_BYTES` to nonnegative integer limits at provider initialization; setting either to `0` disables moment reuse. An output pair larger than the byte limit is not cached. Square-to-source provenance is weak and limited to the configured entry count. Cache keys identify exact views: a different view of the same physical allocation cannot reuse an old pair. When an exact source view is dropped but a sibling keeps the physical allocation alive, its pair remains only until the next insertion prunes dead views or the bounded cache evicts it. Physical allocation retirement removes all matching views and dimension variants immediately, including under optional-cache bookkeeping poison.
+
 ### Exact integer ABI
 
 Exact integer tensors do not use the provider's floating precision or a floating compatibility buffer. They use a packed `u32` word ABI:

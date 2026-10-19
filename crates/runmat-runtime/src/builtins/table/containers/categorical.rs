@@ -2,6 +2,9 @@ use super::*;
 use crate::builtins::table::display::trim_float;
 use runmat_value::NumericScalar;
 
+mod labels;
+pub(crate) use self::labels::categorical_label_view;
+
 pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let source = args
         .first()
@@ -367,10 +370,10 @@ pub(crate) fn categorical_extrema_to_value(
 ) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_value()]));
+            return Ok(Value::output_list(vec![eval.into_value()]));
         }
         let (values, indices) = eval.into_pair();
         return Ok(crate::output_count::output_list_with_padding(
@@ -516,9 +519,9 @@ pub(in crate::builtins::table) fn value_shape_or_column(
     value: &Value,
 ) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.shape.clone()),
+        Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::StringArray(array) => Ok(array.shape.clone()),
-        Value::LogicalArray(array) => Ok(array.shape.clone()),
+        Value::LogicalArray(array) => Ok(array.shape.to_vec()),
         Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::CharArray(array) => Ok(vec![array.rows, 1]),
         _ => Ok(vec![1, 1]),
@@ -873,16 +876,64 @@ fn categorical_numeric_label(value: NumericScalar) -> String {
 }
 
 fn categorical_object_labels(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
-    let categories = categorical_categories(object)?;
-    let codes = categorical_codes(object)?;
-    (0..codes.len())
+    let labels = categorical_label_view(object)?;
+    (0..labels.len())
+        .map(|index| labels.label_at(index).map(str::to_owned))
+        .collect()
+}
+
+pub(crate) fn categorical_observation_labels(
+    object: &ObjectInstance,
+) -> BuiltinResult<Vec<Option<String>>> {
+    let view = categorical_label_view(object)?;
+    (0..view.len())
         .map(|index| {
-            codes
-                .numeric_value_at(index)
-                .ok_or_else(|| invalid_variable("categorical: invalid numeric code storage"))
-                .map(|code| category_label_for_numeric_code(code, &categories).unwrap_or_default())
+            view.observation_label_at(index)
+                .map(|label| label.map(str::to_owned))
         })
         .collect()
+}
+
+pub(crate) fn categorical_declared_levels(object: &ObjectInstance) -> BuiltinResult<Value> {
+    let count = categorical_categories(object)?.len();
+    let codes = Tensor::new(
+        (1..=count).map(|code| code as f64).collect(),
+        vec![count, 1],
+    )
+    .map_err(invalid_variable)?;
+    let mut levels = object.clone();
+    levels
+        .properties
+        .insert("Codes".to_string(), Value::Tensor(codes));
+    Ok(Value::Object(levels))
+}
+
+pub(crate) fn categorical_levels_for_observations(
+    object: &ObjectInstance,
+    labels: &[Option<String>],
+) -> BuiltinResult<Value> {
+    let categories = categorical_categories(object)?;
+    let codes = labels
+        .iter()
+        .map(|label| {
+            let Some(label) = label else {
+                return Ok(f64::NAN);
+            };
+            categories
+                .iter()
+                .position(|category| category == label)
+                .map(|index| index as f64 + 1.0)
+                .ok_or_else(|| {
+                    invalid_variable("categorical: group label is not a declared category")
+                })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let codes = Tensor::new(codes, vec![labels.len(), 1]).map_err(invalid_variable)?;
+    let mut levels = object.clone();
+    levels
+        .properties
+        .insert("Codes".to_string(), Value::Tensor(codes));
+    Ok(Value::Object(levels))
 }
 
 pub(crate) fn categorical_categories(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
@@ -910,7 +961,7 @@ fn categorical_is_ordinal(object: &ObjectInstance) -> bool {
     matches!(object.properties.get("Ordinal"), Some(Value::Bool(true)))
 }
 
-fn category_label_for_code(code: f64, categories: &[String]) -> Option<String> {
+fn category_label_for_code(code: f64, categories: &[String]) -> Option<&str> {
     if !code.is_finite() || code < 1.0 {
         return None;
     }
@@ -918,20 +969,20 @@ fn category_label_for_code(code: f64, categories: &[String]) -> Option<String> {
     if (idx as f64 - code).abs() > f64::EPSILON {
         return None;
     }
-    categories.get(idx - 1).cloned()
+    categories.get(idx - 1).map(String::as_str)
 }
 
-fn category_label_for_integer_code(
+fn category_label_for_integer_code<'a>(
     code: &runmat_value::IntValue,
-    categories: &[String],
-) -> Option<String> {
+    categories: &'a [String],
+) -> Option<&'a str> {
     code.try_to_usize()
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| categories.get(index))
-        .cloned()
+        .map(String::as_str)
 }
 
-fn category_label_for_numeric_code(code: NumericScalar, categories: &[String]) -> Option<String> {
+fn category_label_ref_for_numeric_code(code: NumericScalar, categories: &[String]) -> Option<&str> {
     match code {
         NumericScalar::F64(code) => category_label_for_code(code, categories),
         NumericScalar::F32(code) => category_label_for_code(f64::from(code), categories),
@@ -939,6 +990,10 @@ fn category_label_for_numeric_code(code: NumericScalar, categories: &[String]) -
             .into_int_value()
             .and_then(|code| category_label_for_integer_code(&code, categories)),
     }
+}
+
+fn category_label_for_numeric_code(code: NumericScalar, categories: &[String]) -> Option<String> {
+    category_label_ref_for_numeric_code(code, categories).map(str::to_owned)
 }
 
 struct CategoricalCompareBase {
@@ -1000,7 +1055,7 @@ fn categorical_compare_operand(
                 .collect();
             Ok(CategoricalCompareOperand {
                 codes: mapped,
-                shape: codes.shape,
+                shape: codes.shape().to_vec(),
                 ordinal: categorical_is_ordinal(object),
             })
         }

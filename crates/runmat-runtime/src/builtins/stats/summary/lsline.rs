@@ -1,9 +1,8 @@
 //! Least-squares line plotting compatibility helper.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-};
+#[cfg(test)]
+use runmat_builtins::LSLINE_DESCRIPTOR;
+use runmat_builtins::{BuiltinErrorDescriptor, ReferenceLineOwner, LSLINE_ERROR_INVALID_ARGUMENT};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -11,76 +10,6 @@ use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "lsline";
-
-const PARAM_AX: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::AxesHandle,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Target axes handle.",
-};
-
-const OUTPUT_HANDLE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Line graphics handle or vector of line handles.",
-};
-
-const INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
-const INPUTS_AX: [BuiltinParamDescriptor; 1] = [PARAM_AX];
-const OUTPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [OUTPUT_HANDLE];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "lsline()",
-        inputs: &INPUTS_EMPTY,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "lsline(ax)",
-        inputs: &INPUTS_AX,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = lsline()",
-        inputs: &INPUTS_EMPTY,
-        outputs: &OUTPUTS_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = lsline(ax)",
-        inputs: &INPUTS_AX,
-        outputs: &OUTPUTS_HANDLE,
-    },
-];
-
-pub const LSLINE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LSLINE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:lsline:InvalidArgument"),
-    when: "The optional axes handle is malformed or extra arguments are supplied.",
-    message: "lsline: invalid argument",
-};
-
-pub const LSLINE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LSLINE.INTERNAL",
-    identifier: Some("RunMat:lsline:Internal"),
-    when: "RunMat cannot construct or register the least-squares line.",
-    message: "lsline: internal error",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [LSLINE_ERROR_INVALID_ARGUMENT, LSLINE_ERROR_INTERNAL];
-
-pub const LSLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-fn lsline_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
-    Type::Unknown
-}
 
 fn error(descriptor: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(NAME);
@@ -94,8 +23,19 @@ fn invalid_argument(message: impl Into<String>) -> RuntimeError {
     error(&LSLINE_ERROR_INVALID_ARGUMENT, message)
 }
 
-fn internal_error(message: impl Into<String>) -> RuntimeError {
-    error(&LSLINE_ERROR_INTERNAL, message)
+fn invalid_axes_source(source: RuntimeError) -> RuntimeError {
+    let span = source.span;
+    let mut builder = build_runtime_error("lsline: expected an axes handle")
+        .with_builtin(NAME)
+        .with_gpu_gather_retry(source.gpu_gather_retry())
+        .with_source(source);
+    if let Some(identifier) = LSLINE_ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    if let Some(span) = span {
+        builder = builder.with_span(span);
+    }
+    builder.build()
 }
 
 fn validate_lsline_args(args: &[Value]) -> BuiltinResult<()> {
@@ -104,13 +44,7 @@ fn validate_lsline_args(args: &[Value]) -> BuiltinResult<()> {
         [arg] => match resolve_plot_handle(arg, NAME) {
             Ok(PlotHandle::Axes(_, _)) => Ok(()),
             Ok(_) => Err(invalid_argument("lsline: expected an axes handle")),
-            Err(err) => {
-                if err.identifier().is_some() {
-                    Err(invalid_argument("lsline: expected an axes handle"))
-                } else {
-                    Err(invalid_argument(err.message))
-                }
-            }
+            Err(err) => Err(invalid_axes_source(err)),
         },
         _ => Err(invalid_argument(
             "lsline: expected zero inputs or one axes handle",
@@ -118,34 +52,14 @@ fn validate_lsline_args(args: &[Value]) -> BuiltinResult<()> {
     }
 }
 
-fn map_refline_error(err: RuntimeError) -> RuntimeError {
-    let message = err.message.replace("refline", "lsline");
-    if err
-        .identifier()
-        .is_some_and(|id| id.contains("InvalidArgument"))
-    {
-        invalid_argument(message)
-    } else {
-        internal_error(message)
-    }
-}
-
 #[runtime_builtin(
     name = "lsline",
-    category = "stats/summary",
-    summary = "Add least-squares fit lines to scatter-style plots.",
-    keywords = "lsline,least squares,statistics,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(lsline_type),
-    descriptor(crate::builtins::stats::summary::lsline::LSLINE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::lsline"
 )]
 pub(crate) async fn lsline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     validate_lsline_args(&args)?;
-    super::refline::refline_builtin(args)
-        .await
-        .map_err(map_refline_error)
+    super::reference_lines::run_reference_lines(args, ReferenceLineOwner::Lsline).await
 }
 
 #[cfg(test)]
@@ -239,6 +153,16 @@ mod tests {
         let err = block_on(lsline_builtin(vec![Value::Num(1.0), Value::Num(2.0)]))
             .expect_err("extra arguments should fail");
         assert_eq!(err.identifier(), LSLINE_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn lsline_invalid_axes_keeps_its_own_diagnostic() {
+        let _guard = setup();
+        let err = block_on(lsline_builtin(vec![Value::String("not axes".into())]))
+            .expect_err("text is not an axes handle");
+        assert_eq!(err.identifier(), LSLINE_ERROR_INVALID_ARGUMENT.identifier);
+        assert_eq!(err.context.builtin.as_deref(), Some("lsline"));
+        assert!(std::error::Error::source(&err).is_some());
     }
 
     #[test]

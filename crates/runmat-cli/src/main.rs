@@ -100,6 +100,15 @@ async fn main() -> ExitCode {
                 }
             };
         }
+        Ok(Some(runmat_process_host::HiddenMode::ExtensionHost)) => {
+            return match runmat_runtime::foreign::run_extension_host().await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("runmat extension host failed: {error}");
+                    ExitCode::from(2)
+                }
+            };
+        }
         Ok(None) => {}
         Err(error) => {
             eprintln!("invalid RunMat host mode: {error}");

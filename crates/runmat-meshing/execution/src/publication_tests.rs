@@ -145,8 +145,9 @@ fn runner_commits_root_and_complete_inventory_atomically() {
     let task = &snapshot.tasks[&task_id];
     assert_eq!(task.state, TaskState::Succeeded);
     let committed = task.committed.as_ref().unwrap();
-    assert_eq!(committed.outputs, vec![publication.root_output().clone()]);
-    assert_eq!(committed.result_objects, publication.result_objects());
+    let (outputs, result_objects) = committed.result.values().unwrap();
+    assert_eq!(outputs, [publication.root_output().clone()]);
+    assert_eq!(result_objects, publication.result_objects());
 }
 
 #[test]
@@ -252,6 +253,7 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
             id: worker,
             pool_id: pool,
             resources: inventory,
+            host: crate::task_tests::host_inventory(),
         }))
         .unwrap();
     let task_id = TaskId::derive(&[b"meshing-publication"]);
@@ -263,15 +265,22 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
                 id: task_id,
                 scope_id: scope,
                 pool_id: pool,
-                program_artifact_id: ArtifactId::derive(&[b"meshing-host"]),
-                callable: Callable {
-                    owner_identity: "runmat.meshing".into(),
-                    qualified_name: "publish-stage".into(),
-                    entrypoint_digest: Digest::sha256(b"publish-stage"),
-                },
+                schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+                executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                    ArtifactId::derive(&[b"meshing-host"]),
+                ),
+                callable: Callable::for_program(
+                    "runmat.meshing",
+                    &runmat_execution::ProgramCallable::semantic(
+                        runmat_execution::ProgramFunctionId(0),
+                        None,
+                    ),
+                ),
+                invocation_context: runmat_execution::ProgramInvocationContext::Direct,
                 inputs: Vec::new(),
                 outputs: OutputContract {
                     requested_outputs: 1,
+                    owned_work: None,
                 },
                 resources: ResourceRequest {
                     cpu_millicores: 1_000,
@@ -284,6 +293,7 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
                     accelerators: Vec::new(),
                     required_capabilities: BTreeSet::new(),
                 },
+                host: crate::task_tests::host_requirement(),
                 retry: RetryPolicy::Never,
                 deadline_unix_millis: None,
             },

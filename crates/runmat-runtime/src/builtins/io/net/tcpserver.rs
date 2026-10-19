@@ -1,330 +1,28 @@
 //! MATLAB-compatible `tcpserver` builtin for RunMat.
 
-use once_cell::sync::OnceCell;
+use super::control::{
+    canonicalize_byte_order, default_user_data, parse_port, string_scalar, DEFAULT_TIMEOUT_SECONDS,
+};
+use crate::context::{RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpInvocation};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, NetConstructorOption, TCPSERVER_ERROR_BIND_FAILED,
+    TCPSERVER_ERROR_INTERNAL, TCPSERVER_ERROR_INVALID_ADDRESS, TCPSERVER_ERROR_INVALID_NAME_VALUE,
+    TCPSERVER_ERROR_INVALID_PORT,
+    TCPSERVER_EXPLICIT_GPU_INPUT_EXTENSION as EXPLICIT_GPU_INPUT_EXTENSION,
+    TCPSERVER_INTEGER_PORT_EXTENSION as INTEGER_PORT_EXTENSION,
+    TCPSERVER_INTEGER_TIMEOUT_EXTENSION as INTEGER_TIMEOUT_EXTENSION,
+    TCPSERVER_LEGACY_OPTIONS_EXTENSION as LEGACY_OPTIONS_EXTENSION,
+    TCPSERVER_ZERO_PORT_EXTENSION as ZERO_PORT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntValue, StructValue, Tensor, Value};
+use runmat_value::{ForeignRef, IntValue, ObjectInstance, StructValue, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
-use std::collections::HashMap;
-use std::net::{SocketAddr, TcpListener};
-use std::sync::{Arc, Mutex};
+use std::net::SocketAddr;
 
 const BUILTIN_NAME: &str = "tcpserver";
-
-const INTEGER_PORT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-integer-port",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver with a typed-integer port is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverIntegerPortExtension"),
-};
-const INTEGER_TIMEOUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-integer-timeout",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver with a typed-integer Timeout is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverIntegerTimeoutExtension"),
-};
-const ZERO_PORT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-zero-port",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver ephemeral port selection with port zero is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverZeroPortExtension"),
-};
-const LEGACY_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-legacy-constructor-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver legacy constructor options are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverLegacyOptionsExtension"),
-};
-const EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver with explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverExplicitGpuInputExtension"),
-};
-pub const TCPSERVER_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    INTEGER_PORT_EXTENSION,
-    INTEGER_TIMEOUT_EXTENSION,
-    ZERO_PORT_EXTENSION,
-    LEGACY_OPTIONS_EXTENSION,
-    EXPLICIT_GPU_INPUT_EXTENSION,
-];
-
-const INTEGER_PORT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "port",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The public ServerPort datatype is double. RunMat mode additionally decodes all eight typed integer classes directly into the validated 1..65535 structural range.",
-}];
-const INTEGER_TIMEOUT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "Timeout",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The public Timeout datatype is double; typed integers cross a checked binary64-seconds boundary only in RunMat mode.",
-}];
-pub const TCPSERVER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "server = tcpserver(address, integer_port, ...)",
-        inputs: &INTEGER_PORT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The port is range-checked from authoritative integer storage before socket binding. Public object properties remain double-valued.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "server = tcpserver(..., Timeout=integer_timeout)",
-        inputs: &INTEGER_TIMEOUT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Typed Timeout is gated before provider access and must be exactly representable as binary64 before host networking observes it.",
-    },
-];
-
-const TCPSERVER_OUTPUT_SERVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "server",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tcpserver handle struct for accept/close operations.",
-}];
-const TCPSERVER_INPUTS_ADDRESS_PORT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "address",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bind address or hostname.",
-    },
-    BuiltinParamDescriptor {
-        name: "port",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Listening TCP port (0..65535).",
-    },
-];
-const TCPSERVER_INPUTS_ADDRESS_PORT_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "address",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bind address or hostname.",
-    },
-    BuiltinParamDescriptor {
-        name: "port",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Listening TCP port (0..65535).",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value_pairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/Value options such as Timeout, UserData, Name, and ByteOrder.",
-    },
-];
-const TCPSERVER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "server = tcpserver(address, port)",
-        inputs: &TCPSERVER_INPUTS_ADDRESS_PORT,
-        outputs: &TCPSERVER_OUTPUT_SERVER,
-    },
-    BuiltinSignatureDescriptor {
-        label: "server = tcpserver(address, port, Name, Value, ...)",
-        inputs: &TCPSERVER_INPUTS_ADDRESS_PORT_NAME_VALUE,
-        outputs: &TCPSERVER_OUTPUT_SERVER,
-    },
-];
-
-const TCPSERVER_ERROR_INVALID_ADDRESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.INVALID_ADDRESS",
-    identifier: Some("RunMat:tcpserver:InvalidAddress"),
-    when: "Address argument is not a valid string scalar.",
-    message: "tcpserver: invalid address argument",
-};
-const TCPSERVER_ERROR_INVALID_PORT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.INVALID_PORT",
-    identifier: Some("RunMat:tcpserver:InvalidPort"),
-    when: "Port argument is non-scalar, non-integer, non-finite, or out of range.",
-    message: "tcpserver: invalid port argument",
-};
-const TCPSERVER_ERROR_INVALID_NAME_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.INVALID_NAME_VALUE",
-    identifier: Some("RunMat:tcpserver:InvalidNameValue"),
-    when: "Name/Value arguments are malformed, unsupported, or have invalid values.",
-    message: "tcpserver: invalid name-value arguments",
-};
-const TCPSERVER_ERROR_BIND_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.BIND_FAILED",
-    identifier: Some("RunMat:tcpserver:BindFailed"),
-    when: "Socket bind operation fails.",
-    message: "tcpserver: unable to bind listener",
-};
-const TCPSERVER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.INTERNAL",
-    identifier: Some("RunMat:tcpserver:InternalError"),
-    when: "Internal listener metadata retrieval fails.",
-    message: "tcpserver: internal error",
-};
-const TCPSERVER_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    TCPSERVER_ERROR_INVALID_ADDRESS,
-    TCPSERVER_ERROR_INVALID_PORT,
-    TCPSERVER_ERROR_INVALID_NAME_VALUE,
-    TCPSERVER_ERROR_BIND_FAILED,
-    TCPSERVER_ERROR_INTERNAL,
-];
-pub const TCPSERVER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TCPSERVER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TCPSERVER_ERRORS,
-};
-
-pub(crate) const DEFAULT_TIMEOUT_SECONDS: f64 = 10.0;
-pub(crate) const HANDLE_ID_FIELD: &str = "__tcpserver_id";
-
-type SharedTcpServer = Arc<Mutex<TcpServerState>>;
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub(crate) struct TcpServerState {
-    pub(crate) id: u64,
-    pub(crate) listener: TcpListener,
-    pub(crate) requested_address: String,
-    pub(crate) local_addr: SocketAddr,
-    pub(crate) timeout: f64,
-    pub(crate) name: Option<String>,
-    #[allow(dead_code)]
-    pub(crate) byte_order: String,
-}
-
-#[derive(Default)]
-struct TcpServerRegistry {
-    next_id: u64,
-    servers: HashMap<u64, SharedTcpServer>,
-}
-
-static TCP_SERVER_REGISTRY: OnceCell<Mutex<TcpServerRegistry>> = OnceCell::new();
-
-fn registry() -> &'static Mutex<TcpServerRegistry> {
-    TCP_SERVER_REGISTRY.get_or_init(|| Mutex::new(TcpServerRegistry::default()))
-}
-
-fn insert_server(
-    listener: TcpListener,
-    requested_address: String,
-    local_addr: SocketAddr,
-    options: &ParsedOptions,
-) -> u64 {
-    let mut guard = registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-
-    guard.next_id = guard.next_id.wrapping_add(1);
-    let id = guard.next_id;
-    let state = TcpServerState {
-        id,
-        listener,
-        requested_address,
-        local_addr,
-        timeout: options.timeout,
-        name: options.name.clone(),
-        byte_order: options.byte_order.clone(),
-    };
-    guard.servers.insert(id, Arc::new(Mutex::new(state)));
-    id
-}
-
-#[allow(dead_code)]
-pub(crate) fn server_handle(id: u64) -> Option<SharedTcpServer> {
-    registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .servers
-        .get(&id)
-        .cloned()
-}
-
-pub(crate) fn close_server(id: u64) -> bool {
-    let entry = {
-        let mut guard = registry()
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.servers.remove(&id)
-    };
-    entry.is_some()
-}
-
-pub(crate) fn close_all_servers() -> usize {
-    let entries = {
-        let mut guard = registry()
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.servers.drain().collect::<Vec<_>>()
-    };
-    entries.len()
-}
-
-#[cfg(test)]
-pub(super) fn remove_server_for_test(id: u64) {
-    if let Some(entry) = registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .servers
-        .remove(&id)
-    {
-        drop(entry);
-    }
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(super) fn clear_registry_for_test() {
-    let mut guard = registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    guard.servers.clear();
-    guard.next_id = 0;
-}
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "tcpserver",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host networking only. GPU-resident scalars are gathered prior to socket binding.",
-};
 
 fn tcpserver_error_with_message(
     message: impl Into<String>,
@@ -353,29 +51,19 @@ fn tcpserver_flow(
     tcpserver_error_with_detail(error, message)
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "tcpserver",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtin executed eagerly on the CPU.",
-};
+fn tcpserver_internal_source(err: RuntimeError) -> RuntimeError {
+    let detail = err.message().to_owned();
+    super::error::with_source(BUILTIN_NAME, &TCPSERVER_ERROR_INTERNAL, detail, err)
+}
 
 #[runtime_builtin(
     name = "tcpserver",
-    category = "io/net",
-    summary = "Create TCP server listeners and return server metadata.",
-    keywords = "tcpserver,tcp,network,server",
-    type_resolver(crate::builtins::io::type_resolvers::tcpserver_type),
-    descriptor(crate::builtins::io::net::tcpserver::TCPSERVER_DESCRIPTOR),
-    extensions(crate::builtins::io::net::tcpserver::TCPSERVER_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::net::tcpserver::TCPSERVER_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::net::tcpserver"
 )]
 pub(crate) async fn tcpserver_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     address: Value,
     port: Value,
     rest: Vec<Value>,
@@ -396,59 +84,214 @@ pub(crate) async fn tcpserver_builtin(
             BUILTIN_NAME,
         )?;
     }
-    preflight_name_value_extensions(&rest).await?;
-    let address = gather_if_needed_async(&address).await?;
-    let port = gather_if_needed_async(&port).await?;
-
-    let host = string_scalar(&address, "tcpserver address")
-        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INVALID_ADDRESS, err.to_string()))?;
-    let port = parse_port(&port)
-        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INVALID_PORT, err.to_string()))?;
-    if port == 0 {
-        crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
-    }
-
-    let options = parse_name_value_pairs(rest).await?;
-
-    let listener = TcpListener::bind((host.as_str(), port)).map_err(|err| {
-        tcpserver_flow(
-            &TCPSERVER_ERROR_BIND_FAILED,
-            format!("tcpserver: unable to bind {host}:{port} ({err})"),
+    let prepared_options = preflight_name_value_extensions(&rest).await?;
+    let known_address = if matches!(&address, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(parse_address(&address)?)
+    };
+    let known_port = if matches!(&port, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(parse_endpoint_port(&port)?)
+    };
+    let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    let address = gather_if_needed_async(&address).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INTERNAL,
+            format!("tcpserver: {}", err.message()),
+            err,
         )
     })?;
-    let local_addr = listener
-        .local_addr()
-        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, format!("tcpserver: {err}")))?;
+    let port = gather_if_needed_async(&port).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INTERNAL,
+            format!("tcpserver: {}", err.message()),
+            err,
+        )
+    })?;
 
-    let id = insert_server(listener, host.clone(), local_addr, &options);
-    Ok(build_tcpserver_struct(id, &host, local_addr, &options))
+    let host = match known_address {
+        Some(address) => address,
+        None => parse_address(&address)?,
+    };
+    let port = match known_port {
+        Some(port) => port,
+        None => parse_endpoint_port(&port)?,
+    };
+
+    let options = parse_name_value_pairs(rest, prepared_options).await?;
+
+    let endpoint = work
+        .await_service(
+            service.bind(
+                RuntimeTcpInvocation::from_context(runtime.as_ref()),
+                RuntimeTcpBind {
+                    address: host.clone(),
+                    port,
+                    io_timeout: (options.timeout != 0.0)
+                        .then(|| std::time::Duration::from_secs_f64(options.timeout)),
+                    byte_order: if options.byte_order == "big-endian" {
+                        RuntimeTcpByteOrder::Big
+                    } else {
+                        RuntimeTcpByteOrder::Little
+                    },
+                },
+            ),
+        )
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+        .map_err(|err| {
+            super::error::with_source(
+                BUILTIN_NAME,
+                &TCPSERVER_ERROR_BIND_FAILED,
+                format!("tcpserver: unable to bind {host}:{port} ({err})"),
+                err,
+            )
+        })?;
+    work.completed(0).await?;
+    Ok(build_tcpserver_object(
+        endpoint.authority,
+        &host,
+        endpoint.local_addr,
+        &options,
+    ))
 }
 
-async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
-    if !rest.len().is_multiple_of(2) {
-        return Ok(());
+fn parse_address(address: &Value) -> BuiltinResult<String> {
+    string_scalar(address, "tcpserver address").map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INVALID_ADDRESS,
+            err.to_string(),
+            err,
+        )
+    })
+}
+
+fn parse_endpoint_port(port: &Value) -> BuiltinResult<u16> {
+    let port_num = parse_port(port).map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INVALID_PORT,
+            err.to_string(),
+            err,
+        )
+    })?;
+    if port_num == 0 {
+        crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
     }
+    Ok(port_num)
+}
+
+async fn preflight_name_value_extensions(
+    rest: &[Value],
+) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
+    if !rest.len().is_multiple_of(2) {
+        return Err(tcpserver_flow(
+            &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+            "tcpserver: name-value arguments must appear in pairs",
+        ));
+    }
+    let mut known = Vec::with_capacity(rest.len() / 2);
     for pair in rest.chunks_exact(2) {
-        let Ok(name) = string_scalar(&pair[0], "OptionName") else {
-            continue;
+        let option = match &pair[0] {
+            Value::GpuTensor(_) => None,
+            value => {
+                let name = string_scalar(value, "OptionName").map_err(|err| {
+                    tcpserver_flow(
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpserver: invalid option name: {err}"),
+                    )
+                })?;
+                Some(NetConstructorOption::tcpserver(&name).ok_or_else(|| {
+                    tcpserver_flow(
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpserver: unsupported option '{name}'"),
+                    )
+                })?)
+            }
         };
-        match name.to_ascii_lowercase().as_str() {
-            "timeout" => {
+        if let Some(option) = option {
+            preflight_known_option_value(option, &pair[1])?;
+        }
+        known.push(option);
+    }
+    for (option, pair) in known.iter().copied().zip(rest.chunks_exact(2)) {
+        let value = &pair[1];
+        match option {
+            Some(NetConstructorOption::Timeout) => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-                    &pair[1],
+                    value,
                     &INTEGER_TIMEOUT_EXTENSION,
                     BUILTIN_NAME,
                     "Timeout",
                 )
                 .await?;
             }
-            "userdata" | "name" => {
+            Some(NetConstructorOption::UserData | NetConstructorOption::Name) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
             }
-            _ => {}
+            Some(NetConstructorOption::ByteOrder) => {}
+            None => {}
+            Some(_) => {
+                return Err(tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    "tcpserver: unsupported option",
+                ));
+            }
+        }
+    }
+    Ok(known)
+}
+
+fn preflight_known_option_value(option: NetConstructorOption, value: &Value) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) {
+        return Ok(());
+    }
+    match option {
+        NetConstructorOption::Timeout => {
+            parse_timeout(value).map_err(|err| {
+                tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpserver: invalid Timeout value: {err}"),
+                )
+            })?;
+        }
+        NetConstructorOption::ByteOrder => {
+            let text = string_scalar(value, "ByteOrder").map_err(|err| {
+                tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpserver: invalid ByteOrder value: {err}"),
+                )
+            })?;
+            if canonicalize_byte_order(&text).is_none() {
+                return Err(tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpserver: unsupported ByteOrder '{text}'"),
+                ));
+            }
+        }
+        NetConstructorOption::Name => {
+            string_scalar(value, "Name").map_err(|err| {
+                tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpserver: invalid Name value: {err}"),
+                )
+            })?;
+        }
+        NetConstructorOption::UserData => {}
+        _ => {
+            return Err(tcpserver_flow(
+                &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                "tcpserver: unsupported option",
+            ));
         }
     }
     Ok(())
@@ -473,7 +316,10 @@ impl Default for ParsedOptions {
     }
 }
 
-async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions> {
+async fn parse_name_value_pairs(
+    rest: Vec<Value>,
+    prepared: Vec<Option<NetConstructorOption>>,
+) -> BuiltinResult<ParsedOptions> {
     if rest.is_empty() {
         return Ok(ParsedOptions::default());
     }
@@ -486,23 +332,33 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
 
     let mut options = ParsedOptions::default();
     let mut iter = rest.into_iter();
-    while let Some(name_raw) = iter.next() {
+    for prepared_option in prepared {
+        let name_raw = iter.next().expect("preflight retained paired option name");
         let value_raw = iter
             .next()
             .expect("even-length vector ensures paired name/value");
-        let name_value = gather_if_needed_async(&name_raw)
-            .await
-            .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
-
-        let name = string_scalar(&name_value, "OptionName").map_err(|err| {
-            tcpserver_flow(
-                &TCPSERVER_ERROR_INVALID_NAME_VALUE,
-                format!("tcpserver: invalid option name: {err}"),
-            )
-        })?;
-        let lower = name.to_ascii_lowercase();
-        match lower.as_str() {
-            "timeout" => {
+        let option = match prepared_option {
+            Some(option) => option,
+            None => {
+                let name_value = gather_if_needed_async(&name_raw)
+                    .await
+                    .map_err(tcpserver_internal_source)?;
+                let name = string_scalar(&name_value, "OptionName").map_err(|err| {
+                    tcpserver_flow(
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpserver: invalid option name: {err}"),
+                    )
+                })?;
+                NetConstructorOption::tcpserver(&name).ok_or_else(|| {
+                    tcpserver_flow(
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpserver: unsupported option '{name}'"),
+                    )
+                })?
+            }
+        };
+        match option {
+            NetConstructorOption::Timeout => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                     &value_raw,
                     &INTEGER_TIMEOUT_EXTENSION,
@@ -512,7 +368,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 .await?;
                 let timeout_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpserver_internal_source)?;
                 options.timeout = parse_timeout(&timeout_value).map_err(|err| {
                     tcpserver_flow(
                         &TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -520,21 +376,21 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                     )
                 })?
             }
-            "userdata" => {
+            NetConstructorOption::UserData => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 options.user_data = value_raw;
             }
-            "name" => {
+            NetConstructorOption::Name => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 let name_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpserver_internal_source)?;
                 let text = string_scalar(&name_value, "Name").map_err(|err| {
                     tcpserver_flow(
                         &TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -543,10 +399,10 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 })?;
                 options.name = Some(text);
             }
-            "byteorder" => {
+            NetConstructorOption::ByteOrder => {
                 let order_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpserver_internal_source)?;
                 let raw_order = string_scalar(&order_value, "ByteOrder").map_err(|err| {
                     tcpserver_flow(
                         &TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -564,7 +420,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
             _ => {
                 return Err(tcpserver_flow(
                     &TCPSERVER_ERROR_INVALID_NAME_VALUE,
-                    format!("tcpserver: unsupported option '{name}'"),
+                    "tcpserver: unsupported option",
                 ));
             }
         }
@@ -573,8 +429,8 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
     Ok(options)
 }
 
-fn build_tcpserver_struct(
-    id: u64,
+fn build_tcpserver_object(
+    authority: ForeignRef,
     requested_address: &str,
     local_addr: SocketAddr,
     options: &ParsedOptions,
@@ -640,105 +496,13 @@ fn build_tcpserver_struct(
     st.fields
         .insert("KeepAlive".to_string(), Value::Bool(false));
     st.fields
-        .insert(HANDLE_ID_FIELD.to_string(), Value::Int(IntValue::U64(id)));
-    st.fields
         .insert("Timeout".to_string(), Value::Num(options.timeout));
     st.fields
         .insert("UserData".to_string(), options.user_data.clone());
 
-    Value::Struct(st)
-}
-
-#[derive(Debug, Error)]
-#[error("{message}")]
-pub(crate) struct StringScalarError {
-    message: String,
-}
-
-impl StringScalarError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-pub(crate) fn string_scalar(value: &Value, context: &str) -> Result<String, StringScalarError> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        other => Err(StringScalarError::new(format!(
-            "{context} must be a string scalar or character vector (got {other:?})"
-        ))),
-    }
-}
-
-#[derive(Debug, Error)]
-#[error("{message}")]
-pub(crate) struct PortParseError {
-    message: String,
-}
-
-impl PortParseError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-pub(crate) fn parse_port(value: &Value) -> Result<u16, PortParseError> {
-    let port = match value {
-        Value::Int(int) => {
-            let port = int
-                .try_to_u64()
-                .ok_or_else(|| PortParseError::new("port must be non-negative"))?;
-            return u16::try_from(port).map_err(|_| {
-                PortParseError::new(format!("port {port} is outside the valid range 0–65535"))
-            });
-        }
-        Value::Num(num) => {
-            if !num.is_finite() {
-                return Err(PortParseError::new("port must be finite"));
-            }
-            if num.fract() != 0.0 {
-                return Err(PortParseError::new("port must be an integer value"));
-            }
-            *num as i64
-        }
-        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
-            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
-                let port = int
-                    .try_to_u64()
-                    .ok_or_else(|| PortParseError::new("port must be non-negative"))?;
-                return u16::try_from(port).map_err(|_| {
-                    PortParseError::new(format!("port {port} is outside the valid range 0–65535"))
-                });
-            }
-            let raw = crate::builtins::common::tensor::tensor_value_f64(t, 0);
-            if !raw.is_finite() {
-                return Err(PortParseError::new("port must be finite"));
-            }
-            if raw.fract() != 0.0 {
-                return Err(PortParseError::new("port must be an integer value"));
-            }
-            raw as i64
-        }
-        Value::Tensor(_) => {
-            return Err(PortParseError::new("port must be a numeric scalar"));
-        }
-        _ => {
-            return Err(PortParseError::new("port must be a numeric scalar"));
-        }
-    };
-
-    if !(0..=65_535).contains(&port) {
-        return Err(PortParseError::new(format!(
-            "port {port} is outside the valid range 0–65535"
-        )));
-    }
-    Ok(port as u16)
+    let mut object = ObjectInstance::new(runmat_builtins::TCPSERVER_CLASS);
+    object.properties = st.fields.into_iter().collect();
+    Value::Object(object.with_tcp_authority(authority))
 }
 
 #[derive(Debug, Error)]
@@ -774,46 +538,46 @@ fn parse_timeout(value: &Value) -> Result<f64, TimeoutParseError> {
     Ok(timeout)
 }
 
-pub(crate) fn canonicalize_byte_order(raw: &str) -> Option<&'static str> {
-    let mut compact = String::with_capacity(raw.len());
-    for ch in raw.trim().chars() {
-        if ch.is_ascii_alphanumeric() {
-            compact.push(ch.to_ascii_lowercase());
-        }
-    }
-    match compact.as_str() {
-        "littleendian" | "little" => Some("little-endian"),
-        "bigendian" | "big" => Some("big-endian"),
-        _ => None,
-    }
-}
-
-pub(crate) fn default_user_data() -> Value {
-    Value::Tensor(Tensor::zeros(vec![0, 0]))
-}
-
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::io::net::test_support::CountingDownloadProvider;
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use crate::tcp::NativeTcpService;
+    use runmat_builtins::TCPSERVER_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
-    use std::net::TcpStream;
+    use std::error::Error;
+    use std::net::{TcpListener, TcpStream};
+    use std::rc::Rc;
     use std::time::Duration;
 
     fn struct_field<'a>(value: &'a Value, name: &str) -> &'a Value {
         match value {
-            Value::Struct(struct_value) => struct_value
-                .fields
+            Value::Object(object) => object
+                .properties
                 .get(name)
                 .unwrap_or_else(|| panic!("missing field {name}")),
-            _ => panic!("expected struct result"),
+            _ => panic!("expected TCP server object"),
         }
     }
 
-    fn server_id(value: &Value) -> u64 {
-        match struct_field(value, HANDLE_ID_FIELD) {
-            Value::Int(IntValue::U64(id)) => *id,
-            Value::Int(iv) => iv.to_i64() as u64,
-            other => panic!("unexpected id representation {other:?}"),
+    struct TestServer {
+        value: Value,
+        _runtime: RuntimeContext,
+        _driver: tokio::runtime::Runtime,
+    }
+
+    impl std::fmt::Debug for TestServer {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("TestTcpServer")
+        }
+    }
+
+    impl std::ops::Deref for TestServer {
+        type Target = Value;
+
+        fn deref(&self) -> &Self::Target {
+            &self.value
         }
     }
 
@@ -821,8 +585,54 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
-    fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tcpserver_builtin(address, port, rest))
+    fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<TestServer> {
+        let driver = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("isolated TCP server driver");
+        let service = Rc::new(NativeTcpService::new(driver.handle().clone()));
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
+        let value = driver.block_on(tcpserver_builtin(
+            Some(runtime.clone()),
+            address,
+            port,
+            rest,
+        ))?;
+        Ok(TestServer {
+            value,
+            _runtime: runtime,
+            _driver: driver,
+        })
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn known_invalid_options_reject_before_resident_bind_address_download() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let owner = Box::leak(Box::new(CountingDownloadProvider::new()));
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+        let address = Value::GpuTensor(owner.resident());
+        let err = run_tcpserver(
+            address.clone(),
+            Value::Num(80.0),
+            vec![Value::from("EnableTransferDelay"), Value::Bool(true)],
+        )
+        .expect_err("known invalid option rejects before address download");
+        assert_eq!(
+            err.identifier(),
+            TCPSERVER_ERROR_INVALID_NAME_VALUE.identifier
+        );
+        let err = run_tcpserver(address, Value::Num(80.0), vec![Value::from("Timeout")])
+            .expect_err("incomplete option pair rejects before address download");
+        assert_eq!(
+            err.identifier(),
+            TCPSERVER_ERROR_INVALID_NAME_VALUE.identifier
+        );
+        assert_eq!(owner.downloads(), 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -870,7 +680,7 @@ pub(crate) mod tests {
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::accept::test_guard()
+        crate::builtins::io::net::test_support::test_guard()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -881,7 +691,6 @@ pub(crate) mod tests {
 
         let result = run_tcpserver(Value::from("127.0.0.1"), Value::Num(0.0), Vec::new())
             .expect("tcpserver");
-        let id = server_id(&result);
         let address = match struct_field(&result, "ServerAddress") {
             Value::String(s) => s.clone(),
             other => panic!("expected ServerAddress string, got {other:?}"),
@@ -892,7 +701,7 @@ pub(crate) mod tests {
         };
 
         TcpStream::connect((address.as_str(), port)).expect("connect to loopback server");
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -914,8 +723,7 @@ pub(crate) mod tests {
         };
         assert!((timeout - 5.0).abs() < f64::EPSILON);
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -937,8 +745,7 @@ pub(crate) mod tests {
         };
         assert_eq!(name, "CustomListener");
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -960,8 +767,7 @@ pub(crate) mod tests {
         };
         assert_eq!(order, "big-endian");
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -997,8 +803,7 @@ pub(crate) mod tests {
         };
         assert!(port > 0);
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1063,6 +868,27 @@ pub(crate) mod tests {
         assert_error_identifier(err, TCPSERVER_ERROR_INVALID_NAME_VALUE.identifier.unwrap());
     }
 
+    #[test]
+    fn occupied_port_bind_failure_retains_io_cause() {
+        let _guard = net_guard();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve loopback port");
+        let port = listener.local_addr().expect("local port").port();
+        let error = run_tcpserver(
+            Value::from("127.0.0.1"),
+            Value::Num(f64::from(port)),
+            vec![],
+        )
+        .expect_err("occupied port rejects bind");
+        assert_eq!(error.identifier(), TCPSERVER_ERROR_BIND_FAILED.identifier);
+        let transport = Error::source(&error)
+            .and_then(|source| source.downcast_ref::<crate::tcp::TcpTransportError>())
+            .expect("bind failure retains typed transport cause");
+        assert_eq!(transport.kind(), crate::tcp::TcpTransportErrorKind::Io);
+        assert!(Error::source(transport)
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .is_some());
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tcpserver_stores_userdata() {
@@ -1085,8 +911,7 @@ pub(crate) mod tests {
         let stored = struct_field(&result, "UserData");
         assert_eq!(stored, &user_struct);
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1101,7 +926,6 @@ pub(crate) mod tests {
             vec![Value::from("Timeout"), Value::Num(1.5)],
         )
         .expect("tcpserver");
-        let id = server_id(&result);
         let port = match struct_field(&result, "ServerPort") {
             Value::Num(value) => *value as u16,
             other => panic!("expected double ServerPort, got {other:?}"),
@@ -1112,6 +936,6 @@ pub(crate) mod tests {
             .set_read_timeout(Some(Duration::from_millis(10)))
             .expect("set timeout");
 
-        remove_server_for_test(id);
+        drop(result);
     }
 }

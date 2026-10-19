@@ -7,6 +7,11 @@ members = [
     "crates/runmat-hir",
     "crates/runmat-mir",
     "crates/runmat-native-codegen",
+    "crates/runmat-extension-abi",
+    "crates/runmat-native-ffi",
+    "crates/runmat-mex",
+    "crates/runmat-java",
+    "crates/runmat-python",
     "crates/runmat-native-executor",
     "crates/runmat-aot-runtime",
     "crates/runmat-aot",
@@ -78,6 +83,7 @@ resolver = "2"
 runmat-build-identity = { version = "=0.6.2", path = "crates/runmat-build-identity" }
 runmat-cpu-execution = { version = "=0.6.2", path = "crates/runmat-cpu-execution" }
 # External dependencies used across multiple crates
+wgpu = "24.0.0"
 inventory = "0.1"
 syn = { version = "1", features = ["full"] }
 quote = "1"
@@ -115,14 +121,20 @@ tower-lsp = "0.20"
 once_cell = "1"
 semver = { version = "1", features = ["serde"] }
 sha2 = "0.10"
+hmac = "0.12"
 url = { version = "2", features = ["serde"] }
 
 # Internal workspace crates
 runmat-lexer = { version = "=0.6.2", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.6.2", path = "crates/runmat-parser" }
 runmat-hir = { version = "=0.6.2", path = "crates/runmat-hir" }
-runmat-mir = { version = "=0.6.2", path = "crates/runmat-mir" }
+runmat-mir = { version = "=0.6.2", path = "crates/runmat-mir", default-features = false }
 runmat-native-codegen = { version = "=0.6.2", path = "crates/runmat-native-codegen", default-features = false }
+runmat-extension-abi = { version = "=0.6.2", path = "crates/runmat-extension-abi" }
+runmat-native-ffi = { version = "=0.6.2", path = "crates/runmat-native-ffi" }
+runmat-mex = { version = "=0.6.2", path = "crates/runmat-mex" }
+runmat-java = { version = "=0.6.2", path = "crates/runmat-java" }
+runmat-python = { version = "=0.6.2", path = "crates/runmat-python" }
 runmat-native-executor = { version = "=0.6.2", path = "crates/runmat-native-executor" }
 runmat-aot-runtime = { version = "=0.6.2", path = "crates/runmat-aot-runtime" }
 runmat-aot = { version = "=0.6.2", path = "crates/runmat-aot" }

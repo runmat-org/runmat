@@ -1,55 +1,56 @@
-use runmat_runtime::native::{NativeExit, NativeSiteOutcome};
-
-use crate::NativeExecutorResult;
+pub(super) mod observation;
 
 use super::state::HostState;
+use crate::region::RegionPlacement;
+use crate::NativeExecutorResult;
+use runmat_runtime::native::{NativeExit, NativeSiteOutcome};
 
 pub(super) fn checkpoint(
     state: &mut HostState,
     request: runmat_runtime::native::NativeSiteRequest,
     exit: &mut NativeExit,
 ) -> NativeExecutorResult<Option<NativeSiteOutcome>> {
+    // An enclosing generic region owns this execution interval. Do not time
+    // overlapping nested alternatives or replace its pending observation.
+    if state.region_observation.is_some() {
+        return Ok(None);
+    }
     let Some(plan) = state.optimized_region(request) else {
         return Ok(None);
     };
-    let inputs = state.optimized_region_inputs(&plan)?;
+    // Refreshing canonical bindings mutably borrows the frame while the input
+    // views are live. Retain its shared runtime services without copying inputs.
+    let runtime = state.runtime.clone();
+    let Some(inputs) = state.optimized_region_inputs(&plan)? else {
+        return Ok(None);
+    };
     let Some(workload) = runmat_runtime::numeric_region::workload(&inputs) else {
-        state.disable_optimized_region(plan.region);
         return Ok(None);
     };
-    let Some(placement) =
-        crate::region::choose_vectorized(&state.runtime, &plan, &inputs, workload)
-    else {
-        state.disable_optimized_region(plan.region);
-        return Ok(None);
+    let placement = match crate::region::choose_region(&runtime, &plan, &inputs, workload) {
+        RegionPlacement::Unavailable => return Ok(None),
+        RegionPlacement::Generic(observation) => {
+            state.region_observation = Some(observation::GenericRegionObservation::new(
+                &plan,
+                observation,
+            ));
+            return Ok(None);
+        }
+        RegionPlacement::Vectorized(observation) => observation,
     };
-    let started = std::time::Instant::now();
-    match runmat_runtime::numeric_region::execute(
-        &plan.program,
-        &inputs,
-        &state.runtime.cancellation_token(),
-    )
-    .map_err(|error| crate::NativeExecutorError::Host(error.into()))?
+    // The observation guard records failure on execution/publication errors,
+    // cancellation or unwinding, and success only after publication completes.
+    match runmat_runtime::numeric_region::execute(&plan.program, &inputs, &runtime.cancellation())
+        .map_err(|error| crate::NativeExecutorError::Host(error.into()))?
     {
         runmat_runtime::numeric_region::NumericRegionExecution::Completed(outputs) => {
             state.publish_optimized_region(&plan, outputs)?;
-            placement.observe(runmat_time::duration_ns_saturating(started.elapsed()), true);
+            placement.complete();
             Ok(Some(NativeSiteOutcome::continue_execution()))
         }
-        runmat_runtime::numeric_region::NumericRegionExecution::Ineligible => {
-            placement.observe(
-                runmat_time::duration_ns_saturating(started.elapsed()),
-                false,
-            );
-            state.disable_optimized_region(plan.region);
-            Ok(None)
-        }
-        runmat_runtime::numeric_region::NumericRegionExecution::Cancelled(reason) => {
-            placement.observe(
-                runmat_time::duration_ns_saturating(started.elapsed()),
-                false,
-            );
-            *exit = super::control::exit(reason);
+        runmat_runtime::numeric_region::NumericRegionExecution::Ineligible => Ok(None),
+        runmat_runtime::numeric_region::NumericRegionExecution::Cancelled => {
+            *exit = super::control::cancelled(&runtime.cancellation());
             Ok(Some(NativeSiteOutcome::exit()))
         }
     }

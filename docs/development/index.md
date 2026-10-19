@@ -15,6 +15,7 @@ The root `Cargo.toml` owns the crate list and shared dependency versions. Intern
 | [Testing Strategy](/docs/runtime/development/testing) | What the CI baseline runs, where tests live, and which focused suites to run for common changes. |
 | [Benchmarking](/docs/runtime/development/benchmarking) | CLI benchmarks, cross-language benchmark harnesses, GPU telemetry, and performance smoke tests. |
 | [Telemetry](/docs/runtime/development/telemetry) | Runtime analytics envelope, consent, delivery, local provider telemetry, and opt-out behavior. |
+| [Native Extension ABI](/docs/runtime/development/extensions) | Stable C boundary, opaque handles, capability negotiation, lifecycle rules, and browser behavior for native adapters. |
 
 ## Local Baseline
 

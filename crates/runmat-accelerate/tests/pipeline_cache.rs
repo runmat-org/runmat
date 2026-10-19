@@ -1,3 +1,6 @@
+//! Native filesystem persistence and warm-cache integration test.
+#![cfg(not(target_arch = "wasm32"))]
+
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
@@ -38,28 +41,52 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   output.data[i] = input0.data[i];
 }
 "#;
+    let (shader, output_class) = match provider.precision() {
+        runmat_accelerate_api::ProviderPrecision::F32 => (
+            shader.to_owned(),
+            runmat_accelerate_api::ProviderElementType::F32,
+        ),
+        runmat_accelerate_api::ProviderPrecision::F64 => (
+            shader.replace("f32", "f64"),
+            runmat_accelerate_api::ProviderElementType::F64,
+        ),
+    };
 
     // First run: expect miss and metadata creation
-    let _out = provider
-        .fused_elementwise(
-            shader,
-            std::slice::from_ref(&handle),
-            &[rows * cols],
-            rows * cols,
-        )
-        .expect("fused_elementwise");
+    let out = futures::executor::block_on(provider.fused_elementwise(
+        &shader,
+        runmat_accelerate_api::ProviderShaderRequirements::Basic,
+        std::slice::from_ref(&handle),
+        &[rows * cols],
+        rows * cols,
+        output_class,
+    ))
+    .expect("fused_elementwise");
+    assert_eq!(
+        futures::executor::block_on(provider.download(&out))
+            .expect("first fused output")
+            .data,
+        data
+    );
     let (hits1, misses1) = provider.fused_cache_counters();
     assert!(misses1 >= before_misses, "misses should not decrease");
 
     // Second run: should hit cache
-    let _out2 = provider
-        .fused_elementwise(
-            shader,
-            std::slice::from_ref(&handle),
-            &[rows * cols],
-            rows * cols,
-        )
-        .expect("fused_elementwise 2");
+    let out2 = futures::executor::block_on(provider.fused_elementwise(
+        &shader,
+        runmat_accelerate_api::ProviderShaderRequirements::Basic,
+        std::slice::from_ref(&handle),
+        &[rows * cols],
+        rows * cols,
+        output_class,
+    ))
+    .expect("fused_elementwise 2");
+    assert_eq!(
+        futures::executor::block_on(provider.download(&out2))
+            .expect("warm fused output")
+            .data,
+        data
+    );
     let (hits2, _misses2) = provider.fused_cache_counters();
     assert!(
         hits2 > before_hits || hits2 > hits1,
@@ -70,12 +97,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // recomputing the hash and checking that files exist. We cannot reinitialize the provider
     // in-process here, so this simply validates that persistence occurred.
     let p = provider::ensure_wgpu_provider().unwrap().unwrap();
-    let layout_tag = format!("runmat-fusion-layout-{}", 1);
-    let key = p.compute_pipeline_hash_bytes(
-        shader.as_bytes(),
-        &layout_tag,
-        Some(runmat_accelerate::backend::wgpu::config::effective_workgroup_size()),
-    );
+    let workgroup = runmat_accelerate::backend::wgpu::config::effective_workgroup_size();
+    let selected_shader = shader.replace("@WG@", &workgroup.to_string());
+    let layout_tag = "runmat-fusion-layout-1";
+    let key =
+        p.compute_pipeline_hash_bytes(selected_shader.as_bytes(), layout_tag, Some(workgroup));
     let cache_dir = std::env::var("RUNMAT_PIPELINE_CACHE_DIR")
         .map(std::path::PathBuf::from)
         .ok()
@@ -83,24 +109,39 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             dirs::cache_dir().map(|b| {
                 b.join("runmat")
                     .join("pipelines")
-                    .join(format!("device-{}", p.device_id()))
+                    .join(format!("device-{}", p.pipeline_cache_device_id()))
             })
         })
         .unwrap_or_else(|| {
-            std::path::PathBuf::from("target")
-                .join("tmp")
-                .join(format!("wgpu-pipeline-cache-{}", p.device_id()))
+            std::path::PathBuf::from("target").join("tmp").join(format!(
+                "wgpu-pipeline-cache-{}",
+                p.pipeline_cache_device_id()
+            ))
         });
     let wgsl_path = cache_dir.join(format!("{:016x}.wgsl", key));
     let json_path = cache_dir.join(format!("{:016x}.json", key));
-    assert!(
-        wgsl_path.exists(),
-        "expected wgsl persisted at {:?}",
-        wgsl_path
+    assert_eq!(
+        std::fs::read(&wgsl_path).expect("selected WGSL persisted at canonical key"),
+        selected_shader.as_bytes(),
+        "persisted shader differs from executed source at {wgsl_path:?}"
     );
-    assert!(
-        json_path.exists(),
-        "expected json meta persisted at {:?}",
-        json_path
+    let meta: runmat_accelerate::backend::wgpu::cache::persist::PipelineMeta =
+        serde_json::from_slice(
+            &std::fs::read(&json_path).expect("pipeline metadata persisted at canonical key"),
+        )
+        .expect("pipeline metadata schema");
+    assert_eq!(meta.label, "runmat-fusion-pipeline");
+    assert_eq!(meta.layout_tag.as_deref(), Some(layout_tag));
+    assert_eq!(meta.workgroup_size, Some(workgroup));
+    assert_eq!(
+        meta.version,
+        Some(runmat_accelerate::backend::wgpu::cache::persist::PIPELINE_CACHE_VERSION)
+    );
+    assert_eq!(
+        meta.precision.as_deref(),
+        Some(match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F32 => "f32",
+            runmat_accelerate_api::ProviderPrecision::F64 => "f64",
+        })
     );
 }

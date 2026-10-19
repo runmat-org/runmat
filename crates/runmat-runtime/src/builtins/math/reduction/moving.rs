@@ -768,6 +768,10 @@ struct ParsedMoving {
     normalization: VarianceNormalization,
 }
 
+#[cfg(test)]
+#[path = "moving/owning_tests.rs"]
+mod owning_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VarianceNormalization {
     Sample,
@@ -978,16 +982,11 @@ async fn moving_gpu(
     parsed: &ParsedMoving,
 ) -> BuiltinResult<Value> {
     if let Some(output) = moving_gpu_provider(name, op, &handle, parsed).await? {
-        return Ok(Value::GpuTensor(output));
+        return gpu_helpers::resident_gpu_value(output);
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let result = moving_real(name, op, tensor, parsed)?;
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(tensor::tensor_into_value(result));
-    };
-    let uploaded = gpu_helpers::upload_tensor(provider, &result)
-        .map_err(|err| internal(name, format!("{name}: failed to upload GPU result: {err}")))?;
-    Ok(Value::GpuTensor(uploaded))
+    gpu_helpers::restore_class_preserving_value(&handle, tensor::tensor_into_value(result), name)
 }
 
 async fn moving_gpu_provider(
@@ -1014,14 +1013,14 @@ async fn moving_gpu_provider(
 
     let dim = parsed
         .dim
-        .unwrap_or_else(|| default_dimension(&handle.shape));
+        .unwrap_or_else(|| default_dimension(handle.shape()));
     if dim == 0 {
         return Err(invalid_argument(
             name,
             format!("{name}: dimension must be >= 1"),
         ));
     }
-    let input_shape = shape_with_trailing_singletons(&handle.shape, dim);
+    let input_shape = shape_with_trailing_singletons(handle.shape(), dim);
     let output_shape = output_shape(name, &input_shape, dim, parsed)?;
     validate_sample_points_len(name, input_shape[dim - 1], parsed)?;
     let request = ProviderMovingWindowRequest {
@@ -1037,10 +1036,47 @@ async fn moving_gpu_provider(
     };
     match provider.moving_window(&request).await {
         Ok(output) => {
-            runmat_accelerate_api::set_handle_logical(&output, false);
+            let source_integer = runmat_accelerate_api::handle_integer_type(handle);
+            let expected_integer = if matches!(op, MovingOp::Min | MovingOp::Max | MovingOp::Median)
+            {
+                source_integer
+            } else {
+                None
+            };
+            let expected_precision = if (source_integer.is_some() && expected_integer.is_none())
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            } else {
+                runmat_accelerate_api::handle_precision(handle)
+            };
+            let valid = output.shape() == output_shape
+                && output.device_id() == handle.device_id()
+                && runmat_accelerate_api::provider_for_handle(&output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+                && runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_integer_type(&output) == expected_integer
+                && runmat_accelerate_api::handle_precision(&output) == expected_precision
+                && !runmat_accelerate_api::handle_is_logical(&output);
+            if !valid {
+                let mut error = internal(
+                    name,
+                    format!("{name}: provider returned a malformed moving-window result"),
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(output, error));
+            }
+            let output = gpu_helpers::propagate_owned_output_provenance(output, [handle])?;
             Ok(Some(output))
         }
-        Err(_) => Ok(None),
+        Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => Ok(None),
+        Err(source) => {
+            let mut error = internal(name, format!("{name}: provider execution failed: {source}"));
+            error = crate::runtime_error::with_provider_execution_source(error, source.into());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(error)
+        }
     }
 }
 
@@ -1075,14 +1111,14 @@ fn moving_real(
 ) -> BuiltinResult<Tensor> {
     let dim = parsed
         .dim
-        .unwrap_or_else(|| default_dimension(&tensor.shape));
+        .unwrap_or_else(|| default_dimension(tensor.shape()));
     if dim == 0 {
         return Err(invalid_argument(
             name,
             format!("{name}: dimension must be >= 1"),
         ));
     }
-    let input_shape = shape_with_trailing_singletons(&tensor.shape, dim);
+    let input_shape = shape_with_trailing_singletons(tensor.shape(), dim);
     let shape = output_shape(name, &input_shape, dim, parsed)?;
     let count = checked_element_count(name, &shape)?;
     let dim_index = dim - 1;
@@ -1342,14 +1378,14 @@ fn moving_complex(
 ) -> BuiltinResult<ComplexTensor> {
     let dim = parsed
         .dim
-        .unwrap_or_else(|| default_dimension(&tensor.shape));
+        .unwrap_or_else(|| default_dimension(tensor.shape()));
     if dim == 0 {
         return Err(invalid_argument(
             name,
             format!("{name}: dimension must be >= 1"),
         ));
     }
-    let input_shape = shape_with_trailing_singletons(&tensor.shape, dim);
+    let input_shape = shape_with_trailing_singletons(tensor.shape(), dim);
     let shape = output_shape(name, &input_shape, dim, parsed)?;
     let count = checked_element_count(name, &shape)?;
     let dim_index = dim - 1;
@@ -2831,7 +2867,7 @@ mod tests {
                     );
                 }
             }
-            provider.free(&handle).ok();
+            handle.release().unwrap();
         });
     }
 
@@ -2902,7 +2938,7 @@ mod tests {
             let sum =
                 crate::builtins::common::test_support::gather(Value::GpuTensor(sum_handle.clone()))
                     .expect("gather sum");
-            assert_eq!(sum.shape, vec![1, 4]);
+            assert_eq!(sum.shape(), [1, 4]);
             assert_eq!(sum.materialize_f64(), vec![3.0, 3.0, 6.0, 4.0]);
 
             let var_input = provider
@@ -2929,7 +2965,7 @@ mod tests {
             let var =
                 crate::builtins::common::test_support::gather(Value::GpuTensor(var_handle.clone()))
                     .expect("gather var");
-            assert_eq!(var.shape, vec![1, 2]);
+            assert_eq!(var.shape(), [1, 2]);
             assert_eq!(var.materialize_f64(), vec![1.0, 1.0]);
 
             let median_input = provider
@@ -2956,15 +2992,15 @@ mod tests {
                 median_handle.clone(),
             ))
             .expect("gather median");
-            assert_eq!(median.shape, vec![1, 4]);
+            assert_eq!(median.shape(), [1, 4]);
             assert_eq!(median.materialize_f64(), vec![1.0, 2.0, 6.0, 6.0]);
 
-            provider.free(&input).ok();
-            provider.free(&sum_handle).ok();
-            provider.free(&var_input).ok();
-            provider.free(&var_handle).ok();
-            provider.free(&median_input).ok();
-            provider.free(&median_handle).ok();
+            input.release().unwrap();
+            sum_handle.release().unwrap();
+            var_input.release().unwrap();
+            var_handle.release().unwrap();
+            median_input.release().unwrap();
+            median_handle.release().unwrap();
         });
     }
 
@@ -2977,7 +3013,7 @@ mod tests {
         )
         .expect("movsum");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 4]);
+        assert_eq!(out.shape(), [1, 4]);
         assert_eq!(out.materialize_f64(), vec![3.0, 6.0, 9.0, 7.0]);
     }
 
@@ -3007,7 +3043,7 @@ mod tests {
         )
         .expect("movmean");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![2, 3]);
+        assert_eq!(out.shape(), [2, 3]);
         assert_eq!(out.materialize_f64(), vec![2.0, 3.0, 3.0, 4.0, 4.0, 5.0]);
     }
 
@@ -3096,7 +3132,7 @@ mod tests {
         )
         .expect("movmax");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.shape(), [1, 2]);
         assert_eq!(out.materialize_f64(), vec![9.0, 9.0]);
     }
 
@@ -3190,7 +3226,7 @@ mod tests {
         )
         .expect("movstd dim");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.shape(), [3, 3]);
         assert!((out.materialize_f64()[0] - 8.0_f64.sqrt()).abs() < 1e-12);
         assert!((out.materialize_f64()[1] - (0.5_f64).sqrt()).abs() < 1e-12);
         assert!((out.materialize_f64()[2] - 8.0_f64.sqrt()).abs() < 1e-12);
@@ -3218,7 +3254,7 @@ mod tests {
         )
         .expect("movstd dim omitnan");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.shape(), [3, 3]);
         assert_eq!(out.materialize_f64()[0], 0.0);
         assert!((out.materialize_f64()[1] - 0.5_f64.sqrt()).abs() < 1e-12);
         assert!((out.materialize_f64()[2] - 8.0_f64.sqrt()).abs() < 1e-12);
@@ -3299,7 +3335,7 @@ mod tests {
         )
         .expect("movvar stable fill");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.shape(), [1, 1]);
         assert_eq!(out.materialize_f64(), vec![0.0]);
     }
 
@@ -3317,7 +3353,7 @@ mod tests {
         )
         .expect("movstd discard");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.shape(), [1, 2]);
         assert_eq!(out.materialize_f64(), vec![1.0, 1.0]);
     }
 
@@ -3331,7 +3367,7 @@ mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor");
         };
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), [1, 3]);
         assert!((out.materialize_f64()[0].0 - 2.0).abs() < 1e-12);
         assert_eq!(out.materialize_f64()[0].1, 0.0);
         assert!((out.materialize_f64()[1].0 - 20.0 / 3.0).abs() < 1e-12);
@@ -3454,9 +3490,9 @@ mod tests {
                     let Value::GpuTensor(output) = output else {
                         panic!("{name} must return a resident result");
                     };
-                    provider.free(&output).ok();
+                    output.release().unwrap();
                 }
-                provider.free(&input).ok();
+                input.release().unwrap();
             }
         });
     }
@@ -3495,9 +3531,9 @@ mod tests {
                 let Value::GpuTensor(output) = output else {
                     panic!("movmedian must return resident result");
                 };
-                provider.free(&output).ok();
+                output.release().unwrap();
             }
-            provider.free(&input).ok();
+            input.release().unwrap();
         });
     }
 
@@ -3598,7 +3634,7 @@ mod tests {
         )
         .expect("movsum trailing dim");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 2, 1, 1]);
+        assert_eq!(out.shape(), [1, 2, 1, 1]);
         assert_eq!(out.materialize_f64(), vec![22.0, 23.0]);
     }
 

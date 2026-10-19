@@ -15,7 +15,6 @@ pub(crate) struct SparseJacobiApplyPipeline {
 
 pub(super) fn prepare_pipeline(provider: &WgpuProvider) -> Arc<SparseJacobiPreparePipeline> {
     let mut cache = provider
-        .device_caches
         .sparse_pipelines
         .jacobi_prepare
         .lock()
@@ -27,7 +26,6 @@ pub(super) fn prepare_pipeline(provider: &WgpuProvider) -> Arc<SparseJacobiPrepa
 
 pub(super) fn apply_pipeline(provider: &WgpuProvider) -> Arc<SparseJacobiApplyPipeline> {
     let mut cache = provider
-        .device_caches
         .sparse_pipelines
         .jacobi_apply
         .lock()

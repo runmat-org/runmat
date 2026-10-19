@@ -6,6 +6,8 @@ use runmat_runtime::native::*;
 use crate::NativeExecutorError;
 
 use super::state::HostState;
+#[cfg(test)]
+mod observation_tests;
 
 pub(super) fn table(state: &mut HostState) -> NativeHostVTable {
     NativeHostVTable {
@@ -40,7 +42,7 @@ unsafe extern "C" fn poll_safepoint(
         // SAFETY: the pointers were checked and are borrowed for this callback.
         unsafe { (*safepoint).validate() }
             .map_err(|error| NativeExecutorError::Host(error.to_string()))?;
-        if let Some(cancelled) = super::control::poll(&state.runtime.cancellation_token()) {
+        if let Some(cancelled) = super::control::poll(&state.runtime.cancellation()) {
             // SAFETY: exit is a checked writable callback output.
             unsafe { *exit = cancelled };
         }
@@ -101,10 +103,11 @@ unsafe extern "C" fn execute_site(
                 Ok(())
             }
             Err(NativeExecutorError::Runtime(error)) => {
+                let error = std::sync::Arc::new(state.annotate_error(*error));
                 let exception = state.arena.insert(runmat_value::Value::MException(
-                    runmat_runtime::runtime_error::exception_from_error(&error),
+                    runmat_runtime::runtime_error::exception_from_error(error.clone()),
                 ));
-                state.last_error = Some(*error);
+                state.last_error = Some(error);
                 // SAFETY: callback outputs are checked and writable.
                 unsafe {
                     *exit = NativeExit::exception(NativeException {
@@ -116,6 +119,10 @@ unsafe extern "C" fn execute_site(
                 }
                 Ok(())
             }
+            Err(NativeExecutorError::StaleValue) => Err(NativeExecutorError::Host(format!(
+                "native site {:?} referenced a value whose arena lifetime had ended",
+                request
+            ))),
             Err(error) => Err(error),
         }
     })
@@ -133,12 +140,17 @@ fn boundary(
     let state = unsafe { &mut *context.cast::<HostState>() };
     match catch_unwind(AssertUnwindSafe(|| operation(state))) {
         Ok(Ok(())) => NativeHostStatus::OK,
-        Ok(Err(NativeExecutorError::StaleValue)) => NativeHostStatus::STALE_VALUE,
+        Ok(Err(NativeExecutorError::StaleValue)) => {
+            state.region_observation = None;
+            NativeHostStatus::STALE_VALUE
+        }
         Ok(Err(error)) => {
+            state.region_observation = None;
             state.host_failure = Some(error);
             NativeHostStatus::HOST_FAILURE
         }
         Err(_) => {
+            state.region_observation = None;
             state.host_failure = Some(NativeExecutorError::Host(
                 "panic contained at native host boundary".into(),
             ));

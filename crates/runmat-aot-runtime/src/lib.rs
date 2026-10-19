@@ -1,11 +1,24 @@
 //! Process-image runtime host linked into standalone RunMat programs.
 
 mod builtin;
+mod accelerator_profile;
 mod execute;
+mod foreign_policy;
+mod foreign_retirement;
 mod input;
+mod java_artifacts;
+mod mex;
+mod mex_artifacts;
+mod native_interfaces;
 mod output;
 mod program;
+mod python_artifacts;
+#[cfg(feature = "source-evaluation")]
+mod source_service;
 
+/// Owned embedding input remains host-unselected; it cannot mint a selected
+/// linked-image grant from decoded bytes.
+pub use execute::execute;
 pub use input::AotProcessInput;
 
 pub const EXIT_SUCCESS: i32 = 0;
@@ -24,7 +37,9 @@ pub const EXIT_RUNTIME_FAILURE: i32 = 70;
 /// the exact `AotFunctionResolver` and `AotBuiltinResolver` ABIs. Every non-null
 /// function address must identify Runtime's exact `NativeEntryPoint` ABI, and
 /// every non-null builtin address must identify an immutable
-/// `RuntimeBuiltinBinding`. Each payload pointer must address an immutable
+/// `RuntimeBuiltinBinding`. A non-null `source_service_factory` must identify
+/// the optional factory symbol from the exact verified linked runtime archive.
+/// Each payload pointer must address an immutable
 /// allocation of its corresponding declared length for the duration of this
 /// call. When `argc` is positive, `argv` must be a valid C argument vector.
 #[no_mangle]
@@ -33,14 +48,49 @@ pub unsafe extern "C" fn runmat_aot_main(
     argv: *const *const std::ffi::c_char,
     function_resolver: *const std::ffi::c_void,
     builtin_resolver: *const std::ffi::c_void,
+    source_service_factory: *const std::ffi::c_void,
     native_ir: *const u8,
     native_ir_len: u64,
     program: *const u8,
     program_len: u64,
     resume_points: *const u8,
     resume_points_len: u64,
+    native_interfaces: *const u8,
+    native_interfaces_len: u64,
+    mex_artifacts: *const u8,
+    mex_artifacts_len: u64,
+    java_artifacts: *const u8,
+    java_artifacts_len: u64,
+    python_artifacts: *const u8,
+    python_artifacts_len: u64,
 ) -> i32 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: the generated launcher forwards the process argument vector
+        // received by its C `main` entrypoint.
+        let arguments = unsafe { input::copy_process_arguments(argc, argv) }?;
+        match runmat_process_host::HiddenModeRegistry::standard()
+            .detect(arguments)
+            .map_err(|error| error.to_string())?
+        {
+            Some(runmat_process_host::HiddenMode::ExtensionHost) => {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| {
+                        format!("standalone extension-host runtime failed to start: {error}")
+                    })?;
+                return runtime
+                    .block_on(runmat_runtime::foreign::run_extension_host())
+                    .map_err(|error| format!("standalone extension host failed: {error}"));
+            }
+            Some(mode) => {
+                return Err(format!(
+                    "standalone executable does not provide private host mode '{}'",
+                    mode.marker()
+                ));
+            }
+            None => {}
+        }
         // SAFETY: validation and bounded copies happen before any payload is
         // decoded or retained. The generated launcher supplies these symbols.
         let linked = input::LinkedProcessImage {
@@ -48,17 +98,31 @@ pub unsafe extern "C" fn runmat_aot_main(
             argv,
             function_resolver,
             builtin_resolver,
+            source_service_factory,
             native_ir,
             native_ir_len,
             program,
             program_len,
             resume_points,
             resume_points_len,
+            native_interfaces,
+            native_interfaces_len,
+            mex_artifacts,
+            mex_artifacts_len,
+            java_artifacts,
+            java_artifacts_len,
+            python_artifacts,
+            python_artifacts_len,
         };
         // SAFETY: the raw pointers were checked and converted to bounded borrows
         // above; both resolver contracts are documented on this entry.
         let input = unsafe { AotProcessInput::copy_from_linked(linked) }?;
-        execute::execute(input)
+        // SAFETY: this entry is only called by the generated launcher in the
+        // qualified linked image described by this function's safety contract.
+        let linked = unsafe {
+            input::LinkedAotProcessInput::from_verified_link(input, source_service_factory)
+        };
+        execute::execute_linked(linked)
     }));
     match result {
         Ok(Ok(())) => EXIT_SUCCESS,

@@ -94,6 +94,11 @@ pub struct ProviderRepresentation {
 
 impl ProviderRepresentation {
     pub fn checked_element_count(&self) -> Option<u64> {
+        // A zero extent makes the representation empty regardless of the
+        // cardinality of preceding axes. Match the shared broadcast plan.
+        if self.shape.contains(&0) {
+            return Some(0);
+        }
         self.shape
             .iter()
             .try_fold(1_u64, |count, extent| count.checked_mul(*extent))
@@ -102,5 +107,27 @@ impl ProviderRepresentation {
     pub fn checked_byte_len(&self) -> Option<u64> {
         self.checked_element_count()?
             .checked_mul(self.element_type.byte_width())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn checked_cardinality_preserves_late_zero_but_rejects_nonempty_overflow() {
+        let mut representation = ProviderRepresentation {
+            element_type: ProviderElementType::I32,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![u64::MAX, 2, 0],
+            residency: ProviderResidency::Device,
+        };
+        assert_eq!(representation.checked_element_count(), Some(0));
+        assert_eq!(representation.checked_byte_len(), Some(0));
+        representation.shape.pop();
+        assert_eq!(representation.checked_element_count(), None);
+        assert_eq!(representation.checked_byte_len(), None);
     }
 }

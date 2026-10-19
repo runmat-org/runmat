@@ -50,7 +50,7 @@ impl RegisteredImmutableValueClass {
         object: &ObjectInstance,
         path: &str,
     ) -> Result<(), ValueCodecError> {
-        if object.class_name != self.class_name {
+        if object.class_name.display_name() != self.class_name {
             return Err(ValueCodecError::invalid(
                 path,
                 format!(

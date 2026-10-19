@@ -6,8 +6,7 @@ use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.fatalAssertTrue",
-    category = "testing/qualifications",
-    summary = "Require logical truth or abort the run after safe teardown.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::qualifications::fatal"
 )]
 async fn fatal_assert_true(

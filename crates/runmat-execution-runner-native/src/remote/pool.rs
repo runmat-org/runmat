@@ -1,24 +1,40 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::CacheImport;
-use runmat_execution_artifact::{ArtifactResult, ProgramExecutionRequest, ProjectRevisionRecord};
+use runmat_execution_artifact::{
+    ArtifactResult, GraphExecutionRequest, ProgramExecutionRequest, ProjectRevisionRecord,
+    WorkerProgramRequest,
+};
 use runmat_execution_runner::pool::ResizeRequest;
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
     AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction, DriverCommand,
     DriverConfig, PoolSpec, TaskSubmission,
 };
+use runmat_execution_transport_native::control::DriverArtifactDownload;
 use tokio::sync::{oneshot, Mutex as AsyncMutex, RwLock};
 
 use super::pool_progress::RemoteTaskCompletion;
 use super::RemoteWorkerChannel;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-type CompletionResult = Result<AttemptSuccess, String>;
+type CompletionResult = Result<AttemptSuccess, crate::NativeProgramFailure>;
+
+/// Signed transfer authority for one already-admitted, immutable Graph
+/// Program. The scheduler retains the source for retries; attempt frames carry
+/// only the digest and length issued by a worker after authentication.
+pub(super) struct SignedGraphTransfer {
+    pub(super) encrypted_manifest: Arc<[u8]>,
+    pub(super) ordered_downloads: Arc<[DriverArtifactDownload]>,
+    pub(super) maximum_program_bytes: u64,
+    pub(super) program_digest: Digest,
+    pub(super) program_length: u64,
+}
 
 mod admission;
 mod attempt_execution;
@@ -68,24 +84,30 @@ impl Drop for CancellationDispatchGuard {
 
 /// Portable scheduler composition over allocation-scoped remote worker routes.
 pub struct RemotePoolDriver {
-    scope_id: ExecutionScopeId,
-    pool_id: PoolId,
-    bundle_digest: Digest,
-    bundle_identity: Digest,
-    project_revision: ProjectRevisionRecord,
-    bundle: Arc<[u8]>,
-    driver: Mutex<Driver>,
+    pub(super) scope_id: ExecutionScopeId,
+    pub(super) pool_id: PoolId,
+    direct_bundle: Option<DirectPoolBundle>,
+    pub(super) driver: Mutex<Driver>,
     worker_registration: AsyncMutex<()>,
     channels: RwLock<HashMap<runmat_execution::identity::WorkerId, WorkerRoute>>,
+    applied_software_readiness: Mutex<HashSet<runmat_execution::identity::WorkerId>>,
     next_route_generation: AtomicU64,
     installed_nodes: AsyncMutex<BTreeSet<String>>,
     value_scope: String,
     values: super::pool_values::RemoteValueCatalog,
     execution_objects: super::pool_objects::RemoteObjectCatalog,
-    programs: Mutex<HashMap<TaskId, ProgramExecutionRequest>>,
+    pub(super) programs: Mutex<HashMap<TaskId, Arc<WorkerProgramRequest>>>,
+    graph_transfers: Mutex<HashMap<TaskId, Arc<SignedGraphTransfer>>>,
+    // The exact authenticated parent stage must outlive every active Graph
+    // attempt. Spawned attempt tasks retain this pool Arc even if their
+    // caller's bounded cancellation drain becomes indeterminate.
+    _graph_stage: Mutex<Option<super::program_staging::StagedGraphProgram>>,
+    attempt_cancellation: Mutex<HashMap<runmat_execution::identity::AttemptId, CancellationSource>>,
     input_inventories: Mutex<input_inventory::InputInventories>,
-    completions: Mutex<HashMap<TaskId, oneshot::Sender<CompletionResult>>>,
-    progress: Mutex<HashMap<TaskId, Arc<super::pool_progress::RemoteProgressBuffer>>>,
+    pub(super) completions: Mutex<HashMap<TaskId, oneshot::Sender<(u64, CompletionResult)>>>,
+    completion_sequence: AtomicU64,
+    pub(super) progress: Mutex<HashMap<TaskId, Arc<super::pool_progress::RemoteProgressBuffer>>>,
+    pub(super) collectives: Arc<crate::driver::collective::ProcessCollectiveBroker>,
     admission: Mutex<()>,
     restored_completions: Mutex<HashMap<TaskId, RemoteTaskCompletion>>,
     committed_task: tokio::sync::Notify,
@@ -93,6 +115,15 @@ pub struct RemotePoolDriver {
     cancellation_in_flight: AtomicUsize,
     cancellation_settled: tokio::sync::Notify,
     cancellation_ownership_failed: AtomicBool,
+}
+
+/// Direct V7 admission is backed by the installed bundle. Graph V10 instead
+/// carries exact ordered selected archives in each task request.
+struct DirectPoolBundle {
+    digest: Digest,
+    identity: Digest,
+    project_revision: ProjectRevisionRecord,
+    bytes: Arc<[u8]>,
 }
 
 impl CacheImport for RemotePoolDriver {
@@ -136,7 +167,6 @@ impl RemotePoolDriver {
         bundle: impl Into<Arc<[u8]>>,
         value_scope: impl Into<String>,
     ) -> NativeExecutionResult<Arc<Self>> {
-        let pool_id = pool.id;
         let bundle = bundle.into();
         let decoded = read_bundle(bundle.as_ref(), ArchiveLimits::default()).map_err(|error| {
             NativeExecutionError::Protocol(format!("remote pool bundle is invalid: {error}"))
@@ -146,7 +176,38 @@ impl RemotePoolDriver {
                 "remote pool bundle identity is invalid: {error}"
             ))
         })?;
-        let project_revision = decoded.manifest.project_revision;
+        let direct_bundle = DirectPoolBundle {
+            digest: Digest::sha256(bundle.as_ref()),
+            identity: bundle_identity,
+            project_revision: decoded.manifest.project_revision,
+            bytes: bundle,
+        };
+        Self::new_with_authority(
+            scope_id,
+            pool,
+            driver_fence,
+            Some(direct_bundle),
+            value_scope,
+        )
+    }
+
+    pub fn new_graph(
+        scope_id: ExecutionScopeId,
+        pool: PoolSpec,
+        driver_fence: u64,
+        value_scope: impl Into<String>,
+    ) -> NativeExecutionResult<Arc<Self>> {
+        Self::new_with_authority(scope_id, pool, driver_fence, None, value_scope)
+    }
+
+    fn new_with_authority(
+        scope_id: ExecutionScopeId,
+        pool: PoolSpec,
+        driver_fence: u64,
+        direct_bundle: Option<DirectPoolBundle>,
+        value_scope: impl Into<String>,
+    ) -> NativeExecutionResult<Arc<Self>> {
+        let pool_id = pool.id;
         let mut driver = Driver::new(DriverConfig::default(), driver_fence)?;
         driver.handle(DriverCommand::RegisterScope {
             scope_id,
@@ -159,22 +220,25 @@ impl RemotePoolDriver {
         Ok(Arc::new(Self {
             scope_id,
             pool_id,
-            bundle_digest: Digest::sha256(bundle.as_ref()),
-            bundle_identity,
-            project_revision,
-            bundle,
+            direct_bundle,
             driver: Mutex::new(driver),
             worker_registration: AsyncMutex::new(()),
             channels: RwLock::new(HashMap::new()),
+            applied_software_readiness: Mutex::new(HashSet::new()),
             next_route_generation: AtomicU64::new(1),
             installed_nodes: AsyncMutex::new(BTreeSet::new()),
             value_scope: value_scope.into(),
             values: super::pool_values::RemoteValueCatalog::default(),
             execution_objects: super::pool_objects::RemoteObjectCatalog::new()?,
             programs: Mutex::new(HashMap::new()),
+            graph_transfers: Mutex::new(HashMap::new()),
+            _graph_stage: Mutex::new(None),
+            attempt_cancellation: Mutex::new(HashMap::new()),
             input_inventories: Mutex::new(input_inventory::InputInventories::default()),
             completions: Mutex::new(HashMap::new()),
+            completion_sequence: AtomicU64::new(0),
             progress: Mutex::new(HashMap::new()),
+            collectives: Arc::new(crate::driver::collective::ProcessCollectiveBroker::default()),
             admission: Mutex::new(()),
             restored_completions: Mutex::new(HashMap::new()),
             committed_task: tokio::sync::Notify::new(),
@@ -227,6 +291,16 @@ impl RemotePoolDriver {
         }
     }
 
+    pub(super) fn retain_graph_stage(
+        &self,
+        stage: Option<super::program_staging::StagedGraphProgram>,
+    ) {
+        *self
+            ._graph_stage
+            .lock()
+            .expect("remote Graph stage owner poisoned") = stage;
+    }
+
     pub fn cancel(self: &Arc<Self>, reason: CancellationReason) -> NativeExecutionResult<()> {
         let actions = self.driver.lock().expect("remote driver poisoned").handle(
             DriverCommand::CancelScope {
@@ -253,7 +327,7 @@ impl RemotePoolDriver {
         Ok(())
     }
 
-    fn dispatch(self: &Arc<Self>, actions: Vec<DriverAction>) {
+    pub(super) fn dispatch(self: &Arc<Self>, actions: Vec<DriverAction>) {
         for action in actions {
             match action {
                 DriverAction::Launch(request) => self.launch(request),
@@ -273,6 +347,23 @@ impl RemotePoolDriver {
     }
 
     fn cancel_attempt(self: &Arc<Self>, request: AttemptRequest) {
+        // A remote Cancel acknowledgement proves delivery of a request, not
+        // that an active Graph worker has retired its foreign host or private
+        // staging. Only its eventual attempt report may close the Graph
+        // attempt; Direct keeps its immediate completion.
+        let graph_attempt = matches!(
+            &request.task.callable.program,
+            runmat_execution::ProgramCallable::GraphTarget { .. }
+        );
+        if let Some(source) = self
+            .attempt_cancellation
+            .lock()
+            .expect("remote attempt cancellation registry poisoned")
+            .get(&request.id)
+            .cloned()
+        {
+            source.cancel(CancellationReason::User);
+        }
         self.cancellation_in_flight.fetch_add(1, Ordering::AcqRel);
         let this = Arc::clone(self);
         tokio::spawn(async move {
@@ -315,10 +406,12 @@ impl RemotePoolDriver {
                     return;
                 }
             }
-            this.apply_report(BackendReport::for_request(
-                &request,
-                AttemptReport::Cancelled,
-            ));
+            if !graph_attempt {
+                this.apply_report(BackendReport::for_request(
+                    &request,
+                    AttemptReport::Cancelled,
+                ));
+            }
             guard.1 = true;
         });
     }
@@ -336,7 +429,7 @@ impl RemotePoolDriver {
     }
 }
 
-fn now_millis() -> u64 {
+pub(super) fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|value| value.as_millis().try_into().unwrap_or(u64::MAX))

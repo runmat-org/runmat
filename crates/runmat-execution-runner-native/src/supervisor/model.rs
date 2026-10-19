@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, JobHandle};
 use runmat_execution_artifact::{
-    ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    GraphExecutionRequest, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
+    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::AttemptResourceAccounting;
 use serde::{Deserialize, Serialize};
@@ -91,7 +91,8 @@ pub struct ProgramBatchSubmission<
 > {
     pub recipe: R,
     pub artifact: A,
-    pub function: usize,
+    pub callable: runmat_execution::ProgramCallable,
+    pub invocation_context: runmat_execution::ProgramInvocationContext,
     pub arguments: V,
     pub environment: E,
     #[serde(deserialize_with = "runmat_execution::console::deserialize_controls")]
@@ -112,7 +113,8 @@ impl ProgramBatchSubmission {
         Self {
             recipe: request.recipe,
             artifact: request.artifact,
-            function: request.function,
+            callable: request.callable,
+            invocation_context: request.context,
             arguments: request.arguments,
             environment: request.environment,
             console: request.console,
@@ -127,13 +129,16 @@ impl ProgramBatchSubmission {
         &self,
     ) -> runmat_execution_artifact::BorrowedProgramExecutionRequest<'_> {
         ProgramExecutionRequest {
-            console: self.console,
-            environment: &self.environment,
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe: &self.recipe,
             artifact: &self.artifact,
-            function: self.function,
+            callable: self.callable.clone(),
+            context: self.invocation_context.clone(),
+            assignment: None,
+            job_id: None,
             arguments: self.arguments.as_slice(),
+            environment: &self.environment,
+            console: self.console,
             requested_outputs: self.requested_outputs,
         }
     }
@@ -154,10 +159,14 @@ impl ProgramBatchSubmission {
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         if self.task.request.console != self.console
             || self.task.request.environment != self.environment
+            || self.task.request.callable.program != self.callable
+            || self.task.request.invocation_context != self.invocation_context
             || self.task.request.inputs != self.arguments
             || self.task.request.outputs.requested_outputs != self.requested_outputs
-            || self.task.request.program_artifact_id
-                != runmat_execution::identity::ArtifactId::derive(&[self.artifact.id.0.bytes()])
+            || self.task.request.program_artifact_id()
+                != Some(runmat_execution::identity::ArtifactId::derive(&[
+                    self.artifact.id.0.bytes()
+                ]))
         {
             return Err(NativeExecutionError::Protocol(
                 "durable task differs from its original program invocation".into(),
@@ -184,7 +193,8 @@ impl ProgramBatchSubmission {
         let stable = ProgramBatchSubmission {
             recipe: &self.recipe,
             artifact: &self.artifact,
-            function: self.function,
+            callable: self.callable.clone(),
+            invocation_context: self.invocation_context.clone(),
             arguments: self.arguments.as_slice(),
             environment: &self.environment,
             console: self.console,
@@ -198,6 +208,83 @@ impl ProgramBatchSubmission {
             &stable,
             u64::from(super::protocol::SUPERVISOR_MAX_MESSAGE_BYTES),
         )
+    }
+
+    pub fn idempotency_digest(&self) -> Option<Digest> {
+        self.idempotency_key.as_deref().map(idempotency_digest)
+    }
+}
+
+/// Durable V10 submission. Its graph and selected products are one authenticated
+/// request; the local result receipt remains with the submitting service.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphBatchSubmission {
+    pub request: GraphExecutionRequest,
+    pub idempotency_key: Option<String>,
+    pub retention_millis: u64,
+}
+
+/// A graph submission whose archives and selected products were admitted
+/// before taking the supervisor's durable-store lock.
+pub(super) struct ValidatedGraphBatchSubmission {
+    pub(super) submission: GraphBatchSubmission,
+    pub(super) request_digest: Digest,
+    pub(super) idempotency_key_digest: Option<Digest>,
+}
+
+impl GraphBatchSubmission {
+    pub(super) fn into_validated(self) -> NativeExecutionResult<ValidatedGraphBatchSubmission> {
+        self.validate()?;
+        let request_digest = self.request_digest()?;
+        let idempotency_key_digest = self.idempotency_digest();
+        Ok(ValidatedGraphBatchSubmission {
+            submission: self,
+            request_digest,
+            idempotency_key_digest,
+        })
+    }
+
+    pub fn validate(&self) -> NativeExecutionResult<()> {
+        self.request
+            .validate()
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        if self.request.assignment.is_some()
+            || self.request.job_id.is_some()
+            || self
+                .idempotency_key
+                .as_deref()
+                .is_some_and(|key| key.is_empty() || key.len() > 256 || key.contains('\0'))
+            || !(MIN_RETENTION_MILLIS..=MAX_RETENTION_MILLIS).contains(&self.retention_millis)
+        {
+            return Err(NativeExecutionError::Configuration(
+                "graph batch submission has an assignment, job identity, key, or retention mismatch"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn request_digest(&self) -> NativeExecutionResult<Digest> {
+        // Hash the same serialized field shape without cloning the selected
+        // executable bundle and graph for each durable Show/InspectKind.
+        #[derive(Serialize)]
+        struct StableGraphSubmission<'a> {
+            request: &'a GraphExecutionRequest,
+            idempotency_key: Option<&'a str>,
+            retention_millis: u64,
+        }
+        let stable = StableGraphSubmission {
+            request: &self.request,
+            idempotency_key: None,
+            retention_millis: self.retention_millis,
+        };
+        let mut identity = b"runmat-local-graph-batch-request-v1\0".to_vec();
+        identity.extend(
+            serde_json::to_vec(&stable)
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
+        );
+        Ok(Digest::sha256(identity))
     }
 
     pub fn idempotency_digest(&self) -> Option<Digest> {
@@ -232,6 +319,10 @@ impl LocalJobState {
 pub struct LocalJobRecord {
     pub schema_version: u16,
     pub handle: JobHandle,
+    /// The persisted request's typed workload. Legacy records omit this field
+    /// and are resolved against request.json before Show/list returns them.
+    #[serde(default)]
+    pub workload_kind: LocalJobWorkloadKind,
     pub state: LocalJobState,
     pub request_digest: Digest,
     pub workload_digest: Digest,
@@ -247,6 +338,7 @@ pub struct LocalJobRecord {
 impl LocalJobRecord {
     pub fn validate(&self) -> NativeExecutionResult<()> {
         if self.schema_version != 1
+            || self.workload_kind == LocalJobWorkloadKind::Legacy
             || self.handle.generation == 0
             || self.updated_unix_millis < self.submitted_unix_millis
             || self.retain_until_unix_millis < self.updated_unix_millis
@@ -264,6 +356,16 @@ impl LocalJobRecord {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalJobWorkloadKind {
+    #[default]
+    Legacy,
+    Script,
+    Program,
+    Graph,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DriverCompletion {
@@ -271,11 +373,24 @@ pub struct DriverCompletion {
     pub success: bool,
     pub exit_code: Option<i32>,
     pub message: Option<String>,
+    /// Typed result of a detached Graph batch. Script completions carry none;
+    /// portable program results are published by their leased provider.
+    #[serde(default)]
+    pub response: Option<ProgramExecutionResponse>,
 }
 
 impl DriverCompletion {
     pub fn validate(&self) -> NativeExecutionResult<()> {
         if self.schema_version != 4
+            || self.response.as_ref().is_some_and(|response| {
+                self.success
+                    != matches!(
+                        response,
+                        ProgramExecutionResponse::Success { .. }
+                            | ProgramExecutionResponse::GraphSuccess { .. }
+                            | ProgramExecutionResponse::ExternalizedSuccess { .. }
+                    )
+            })
             || self
                 .message
                 .as_ref()
@@ -350,14 +465,19 @@ pub enum BatchDriverInvocation {
         submission: Box<ProgramBatchSubmission>,
         lease: Box<super::DurableAttemptLease>,
     },
+    Graph {
+        job_directory: PathBuf,
+        job_id: runmat_execution::JobId,
+        submission: Box<GraphBatchSubmission>,
+    },
 }
 
 impl BatchDriverInvocation {
     pub fn job_directory(&self) -> &Path {
         match self {
-            Self::Script { job_directory, .. } | Self::Program { job_directory, .. } => {
-                job_directory
-            }
+            Self::Script { job_directory, .. }
+            | Self::Program { job_directory, .. }
+            | Self::Graph { job_directory, .. } => job_directory,
         }
     }
 }

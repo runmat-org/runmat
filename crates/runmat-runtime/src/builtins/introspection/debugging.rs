@@ -8,7 +8,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::{CellArray, NumericDType, StructValue, Tensor, Value};
+use runmat_value::{CellArray, NumericDType, StructArray, StructValue, Tensor, Value};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -24,8 +24,7 @@ const DBSTACK_OUTPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description:
-            "Call-stack entries in RunMat's column-cell representation of a structure array.",
+        description: "Call-stack entries in a structure array.",
     },
     BuiltinParamDescriptor {
         name: "I",
@@ -41,7 +40,7 @@ const DBSTACK_STACK_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescripto
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Call-stack entries in RunMat's column-cell representation of a structure array.",
+    description: "Call-stack entries in a structure array.",
 }];
 
 const DBSTACK_N_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -490,7 +489,7 @@ fn nonnegative_platform_usize(value: f64) -> Option<usize> {
     Some(value as usize)
 }
 
-fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bool) -> Value {
+fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bool) -> StructValue {
     let mut st = StructValue::new();
     let file = if complete_names {
         frame.file.clone()
@@ -504,7 +503,7 @@ fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bo
     st.insert("file", Value::String(file));
     st.insert("name", Value::String(frame.function.clone()));
     st.insert("line", Value::Num(frame.line as f64));
-    Value::Struct(st)
+    st
 }
 
 fn cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
@@ -539,7 +538,12 @@ fn stack_value(skip: usize, complete_names: bool) -> BuiltinResult<Value> {
         .skip(skip)
         .map(|frame| stack_struct(frame, complete_names))
         .collect::<Vec<_>>();
-    cell_column(entries)
+    StructArray::normalize(
+        vec!["file".into(), "name".into(), "line".into()],
+        entries,
+        vec![frames.len().saturating_sub(skip), 1],
+    )
+    .map_err(|error| debug_error("dbstack", &DEBUG_ERROR_INVALID_INPUT, &error))
 }
 
 fn parse_dbstack_args(args: &[Value]) -> BuiltinResult<(usize, bool)> {
@@ -574,7 +578,7 @@ pub(crate) fn dispatch_dbstack(args: Vec<Value>) -> BuiltinResult<Value> {
     let stack = stack_value(skip, complete_names)?;
     match crate::output_count::current_output_count() {
         Some(0) => {
-            record_console_line(ConsoleStream::Stdout, format_stack_for_display(&stack));
+            record_console_line(ConsoleStream::Stdout, format_stack_for_display(&stack))?;
             Ok(empty_value())
         }
         Some(n) if n >= 2 => Ok(crate::output_count::output_list_with_padding(
@@ -586,16 +590,14 @@ pub(crate) fn dispatch_dbstack(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn format_stack_for_display(stack: &Value) -> String {
-    let Value::Cell(cell) = stack else {
-        return String::new();
+    let structures: Vec<StructValue> = match stack {
+        Value::Struct(structure) => vec![structure.clone()],
+        Value::StructArray(array) => array.elements().map(|value| value.to_owned()).collect(),
+        _ => return String::new(),
     };
-    let lines = cell
-        .data
-        .iter()
-        .filter_map(|value| {
-            let Value::Struct(st) = value else {
-                return None;
-            };
+    let lines = structures
+        .into_iter()
+        .map(|st| {
             let name = st
                 .fields
                 .get("name")
@@ -615,11 +617,11 @@ fn format_stack_for_display(stack: &Value) -> String {
                     _ => None,
                 })
                 .unwrap_or(0);
-            Some(if file.is_empty() {
+            if file.is_empty() {
                 format!("In {name} at line {line}")
             } else {
                 format!("In {name} ({file}) at line {line}")
-            })
+            }
         })
         .collect::<Vec<_>>();
     lines.join("\n")
@@ -777,7 +779,7 @@ pub(crate) async fn dispatch_dbtype(args: Vec<Value>) -> BuiltinResult<Value> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    record_console_line(ConsoleStream::Stdout, rendered);
+    record_console_line(ConsoleStream::Stdout, rendered)?;
     Ok(empty_value())
 }
 
@@ -931,6 +933,22 @@ mod tests {
         cell.data.len()
     }
 
+    fn stack_len(value: &Value) -> usize {
+        match value {
+            Value::Struct(_) => 1,
+            Value::StructArray(array) => array.len(),
+            other => panic!("expected stack structure array, got {other:?}"),
+        }
+    }
+
+    fn stack_element(value: &Value, index: usize) -> StructValue {
+        match value {
+            Value::Struct(structure) if index == 0 => structure.clone(),
+            Value::StructArray(array) => array.get_linear(index).unwrap().to_owned(),
+            other => panic!("expected stack structure array, got {other:?}"),
+        }
+    }
+
     #[test]
     fn typed_debug_offsets_preserve_platform_representable_uint64() {
         assert_eq!(integer_value(&Value::Int(IntValue::U64(3))), Some(3));
@@ -997,44 +1015,34 @@ mod tests {
 
     #[test]
     fn dbstack_rejects_more_than_two_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = dispatch_dbstack(Vec::new()).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:dbstack:TooManyOutputs"));
     }
 
     #[test]
-    fn dbstack_returns_source_backed_stack_cell() {
+    fn dbstack_returns_source_backed_structure_array() {
         let source_id = SourceId(31);
         let _catalog = crate::source_context::replace_source_catalog_with_fullpaths(vec![(
             source_id,
             "worker.m".to_string(),
             Some("/tmp/worker.m".to_string()),
             "function worker\nx = dbstack;\nend\n".to_string(),
-        )]);
+        )])
+        .expect("debugging source catalog admission");
         let _guard = crate::debug_context::push_frame("worker", Some(source_id), Some((16, 25)));
         let value = dispatch_dbstack(Vec::new()).expect("dbstack");
-        let Value::Cell(cell) = value else {
-            panic!("expected cell row");
-        };
-        assert_eq!(cell.data.len(), 1);
-        let Value::Struct(st) = &cell.data[0] else {
-            panic!("expected stack struct");
-        };
+        assert_eq!(stack_len(&value), 1);
+        let st = stack_element(&value, 0);
         assert_eq!(st.fields.get("name"), Some(&Value::String("worker".into())));
         assert_eq!(
             st.fields.get("file"),
             Some(&Value::String("worker.m".into()))
         );
-        assert_eq!(cell.shape, vec![1, 1]);
         assert_eq!(st.fields.len(), 3);
         let complete =
             dispatch_dbstack(vec![Value::String("-completenames".into())]).expect("complete names");
-        let Value::Cell(complete) = complete else {
-            panic!("expected cell column");
-        };
-        let Value::Struct(complete_frame) = &complete.data[0] else {
-            panic!("expected stack struct");
-        };
+        let complete_frame = stack_element(&complete, 0);
         assert_eq!(
             complete_frame.fields.get("file"),
             Some(&Value::String("/tmp/worker.m".into()))
@@ -1046,13 +1054,8 @@ mod tests {
         let _outer = crate::debug_context::push_frame("outer", None, None);
         let _inner = crate::debug_context::push_frame("inner", None, None);
         let value = dispatch_dbstack(vec![Value::Num(1.0)]).expect("dbstack");
-        assert_eq!(cell_len(&value), 1);
-        let Value::Cell(cell) = value else {
-            unreachable!();
-        };
-        let Value::Struct(st) = &cell.data[0] else {
-            panic!("expected stack struct");
-        };
+        assert_eq!(stack_len(&value), 1);
+        let st = stack_element(&value, 0);
         assert_eq!(st.fields.get("name"), Some(&Value::String("outer".into())));
     }
 
@@ -1101,6 +1104,37 @@ mod tests {
             st.fields.get("name"),
             Some(&Value::String("callsite".into()))
         );
-        assert!(matches!(st.fields.get("stack"), Some(Value::Cell(_))));
+        let stack = st.fields.get("stack").expect("stack field");
+        assert_eq!(stack_len(stack), 1);
+        let frame = stack_element(stack, 0);
+        assert_eq!(frame.fields.get("name"), st.fields.get("name"));
+        assert_eq!(frame.fields.get("file"), st.fields.get("file"));
+        assert_eq!(frame.fields.get("line"), st.fields.get("line"));
+        assert_eq!(frame.fields.len(), 3);
+    }
+
+    #[test]
+    fn getcallinfo_preserves_ordered_structure_stack() {
+        let _outer = crate::debug_context::push_frame("outer", None, None);
+        let _inner = crate::debug_context::push_frame("inner", None, None);
+        let Value::Struct(info) = dispatch_getcallinfo(Vec::new()).expect("getcallinfo") else {
+            panic!("expected call information structure");
+        };
+        let stack = info.fields.get("stack").expect("stack field");
+        let Value::StructArray(array) = stack else {
+            panic!("expected structure array for two frames");
+        };
+        assert_eq!(array.shape(), [2, 1]);
+        assert_eq!(stack_len(stack), 2);
+        for (index, name) in ["inner", "outer"].into_iter().enumerate() {
+            assert_eq!(
+                stack_element(stack, index).fields.get("name"),
+                Some(&Value::String(name.into()))
+            );
+        }
+        assert_eq!(
+            info.fields.get("name"),
+            Some(&Value::String("inner".into()))
+        );
     }
 }

@@ -250,6 +250,39 @@ impl PieChart {
                 .as_ref()
                 .map_or(0, |i| i.len() * std::mem::size_of::<u32>())
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::optional_string(self.label.as_ref());
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::optional_string(self.label_format.as_ref()),
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::strings(&self.slice_labels)?,
+        )?;
+        for bytes in [
+            crate::plots::clone_budget::vec::<f64>(self.values.capacity())?,
+            crate::plots::clone_budget::vec::<Vec4>(self.colors.capacity())?,
+            crate::plots::clone_budget::vec::<bool>(self.explode.capacity())?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<u32>(self.indices.as_ref().map_or(0, Vec::capacity))?,
+        ] {
+            crate::plots::clone_budget::add(&mut total, bytes)?;
+        }
+        if let Some(slices) = &self.slices {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<PieSliceMeta>(slices.capacity())?,
+            )?;
+            for slice in slices {
+                crate::plots::clone_budget::add(&mut total, slice.label.capacity())?;
+            }
+        }
+        Some(total)
+    }
 }
 
 fn format_percentage_label(fmt: Option<&str>, frac: f32) -> String {

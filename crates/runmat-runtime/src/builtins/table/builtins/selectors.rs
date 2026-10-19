@@ -1,48 +1,10 @@
 use super::*;
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::HEAD_GPU_COUNT_EXTENSION;
 use runmat_macros::runtime_builtin;
-
-const HEAD_GPU_COUNT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "head-gpu-row-count",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "head with a GPU-resident row count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:HeadGpuRowCountExtension"),
-};
-pub const HEAD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [HEAD_GPU_COUNT_EXTENSION];
-
-const HEAD_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Integer array rows are selected exactly and retain their input class.",
-}];
-const HEAD_COUNT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "N",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The positive row count is decoded exactly from authoritative scalar storage.",
-}];
-pub const HEAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "B = head(integer_A, ...)", inputs: &HEAD_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Row selection preserves exact integer storage and every trailing dimension; resident data is downloaded non-destructively and restored to its owner." },
-    BuiltinIntegerCapabilityDescriptor { form: "B = head(A, integer_N)", inputs: &HEAD_COUNT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "N is a positive scalar structural control; a resident N is a separately gated RunMat extension." },
-];
 
 #[runtime_builtin(
     name = "head",
-    category = "table",
-    summary = "Return the first rows of a table, timetable, or array.",
-    keywords = "head,table,timetable,preview,rows",
-    accel = "cpu",
-    descriptor(crate::builtins::table::HEAD_DESCRIPTOR),
-    extensions(crate::builtins::table::builtins::selectors::HEAD_EXTENSIONS),
-    integer_capabilities(crate::builtins::table::builtins::selectors::HEAD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn head_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

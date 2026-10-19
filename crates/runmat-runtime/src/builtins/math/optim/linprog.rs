@@ -2,13 +2,12 @@
 
 use nalgebra::{DMatrix, DVector};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, LINPROG_ERROR_INVALID_ARGUMENT,
+    LINPROG_ERROR_INVALID_INPUT, LINPROG_GPU_INPUT_EXTENSION, LINPROG_INTEGER_AEQ_EXTENSION,
+    LINPROG_INTEGER_A_EXTENSION, LINPROG_INTEGER_BEQ_EXTENSION, LINPROG_INTEGER_B_EXTENSION,
+    LINPROG_INTEGER_F_EXTENSION, LINPROG_INTEGER_LB_EXTENSION, LINPROG_INTEGER_UB_EXTENSION,
 };
+pub use runmat_builtins::{LINPROG_DESCRIPTOR, LINPROG_EXTENSIONS, LINPROG_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{StructValue, Tensor, Value};
 
@@ -17,420 +16,16 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::optim::type_resolvers::linear_programming_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "linprog";
 const ALGORITHM: &str = "active-set vertex enumeration";
 const TOL: f64 = 1.0e-8;
 
-macro_rules! linprog_integer_extension {
-    ($name:ident, $id:literal, $role:literal, $identifier:literal) => {
-        pub const $name: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-            id: $id,
-            mode: BuiltinExtensionMode::RunMatOnly,
-            description: concat!(
-                "linprog with a typed-integer ",
-                $role,
-                " input is a RunMat extension"
-            ),
-            error_identifier: Some($identifier),
-        };
-    };
-}
-linprog_integer_extension!(
-    LINPROG_INTEGER_F_EXTENSION,
-    "linprog-integer-f",
-    "f",
-    "RunMat:compatibility:LinprogIntegerFExtension"
-);
-linprog_integer_extension!(
-    LINPROG_INTEGER_A_EXTENSION,
-    "linprog-integer-a",
-    "A",
-    "RunMat:compatibility:LinprogIntegerAExtension"
-);
-linprog_integer_extension!(
-    LINPROG_INTEGER_B_EXTENSION,
-    "linprog-integer-b",
-    "b",
-    "RunMat:compatibility:LinprogIntegerBExtension"
-);
-linprog_integer_extension!(
-    LINPROG_INTEGER_AEQ_EXTENSION,
-    "linprog-integer-aeq",
-    "Aeq",
-    "RunMat:compatibility:LinprogIntegerAeqExtension"
-);
-linprog_integer_extension!(
-    LINPROG_INTEGER_BEQ_EXTENSION,
-    "linprog-integer-beq",
-    "beq",
-    "RunMat:compatibility:LinprogIntegerBeqExtension"
-);
-linprog_integer_extension!(
-    LINPROG_INTEGER_LB_EXTENSION,
-    "linprog-integer-lb",
-    "lb",
-    "RunMat:compatibility:LinprogIntegerLbExtension"
-);
-linprog_integer_extension!(
-    LINPROG_INTEGER_UB_EXTENSION,
-    "linprog-integer-ub",
-    "ub",
-    "RunMat:compatibility:LinprogIntegerUbExtension"
-);
-pub const LINPROG_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "linprog-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "linprog with explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:LinprogExplicitGpuInputExtension"),
-};
-pub const LINPROG_EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
-    LINPROG_INTEGER_F_EXTENSION,
-    LINPROG_INTEGER_A_EXTENSION,
-    LINPROG_INTEGER_B_EXTENSION,
-    LINPROG_INTEGER_AEQ_EXTENSION,
-    LINPROG_INTEGER_BEQ_EXTENSION,
-    LINPROG_INTEGER_LB_EXTENSION,
-    LINPROG_INTEGER_UB_EXTENSION,
-    LINPROG_GPU_INPUT_EXTENSION,
-];
-const LINPROG_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 7] = [
-    BuiltinIntegerInputCapability {
-        name: "f",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "Public linprog requires double f; RunMat mode admits exact-binary64 typed integers.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public A is single or double; typed integers are independently gated.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "b",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public b is single or double; typed integers are independently gated.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Aeq",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public Aeq is double; typed integers are independently gated.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "beq",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public beq is single or double; typed integers are independently gated.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "lb",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public lb is double; typed integers are independently gated.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "ub",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public ub is double; typed integers are independently gated.",
-    },
-];
-pub const LINPROG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor { form: "linprog(integer-valued solver inputs)", inputs: &LINPROG_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Every typed-integer role is a separately gated RunMat extension. Values must be exactly representable before crossing the host binary64 solver boundary." }];
-
-const LINPROG_OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "x",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Optimal decision vector.",
-}];
-
-const LINPROG_OUTPUT_X_FVAL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Optimal decision vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "fval",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Objective value f'*x at the solution.",
-    },
-];
-
-const LINPROG_OUTPUT_X_FVAL_EXITFLAG: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Optimal decision vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "fval",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Objective value f'*x at the solution.",
-    },
-    BuiltinParamDescriptor {
-        name: "exitflag",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Solver status code.",
-    },
-];
-
-const LINPROG_OUTPUT_ALL: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Optimal decision vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "fval",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Objective value f'*x at the solution.",
-    },
-    BuiltinParamDescriptor {
-        name: "exitflag",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Solver status code.",
-    },
-    BuiltinParamDescriptor {
-        name: "output",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagnostic metadata struct.",
-    },
-];
-
-const LINPROG_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Linear objective vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Inequality constraint matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Inequality constraint right-hand side.",
-    },
-];
-
-const LINPROG_INPUTS_EQ: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Linear objective vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Inequality constraint matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Inequality constraint right-hand side.",
-    },
-    BuiltinParamDescriptor {
-        name: "Aeq",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Equality constraint matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "beq",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Equality constraint right-hand side.",
-    },
-];
-
-const LINPROG_INPUTS_BOUNDS: [BuiltinParamDescriptor; 7] = [
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Linear objective vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Inequality constraint matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "b",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Inequality constraint right-hand side.",
-    },
-    BuiltinParamDescriptor {
-        name: "Aeq",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Equality constraint matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "beq",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Equality constraint right-hand side.",
-    },
-    BuiltinParamDescriptor {
-        name: "lb",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Lower bounds.",
-    },
-    BuiltinParamDescriptor {
-        name: "ub",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Upper bounds.",
-    },
-];
-
-const LINPROG_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
-    BuiltinSignatureDescriptor {
-        label: "x = linprog(f, A, b)",
-        inputs: &LINPROG_INPUTS_CORE,
-        outputs: &LINPROG_OUTPUT_X,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = linprog(f, A, b, Aeq, beq)",
-        inputs: &LINPROG_INPUTS_EQ,
-        outputs: &LINPROG_OUTPUT_X,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = linprog(f, A, b, Aeq, beq, lb, ub)",
-        inputs: &LINPROG_INPUTS_BOUNDS,
-        outputs: &LINPROG_OUTPUT_X,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval] = linprog(f, A, b)",
-        inputs: &LINPROG_INPUTS_CORE,
-        outputs: &LINPROG_OUTPUT_X_FVAL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval] = linprog(f, A, b, Aeq, beq)",
-        inputs: &LINPROG_INPUTS_EQ,
-        outputs: &LINPROG_OUTPUT_X_FVAL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval] = linprog(f, A, b, Aeq, beq, lb, ub)",
-        inputs: &LINPROG_INPUTS_BOUNDS,
-        outputs: &LINPROG_OUTPUT_X_FVAL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval, exitflag] = linprog(f, A, b)",
-        inputs: &LINPROG_INPUTS_CORE,
-        outputs: &LINPROG_OUTPUT_X_FVAL_EXITFLAG,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval, exitflag] = linprog(f, A, b, Aeq, beq)",
-        inputs: &LINPROG_INPUTS_EQ,
-        outputs: &LINPROG_OUTPUT_X_FVAL_EXITFLAG,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval, exitflag] = linprog(f, A, b, Aeq, beq, lb, ub)",
-        inputs: &LINPROG_INPUTS_BOUNDS,
-        outputs: &LINPROG_OUTPUT_X_FVAL_EXITFLAG,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval, exitflag, output] = linprog(f, A, b)",
-        inputs: &LINPROG_INPUTS_CORE,
-        outputs: &LINPROG_OUTPUT_ALL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq)",
-        inputs: &LINPROG_INPUTS_EQ,
-        outputs: &LINPROG_OUTPUT_ALL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[x, fval, exitflag, output] = linprog(f, A, b, Aeq, beq, lb, ub)",
-        inputs: &LINPROG_INPUTS_BOUNDS,
-        outputs: &LINPROG_OUTPUT_ALL,
-    },
-];
-
-const LINPROG_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LINPROG.INVALID_ARGUMENT",
-    identifier: Some("RunMat:linprog:InvalidArgument"),
-    when: "The argument count or optional argument grammar is invalid.",
-    message: "linprog: invalid argument",
-};
-
-const LINPROG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LINPROG.INVALID_INPUT",
-    identifier: Some("RunMat:linprog:InvalidInput"),
-    when: "Objective, constraint, or bound dimensions/types are invalid.",
-    message: "linprog: invalid input",
-};
-
-const LINPROG_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [LINPROG_ERROR_INVALID_ARGUMENT, LINPROG_ERROR_INVALID_INPUT];
-
-pub const LINPROG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LINPROG_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LINPROG_ERRORS,
-};
+mod combinations;
+mod solve;
+use crate::builtins::math::optim::common::ScalarCooperation;
+use solve::solve_linprog;
 
 fn linprog_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -478,22 +73,90 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "linprog",
-    category = "math/optim",
-    summary = "Solve a linear programming minimization problem with linear constraints and bounds.",
-    keywords = "linprog,linear programming,optimization,linear constraints,bounds",
-    accel = "sink",
-    type_resolver(linear_programming_type),
-    extensions(LINPROG_EXTENSIONS),
-    integer_capabilities(LINPROG_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::math::optim::linprog::LINPROG_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::optim::linprog"
 )]
+async fn linprog_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &LINPROG_DESCRIPTOR,
+        &LINPROG_ERROR_INVALID_ARGUMENT,
+        NAME,
+    )?;
+    if !(3..=7).contains(&args.len()) {
+        return Err(linprog_error_with_detail(
+            &LINPROG_ERROR_INVALID_ARGUMENT,
+            "expected f,A,b and optionally Aeq,beq,lb,ub",
+        ));
+    }
+    let mut args = args.into_iter();
+    let f = args.next().expect("admitted arity");
+    let a = args.next().expect("admitted arity");
+    let b = args.next().expect("admitted arity");
+    let rest = args.collect();
+    linprog_in_runtime(runtime.as_ref(), f, a, b, rest).await
+}
+
+#[cfg(test)]
 async fn linprog_builtin(f: Value, a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    linprog_in_runtime(None, f, a, b, rest).await
+}
+
+async fn linprog_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    f: Value,
+    a: Value,
+    b: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &LINPROG_DESCRIPTOR,
+        &LINPROG_ERROR_INVALID_ARGUMENT,
+        NAME,
+    )?;
+    let mut cooperation =
+        ScalarCooperation::for_builtin(runmat_builtins::LINPROG_CATALOG_ENTRY.identity, runtime);
+    cooperation.completed(0).await?;
     if rest.len() > 4 {
         return Err(linprog_error_with_detail(
             &LINPROG_ERROR_INVALID_ARGUMENT,
             "too many input arguments",
         ));
+    }
+    if rest.len() == 1 && !is_empty_value(&rest[0]) {
+        return Err(linprog_error_with_detail(
+            &LINPROG_ERROR_INVALID_ARGUMENT,
+            "Aeq requires a matching beq argument",
+        ));
+    }
+
+    crate::builtins::math::optim::common::preflight_catalog_inputs(
+        &runmat_builtins::LINPROG_CATALOG_ENTRY,
+        &LINPROG_ERROR_INVALID_INPUT,
+        [&f, &a, &b].into_iter().chain(rest.iter()),
+    )?;
+
+    use runmat_builtins::OptimNumericInput as Role;
+    for (label, value, role) in [
+        ("f", &f, Role::NonemptyVector),
+        ("A", &a, Role::OptionalMatrix),
+        ("b", &b, Role::OptionalVector),
+    ] {
+        preflight_numeric(label, value, role)?;
+    }
+    for ((label, role), value) in [
+        ("Aeq", Role::OptionalMatrix),
+        ("beq", Role::OptionalVector),
+        ("lb", Role::OptionalVector),
+        ("ub", Role::OptionalVector),
+    ]
+    .into_iter()
+    .zip(&rest)
+    {
+        preflight_numeric(label, value, role)?;
     }
 
     ensure_linprog_input_policy("f", &f, &LINPROG_INTEGER_F_EXTENSION).await?;
@@ -552,7 +215,22 @@ async fn linprog_builtin(f: Value, a: Value, b: Value, rest: Vec<Value>) -> Buil
         a_eq,
         b_eq,
     };
-    Ok(finalize(solve_linprog(&problem)))
+    Ok(finalize(solve_linprog(&problem, &mut cooperation).await?))
+}
+
+fn preflight_numeric(
+    label: &str,
+    value: &Value,
+    role: runmat_builtins::OptimNumericInput,
+) -> BuiltinResult<()> {
+    let fact = crate::value_fact::value_fact(value);
+    if matches!(fact.kind, runmat_types::ValueKindFact::Logical) || !role.accepts_metadata(&fact) {
+        return Err(linprog_error_with_detail(
+            &LINPROG_ERROR_INVALID_INPUT,
+            format!("{label} has unsupported real numeric class or geometry"),
+        ));
+    }
+    Ok(())
 }
 
 async fn ensure_linprog_input_policy(
@@ -602,7 +280,12 @@ impl MatrixInput {
 async fn gather(value: Value) -> BuiltinResult<Value> {
     crate::dispatcher::gather_if_needed_async(&value)
         .await
-        .map_err(|err| linprog_error_with_detail(&LINPROG_ERROR_INVALID_INPUT, err.message()))
+        .map_err(|err| {
+            let mut error = linprog_error_with_detail(&LINPROG_ERROR_INVALID_INPUT, err.message());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error.source = Some(Box::new(err));
+            error
+        })
 }
 
 fn is_empty_value(value: &Value) -> bool {
@@ -622,7 +305,7 @@ async fn numeric_vector(
         Value::Num(n) => vec![n],
         Value::Int(i) => vec![i.to_f64()],
         Value::Tensor(t) => {
-            let dims = t.shape.len();
+            let dims = t.shape().len();
             if dims > 2 || (t.rows() != 1 && t.cols() != 1) {
                 return Err(linprog_error_with_detail(
                     &LINPROG_ERROR_INVALID_INPUT,
@@ -669,7 +352,7 @@ async fn numeric_matrix(label: &str, value: Value) -> BuiltinResult<Option<Matri
             }))
         }
         Value::Tensor(t) => {
-            if t.shape.len() > 2 {
+            if t.shape().len() > 2 {
                 return Err(linprog_error_with_detail(
                     &LINPROG_ERROR_INVALID_INPUT,
                     format!("{label} must be a numeric matrix"),
@@ -842,64 +525,6 @@ impl LinprogOutcome {
     }
 }
 
-fn solve_linprog(problem: &LinearProgram) -> LinprogOutcome {
-    let n = problem.f.len();
-    let Some(face) = equality_face(problem, n) else {
-        return LinprogOutcome::infeasible("No feasible point found.");
-    };
-    let reduced = reduce_to_equality_face(problem, &face);
-    let k = reduced.f.len();
-    let mut candidates = Vec::new();
-    let mut combinations = 0usize;
-
-    enumerate_vertices(&reduced, |y| {
-        combinations += 1;
-        if is_feasible(&reduced, &y) {
-            candidates.push(y);
-        }
-    });
-
-    let feasible_fallback = if candidates.is_empty() {
-        let y0 = vec![0.0; k];
-        is_feasible(&reduced, &y0).then_some(y0)
-    } else {
-        None
-    };
-    let has_feasible_point = !candidates.is_empty() || feasible_fallback.is_some();
-    if !has_feasible_point {
-        return LinprogOutcome::infeasible("No feasible point found.");
-    }
-    if has_unbounded_descent_direction(&reduced) {
-        return LinprogOutcome::unbounded(combinations);
-    }
-
-    if let Some(x) = feasible_fallback {
-        candidates.push(x);
-    }
-
-    let mut best_y = candidates[0].clone();
-    let mut best_fval = dot(&reduced.f, &best_y);
-    for candidate in candidates.into_iter().skip(1) {
-        let fval = dot(&reduced.f, &candidate);
-        if fval < best_fval - TOL {
-            best_y = candidate;
-            best_fval = fval;
-        }
-    }
-
-    let best = lift_from_equality_face(&face, &best_y);
-    let best_fval = dot(&problem.f, &best);
-    let constrviolation = constraint_violation(problem, &best);
-    LinprogOutcome {
-        x: Some(best),
-        fval: Some(best_fval),
-        exitflag: 1,
-        iterations: combinations,
-        constrviolation,
-        message: "Optimal solution found.".to_string(),
-    }
-}
-
 struct EqualityFace {
     x0: Vec<f64>,
     basis: Vec<Vec<f64>>,
@@ -953,52 +578,6 @@ fn lift_from_equality_face(face: &EqualityFace, y: &[f64]) -> Vec<f64> {
         }
     }
     x
-}
-
-fn enumerate_vertices(problem: &LinearProgram, mut visit: impl FnMut(Vec<f64>)) {
-    let n = problem.f.len();
-    let max_active = problem.a_ineq.len().min(n);
-    for active_count in 0..=max_active {
-        enumerate_combinations(problem.a_ineq.len(), active_count, |active| {
-            let mut rows = problem.a_eq.clone();
-            let mut rhs = problem.b_eq.clone();
-            for &idx in active {
-                rows.push(problem.a_ineq[idx].clone());
-                rhs.push(problem.b_ineq[idx]);
-            }
-            if let Some(x) = pseudo_solve(&rows, &rhs, n) {
-                visit(x);
-            }
-        });
-    }
-}
-
-fn has_unbounded_descent_direction(problem: &LinearProgram) -> bool {
-    let n = problem.f.len();
-    let max_active = problem.a_ineq.len().min(n.saturating_sub(1));
-    for active_count in 0..=max_active {
-        let mut found = false;
-        enumerate_combinations(problem.a_ineq.len(), active_count, |active| {
-            if found {
-                return;
-            }
-            let mut rows = problem.a_eq.clone();
-            for &idx in active {
-                rows.push(problem.a_ineq[idx].clone());
-            }
-            for direction in candidate_nullspace_descent_directions(&rows, &problem.f, n) {
-                if is_recession_direction(problem, &direction) && dot(&problem.f, &direction) < -TOL
-                {
-                    found = true;
-                    return;
-                }
-            }
-        });
-        if found {
-            return true;
-        }
-    }
-    false
 }
 
 fn candidate_nullspace_descent_directions(rows: &[Vec<f64>], f: &[f64], n: usize) -> Vec<Vec<f64>> {
@@ -1168,33 +747,6 @@ fn dmatrix_from_rows(rows: &[Vec<f64>], n: usize) -> DMatrix<f64> {
     DMatrix::from_row_slice(rows.len(), n, &data)
 }
 
-fn enumerate_combinations(len: usize, choose: usize, mut visit: impl FnMut(&[usize])) {
-    fn rec(
-        len: usize,
-        choose: usize,
-        start: usize,
-        current: &mut Vec<usize>,
-        visit: &mut dyn FnMut(&[usize]),
-    ) {
-        if current.len() == choose {
-            visit(current);
-            return;
-        }
-        let remaining = choose - current.len();
-        for idx in start..=len - remaining {
-            current.push(idx);
-            rec(len, choose, idx + 1, current, visit);
-            current.pop();
-        }
-    }
-
-    if choose > len {
-        return;
-    }
-    let mut current = Vec::with_capacity(choose);
-    rec(len, choose, 0, &mut current, &mut visit);
-}
-
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
@@ -1215,7 +767,7 @@ fn finalize(outcome: LinprogOutcome) -> Value {
 
     match crate::output_count::current_output_count() {
         None => x,
-        Some(0) => Value::OutputList(Vec::new()),
+        Some(0) => Value::output_list(Vec::new()),
         Some(1) => crate::output_count::output_list_with_padding(1, vec![x]),
         Some(2) => crate::output_count::output_list_with_padding(2, vec![x, fval]),
         Some(3) => crate::output_count::output_list_with_padding(3, vec![x, fval, exitflag]),
@@ -1252,6 +804,76 @@ mod tests {
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, Value as V};
 
+    #[test]
+    fn registered_solver_checks_requested_outputs_and_invocation_cancellation_first() {
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::rc::Rc;
+        let source = CancellationSource::new();
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        source.cancel(CancellationReason::User);
+        let args = vec![V::Num(1.0), empty(), empty()];
+        let error = block_on(linprog_builtin_registered(Some(runtime), args))
+            .expect_err("cancelled solver");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        let error = block_on(linprog_builtin_registered(
+            None,
+            vec![V::Num(1.0), empty(), empty(), V::Num(1.0)],
+        ))
+        .expect_err("lone nonempty Aeq remains a grammar failure");
+        assert_eq!(
+            error.identifier(),
+            LINPROG_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(error.message().contains("Aeq requires a matching beq"));
+        let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
+        let error = block_on(linprog_builtin_registered(None, Vec::new()))
+            .expect_err("output preflight before argument parsing");
+        assert_eq!(
+            error.identifier(),
+            LINPROG_ERROR_INVALID_ARGUMENT.identifier
+        );
+    }
+
+    #[test]
+    fn active_candidate_observes_budget_cancellation_without_solver_replay() {
+        use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::{num::NonZeroU64, rc::Rc};
+        let source = Rc::new(CancellationSource::new());
+        let cancelled = source.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                cancelled.cancel(CancellationReason::User);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let mut cooperation = ScalarCooperation::with_builtin_budget(
+            runmat_builtins::LINPROG_CATALOG_ENTRY.identity,
+            budget,
+        );
+        let problem = LinearProgram {
+            f: vec![1.0],
+            a_ineq: vec![vec![-1.0]],
+            b_ineq: vec![0.0],
+            a_eq: Vec::new(),
+            b_eq: Vec::new(),
+        };
+        let error = block_on(solve_linprog(&problem, &mut cooperation))
+            .err()
+            .expect("cancellation at numerical boundary");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(error.source.is_some());
+    }
+
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> V {
         V::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())
     }
@@ -1271,11 +893,36 @@ mod tests {
     }
 
     fn run(f: V, a: V, b: V, rest: Vec<V>, outputs: usize) -> Vec<V> {
-        let _guard = crate::output_count::push_output_count(Some(outputs));
+        let _guard =
+            crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
         let value = block_on(linprog_builtin(f, a, b, rest)).expect("linprog");
         match value {
-            V::OutputList(values) => values,
+            V::OutputList(values) => values
+                .try_into_owned()
+                .expect("unique output list")
+                .try_into_unbounded_vec()
+                .expect("unbounded output list"),
             other => vec![other],
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn public_invocation_accepts_rank_zero_and_rank_one_objective_vectors() {
+        for shape in [vec![], vec![1]] {
+            let objective = V::Tensor(Tensor::new(vec![1.0], shape).expect("objective"));
+            let output = block_on(linprog_builtin(
+                objective,
+                empty(),
+                empty(),
+                vec![empty(), empty(), V::Num(0.0), V::Num(1.0)],
+            ))
+            .expect("bounded scalar linear program");
+            let V::Tensor(solution) = output else {
+                panic!("expected solution tensor");
+            };
+            assert_eq!(solution.shape(), &[1, 1]);
+            assert_eq!(solution.materialize_f64(), vec![0.0]);
         }
     }
 

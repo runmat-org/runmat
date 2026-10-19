@@ -41,6 +41,7 @@ struct SparseStorage {
 pub(in crate::backend::wgpu::provider) struct SparseState {
     storage: Mutex<SparseStorage>,
     transient_bytes: AtomicU64,
+    next_id: AtomicU64,
 }
 
 pub(super) struct SparseTransientReservation<'a> {
@@ -59,6 +60,11 @@ impl Drop for SparseTransientReservation<'_> {
 }
 
 impl SparseState {
+    /// Sparse handle identities are provider-local and never alias dense allocations.
+    pub(in crate::backend::wgpu::provider) fn next_id(&self) -> u64 {
+        self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    }
+
     fn lock(&self) -> MutexGuard<'_, SparseStorage> {
         self.storage
             .lock()

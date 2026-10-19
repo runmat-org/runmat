@@ -4,18 +4,20 @@ use std::time::Duration;
 
 use runmat_execution::identity::PoolId;
 use runmat_execution::identity::ValueId;
+use runmat_execution::value::GraphRequiredSchema;
 use runmat_execution::{CancellationReason, ExecutionScopeId};
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_artifact::{
-    ProgramExecutionObject, ProgramExecutionObjectLocation, ProgramExecutionRequest,
-    ProgramExecutionResponse,
+    GraphExecutionRequest, ProgramExecutionObject, ProgramExecutionObjectLocation,
+    ProgramExecutionRequest, ProgramExecutionResponse,
 };
 use runmat_execution_runner::PoolSpec;
 use runmat_execution_transport_native::control::{
     DriverAuthority, DriverControlPlane, ResourceRequest as AllocationResources,
 };
 
-use super::pool_reconcile::{reconcile_workers, validate_pool_intent};
+use super::driver::AdmittedRemoteProgram;
+use super::pool_reconcile::{reconcile_workers, validate_pool_intent, WorkerAuthorizationContext};
 use super::pool_resources::pool_inventory;
 use super::pool_wait::{
     await_running_operation, await_startup_operation, RunningWait, StartupWait,
@@ -30,6 +32,7 @@ const WORKER_READY_TIMEOUT: Duration = Duration::from_secs(90);
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(2);
 const DRIVER_TICK_INTERVAL: Duration = Duration::from_millis(250);
+const CANCELLATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) enum RemotePoolExecutionOutcome {
     Completed(RemotePoolExecutionResult),
@@ -43,6 +46,14 @@ pub(crate) struct RemotePoolExecutionResult {
 }
 
 impl RemotePoolExecutionResult {
+    /// A response whose values are complete without driver-held result objects.
+    pub(crate) fn without_objects(response: ProgramExecutionResponse) -> Self {
+        Self {
+            response,
+            objects: super::result_objects::RemoteResultObjects::None,
+        }
+    }
+
     #[cfg(all(test, feature = "occt-native"))]
     pub(crate) fn read_result_object(
         &self,
@@ -57,8 +68,7 @@ pub(super) struct RemotePoolExecution<'a> {
     pub(super) control: &'a dyn DriverControlPlane,
     pub(super) authority: &'a DriverAuthority,
     pub(super) run_key: &'a RunKeyMaterial,
-    pub(super) bundle_archive: Vec<u8>,
-    pub(super) request: ProgramExecutionRequest,
+    pub(super) program: AdmittedRemoteProgram,
     pub(super) input_objects: Vec<ProgramExecutionObject>,
     pub(super) recovered: Option<super::recovery::RestoredObjectClosure>,
     pub(super) recovered_pool: Option<super::pool_checkpoint::RestoredPoolCheckpoint>,
@@ -67,6 +77,20 @@ pub(super) struct RemotePoolExecution<'a> {
     pub(super) desired_workers: u32,
     pub(super) resources: AllocationResources,
     pub(super) cancellation: tokio::sync::watch::Receiver<bool>,
+    pub(super) ready_v1: bool,
+}
+
+/// The admitted root program: Direct V7 runs against the installed bundle;
+/// a Graph V10 Program is staged to each worker from its signed transfer.
+enum RootProgram {
+    Direct(ProgramExecutionRequest),
+    Graph(GraphRoot),
+}
+
+pub(super) struct GraphRoot {
+    pub(super) request: GraphExecutionRequest,
+    pub(super) encoded_bytes: usize,
+    pub(super) transfer: Option<super::pool::SignedGraphTransfer>,
 }
 
 pub(super) async fn execute(
@@ -76,8 +100,7 @@ pub(super) async fn execute(
         control,
         authority,
         run_key,
-        bundle_archive,
-        request,
+        program,
         input_objects,
         recovered,
         recovered_pool,
@@ -86,7 +109,13 @@ pub(super) async fn execute(
         desired_workers,
         resources,
         mut cancellation,
+        ready_v1,
     } = execution;
+    let authorization = WorkerAuthorizationContext {
+        authority,
+        run_key,
+        ready_v1,
+    };
     let scope_id = ExecutionScopeId::derive(&[authority.run_id.as_bytes(), b"remote-root"]);
     let pool_id = PoolId::derive(&[authority.run_id.as_bytes(), b"remote-pool"]);
     let pool_inventory = pool_inventory(&resources, desired_workers)?;
@@ -104,23 +133,62 @@ pub(super) async fn execute(
         .as_ref()
         .map(|restored| restored.locations.clone())
         .unwrap_or_default();
-    let pool = match recovered_pool {
-        Some(restored) => restored.into_pool(
-            super::RemotePoolRestoreAuthority {
+    let (pool, root) = match program {
+        AdmittedRemoteProgram::Direct(admitted) => {
+            let super::driver::program::AdmittedDirectProgram {
+                bundle_archive,
+                request,
+                ..
+            } = *admitted;
+            let pool = match recovered_pool {
+                Some(restored) => restored.into_pool(
+                    super::RemotePoolRestoreAuthority {
+                        scope_id,
+                        pool: pool_spec,
+                        value_scope: authority.run_id.clone(),
+                        driver_fence: authority.fencing_token,
+                    },
+                    Arc::from(bundle_archive),
+                )?,
+                None => RemotePoolDriver::new_with_value_scope(
+                    scope_id,
+                    pool_spec,
+                    authority.fencing_token,
+                    bundle_archive,
+                    authority.run_id.clone(),
+                )?,
+            };
+            (pool, RootProgram::Direct(request))
+        }
+        AdmittedRemoteProgram::Graph(admitted) => {
+            if recovered_pool.is_some() || !input_objects.is_empty() {
+                return Err(protocol(
+                    "graph programs carry neither pool checkpoints nor Direct input objects",
+                ));
+            }
+            let super::driver::program::AdmittedGraphProgram {
+                request,
+                encoded_bytes,
+                _staged,
+                transfer,
+                ..
+            } = *admitted;
+            let pool = RemotePoolDriver::new_graph(
                 scope_id,
-                pool: pool_spec,
-                value_scope: authority.run_id.clone(),
-                driver_fence: authority.fencing_token,
-            },
-            Arc::from(bundle_archive),
-        )?,
-        None => RemotePoolDriver::new_with_value_scope(
-            scope_id,
-            pool_spec,
-            authority.fencing_token,
-            bundle_archive,
-            authority.run_id.clone(),
-        )?,
+                pool_spec,
+                authority.fencing_token,
+                authority.run_id.clone(),
+            )?;
+            pool.retain_graph_stage(_staged);
+            (
+                pool,
+                RootProgram::Graph(GraphRoot {
+                    request,
+                    encoded_bytes,
+                    transfer,
+                }),
+            )
+        }
     };
     for object in input_objects {
         if object.is_externalized_value() {
@@ -181,11 +249,10 @@ pub(super) async fn execute(
         Ok(()) => {
             execute_with_allocated_workers(AllocatedExecution {
                 control,
-                authority,
-                run_key,
+                authorization: &authorization,
                 pool,
                 pool_id,
-                request,
+                root,
                 recovered,
                 pool_catalog,
                 pool_locations,
@@ -215,11 +282,10 @@ pub(super) async fn execute(
 
 struct AllocatedExecution<'a> {
     control: &'a dyn DriverControlPlane,
-    authority: &'a DriverAuthority,
-    run_key: &'a RunKeyMaterial,
+    authorization: &'a WorkerAuthorizationContext<'a>,
     pool: Arc<RemotePoolDriver>,
     pool_id: PoolId,
-    request: ProgramExecutionRequest,
+    root: RootProgram,
     recovered: Option<super::recovery::RestoredObjectClosure>,
     pool_catalog: Option<ProgramExecutionObjectLocation>,
     pool_locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
@@ -239,11 +305,10 @@ async fn execute_with_allocated_workers(
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
     let AllocatedExecution {
         control,
-        authority,
-        run_key,
+        authorization,
         pool,
         pool_id,
-        request,
+        root,
         recovered,
         pool_catalog,
         pool_locations,
@@ -257,6 +322,8 @@ async fn execute_with_allocated_workers(
         deadline,
         mut driver_ticks,
     } = execution;
+    let authority = authorization.authority;
+    let run_key = authorization.run_key;
     let mut registered = HashMap::new();
     while registered.len() < desired_workers as usize {
         if *cancellation.borrow() {
@@ -266,8 +333,7 @@ async fn execute_with_allocated_workers(
         match await_startup_operation(
             reconcile_workers(
                 control,
-                authority,
-                run_key,
+                authorization,
                 pool_id,
                 &pool,
                 &worker_pool,
@@ -354,6 +420,50 @@ async fn execute_with_allocated_workers(
     }
 
     let run_id = authority.run_id.clone();
+    let request = match root {
+        RootProgram::Direct(request) => request,
+        RootProgram::Graph(graph) => {
+            // V10 work proceeds as soon as workers register. Newer graph
+            // requests wait for an encrypted, binary-issued capability proof.
+            let required = GraphRequiredSchema::from_version(graph.request.schema_version)
+                .ok_or_else(|| protocol("remote Graph request has an unsupported schema"))?
+                .required_capability();
+            if let Some(required) = &required {
+                let supported = await_graph_capability(GraphCapabilityWait {
+                    control,
+                    authorization,
+                    pool: &pool,
+                    pool_id,
+                    required,
+                    desired_workers,
+                    resources: &resources,
+                    cancellation: &mut cancellation,
+                    worker_pool: &mut worker_pool,
+                    generation: generation.as_ref(),
+                    registered: &mut registered,
+                    deadline,
+                })
+                .await?;
+                if !supported {
+                    pool.cancel(CancellationReason::User)?;
+                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                }
+            }
+            return run_graph_root(
+                &pool,
+                super::pool_tasks::execute_graph_root(
+                    Arc::clone(&pool),
+                    graph,
+                    required,
+                    run_id,
+                    resources.clone(),
+                ),
+                &mut cancellation,
+                &mut driver_ticks,
+            )
+            .await;
+        }
+    };
     let exact_meshing = request.recipe.execution_mode == EXACT_MESHING_ROOT_EXECUTION_MODE;
     let geometry_meshing =
         request.recipe.execution_mode == crate::GEOMETRY_MESHING_ROOT_EXECUTION_MODE;
@@ -615,8 +725,7 @@ async fn execute_with_allocated_workers(
                 }
                 let reconcile = reconcile_workers(
                         control,
-                        authority,
-                        run_key,
+                        authorization,
                         pool_id,
                         &pool,
                         &worker_pool,
@@ -662,6 +771,124 @@ async fn execute_with_allocated_workers(
                         return Err(protocol("remote worker reconciliation exceeded its deadline"));
                     }
                 }
+            }
+        }
+    }
+}
+
+struct GraphCapabilityWait<'a, 'b> {
+    control: &'a dyn DriverControlPlane,
+    authorization: &'a WorkerAuthorizationContext<'a>,
+    pool: &'b Arc<RemotePoolDriver>,
+    pool_id: PoolId,
+    required: &'b runmat_execution::resource::Capability,
+    desired_workers: u32,
+    resources: &'b AllocationResources,
+    cancellation: &'b mut tokio::sync::watch::Receiver<bool>,
+    worker_pool: &'b mut runmat_execution_transport_native::control::DriverWorkerPool,
+    generation: &'b std::sync::atomic::AtomicU64,
+    registered: &'b mut HashMap<String, runmat_execution::identity::WorkerId>,
+    deadline: tokio::time::Instant,
+}
+
+/// Returns false when cancellation arrives before an authenticated worker
+/// advertises the selected Graph schema.
+async fn await_graph_capability(wait: GraphCapabilityWait<'_, '_>) -> NativeExecutionResult<bool> {
+    let GraphCapabilityWait {
+        control,
+        authorization,
+        pool,
+        pool_id,
+        required,
+        desired_workers,
+        resources,
+        cancellation,
+        worker_pool,
+        generation,
+        registered,
+        deadline,
+    } = wait;
+    loop {
+        pool.refresh_worker_software_capabilities().await?;
+        let supported = pool.snapshot().pools.get(&pool_id).is_some_and(|pool| {
+            pool.spec.resource_limit.capabilities.contains(required)
+        });
+        if supported {
+            return Ok(true);
+        }
+        if *cancellation.borrow() {
+            return Ok(false);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(protocol(
+                "no authenticated remote worker advertised the selected Graph schema",
+            ));
+        }
+        tokio::select! {
+            changed = cancellation.changed() => {
+                if changed.is_ok() && *cancellation.borrow() {
+                    return Ok(false);
+                }
+            }
+            _ = tokio::time::sleep(RECONCILE_INTERVAL) => {}
+        }
+        *worker_pool = control
+            .resize_workers(
+                authorization.authority,
+                worker_pool
+                    .generation
+                    .checked_sub(1)
+                    .ok_or_else(|| protocol("Server returned an invalid worker pool generation"))?,
+                desired_workers,
+                resources.clone(),
+            )
+            .await
+            .map_err(protocol)?;
+        generation.store(worker_pool.generation, std::sync::atomic::Ordering::Release);
+        validate_pool_intent(worker_pool, desired_workers, resources)?;
+        reconcile_workers(
+            control,
+            authorization,
+            pool_id,
+            pool,
+            worker_pool,
+            registered,
+        )
+        .await?;
+    }
+}
+
+/// A Graph root keeps scheduler time moving and, on cancellation, waits a
+/// bounded interval for the worker's retirement report before resolving.
+async fn run_graph_root(
+    pool: &Arc<RemotePoolDriver>,
+    execution: impl std::future::Future<Output = NativeExecutionResult<RemotePoolExecutionOutcome>>,
+    cancellation: &mut tokio::sync::watch::Receiver<bool>,
+    driver_ticks: &mut tokio::time::Interval,
+) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    tokio::pin!(execution);
+    let mut cancellation_open = true;
+    loop {
+        if *cancellation.borrow() {
+            pool.cancel(CancellationReason::User)?;
+            let drained = tokio::time::timeout(CANCELLATION_DRAIN_TIMEOUT, &mut execution).await;
+            return Ok(match drained {
+                Ok(result) => super::pool_tasks::observed_execution(pool, result, true)?,
+                Err(_) => RemotePoolExecutionOutcome::Indeterminate(
+                    "remote Graph cancellation did not prove worker retirement before the drain deadline"
+                        .into(),
+                ),
+            });
+        }
+        tokio::select! {
+            result = &mut execution => return result,
+            changed = cancellation.changed(), if cancellation_open => {
+                if changed.is_err() {
+                    cancellation_open = false;
+                }
+            }
+            _ = driver_ticks.tick() => {
+                pool.tick()?;
             }
         }
     }

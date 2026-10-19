@@ -600,6 +600,14 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
     let payload = js_sys::Object::new();
     let message = err.to_string();
     let code = match err {
+        FigureError::ReceiverIdentity(source) => {
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("details"),
+                &JsValue::from_str(&source.to_string()),
+            );
+            "ReceiverIdentity"
+        }
         FigureError::InvalidHandle(handle) => {
             let _ = Reflect::set(
                 &payload,
@@ -641,6 +649,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
         FigureError::InvalidPlotObjectHandle => "InvalidPlotObjectHandle",
+        FigureError::StalePlotSnapshot => "StalePlotSnapshot",
         FigureError::RenderFailure { source } => {
             let details = source.to_string();
             let _ = Reflect::set(
@@ -662,6 +671,51 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
         &JsValue::from_str(&message),
     );
     JsValue::from(payload)
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod error_tests {
+    use super::*;
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn stale_plot_snapshot_preserves_public_error() {
+        let error = figure_error_to_js(FigureError::StalePlotSnapshot);
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("code"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("StalePlotSnapshot")
+        );
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("message"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("plot changed while reading its GPU data")
+        );
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn receiver_identity_preserves_typed_source() {
+        let error = figure_error_to_js(FigureError::ReceiverIdentity(
+            runmat_runtime::builtins::plotting::GraphicsReceiverIssueError,
+        ));
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("code"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("ReceiverIdentity")
+        );
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("details"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("graphics receiver identity space exhausted")
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -819,8 +873,7 @@ fn shared_webgpu_context() -> Option<SharedWgpuContext> {
         AccelContextHandle::Wgpu(ctx) => {
             let shared = SharedWgpuContext {
                 instance: ctx.instance.clone(),
-                device: ctx.device,
-                queue: ctx.queue,
+                access: ctx.access,
                 adapter: ctx.adapter,
                 adapter_info: ctx.adapter_info.clone(),
                 limits: ctx.limits,

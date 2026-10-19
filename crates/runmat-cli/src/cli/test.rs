@@ -89,7 +89,7 @@ pub struct TestArgs {
     #[arg(long)]
     pub coverage_include_vendor: bool,
 
-    /// Directory for machine reports and captured artifacts
+    /// Directory for direct report files and run-scoped captured artifacts
     #[arg(long = "report-dir", default_value = "test-results")]
     pub report_dir: PathBuf,
 

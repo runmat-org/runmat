@@ -446,7 +446,6 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let series_style = series_bar_style(&style, color_axes, hold_enabled, 0);
     apply_bar_style(&mut chart, &series_style, HIST_DEFAULT_LABEL);
 
-
     let mut chart_opt = Some(chart);
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
@@ -493,8 +492,7 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         })?;
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_histogram_internal(err));

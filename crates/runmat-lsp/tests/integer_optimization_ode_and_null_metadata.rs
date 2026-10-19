@@ -18,10 +18,11 @@ const CAPABILITY_NAMES: [&str; 8] = [
 #[test]
 fn optimization_ode_and_null_integer_metadata_is_explicit() {
     for name in CAPABILITY_NAMES {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert!(!builtin.integer_capabilities.is_empty(), "{name}");
-        assert!(builtin.integer_audit.is_none(), "{name}");
-        for capability in builtin.integer_capabilities {
+        let metadata = runmat_builtins::builtin_integer_metadata_by_name(name)
+            .expect("registered builtin integer metadata");
+        assert!(!metadata.capabilities.is_empty(), "{name}");
+        assert!(metadata.audit.is_none(), "{name}");
+        for capability in metadata.capabilities {
             for input in capability.inputs {
                 assert_eq!(input.classes.len(), 8, "{name}: {}", input.name);
             }
@@ -62,8 +63,9 @@ fn optimization_and_ode_integer_extensions_describe_checked_host_boundaries() {
 
 #[test]
 fn null_and_quad_distinguish_documented_integer_controls_from_extensions() {
-    let null = runmat_builtins::builtin_function_by_name("null").expect("null builtin");
-    assert!(null.integer_capabilities.iter().any(|capability| {
+    let null =
+        runmat_builtins::builtin_integer_metadata_by_name("null").expect("null integer metadata");
+    assert!(null.capabilities.iter().any(|capability| {
         capability.inputs.iter().any(|input| {
             input.name == "tol" && input.availability == BuiltinIntegerInputAvailability::Documented
         }) && capability.output_class == BuiltinIntegerOutputClassRule::PreserveNondoubleInput

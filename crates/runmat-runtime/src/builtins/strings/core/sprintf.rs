@@ -1,13 +1,8 @@
 //! MATLAB-compatible `sprintf` builtin that mirrors printf-style formatting semantics.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, SPRINTF_DESCRIPTOR, SPRINTF_ERROR_ARGUMENT_MISMATCH,
+    SPRINTF_ERROR_INTERNAL, SPRINTF_ERROR_INVALID_FORMAT_SPEC, SPRINTF_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, Value};
@@ -21,7 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::type_resolvers::string_scalar_type;
+use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::sprintf")]
@@ -53,91 +48,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "sprintf";
 
-const SPRINTF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "txt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Formatted character row vector output.",
-}];
-
-const SPRINTF_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "formatSpec",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Format template text.",
-    },
-    BuiltinParamDescriptor {
-        name: "A...",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Values substituted by conversion specifiers.",
-    },
-];
-
-const SPRINTF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "txt = sprintf(formatSpec, A...)",
-    inputs: &SPRINTF_INPUTS,
-    outputs: &SPRINTF_OUTPUT,
-}];
-
-const SPRINTF_ERROR_INVALID_FORMAT_SPEC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPRINTF.INVALID_FORMAT_SPEC",
-    identifier: Some("RunMat:sprintf:InvalidFormatSpec"),
-    when: "formatSpec is invalid or unsupported.",
-    message: "sprintf: invalid formatSpec",
-};
-
-const SPRINTF_ERROR_ARGUMENT_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPRINTF.ARGUMENT_MISMATCH",
-    identifier: Some("RunMat:sprintf:ArgumentMismatch"),
-    when: "Conversion specifier count does not match provided arguments.",
-    message: "sprintf: format arguments do not match conversion specifiers",
-};
-
-const SPRINTF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPRINTF.INTERNAL",
-    identifier: Some("RunMat:sprintf:InternalError"),
-    when: "Internal char-array construction failed.",
-    message: "sprintf: internal error",
-};
-
-const SPRINTF_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    SPRINTF_ERROR_INVALID_FORMAT_SPEC,
-    SPRINTF_ERROR_ARGUMENT_MISMATCH,
-    SPRINTF_ERROR_INTERNAL,
-];
-
-pub const SPRINTF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPRINTF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SPRINTF_ERRORS,
-};
-
-const SPRINTF_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A...",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly lists all eight integer classes. Integer conversions read authoritative values directly, including signed, unsigned, octal, hexadecimal, character-code, width, and precision roles.",
-    }];
-pub const SPRINTF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "txt = sprintf(formatSpec, integer_A...)",
-        inputs: &SPRINTF_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Formatting preserves full-width integer text without an f64 intermediary and consumes array elements in column order. Resident numeric arguments gather authoritatively because formatting executes on the client.",
-    }];
-
 fn sprintf_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     sprintf_error_with_message(error.message, error)
 }
@@ -159,17 +69,18 @@ fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "sprintf",
-    category = "strings/core",
-    summary = "Format data into a character vector using printf-style specifiers.",
-    keywords = "sprintf,format,printf,text",
-    accel = "format",
-    sink = true,
-    type_resolver(string_scalar_type),
-    descriptor(crate::builtins::strings::core::sprintf::SPRINTF_DESCRIPTOR),
-    integer_capabilities(crate::builtins::strings::core::sprintf::SPRINTF_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
 async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &SPRINTF_DESCRIPTOR,
+        &SPRINTF_ERROR_TOO_MANY_OUTPUTS,
+        "sprintf",
+    )?;
+    if contains_numeric_or_resident_text_input(&format_spec) {
+        return Err(sprintf_error(&SPRINTF_ERROR_INVALID_FORMAT_SPEC));
+    }
     let gathered_spec = gather_if_needed_async(&format_spec)
         .await
         .map_err(remap_sprintf_flow)?;
@@ -218,7 +129,11 @@ fn char_row_value(text: &str) -> BuiltinResult<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::{builtins::common::test_support, make_cell};
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{infer_catalog_call, SPRINTF_CATALOG_ENTRY};
+    use runmat_types::{
+        CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
+        ValueFact, ValueKindFact,
+    };
     use runmat_value::{
         CharArray, IntValue, IntegerComplexStorage, IntegerStorage, StringArray, Tensor,
     };
@@ -262,6 +177,20 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn sprintf_shared_scientific_and_general_conversions() {
+        let result = sprintf_builtin(
+            Value::String("%.1e|%.3g|%d".to_string()),
+            vec![Value::Num(8.8e8), Value::Num(0.000123456), Value::Num(2.5)],
+        )
+        .expect("sprintf");
+        assert_eq!(
+            char_value_to_string(result),
+            "8.8e+08|0.000123|2.500000e+00"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn sprintf_array_repeat() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let result = sprintf_builtin(
@@ -299,7 +228,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let value = Value::GpuTensor(handle);
@@ -481,10 +410,24 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sprintf_type_is_string_scalar() {
-        assert_eq!(
-            string_scalar_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
+    fn sprintf_catalog_infers_character_row_for_text() {
+        let request = CallRequest {
+            arguments: vec![ValueFact::scalar(ValueKindFact::String)],
+            literals: LiteralContext::new(Vec::new()),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let inferred = infer_catalog_call(&SPRINTF_CATALOG_ENTRY, &request);
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
         );
+        assert_eq!(inferred.outputs.len(), 1);
+        assert_eq!(inferred.outputs[0].kind, ValueKindFact::Character);
+        assert_eq!(
+            inferred.outputs[0].shape,
+            ShapeFact::from(vec![Some(1), None])
+        );
+        assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
     }
 }

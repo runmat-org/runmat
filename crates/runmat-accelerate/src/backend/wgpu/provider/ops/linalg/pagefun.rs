@@ -70,15 +70,16 @@ impl WgpuProvider {
         let total_len = out_page_size
             .checked_mul(page_volume)
             .ok_or_else(|| anyhow!("pagefun: output size overflow"))?;
-        let out_buffer =
-            self.create_storage_buffer_checked(total_len, "runmat-pagefun-mtimes-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, total_len, "runmat-pagefun-mtimes-out")
+        })??;
 
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(
+            return self.register_existing_buffer(
                 out_buffer,
                 request.output_shape.clone(),
                 total_len,
-            ));
+            );
         }
 
         let m_u32 = u32::try_from(rows)
@@ -96,124 +97,128 @@ impl WgpuProvider {
         let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
         let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m_u32, tile);
 
-        self.prepare_matmul_pipeline();
-        self.device_ref().poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| self.prepare_matmul_pipeline(emission, pending))??;
+        self.access.poll(wgpu::Maintain::Poll);
 
         let start = Instant::now();
 
-        let mut multi_index = vec![0usize; rank];
-        for page_idx in 0..page_volume {
-            if rank > 0 {
-                decode_multi_index(page_idx, &request.page_dims, &mut multi_index);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let mut multi_index = vec![0usize; rank];
+            for page_idx in 0..page_volume {
+                if rank > 0 {
+                    decode_multi_index(page_idx, &request.page_dims, &mut multi_index);
+                }
+
+                let lhs_linear = broadcast_linear_index(&lhs_dims, &lhs_strides, &multi_index);
+                let rhs_linear = broadcast_linear_index(&rhs_dims, &rhs_strides, &multi_index);
+
+                let lhs_offset_elements = lhs_linear
+                    .checked_mul(lhs_page_size)
+                    .ok_or_else(|| anyhow!("pagefun: lhs offset overflow"))?;
+                let rhs_offset_elements = rhs_linear
+                    .checked_mul(rhs_page_size)
+                    .ok_or_else(|| anyhow!("pagefun: rhs offset overflow"))?;
+                let out_offset_elements = page_idx
+                    .checked_mul(out_page_size)
+                    .ok_or_else(|| anyhow!("pagefun: output offset overflow"))?;
+
+                let lhs_end = lhs_offset_elements
+                    .checked_add(lhs_page_size)
+                    .ok_or_else(|| anyhow!("pagefun: lhs offset overflow"))?;
+                let rhs_end = rhs_offset_elements
+                    .checked_add(rhs_page_size)
+                    .ok_or_else(|| anyhow!("pagefun: rhs offset overflow"))?;
+                let out_end = out_offset_elements
+                    .checked_add(out_page_size)
+                    .ok_or_else(|| anyhow!("pagefun: output offset overflow"))?;
+
+                ensure!(
+                    lhs_end <= entry_a.len,
+                    "pagefun: lhs page out of bounds (page {})",
+                    page_idx
+                );
+                ensure!(
+                    rhs_end <= entry_b.len,
+                    "pagefun: rhs page out of bounds (page {})",
+                    page_idx
+                );
+                ensure!(
+                    out_end <= total_len,
+                    "pagefun: output page out of bounds (page {})",
+                    page_idx
+                );
+
+                let offset_a_u32 = u32::try_from(lhs_offset_elements)
+                    .map_err(|_| anyhow!("pagefun: lhs offset exceeds GPU limits"))?;
+                let offset_b_u32 = u32::try_from(rhs_offset_elements)
+                    .map_err(|_| anyhow!("pagefun: rhs offset exceeds GPU limits"))?;
+                let offset_out_u32 = u32::try_from(out_offset_elements)
+                    .map_err(|_| anyhow!("pagefun: output offset exceeds GPU limits"))?;
+
+                let mut flags = 0u32;
+                if view_a.transpose {
+                    flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_A;
+                }
+                if view_b.transpose {
+                    flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_B;
+                }
+
+                let params = crate::backend::wgpu::params::MatmulParams {
+                    m: m_u32,
+                    n: n_u32,
+                    k: k_u32,
+                    lda,
+                    ldb,
+                    ldc,
+                    offset_a: offset_a_u32,
+                    offset_b: offset_b_u32,
+                    offset_out: offset_out_u32,
+                    flags,
+                };
+
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-pagefun-mtimes-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-pagefun-mtimes-bind"),
+                        layout: &self.pipelines.matmul.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry_a.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: entry_b.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+
+                crate::backend::wgpu::dispatch::matmul::run(
+                    emission,
+                    pending,
+                    &self.pipelines.matmul.get(emission)?.pipeline,
+                    &bind_group,
+                    groups_x,
+                    groups_y,
+                )?;
             }
 
-            let lhs_linear = broadcast_linear_index(&lhs_dims, &lhs_strides, &multi_index);
-            let rhs_linear = broadcast_linear_index(&rhs_dims, &rhs_strides, &multi_index);
-
-            let lhs_offset_elements = lhs_linear
-                .checked_mul(lhs_page_size)
-                .ok_or_else(|| anyhow!("pagefun: lhs offset overflow"))?;
-            let rhs_offset_elements = rhs_linear
-                .checked_mul(rhs_page_size)
-                .ok_or_else(|| anyhow!("pagefun: rhs offset overflow"))?;
-            let out_offset_elements = page_idx
-                .checked_mul(out_page_size)
-                .ok_or_else(|| anyhow!("pagefun: output offset overflow"))?;
-
-            let lhs_end = lhs_offset_elements
-                .checked_add(lhs_page_size)
-                .ok_or_else(|| anyhow!("pagefun: lhs offset overflow"))?;
-            let rhs_end = rhs_offset_elements
-                .checked_add(rhs_page_size)
-                .ok_or_else(|| anyhow!("pagefun: rhs offset overflow"))?;
-            let out_end = out_offset_elements
-                .checked_add(out_page_size)
-                .ok_or_else(|| anyhow!("pagefun: output offset overflow"))?;
-
-            ensure!(
-                lhs_end <= entry_a.len,
-                "pagefun: lhs page out of bounds (page {})",
-                page_idx
-            );
-            ensure!(
-                rhs_end <= entry_b.len,
-                "pagefun: rhs page out of bounds (page {})",
-                page_idx
-            );
-            ensure!(
-                out_end <= total_len,
-                "pagefun: output page out of bounds (page {})",
-                page_idx
-            );
-
-            let offset_a_u32 = u32::try_from(lhs_offset_elements)
-                .map_err(|_| anyhow!("pagefun: lhs offset exceeds GPU limits"))?;
-            let offset_b_u32 = u32::try_from(rhs_offset_elements)
-                .map_err(|_| anyhow!("pagefun: rhs offset exceeds GPU limits"))?;
-            let offset_out_u32 = u32::try_from(out_offset_elements)
-                .map_err(|_| anyhow!("pagefun: output offset exceeds GPU limits"))?;
-
-            let mut flags = 0u32;
-            if view_a.transpose {
-                flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_A;
-            }
-            if view_b.transpose {
-                flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_B;
-            }
-
-            let params = crate::backend::wgpu::params::MatmulParams {
-                m: m_u32,
-                n: n_u32,
-                k: k_u32,
-                lda,
-                ldb,
-                ldc,
-                offset_a: offset_a_u32,
-                offset_b: offset_b_u32,
-                offset_out: offset_out_u32,
-                flags,
-            };
-
-            let params_buffer = self.uniform_buffer(&params, "runmat-pagefun-mtimes-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-pagefun-mtimes-bind"),
-                    layout: &self.pipelines.matmul.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry_a.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: entry_b.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-
-            crate::backend::wgpu::dispatch::matmul::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.matmul.pipeline,
-                &bind_group,
-                groups_x,
-                groups_y,
-            );
-        }
-
+            Ok(())
+        })??;
         self.telemetry.record_matmul_duration(start.elapsed());
 
         let handle =
-            self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len);
+            self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len)?;
 
         Ok(handle)
     }

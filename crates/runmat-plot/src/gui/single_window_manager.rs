@@ -88,7 +88,9 @@ fn show_plot_internal(
                     }
 
                     // Set the figure data
-                    window.set_figure(figure);
+                    window
+                        .set_figure(figure)
+                        .map_err(|error| format!("Failed to prepare plot: {error}"))?;
 
                     // Run the window (this will consume the EventLoop)
                     window
@@ -115,7 +117,9 @@ fn show_plot_internal(
                 }
 
                 // Set the figure data
-                window.set_figure(figure);
+                window
+                    .set_figure(figure)
+                    .map_err(|error| format!("Failed to prepare plot: {error}"))?;
 
                 // Run the window (this will consume the EventLoop)
                 window

@@ -1,10 +1,11 @@
 use runmat_builtins::Type;
 
-use runmat_builtins::shape_rules::{
-    constructor_shape_from_dims, element_count_if_known, unknown_shape,
-};
+use runmat_builtins::shape_rules::element_count_if_known;
+#[cfg(test)]
+use runmat_builtins::shape_rules::{constructor_shape_from_dims, unknown_shape};
 use runmat_builtins::ResolveContext;
 
+#[cfg(test)]
 pub fn rank_from_dims_args(args: &[Type], ctx: &ResolveContext) -> Option<usize> {
     if args.is_empty() {
         return None;
@@ -26,6 +27,7 @@ pub fn rank_from_dims_args(args: &[Type], ctx: &ResolveContext) -> Option<usize>
     }
 }
 
+#[cfg(test)]
 pub fn tensor_type_from_rank(args: &[Type], ctx: &ResolveContext) -> Type {
     if let Some(ty) = tensor_type_from_literal_dims(args, ctx) {
         return ty;
@@ -39,6 +41,7 @@ pub fn tensor_type_from_rank(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
+#[cfg(test)]
 pub fn tensor_type_from_literal_dims(args: &[Type], ctx: &ResolveContext) -> Option<Type> {
     if args.is_empty() {
         return None;
@@ -53,6 +56,7 @@ pub fn tensor_type_from_literal_dims(args: &[Type], ctx: &ResolveContext) -> Opt
     constructor_shape_from_dims(&dims).map(|shape| Type::Tensor { shape: Some(shape) })
 }
 
+#[cfg(test)]
 pub fn logical_type_from_rank(rank: Option<usize>) -> Type {
     match rank {
         Some(rank) => Type::Logical {
@@ -73,12 +77,6 @@ pub fn row_vector_type(ctx: &ResolveContext) -> Type {
     }
 }
 
-pub fn column_vector_type() -> Type {
-    Type::Tensor {
-        shape: Some(vec![None, Some(1)]),
-    }
-}
-
 pub fn size_vector_len(ty: &Type) -> Option<usize> {
     match ty {
         Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
@@ -89,6 +87,7 @@ pub fn size_vector_len(ty: &Type) -> Option<usize> {
     }
 }
 
+#[cfg(test)]
 pub fn is_scalar_type(ty: &Type) -> bool {
     match ty {
         Type::Num | Type::Int | Type::Bool => true,

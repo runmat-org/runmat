@@ -24,7 +24,6 @@ pub(crate) struct SparseCgPipelines {
 
 pub(super) fn get(provider: &WgpuProvider) -> Arc<SparseCgPipelines> {
     let mut cache = provider
-        .device_caches
         .sparse_pipelines
         .cg
         .lock()

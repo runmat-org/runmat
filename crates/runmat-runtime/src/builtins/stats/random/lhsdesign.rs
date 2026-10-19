@@ -247,7 +247,8 @@ pub(crate) async fn lhsdesign_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     ensure_extensions(&args)?;
     let args = gather_args(args).await?;
     let options = parse_args(args)?;
-    let design = compute_lhsdesign(options)?;
+    let mut turn = random::acquire_turn(None, NAME).await?;
+    let design = compute_lhsdesign(&mut turn, options)?;
     Tensor::new(design, vec![options.n, options.p])
         .map(tensor::tensor_into_value)
         .map_err(|err| internal(format!("lhsdesign: {err}")))
@@ -465,7 +466,10 @@ fn parse_criterion(value: &Value) -> BuiltinResult<Criterion> {
     }
 }
 
-fn compute_lhsdesign(options: LhsOptions) -> BuiltinResult<Vec<f64>> {
+fn compute_lhsdesign(
+    turn: &mut random::RandomTurn,
+    options: LhsOptions,
+) -> BuiltinResult<Vec<f64>> {
     let len = options
         .n
         .checked_mul(options.p)
@@ -483,7 +487,7 @@ fn compute_lhsdesign(options: LhsOptions) -> BuiltinResult<Vec<f64>> {
     let mut best = Vec::new();
     let mut best_score = f64::NEG_INFINITY;
     for _ in 0..candidates {
-        let candidate = candidate_design(options.n, options.p, len, smooth)?;
+        let candidate = candidate_design(turn, options.n, options.p, len, smooth)?;
         let score = design_score(&candidate, options.n, options.p, options.criterion);
         if best.is_empty() || score > best_score {
             best_score = score;
@@ -521,15 +525,21 @@ fn validate_score_budget(
     Ok(())
 }
 
-fn candidate_design(n: usize, p: usize, len: usize, smooth: bool) -> BuiltinResult<Vec<f64>> {
+fn candidate_design(
+    turn: &mut random::RandomTurn,
+    n: usize,
+    p: usize,
+    len: usize,
+    smooth: bool,
+) -> BuiltinResult<Vec<f64>> {
     let mut data = Vec::new();
     data.try_reserve_exact(len)
         .map_err(|_| invalid("lhsdesign: requested design is too large"))?;
     data.resize(len, 0.0);
     for col in 0..p {
-        let permutation = random_permutation(n)?;
+        let permutation = random_permutation(turn, n)?;
         let jitter = if smooth {
-            Some(random::generate_uniform(n, NAME)?)
+            Some(random::generate_uniform(turn, n, NAME)?)
         } else {
             None
         };
@@ -541,8 +551,8 @@ fn candidate_design(n: usize, p: usize, len: usize, smooth: bool) -> BuiltinResu
     Ok(data)
 }
 
-fn random_permutation(n: usize) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(n.saturating_sub(1), NAME)?;
+fn random_permutation(turn: &mut random::RandomTurn, n: usize) -> BuiltinResult<Vec<usize>> {
+    let uniforms = random::generate_uniform(turn, n.saturating_sub(1), NAME)?;
     let mut indices = Vec::new();
     indices
         .try_reserve_exact(n)
@@ -646,7 +656,7 @@ mod tests {
         let _guard = reset_rng();
         let out = block_on(lhsdesign_builtin(vec![Value::Num(6.0), Value::Num(3.0)])).unwrap();
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![6, 3]);
+        assert_eq!(tensor.shape(), &[6, 3]);
         assert!(tensor
             .materialize_f64()
             .iter()
@@ -692,7 +702,7 @@ mod tests {
         ]))
         .unwrap();
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![8, 3]);
+        assert_eq!(tensor.shape(), &[8, 3]);
         for value in tensor.materialize_f64() {
             let scaled = value * 8.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
@@ -715,7 +725,7 @@ mod tests {
         ]))
         .expect("lhsdesign");
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![4, 2]);
+        assert_eq!(tensor.shape(), &[4, 2]);
         for value in tensor.materialize_f64() {
             let scaled = value * 4.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
@@ -848,8 +858,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let count = Tensor::new(vec![4.0], vec![1, 1]).unwrap();
             let explicit = gpu_helpers::upload_tensor(provider, &count).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(lhsdesign_builtin(vec![
                 Value::GpuTensor(explicit),
@@ -862,8 +873,9 @@ mod tests {
             );
 
             let automatic = gpu_helpers::upload_tensor(provider, &count).expect("upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated provenance");
             let output = block_on(lhsdesign_builtin(vec![
                 Value::GpuTensor(automatic),
                 Value::Num(2.0),
@@ -872,7 +884,7 @@ mod tests {
             let Value::Tensor(output) = output else {
                 panic!("lhsdesign remains a host implementation");
             };
-            assert_eq!(output.shape, vec![4, 2]);
+            assert_eq!(output.shape(), &[4, 2]);
         });
     }
 }

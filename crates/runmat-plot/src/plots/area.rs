@@ -7,7 +7,6 @@ use crate::core::{
 use crate::gpu::axis::OwnedAxisData;
 use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct AreaPlot {
@@ -31,7 +30,7 @@ pub struct AreaPlot {
 #[derive(Clone, Debug)]
 pub struct AreaGpuSource {
     pub x_axis: OwnedAxisData,
-    pub y_buffer: Arc<wgpu::Buffer>,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
     pub rows: usize,
     pub cols: usize,
     pub target_col: usize,
@@ -57,11 +56,10 @@ impl AreaPlot {
             })?;
             let x = source
                 .x_axis
-                .export_f64(&context.device, &context.queue, source.rows, source.scalar)
+                .export_f64(&context.access, source.rows, source.scalar)
                 .await?;
             let all_y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.y_buffer,
                 source.rows * source.cols,
                 source.scalar,
@@ -257,5 +255,36 @@ impl AreaPlot {
                 .indices
                 .as_ref()
                 .map_or(0, |i| i.len() * std::mem::size_of::<u32>())
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for len in [
+            self.x.capacity(),
+            self.y.capacity(),
+            self.lower_y.as_ref().map_or(0, Vec::capacity),
+        ] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(len)?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<u32>(self.indices.as_ref().map_or(0, Vec::capacity))?,
+        )?;
+        if let Some(source) = &self.gpu_source {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::owned_axis(&source.x_axis)?,
+            )?;
+        }
+        Some(total)
     }
 }

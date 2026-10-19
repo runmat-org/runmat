@@ -557,50 +557,40 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, x, y, z, u, v, w, rest) =
         parse_quiver3_args(args).map_err(map_quiver3_invalid_argument)?;
     let parsed = parse_quiver3_style_args(&rest).map_err(map_quiver3_invalid_argument)?;
-    let x_tensor = NumericInput::from_value(x, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let [x, y, z, u, v, w] = [x, y, z, u, v, w].map(|value| {
+        NumericInput::from_value(value, BUILTIN_NAME).map_err(map_quiver3_invalid_argument)
+    });
+    // Validate all representations before the first potentially pending download.
+    let (x, y, z, u, v, w) = (x?, y?, z?, u?, v?, w?);
+    let x_tensor = x
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let y_tensor = NumericInput::from_value(y, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let y_tensor = y
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let z_tensor = NumericInput::from_value(z, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let z_tensor = z
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let u_tensor = NumericInput::from_value(u, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let u_tensor = u
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let v_tensor = NumericInput::from_value(v, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let v_tensor = v
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let w_tensor = NumericInput::from_value(w, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let w_tensor = w
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
     let (x_vals, y_vals, z_vals, u_vals, v_vals, w_vals) =
         materialize_quiver3_components(x_tensor, y_tensor, z_tensor, u_tensor, v_tensor, w_tensor)
             .map_err(map_quiver3_invalid_argument)?;
-    let opts = PlotRenderOptions {
-        ..Default::default()
-    };
-    let plot_index_out = Rc::new(RefCell::new(None));
-    let plot_index_slot = Rc::clone(&plot_index_out);
-    let figure_handle = crate::builtins::plotting::current_figure_handle();
-    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let axes = target_axes.unwrap_or(axes);
-        let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
-        let plot = QuiverPlot::from_numeric_data3d(
-            x_vals.clone(),
-            y_vals.clone(),
-            z_vals.clone(),
-            u_vals.clone(),
-            v_vals.clone(),
-            w_vals.clone(),
-        )
+    let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
+    let mut plot = QuiverPlot::from_numeric_data3d(x_vals, y_vals, z_vals, u_vals, v_vals, w_vals)
         .map_err(|err| plotting_error(BUILTIN_NAME, err))?
         .with_style(
             parsed.color,
@@ -609,6 +599,19 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             parsed.head_size,
         )
         .with_label(label);
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
+    let mut prepared = Some(plot);
+    let opts = PlotRenderOptions::default();
+    let plot_index_out = Rc::new(RefCell::new(None));
+    let plot_index_slot = Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+        let axes = target_axes.unwrap_or(axes);
+        let plot = prepared
+            .take()
+            .expect("quiver3 prepared plot consumed once");
         let plot_index = figure.add_quiver_plot_on_axes(plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
@@ -619,8 +622,7 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_quiver3_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_quiver3_internal(err));
@@ -630,6 +632,7 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 
 #[derive(Clone)]
 struct ParsedQuiver3Style {
+    visible: Option<bool>,
     color: Vec4,
     line_width: f32,
     label: Option<String>,
@@ -674,6 +677,7 @@ fn parse_quiver3_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedQuiver
     }
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
     Ok(ParsedQuiver3Style {
+        visible: parsed.appearance.visible,
         color: parsed.appearance.color,
         line_width: parsed.appearance.line_width,
         label: parsed.label,
@@ -763,20 +767,29 @@ fn default_quiver3_grid_from_value(value: &Value) -> crate::BuiltinResult<(Tenso
     ))
 }
 
+fn quiver3_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn tensor_shape_from_value(value: &Value) -> crate::BuiltinResult<(usize, usize, usize)> {
     match value {
         Value::GpuTensor(handle) => {
-            let rows = handle.shape.first().copied().unwrap_or(1).max(1);
-            let cols = handle.shape.get(1).copied().unwrap_or(1).max(1);
-            let len = handle.shape.iter().product::<usize>().max(1);
+            let rows = handle.shape().first().copied().unwrap_or(1).max(1);
+            let cols = handle.shape().get(1).copied().unwrap_or(1).max(1);
+            let len = handle.shape().iter().product::<usize>().max(1);
             Ok((rows, cols, len))
         }
         _ => {
             let tensor = Tensor::try_from(value)
                 .map_err(|err| plotting_error(BUILTIN_NAME, format!("quiver3: {err}")))?;
+            let (rows, cols) = quiver3_matrix_dimensions(&tensor);
             Ok((
-                tensor.rows.max(1),
-                tensor.cols.max(1),
+                rows.max(1),
+                cols.max(1),
                 tensor_helpers::tensor_element_len(&tensor),
             ))
         }
@@ -797,18 +810,14 @@ fn materialize_quiver3_components(
     let u_len = tensor_helpers::tensor_element_len(&u);
     let v_len = tensor_helpers::tensor_element_len(&v);
     let w_len = tensor_helpers::tensor_element_len(&w);
-    let z_rows = z.rows;
-    let z_cols = z.cols;
-    let z_shape = z.shape.clone();
-    let u_rows = u.rows;
-    let u_cols = u.cols;
-    let u_shape = u.shape.clone();
-    let v_rows = v.rows;
-    let v_cols = v.cols;
-    let v_shape = v.shape.clone();
-    let w_rows = w.rows;
-    let w_cols = w.cols;
-    let w_shape = w.shape.clone();
+    let (z_rows, z_cols) = quiver3_matrix_dimensions(&z);
+    let z_shape = z.shape();
+    let (u_rows, u_cols) = quiver3_matrix_dimensions(&u);
+    let u_shape = u.shape();
+    let (v_rows, v_cols) = quiver3_matrix_dimensions(&v);
+    let v_shape = v.shape();
+    let (w_rows, w_cols) = quiver3_matrix_dimensions(&w);
+    let w_shape = w.shape();
     if u_rows != v_rows
         || u_cols != v_cols
         || u_len != v_len
@@ -935,6 +944,20 @@ mod tests {
 
     fn nd_tensor(shape: Vec<usize>, data: &[f64]) -> Tensor {
         Tensor::new(data.to_vec(), shape).expect("quiver3 test tensor")
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn quiver3_default_grid_preserves_dense_rank_boundaries() {
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        let (x, y) = default_quiver3_grid_from_value(&scalar).unwrap();
+        assert_eq!(x.materialize_f64(), vec![1.0]);
+        assert_eq!(y.materialize_f64(), vec![1.0]);
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+        let (x, y) = default_quiver3_grid_from_value(&vector).unwrap();
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
+        assert_eq!(y.materialize_f64(), vec![1.0, 1.0, 1.0]);
     }
 
     #[test]

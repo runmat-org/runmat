@@ -62,11 +62,12 @@ error_namespace = "RunMat"
 verbose = false
 
 language = { compat = "runmat" }
+foreign = { mex = { unmanifested = "isolate" } }
 logging = { level = "warn", debug = false, file = "" }
 telemetry = { enabled = true, show_payloads = false, http_endpoint = "", udp_endpoint = "udp.telemetry.runmat.com:7846", queue_size = 256, sync_mode = false, drain_mode = "all", drain_timeout_ms = 50, require_ingestion_key = true }
 jit = { enabled = true, threshold = 10, optimization_level = "speed" }
 gc = { preset = "low-latency", young_size_mb = 128, threads = 8, collect_stats = false }
-accelerate = { enabled = true, provider = "wgpu", allow_inprocess_fallback = true, wgpu_power_preference = "auto", wgpu_force_fallback_adapter = false, auto_offload = { enabled = true, calibrate = true, profile_path = ".runmat/auto_offload.json", log_level = "trace" } }
+accelerate = { enabled = true, provider = "wgpu", allow_inprocess_fallback = true, wgpu_power_preference = "auto", wgpu_force_fallback_adapter = false, auto_offload = { enabled = true, calibrate = true, log_level = "trace" } }
 plotting = { mode = "auto", force_headless = false, backend = "auto", scatter_target_points = 250000, surface_vertex_budget = 400000 }
 
 [runtime.fea]

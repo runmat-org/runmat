@@ -118,7 +118,8 @@ fn fused_single_pass_sum_mul_no_alias() {
                 output: Some(v_mul),
             },
             FusionOp::Builtin {
-                name: "sum".to_string(),
+                origin: Default::default(),
+                name: "sum".into(),
                 inputs: vec![v_mul, v_dim],
                 output: Some(v_sum),
             },
@@ -158,7 +159,7 @@ fn fused_single_pass_sum_mul_no_alias() {
     let out = execute_reduction(req, rows, cols, 0).expect("fused single-pass reduction");
     match out {
         Value::GpuTensor(h) => {
-            assert_eq!(h.shape, vec![cols], "output shape should be [cols]");
+            assert_eq!(h.shape(), vec![cols], "output shape should be [cols]");
         }
         _ => panic!("expected GPU tensor"),
     }

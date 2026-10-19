@@ -106,7 +106,10 @@ fn nlms_two_fused_reductions_integration() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin { name: "sum".into() },
+            label: AccelNodeLabel::Builtin {
+                name: "sum".into(),
+                origin: Default::default(),
+            },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_sum],
@@ -145,7 +148,8 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
-                    name: "sum".to_string(),
+                    origin: Default::default(),
+                    name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_sum),
                 },
@@ -246,7 +250,10 @@ fn nlms_two_fused_reductions_integration() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin { name: "sum".into() },
+            label: AccelNodeLabel::Builtin {
+                name: "sum".into(),
+                origin: Default::default(),
+            },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_sum],
@@ -292,7 +299,8 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
-                    name: "sum".to_string(),
+                    origin: Default::default(),
+                    name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_sum),
                 },
@@ -383,7 +391,8 @@ fn nlms_two_fused_reductions_integration() {
             placement: None,
             runtime: None,
         };
-        let e_val = execute_elementwise(req).expect("fused elementwise sub");
+        let e_val =
+            futures::executor::block_on(execute_elementwise(req)).expect("fused elementwise sub");
         match e_val.final_value {
             Value::GpuTensor(h) => h,
             _ => panic!("expected GPU tensor for e"),
@@ -441,6 +450,7 @@ fn nlms_two_fused_reductions_integration() {
         let mean_node = AccelNode {
             id: 1,
             label: AccelNodeLabel::Builtin {
+                origin: Default::default(),
                 name: "mean".into(),
             },
             category: AccelOpCategory::Reduction,
@@ -479,7 +489,8 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_sq),
                 },
                 FusionOp::Builtin {
-                    name: "mean".to_string(),
+                    origin: Default::default(),
+                    name: "mean".into(),
                     inputs: vec![v_sq, v_all],
                     output: Some(v_mean),
                 },
@@ -514,7 +525,11 @@ fn nlms_two_fused_reductions_integration() {
         let mse = execute_reduction(req, cols, 1, 0).expect("fused mean(all)");
         match mse {
             Value::GpuTensor(h) => {
-                assert_eq!(h.shape, vec![1], "mean(all) should return scalar shape [1]");
+                assert_eq!(
+                    h.shape(),
+                    vec![1],
+                    "mean(all) should return scalar shape [1]"
+                );
             }
             _ => panic!("expected GPU tensor for mse"),
         }

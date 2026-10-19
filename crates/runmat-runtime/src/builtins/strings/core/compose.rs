@@ -1,11 +1,8 @@
 //! MATLAB-compatible `compose` builtin that formats data into text arrays.
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, COMPOSE_DESCRIPTOR, COMPOSE_ERROR_INTERNAL, COMPOSE_ERROR_INVALID_DATA,
+    COMPOSE_ERROR_INVALID_FORMAT_SPEC, COMPOSE_ERROR_TOO_MANY_OUTPUTS,
+    COMPOSE_RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
@@ -18,7 +15,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::core::string::{
     extract_format_spec, format_from_spec, FormatSpecData,
 };
-use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::compose")]
@@ -50,124 +46,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "compose";
 
-pub const COMPOSE_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "compose-resident-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "compose with resident array arguments is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ComposeResidentInputExtension"),
-    };
-
-pub const COMPOSE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [COMPOSE_RESIDENT_INPUT_EXTENSION];
-
-const COMPOSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A...",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "All eight integer classes are formatted directly from native storage, including exact int64 and uint64 values above flintmax.",
-}];
-
-pub const COMPOSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
-    form: "S = compose(formatSpec, integer_A...)",
-    inputs: &COMPOSE_INTEGER_INPUTS,
-    computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-    output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-    overflow: BuiltinIntegerOverflowRule::NotApplicable,
-    backend: BuiltinIntegerBackendRule::HostOnly,
-    overload: BuiltinIntegerOverloadKind::Multiple,
-    notes: "Integer substitution is textual and exact; the format-spec family selects a host string array or cell array of character vectors. Resident arguments are a separately gated RunMat extension and gather before formatting.",
-}];
-
-const COMPOSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "Formatted string array or cell array of character vectors, selected by formatSpec.",
-}];
-
-const COMPOSE_INPUT_NO_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "formatSpec",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Format text or array returned in the corresponding string or cellstr family when no data arguments are supplied.",
-}];
-
-const COMPOSE_INPUT_WITH_ARGS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "formatSpec",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Format template text.",
-    },
-    BuiltinParamDescriptor {
-        name: "A...",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Values substituted into formatSpec placeholders.",
-    },
-];
-
-const COMPOSE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "S = compose(formatSpec)",
-        inputs: &COMPOSE_INPUT_NO_ARGS,
-        outputs: &COMPOSE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = compose(formatSpec, A...)",
-        inputs: &COMPOSE_INPUT_WITH_ARGS,
-        outputs: &COMPOSE_OUTPUT,
-    },
-];
-
-const COMPOSE_ERROR_INVALID_FORMAT_SPEC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPOSE.INVALID_FORMAT_SPEC",
-    identifier: Some("RunMat:compose:InvalidFormatSpec"),
-    when: "formatSpec is not valid text input for compose formatting.",
-    message: "compose: invalid formatSpec",
-};
-
-const COMPOSE_ERROR_ARGUMENT_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPOSE.ARGUMENT_MISMATCH",
-    identifier: Some("RunMat:compose:ArgumentMismatch"),
-    when: "Data arguments are not scalar or broadcast-compatible with formatSpec.",
-    message: "compose: format data arguments must be scalars or match formatSpec size",
-};
-
-const COMPOSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPOSE.INTERNAL",
-    identifier: Some("RunMat:compose:InternalError"),
-    when: "Internal string-array construction failed.",
-    message: "compose: internal error",
-};
-
-const COMPOSE_ERROR_INVALID_DATA: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COMPOSE.INVALID_DATA",
-    identifier: Some("RunMat:compose:InvalidData"),
-    when: "A data argument is outside compose's documented numeric, logical, character, or string domain.",
-    message: "compose: unsupported data argument",
-};
-
-const COMPOSE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    COMPOSE_ERROR_INVALID_FORMAT_SPEC,
-    COMPOSE_ERROR_ARGUMENT_MISMATCH,
-    COMPOSE_ERROR_INTERNAL,
-    COMPOSE_ERROR_INVALID_DATA,
-];
-
-pub const COMPOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COMPOSE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COMPOSE_ERRORS,
-};
-
 fn compose_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     compose_error_with_message(error.message, error)
 }
@@ -197,17 +75,15 @@ fn remap_compose_flow(mut err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "compose",
-    category = "strings/core",
-    summary = "Format values into text arrays using printf-style placeholders.",
-    keywords = "compose,format,string array,gpu",
-    accel = "sink",
-    type_resolver(string_array_type),
-    extensions(COMPOSE_EXTENSIONS),
-    integer_capabilities(COMPOSE_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::strings::core::compose::COMPOSE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::compose"
 )]
 async fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &COMPOSE_DESCRIPTOR,
+        &COMPOSE_ERROR_TOO_MANY_OUTPUTS,
+        "compose",
+    )?;
     if !rest.is_empty() && matches!(format_spec, Value::Cell(_)) {
         return Err(compose_error_with_message(
             "compose: cellstr formatSpec is supported only by compose(formatSpec)",
@@ -292,7 +168,11 @@ fn format_spec_data_to_string_array(spec: FormatSpecData) -> BuiltinResult<Strin
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{infer_catalog_call, COMPOSE_CATALOG_ENTRY};
+    use runmat_types::{
+        CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, StorageFact, ValueFact,
+        ValueKindFact,
+    };
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -374,7 +254,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -413,7 +293,7 @@ pub(crate) mod tests {
         .expect("cpu compose");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("gpu upload");
@@ -458,7 +338,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -521,10 +401,22 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn compose_type_is_string_array() {
-        assert_eq!(
-            string_array_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
+    fn compose_catalog_preserves_unary_string_shape() {
+        let input = ValueFact::scalar(ValueKindFact::String);
+        let request = CallRequest {
+            arguments: vec![input.clone()],
+            literals: LiteralContext::new(Vec::new()),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let inferred = infer_catalog_call(&COMPOSE_CATALOG_ENTRY, &request);
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
         );
+        assert_eq!(inferred.outputs.len(), 1);
+        assert_eq!(inferred.outputs[0].kind, ValueKindFact::String);
+        assert_eq!(inferred.outputs[0].shape, input.shape);
+        assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
     }
 }

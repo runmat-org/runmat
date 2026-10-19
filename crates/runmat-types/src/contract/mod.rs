@@ -1,3 +1,4 @@
+mod adapter;
 mod call;
 mod diagnostic;
 mod effects;
@@ -9,7 +10,9 @@ mod output;
 mod parallel;
 mod region;
 mod schema;
+mod window;
 
+pub use adapter::*;
 pub use call::*;
 pub use diagnostic::*;
 pub use effects::*;
@@ -21,3 +24,4 @@ pub use output::*;
 pub use parallel::*;
 pub use region::*;
 pub use schema::*;
+pub use window::*;

@@ -98,30 +98,15 @@ impl Scatter3Plot {
                     .to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let z = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.z_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
+            let z =
+                readback_scalar_buffer_f64(&context.access, &inputs.z_buffer, len, inputs.scalar)
+                    .await?;
             let shape = vec![1, len];
             let wrap = |values: Vec<f64>| match inputs.scalar {
                 crate::gpu::ScalarType::F64 => {
@@ -189,9 +174,7 @@ impl Scatter3Plot {
                         .ok_or_else(|| {
                             "scatter3 GPU color source byte size overflowed".to_string()
                         })?;
-                    let bytes =
-                        copy_readback_bytes(&context.device, &context.queue, buffer, byte_len)
-                            .await?;
+                    let bytes = copy_readback_bytes(&context.access, buffer, byte_len).await?;
                     let values: &[f32] = bytemuck::try_cast_slice(&bytes)
                         .map_err(|err| format!("scatter3 GPU color readback failed: {err}"))?;
                     if values.len() != value_count {
@@ -619,6 +602,37 @@ impl Scatter3Plot {
     pub fn bounds(&mut self) -> BoundingBox {
         self.ensure_bounds();
         self.bounds.unwrap_or_default()
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for bytes in [
+            crate::plots::clone_budget::vec::<Vec3>(self.points.capacity())?,
+            crate::plots::clone_budget::vec::<Vec4>(self.colors.capacity())?,
+            crate::plots::clone_budget::vec::<f32>(
+                self.point_sizes.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        ] {
+            crate::plots::clone_budget::add(&mut total, bytes)?;
+        }
+        for source in [&self.source_x, &self.source_y, &self.source_z]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        if let Some(inputs) = &self.gpu_inputs {
+            if let crate::gpu::scatter2::ScatterColorBuffer::Host(colors) = &inputs.colors {
+                crate::plots::clone_budget::add(
+                    &mut total,
+                    crate::plots::clone_budget::vec::<[f32; 4]>(colors.capacity())?,
+                )?;
+            }
+        }
+        Some(total)
     }
 }
 

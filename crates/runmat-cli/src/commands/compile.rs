@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -9,6 +10,8 @@ use crate::{
     presentation,
 };
 
+mod selected;
+
 pub struct CompileRequest {
     pub file: PathBuf,
     pub output: Option<PathBuf>,
@@ -17,6 +20,9 @@ pub struct CompileRequest {
     pub explain_link: bool,
     pub link_plan_json: Option<PathBuf>,
     pub linker: Option<PathBuf>,
+    pub selected_pack_manifest: Option<PathBuf>,
+    pub selected_components: Option<PathBuf>,
+    pub selected_host_admission: Option<PathBuf>,
     pub keep_temps: bool,
     pub force: bool,
 }
@@ -34,6 +40,9 @@ pub async fn execute(
         explain_link,
         link_plan_json,
         linker,
+        selected_pack_manifest,
+        selected_components,
+        selected_host_admission,
         keep_temps,
         force,
     } = request;
@@ -45,29 +54,150 @@ pub async fn execute(
     {
         anyhow::bail!("runmat compile currently accepts a .m entrypoint");
     }
-    let runtime = runmat_aot::archive::embedded_runtime_archive()?.ok_or_else(|| {
-        anyhow::anyhow!(
-            "this RunMat build does not contain a native compile runtime; rebuild it with scripts/build-runmat-with-aot-runtime.sh (or the Windows PowerShell equivalent)"
-        )
-    })?;
+    let selected_paths = selected::SelectedPaths::from_options(
+        selected_pack_manifest,
+        selected_components,
+        selected_host_admission,
+    )?;
+    let runtime = if selected_paths.is_some() {
+        None
+    } else {
+        Some(runmat_aot::archive::embedded_runtime_archive()?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "this RunMat build does not contain a native compile runtime; rebuild it with scripts/build-runmat-with-aot-runtime.sh (or the Windows PowerShell equivalent)"
+            )
+        })?)
+    };
     let policy = match policy {
         AotPolicy::NativeSpecialized => runmat_aot::compile::CompilationPolicy::NativeSpecialized,
         AotPolicy::ClosedWorld => runmat_aot::compile::CompilationPolicy::ClosedWorld,
         AotPolicy::DynamicRuntime => runmat_aot::compile::CompilationPolicy::DynamicRuntime,
         AotPolicy::Portable => runmat_aot::compile::CompilationPolicy::Portable,
     };
-    policy.validate(&runtime.manifest.capabilities)?;
-    let source_text = std::fs::read_to_string(&file)
-        .with_context(|| format!("failed to read compile entrypoint `{}`", file.display()))?;
+    if let Some(runtime) = runtime.as_ref() {
+        policy.validate(&runtime.manifest.capabilities)?;
+    }
     let mut session =
         super::session::create_session(false, false, config, "failed to create compile session")?;
-    let _project_lease = install_project_for_source(&mut session, &file, cli).await?;
-    let source = runmat_core::ExecutableSource::new("root", file.to_string_lossy(), source_text);
+    let project = install_project_for_source(&mut session, &file, cli).await?;
+    let source = super::package::executable_source(
+        project.as_ref().map(|project| &project.resolved.frozen),
+        &file,
+    )
+    .await?;
     let unit = session
-        .compile_executable_unit(source, None)
+        .compile_executable_unit(&source, None)
         .await
-        .map_err(|error| anyhow::anyhow!(error))?;
-    let program_link_plan = runmat_aot::compile::build_program_link_plan(&unit, &runtime, policy)?;
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "{}",
+                crate::diagnostics::format_frontend_error(
+                    &error,
+                    &source.relative_path,
+                    Some(&source.text),
+                )
+                .unwrap_or_else(|| error.to_string())
+            )
+        })?;
+    let report = unit.reachability_report();
+    let inferred = unit.inferred_interop_manifest();
+    let mut selected = inferred
+        .adapters
+        .iter()
+        .map(|item| item.adapter.clone())
+        .collect::<BTreeSet<_>>();
+    let mut selected_mex_names = BTreeSet::new();
+    if let Some(project) = project.as_ref() {
+        for node in &report.nodes {
+            if node.kind == runmat_mir::analysis::ReachabilityNodeKind::ExternalCallable {
+                for declaration in &project.resolved.frozen.mex_artifacts {
+                    if declaration.name == node.symbol {
+                        selected_mex_names.insert(declaration.name.clone());
+                    }
+                }
+            }
+        }
+        if !selected_mex_names.is_empty() {
+            selected.insert(runmat_types::ForeignAdapterId::new(
+                runmat_mex::MEX_ADAPTER_ID,
+            )?);
+        }
+    }
+    if report.has_unknown_edges {
+        // An unbounded dynamic target may resolve any installed foreign call.
+        // Grant the four supported runtime families and this frozen project's
+        // declared artifacts, explicitly in the authenticated interop
+        // manifest, never by receiver discovery.
+        for adapter in [
+            runmat_native_ffi::NATIVE_FFI_ADAPTER_ID,
+            runmat_mex::MEX_ADAPTER_ID,
+            runmat_java::JAVA_ADAPTER_ID,
+            runmat_python::PYTHON_ADAPTER_ID,
+        ] {
+            selected.insert(runmat_types::ForeignAdapterId::new(adapter)?);
+        }
+    }
+    let foreign_artifacts = if let Some(project) = project.as_ref() {
+        super::package::prepare_foreign_artifacts_for_selection(
+            &project.resolved.frozen,
+            config,
+            &selected,
+            (!report.has_unknown_edges).then_some(&selected_mex_names),
+        )?
+    } else if selected.contains(&runmat_types::ForeignAdapterId::new(
+        runmat_python::PYTHON_ADAPTER_ID,
+    )?) {
+        super::package::prepare_python_runtime(config)?
+    } else {
+        super::package::PreparedForeignArtifacts::empty()
+    };
+    let closed_grant = runmat_types::InteropManifest {
+        schema_version: runmat_types::INTEROP_MANIFEST_SCHEMA_VERSION,
+        foreign_types: Vec::new(),
+        adapters: selected
+            .iter()
+            .cloned()
+            .map(|adapter| runmat_types::ForeignAdapterRequirement {
+                adapter,
+                minimum_version: 1,
+                capabilities: runmat_types::CapabilitySet(BTreeSet::from([
+                    runmat_types::CapabilityRequirement::ForeignRuntime,
+                ])),
+                execution_stack: runmat_types::ExecutionStackRequirement::Process,
+                artifact_identities: Vec::new(),
+            })
+            .collect(),
+        adapter_contracts: Vec::new(),
+    };
+    let interop = runmat_types::InteropManifest::merge([
+        inferred,
+        closed_grant,
+        foreign_artifacts.interop.clone(),
+    ])
+    .map_err(|error| anyhow::anyhow!("{}: {}", error.path, error.message))?;
+    let output = output.unwrap_or_else(|| default_output(&file));
+    if let Some(paths) = selected_paths {
+        return selected::execute(
+            &unit,
+            interop,
+            foreign_artifacts,
+            config,
+            selected::SelectedCompileRequest {
+                paths,
+                output,
+                optimization,
+                policy,
+                explain_link,
+                link_plan_json,
+                keep_temps,
+                force,
+            },
+        );
+    }
+    let runtime = runtime.expect("pure compile route has an embedded runtime");
+    let program_link_plan = runmat_aot::compile::build_program_link_plan_with_interop(
+        &unit, &runtime, policy, interop,
+    )?;
     if explain_link {
         print_link_explanation(&program_link_plan);
     }
@@ -90,9 +220,17 @@ pub async fn execute(
                 _ => runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
             },
             retained_builtin_bindings: program_link_plan.retained_builtin_bindings.clone(),
+            interop: program_link_plan.interop.clone(),
+            foreign_policy: Some(
+                runmat_core::foreign_artifacts::capture_foreign_policy_object(&config.foreign)
+                    .map_err(anyhow::Error::msg)?,
+            ),
+            native_interfaces: foreign_artifacts.native_interfaces,
+            mex_artifacts: foreign_artifacts.mex_artifacts,
+            java_artifacts: foreign_artifacts.java_artifacts,
+            python_artifacts: foreign_artifacts.python_artifacts,
         },
     )?;
-    let output = output.unwrap_or_else(|| default_output(&file));
     let linked = runmat_aot::link::link_standalone(
         &object,
         &runtime,
@@ -149,6 +287,14 @@ fn print_link_explanation(plan: &runmat_aot::compile::ProgramLinkPlan) {
                 binding.name, binding.variant, binding.native_symbol
             );
         }
+    }
+    for adapter in &plan.interop.adapters {
+        println!(
+            "Retained foreign adapter {} v{} with {} exact artifact(s)",
+            adapter.adapter,
+            adapter.minimum_version,
+            adapter.artifact_identities.len()
+        );
     }
     if !plan.omitted_runtime_families.is_empty() {
         println!(

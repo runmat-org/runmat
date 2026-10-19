@@ -13,6 +13,23 @@ pub enum IntValue {
 }
 
 impl IntValue {
+    /// Returns the exact signed representation of any fixed-width integer.
+    ///
+    /// `i128` contains the full range of every `IntValue` variant, including
+    /// `uint64`, so this conversion never saturates or rounds.
+    pub fn to_i128(&self) -> i128 {
+        match self {
+            IntValue::I8(value) => *value as i128,
+            IntValue::I16(value) => *value as i128,
+            IntValue::I32(value) => *value as i128,
+            IntValue::I64(value) => *value as i128,
+            IntValue::U8(value) => *value as i128,
+            IntValue::U16(value) => *value as i128,
+            IntValue::U32(value) => *value as i128,
+            IntValue::U64(value) => *value as i128,
+        }
+    }
+
     pub fn to_i64(&self) -> i64 {
         match self {
             IntValue::I8(v) => *v as i64,
@@ -106,15 +123,25 @@ impl IntValue {
         }
     }
     pub fn class_name(&self) -> &'static str {
+        self.numeric_dtype().class_name()
+    }
+
+    pub fn integer_class(&self) -> runmat_types::IntegerClass {
+        self.numeric_dtype()
+            .integer_class()
+            .expect("IntValue always has an integer dtype")
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
         match self {
-            IntValue::I8(_) => "int8",
-            IntValue::I16(_) => "int16",
-            IntValue::I32(_) => "int32",
-            IntValue::I64(_) => "int64",
-            IntValue::U8(_) => "uint8",
-            IntValue::U16(_) => "uint16",
-            IntValue::U32(_) => "uint32",
-            IntValue::U64(_) => "uint64",
+            IntValue::I8(_) => NumericDType::I8,
+            IntValue::I16(_) => NumericDType::I16,
+            IntValue::I32(_) => NumericDType::I32,
+            IntValue::I64(_) => NumericDType::I64,
+            IntValue::U8(_) => NumericDType::U8,
+            IntValue::U16(_) => NumericDType::U16,
+            IntValue::U32(_) => NumericDType::U32,
+            IntValue::U64(_) => NumericDType::U64,
         }
     }
 
@@ -156,17 +183,17 @@ impl IntValue {
 
 impl From<&runmat_types::IntegerLiteral> for IntValue {
     fn from(literal: &runmat_types::IntegerLiteral) -> Self {
-        use runmat_types::IntegerLiteralClass;
+        use runmat_types::IntegerClass;
 
         match literal.class() {
-            IntegerLiteralClass::Int8 => Self::I8(literal.bits() as i8),
-            IntegerLiteralClass::Int16 => Self::I16(literal.bits() as i16),
-            IntegerLiteralClass::Int32 => Self::I32(literal.bits() as i32),
-            IntegerLiteralClass::Int64 => Self::I64(literal.bits() as i64),
-            IntegerLiteralClass::UInt8 => Self::U8(literal.bits() as u8),
-            IntegerLiteralClass::UInt16 => Self::U16(literal.bits() as u16),
-            IntegerLiteralClass::UInt32 => Self::U32(literal.bits() as u32),
-            IntegerLiteralClass::UInt64 => Self::U64(literal.bits()),
+            IntegerClass::Int8 => Self::I8(literal.bits() as i8),
+            IntegerClass::Int16 => Self::I16(literal.bits() as i16),
+            IntegerClass::Int32 => Self::I32(literal.bits() as i32),
+            IntegerClass::Int64 => Self::I64(literal.bits() as i64),
+            IntegerClass::UInt8 => Self::U8(literal.bits() as u8),
+            IntegerClass::UInt16 => Self::U16(literal.bits() as u16),
+            IntegerClass::UInt32 => Self::U32(literal.bits() as u32),
+            IntegerClass::UInt64 => Self::U64(literal.bits()),
         }
     }
 }

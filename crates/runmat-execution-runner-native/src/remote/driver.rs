@@ -1,13 +1,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, EncryptionPurpose, PortableExecutionEncryption,
 };
 use runmat_execution_artifact::{
-    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
-    ProgramExecutionObjectLocation, ProgramExecutionOutputs, ProgramExecutionRequest,
+    ProgramExecutionObject, ProgramExecutionObjectLocation, ProgramExecutionOutputs,
     ProgramExecutionResponse,
 };
 use runmat_execution_transport_native::control::{
@@ -17,12 +15,15 @@ use runmat_execution_transport_native::control::{
 };
 use runmat_execution_transport_native::identity::EndpointIdentityMaterial;
 
-use super::checkpoint::{
-    execution_start_phase, RemoteDriverCheckpoint, RemoteDriverCheckpointPhase,
-};
+use super::checkpoint::{RemoteDriverCheckpoint, RemoteDriverCheckpointPhase};
 use super::config::RemoteDriverConfig;
-use super::crypto::{ciphertext_digest, open_object, project_revision_identity, seal_object};
+use super::crypto::{ciphertext_digest, open_object, seal_object};
 use crate::{NativeExecutionError, NativeExecutionResult};
+
+pub(super) mod program;
+pub(super) use program::AdmittedRemoteProgram;
+#[path = "local_graph.rs"]
+pub(super) mod local_graph;
 
 const MEDIA_TYPE: &str = "application/vnd.runmat.execution+ciphertext";
 const RETAIN_FOR_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -82,74 +83,18 @@ pub(super) async fn run_remote_driver(
         return Ok(());
     }
 
-    let bundle = required_artifact(&bootstrap.artifacts, "bundle")?;
-    let program = required_artifact(&bootstrap.artifacts, "program")?;
-    let input = required_artifact(&bootstrap.artifacts, "input")?;
-    let bundle_archive = open_download(
+    let admitted = program::admit(
         control.as_ref(),
         &run_key,
-        bundle,
+        &bootstrap.artifacts,
         &config.authority.run_id,
-        EncryptionPurpose::Bundle,
+        &bootstrap.project_revision,
+        bootstrap.desired_worker_count,
+        bootstrap.driver_resources.scratch_bytes,
     )
     .await?;
-    let bundle =
-        read_bundle(bundle_archive.as_slice(), ArchiveLimits::default()).map_err(protocol)?;
-    let descriptor: ProgramExecutionDescriptor = serde_json::from_slice(
-        &open_download(
-            control.as_ref(),
-            &run_key,
-            program,
-            &config.authority.run_id,
-            EncryptionPurpose::Program,
-        )
-        .await?,
-    )
-    .map_err(protocol)?;
-    let inputs: ProgramExecutionInputs = serde_json::from_slice(
-        &open_download(
-            control.as_ref(),
-            &run_key,
-            input,
-            &config.authority.run_id,
-            EncryptionPurpose::Input,
-        )
-        .await?,
-    )
-    .map_err(protocol)?;
-    descriptor.validate().map_err(protocol)?;
-    inputs.validate().map_err(protocol)?;
-    if inputs
-        .objects
-        .iter()
-        .any(|object| object.reference.authorization_scope != config.authority.run_id)
-    {
-        return Err(protocol(
-            "program input object is outside the admitted run authority",
-        ));
-    }
-    bundle.validate().map_err(protocol)?;
-    if bundle.manifest.portable_environment != descriptor.environment.entries()
-        || bundle.manifest.program_revision != descriptor.recipe.program_revision
-        || !bundle
-            .manifest
-            .recipes
-            .iter()
-            .any(|recipe| recipe == &descriptor.recipe)
-        || !bundle
-            .manifest
-            .artifacts
-            .iter()
-            .any(|artifact| artifact == &descriptor.artifact)
-        || project_revision_identity(&bundle.manifest.program_revision)
-            != bootstrap.project_revision
-    {
-        return Err(protocol(
-            "bundle, program, and admitted project revision do not converge",
-        ));
-    }
-    let input_locations = inputs.objects.clone();
-    let request = ProgramExecutionRequest::from_parts(descriptor, inputs).map_err(protocol)?;
+    let program_identity = admitted.checkpoint_identity()?;
+    let input_locations = admitted.input_locations().to_vec();
     let (mut checkpoint_sequence, closure_catalog, pool_catalog) =
         match bootstrap.checkpoint.as_ref() {
             Some(download) => {
@@ -167,10 +112,10 @@ pub(super) async fn run_remote_driver(
                 )
                 .await?;
                 let checkpoint = RemoteDriverCheckpoint::from_canonical_bytes(&plaintext)?;
-                checkpoint.validate_for_replacement(
+                checkpoint.validate_for_program(
                     &config.authority,
                     &bootstrap.project_revision,
-                    &request,
+                    program_identity,
                 )?;
                 (
                     checkpoint.sequence,
@@ -240,10 +185,6 @@ pub(super) async fn run_remote_driver(
             return Err(protocol("restored recovery closure omits its root object"));
         }
     }
-    let materialized_project = (bootstrap.desired_worker_count == 0
-        && bundle.requires_source_project())
-    .then(|| crate::materialized_project::MaterializedProject::from_bundle(&bundle))
-    .transpose()?;
 
     checkpoint_sequence = checkpoint_sequence
         .checked_add(1)
@@ -252,11 +193,11 @@ pub(super) async fn run_remote_driver(
         control.as_ref(),
         &config.authority,
         &run_key,
-        &RemoteDriverCheckpoint::new(
+        &RemoteDriverCheckpoint::for_program(
             checkpoint_sequence,
             &config.authority,
             &bootstrap.project_revision,
-            &request,
+            program_identity,
             RemoteDriverCheckpointPhase::ReadyToExecute,
             closure_catalog.clone(),
         )?
@@ -279,12 +220,12 @@ pub(super) async fn run_remote_driver(
         control.as_ref(),
         &config.authority,
         &run_key,
-        &RemoteDriverCheckpoint::new(
+        &RemoteDriverCheckpoint::for_program(
             checkpoint_sequence,
             &config.authority,
             &bootstrap.project_revision,
-            &request,
-            execution_start_phase(&request),
+            program_identity,
+            admitted.execution_start_phase(),
             closure_catalog,
         )?
         .with_pool_catalog(pool_catalog)?,
@@ -293,64 +234,36 @@ pub(super) async fn run_remote_driver(
 
     let mut usage_sequence = 0_u64;
     let (cancellation_sender, cancellation_receiver) = tokio::sync::watch::channel(false);
-    let uses_remote_pool = bootstrap.desired_worker_count > 0;
+    let supports_owned_cancellation =
+        bootstrap.desired_worker_count > 0 || matches!(&admitted, AdmittedRemoteProgram::Graph(_));
     let execution = async {
         if bootstrap.desired_worker_count == 0 {
-            let objects = super::object_transfer::RemoteObjectStore::new()?;
-            let mut values = std::collections::HashMap::new();
-            for object in input_objects {
-                if let Some(value) = object.decode_externalized_value().map_err(protocol)? {
-                    values.insert(object.reference.id, value);
-                } else {
-                    objects.register(object)?;
+            match admitted {
+                AdmittedRemoteProgram::Direct(admitted) => {
+                    let response = execute_local_direct(*admitted, input_objects).await?;
+                    Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(response))
+                }
+                AdmittedRemoteProgram::Graph(admitted) => {
+                    let program::AdmittedGraphProgram {
+                        request, _staged, ..
+                    } = *admitted;
+                    local_graph::execute(
+                        &config.authority.run_id,
+                        request,
+                        _staged,
+                        &bootstrap.driver_resources,
+                        &bootstrap.driver_accelerator_devices,
+                        cancellation_receiver,
+                    )
+                    .await
                 }
             }
-            let mut request = request;
-            let response = if request.artifact.form
-                == runmat_execution_artifact::ExecutableForm::AnalysisWorkload
-            {
-                let mut objects = objects.clone();
-                crate::execute_analysis_program_request(
-                    &request,
-                    &mut objects,
-                    &crate::NativeAnalysisKernel,
-                    crate::NativeAnalysisHostLimits::default(),
-                )
-            } else if request.artifact.form
-                == runmat_execution_artifact::ExecutableForm::GeometryWorkload
-            {
-                let mut objects = objects.clone();
-                crate::execute_geometry_materialization_program_request(
-                    &request,
-                    &mut objects,
-                    crate::NativeGeometryMaterializationLimits::default(),
-                )
-            } else {
-                request.arguments = request
-                    .arguments
-                    .iter()
-                    .map(|argument| super::value_transfer::materialize(argument, &values))
-                    .collect::<NativeExecutionResult<Vec<_>>>()?;
-                crate::test_workload::execute_host_program_request_in_context(
-                    request,
-                    materialized_project
-                        .as_ref()
-                        .map(|project| project.handoff()),
-                    Some(&bundle.manifest.portable_environment),
-                    None,
-                    None,
-                )
-                .await
-            };
-            let result = collect_result_objects(response, objects)?;
-            Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(result))
         } else {
             super::pool_execution::execute(super::pool_execution::RemotePoolExecution {
                 control: control.as_ref(),
                 authority: &config.authority,
                 run_key: &run_key,
-                bundle_archive,
-                request,
+                program: admitted,
                 input_objects,
                 recovered,
                 recovered_pool,
@@ -359,6 +272,7 @@ pub(super) async fn run_remote_driver(
                 desired_workers: bootstrap.desired_worker_count,
                 resources: bootstrap.worker_resources,
                 cancellation: cancellation_receiver,
+                ready_v1: config.ready_v1,
             })
             .await
         }
@@ -426,7 +340,7 @@ pub(super) async fn run_remote_driver(
                     .await
                     .map_err(protocol)?;
                 if heartbeat.cancellation_requested {
-                    if uses_remote_pool {
+                    if supports_owned_cancellation {
                         cancellation_sender.send_replace(true);
                         continue;
                     }
@@ -452,6 +366,67 @@ pub(super) async fn run_remote_driver(
     commit_response(control.as_ref(), &config, &run_key, response).await
 }
 
+/// Execute an admitted Direct program on the driver host with its independent
+/// input objects; values are materialized only for language programs.
+async fn execute_local_direct(
+    admitted: program::AdmittedDirectProgram,
+    input_objects: Vec<ProgramExecutionObject>,
+) -> NativeExecutionResult<super::pool_execution::RemotePoolExecutionResult> {
+    let program::AdmittedDirectProgram {
+        mut request,
+        materialized,
+        bundle,
+        ..
+    } = admitted;
+    let objects = super::object_transfer::RemoteObjectStore::new()?;
+    let mut values = std::collections::HashMap::new();
+    for object in input_objects {
+        if let Some(value) = object.decode_externalized_value().map_err(protocol)? {
+            values.insert(object.reference.id, value);
+        } else {
+            objects.register(object)?;
+        }
+    }
+    let response = match request.artifact.form {
+        runmat_execution_artifact::ExecutableForm::AnalysisWorkload => {
+            let mut objects = objects.clone();
+            crate::execute_analysis_program_request(
+                &request,
+                &mut objects,
+                &crate::NativeAnalysisKernel,
+                crate::NativeAnalysisHostLimits::default(),
+            )
+        }
+        runmat_execution_artifact::ExecutableForm::GeometryWorkload => {
+            let mut objects = objects.clone();
+            crate::execute_geometry_materialization_program_request(
+                &request,
+                &mut objects,
+                crate::NativeGeometryMaterializationLimits::default(),
+            )
+        }
+        _ => {
+            request.arguments = request
+                .arguments
+                .iter()
+                .map(|argument| super::value_transfer::materialize(argument, &values))
+                .collect::<NativeExecutionResult<Vec<_>>>()?;
+            let environment = bundle.manifest.portable_environment.clone();
+            crate::test_workload::execute_host_program_request_in_context(
+                request,
+                materialized.as_ref(),
+                None,
+                Some(bundle),
+                Some(&environment),
+                None,
+                None,
+            )
+            .await
+        }
+    };
+    collect_result_objects(response, objects)
+}
+
 async fn report_usage(
     control: &dyn DriverControlPlane,
     config: &RemoteDriverConfig,
@@ -474,34 +449,66 @@ pub(super) async fn commit_response(
     result: super::pool_execution::RemotePoolExecutionResult,
 ) -> NativeExecutionResult<()> {
     let super::pool_execution::RemotePoolExecutionResult { response, objects } = result;
-    if let ProgramExecutionResponse::Failure { message } = response {
-        return {
-            let diagnostic = store_encrypted(
+    let response = match response {
+        response @ ProgramExecutionResponse::GraphSuccess { .. } => {
+            let plaintext = serde_json::to_vec(&response).map_err(protocol)?;
+            let result = store_encrypted(
                 control,
                 &config.authority,
                 run_key,
-                DriverArtifactKind::Diagnostic,
-                EncryptionPurpose::DetailedEvent,
-                message.as_bytes(),
+                DriverArtifactKind::Result,
+                EncryptionPurpose::Result,
+                &plaintext,
                 None,
             )
             .await?;
-            transition(
+            return transition(
                 control,
                 config,
-                DriverRunTarget::Failed,
-                Some("execution-failed"),
+                DriverRunTarget::Succeeded,
                 None,
-                Some(diagnostic),
+                Some(result),
+                None,
             )
-            .await
-        };
+            .await;
+        }
+        ProgramExecutionResponse::SpmdSuccess { .. } => {
+            return fail_with_diagnostic(
+                control,
+                config,
+                run_key,
+                b"SPMD worker response requires the typed remote gang driver",
+                "spmd-gang-driver-required",
+            )
+            .await;
+        }
+        response @ ProgramExecutionResponse::RuntimeFailure { .. } => {
+            let plaintext = serde_json::to_vec(&response).map_err(protocol)?;
+            return fail_with_diagnostic(
+                control,
+                config,
+                run_key,
+                &plaintext,
+                "runtime-execution-failed",
+            )
+            .await;
+        }
+        response => response,
+    };
+    if let ProgramExecutionResponse::Failure { message } = response {
+        return fail_with_diagnostic(
+            control,
+            config,
+            run_key,
+            message.as_bytes(),
+            "execution-failed",
+        )
+        .await;
     }
 
     let references: &[runmat_execution::value::ValueRef] = match &response {
         ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } => result_objects,
-        ProgramExecutionResponse::Success { .. } => &[],
-        ProgramExecutionResponse::Failure { .. } => unreachable!("failure returned above"),
+        _ => &[],
     };
     let mut locations = Vec::with_capacity(references.len());
     for reference in references {
@@ -557,6 +564,34 @@ pub(super) async fn commit_response(
         None,
         Some(result),
         None,
+    )
+    .await
+}
+
+async fn fail_with_diagnostic(
+    control: &dyn DriverControlPlane,
+    config: &RemoteDriverConfig,
+    run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
+    diagnostic: &[u8],
+    reason: &str,
+) -> NativeExecutionResult<()> {
+    let diagnostic = store_encrypted(
+        control,
+        &config.authority,
+        run_key,
+        DriverArtifactKind::Diagnostic,
+        EncryptionPurpose::DetailedEvent,
+        diagnostic,
+        None,
+    )
+    .await?;
+    transition(
+        control,
+        config,
+        DriverRunTarget::Failed,
+        Some(reason),
+        None,
+        Some(diagnostic),
     )
     .await
 }

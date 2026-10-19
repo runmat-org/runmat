@@ -1,7 +1,5 @@
 //! MATLAB-compatible `contour3` builtin (3-D contour lines).
 
-#[cfg(not(target_arch = "wasm32"))]
-use log::warn;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 #[cfg(test)]
@@ -90,7 +88,7 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         let mut contour = None;
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(handle) = z_input.gpu_handle().cloned() {
-            match build_contour_gpu_plot_with_z_mode_async(
+            contour = build_contour_gpu_plot_with_z_mode_async(
                 name,
                 &x_axis,
                 &y_axis,
@@ -101,15 +99,7 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 &line_color,
                 ContourZMode::Level,
             )
-            .await
-            {
-                Ok(gpu_contour) => {
-                    contour = Some(gpu_contour);
-                }
-                Err(err) => {
-                    warn!("contour3 GPU path unavailable: {err}");
-                }
-            }
+            .await?;
         }
         if contour.is_none() {
             let z_tensor = match z_input {
@@ -152,8 +142,7 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_contour_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(err);

@@ -12,25 +12,34 @@ build = "build.rs"
 [dependencies]
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
+runmat-package-cache = { workspace = true }
+runmat-package = { workspace = true }
 runmat-core = { workspace = true }
 runmat-builtins = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-native-codegen = { workspace = true, features = ["compiler"] }
+runmat-native-ffi = { workspace = true }
+runmat-mex = { workspace = true }
+runmat-java = { workspace = true }
+runmat-python = { workspace = true }
+runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 target-lexicon = { workspace = true }
 tempfile = "3.12"
 thiserror = { workspace = true }
 zstd = "0.13"
+object = { version = "0.37.3", default-features = false, features = ["read", "std"] }
 
 [target.'cfg(windows)'.dependencies]
 ar_archive_writer = "0.5.2"
 cc = "1.2"
-object = { version = "0.37.3", default-features = false, features = ["read"] }
 
 [dev-dependencies]
-runmat-runtime = { workspace = true, features = ["plot-core"] }
+object = { version = "0.37.3", default-features = false, features = ["write"] }
+ar_archive_writer = "0.5.2"
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -23,7 +23,7 @@ fn compiled_datetime_metadata_and_nonzero_forms_cover_every_integer_class() {
             "{constructor} nnz and ndims outputs"
         );
         assert!(values.iter().any(|value| {
-            matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.integer_storage().is_some_and(|storage| storage.exact_values().iter().map(|value| value.to_f64()).collect::<Vec<_>>() == vec![1.0, 2.0]))
+            matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 1] && tensor.integer_storage().is_some_and(|storage| storage.exact_values().iter().map(|value| value.to_f64()).collect::<Vec<_>>() == vec![1.0, 2.0]))
         }), "{constructor} nonzeros output");
         assert!(values.iter().any(|value| {
             matches!(value, Value::Cell(cell) if cell.data.get(1).is_some_and(|value| matches!(value, Value::Int(integer) if integer.to_f64() == 2.0)))

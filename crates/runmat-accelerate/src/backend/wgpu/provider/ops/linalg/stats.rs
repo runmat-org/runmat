@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "stats/validation_tests.rs"]
+mod validation_tests;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CovarianceToCorrelationParams {
@@ -18,9 +22,11 @@ impl WgpuProvider {
         options: &CovarianceOptions,
     ) -> Result<GpuTensorHandle> {
         if options.rows != CovRows::All {
-            return Err(anyhow!(
-                "covariance: rows option {:?} not supported by WGPU provider",
-                options.rows
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                format!(
+                    "covariance: rows option {:?} not supported by WGPU provider",
+                    options.rows
+                ),
             ));
         }
 
@@ -65,8 +71,8 @@ impl WgpuProvider {
             let right_column = self.reshape(rhs, &[right_entry.len, 1])?;
             let cat_inputs = vec![left_column.clone(), right_column.clone()];
             let result = self.cat_exec(2, &cat_inputs);
-            let _ = self.free_exec(&left_column);
-            let _ = self.free_exec(&right_column);
+            drop(left_column);
+            drop(right_column);
             Some(result?)
         } else {
             None
@@ -90,10 +96,10 @@ impl WgpuProvider {
         };
 
         if let Some(handle) = combined {
-            let _ = self.free_exec(&handle);
+            drop(handle);
         }
         if let Some(handle) = normalized_single {
-            let _ = self.free_exec(&handle);
+            drop(handle);
         }
 
         result
@@ -138,19 +144,19 @@ impl WgpuProvider {
         )?;
         let outer = self.scalar_mul(&outer_scaled, 1.0 / rows_f64)?;
 
-        let _ = self.free_exec(&means_col);
-        let _ = self.free_exec(&means_row_scaled);
-        let _ = self.free_exec(&outer_scaled);
+        drop(means_col);
+        drop(means_row_scaled);
+        drop(outer_scaled);
 
         let centered =
             self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &xtx, &outer)?;
 
-        let _ = self.free_exec(&xtx);
-        let _ = self.free_exec(&outer);
-        let _ = self.free_exec(&means_scaled);
+        drop(xtx);
+        drop(outer);
+        drop(means_scaled);
 
         let handle = self.scalar_mul(&centered, 1.0 / denom)?;
-        let _ = self.free_exec(&centered);
+        drop(centered);
 
         self.mark_buffer_usage(&handle, BufferUsageClass::FusionOut);
 
@@ -172,7 +178,7 @@ impl WgpuProvider {
         }
 
         if casted_means {
-            let _ = self.free_exec(&means_used);
+            drop(means_used);
         }
 
         Ok(handle)
@@ -352,9 +358,9 @@ impl WgpuProvider {
             let product_t_tmp = self.transpose_exec(product)?;
             let gram_tmp =
                 self.matmul_exec_with_usage(&product_t_tmp, product, BufferUsageClass::FusionOut)?;
-            let _ = self.free_exec(&product_t_tmp);
+            drop(product_t_tmp);
             let owned = self.download_exec(&gram_tmp).await?;
-            let _ = self.free_exec(&gram_tmp);
+            drop(gram_tmp);
             Cow::Owned(owned)
         };
         let gram_view: &HostTensorOwned = gram_cow.as_ref();
@@ -551,7 +557,7 @@ impl WgpuProvider {
             let plan = active_group_plan_clone();
             log::warn!(
                 "qr_power_iter zero-data alert: product={} len={} non_zero_q={} max_product_abs_pre={:?} max_product_abs={:.3e} max_q_abs_pre={:?} active={:?} plan_inputs={:?} stack_pattern={:?}",
-                product.buffer_id,
+                product.buffer_id(),
                 product_entry.len,
                 non_zero_q,
                 pre_product_max,
@@ -601,12 +607,7 @@ impl WgpuProvider {
         if entry.shape.as_slice() == [rows, 1] {
             return Ok((weights.clone(), false));
         }
-        let handle = self.register_existing_buffer_with_storage(
-            entry.buffer.clone(),
-            vec![rows, 1],
-            entry.len,
-            entry.storage,
-        );
+        let handle = self.reshape_exec(weights, &[rows, 1])?;
         Ok((handle, true))
     }
 
@@ -615,31 +616,33 @@ impl WgpuProvider {
         let all_finite = match self.reduce_all_exec(&finite_mask, false) {
             Ok(handle) => handle,
             Err(err) => {
-                let _ = self.free_exec(&finite_mask);
+                drop(finite_mask);
                 return Err(err);
             }
         };
         let all_finite_value = self.read_scalar_exec(&all_finite, 0);
-        let _ = self.free_exec(&finite_mask);
-        let _ = self.free_exec(&all_finite);
-        ensure!(
-            all_finite_value? != 0.0,
-            "covariance: weights must be non-negative finite values"
-        );
+        drop(finite_mask);
+        drop(all_finite);
+        if all_finite_value? == 0.0 {
+            return Err(runmat_accelerate_api::CovarianceWeightDomainError::NonFinite.into());
+        }
 
         let min_weight =
             self.reduce_global_exec(weights, crate::backend::wgpu::types::GlobalReduceOp::Min)?;
         let min_value = self.read_scalar_exec(&min_weight, 0);
-        let _ = self.free_exec(&min_weight);
-        ensure!(
-            min_value? >= 0.0,
-            "covariance: weights must be non-negative finite values"
-        );
+        drop(min_weight);
+        let min_value = min_value?;
+        if !min_value.is_finite() {
+            return Err(runmat_accelerate_api::CovarianceWeightDomainError::NonFinite.into());
+        }
+        if min_value < 0.0 {
+            return Err(runmat_accelerate_api::CovarianceWeightDomainError::Negative.into());
+        }
 
         let sum_weight =
             self.reduce_global_exec(weights, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
         let sum_value = self.read_scalar_exec(&sum_weight, 0);
-        let _ = self.free_exec(&sum_weight);
+        drop(sum_weight);
         sum_value
     }
 
@@ -656,7 +659,7 @@ impl WgpuProvider {
             Ok(value) => value,
             Err(err) => {
                 if weights_alias {
-                    let _ = self.free_exec(&weights_column);
+                    drop(weights_column);
                 }
                 return Err(err);
             }
@@ -664,7 +667,7 @@ impl WgpuProvider {
         let denom = sum_w - 1.0;
         if sum_w <= 0.0 || denom <= 0.0 {
             if weights_alias {
-                let _ = self.free_exec(&weights_column);
+                drop(weights_column);
             }
             return self.fill_exec(&[cols, cols], f64::NAN);
         }
@@ -680,7 +683,7 @@ impl WgpuProvider {
                 Ok(handle) => handle,
                 Err(err) => {
                     if weights_alias {
-                        let _ = self.free_exec(&weights_column);
+                        drop(weights_column);
                     }
                     return Err(err);
                 }
@@ -700,12 +703,12 @@ impl WgpuProvider {
         ) {
             Ok(handle) => handle,
             Err(err) => {
-                let _ = self.free_exec(&weighted);
+                drop(weighted);
                 if casted_weights {
-                    let _ = self.free_exec(&weights_used);
+                    drop(weights_used);
                 }
                 if weights_alias {
-                    let _ = self.free_exec(&weights_column);
+                    drop(weights_column);
                 }
                 return Err(err);
             }
@@ -727,20 +730,20 @@ impl WgpuProvider {
         let covariance = self.matmul_exec(&centered_t, &weighted_centered)?;
         let result = self.scalar_mul(&covariance, 1.0 / denom);
 
-        let _ = self.free_exec(&weighted);
-        let _ = self.free_exec(&weighted_sum);
-        let _ = self.free_exec(&weighted_means);
-        let _ = self.free_exec(&ones);
-        let _ = self.free_exec(&means_full);
-        let _ = self.free_exec(&centered);
-        let _ = self.free_exec(&weighted_centered);
-        let _ = self.free_exec(&centered_t);
-        let _ = self.free_exec(&covariance);
+        drop(weighted);
+        drop(weighted_sum);
+        drop(weighted_means);
+        drop(ones);
+        drop(means_full);
+        drop(centered);
+        drop(weighted_centered);
+        drop(centered_t);
+        drop(covariance);
         if casted_weights {
-            let _ = self.free_exec(&weights_used);
+            drop(weights_used);
         }
         if weights_alias {
-            let _ = self.free_exec(&weights_column);
+            drop(weights_column);
         }
 
         result
@@ -753,9 +756,11 @@ impl WgpuProvider {
         options: &CovarianceOptions,
     ) -> Result<GpuTensorHandle> {
         if options.rows != CovRows::All {
-            return Err(anyhow!(
-                "covariance: rows option {:?} not supported by WGPU provider",
-                options.rows
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                format!(
+                    "covariance: rows option {:?} not supported by WGPU provider",
+                    options.rows
+                ),
             ));
         }
         if options.has_weight_vector && weights.is_none() {
@@ -781,8 +786,10 @@ impl WgpuProvider {
         }
 
         if cols == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-cov-empty");
-            return Ok(self.register_existing_buffer(out_buffer, vec![0, 0], 0));
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-cov-empty")
+            })??;
+            return self.register_existing_buffer(out_buffer, vec![0, 0], 0);
         }
 
         if rows == 0 {
@@ -812,7 +819,7 @@ impl WgpuProvider {
         let result = self
             .centered_gram_exec_kernel(matrix, &entry, &means, rows, cols, denom)
             .await;
-        let _ = self.free_exec(&means);
+        drop(means);
         result
     }
     pub(crate) async fn corrcoef_exec(
@@ -822,18 +829,13 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(matrix)?;
         let normalized = match entry.shape.as_slice() {
-            [1, _] => Some(self.register_existing_buffer_with_storage(
-                entry.buffer.clone(),
-                vec![entry.len, 1],
-                entry.len,
-                entry.storage,
-            )),
+            [1, _] => Some(self.reshape_exec(matrix, &[entry.len, 1])?),
             _ => None,
         };
         let source = normalized.as_ref().unwrap_or(matrix);
         let result = self.corrcoef_matrix_exec(source, options).await;
         if let Some(handle) = normalized {
-            let _ = self.free_exec(&handle);
+            drop(handle);
         }
         result
     }
@@ -844,9 +846,11 @@ impl WgpuProvider {
         options: &CorrcoefOptions,
     ) -> Result<GpuTensorHandle> {
         if options.rows != CorrcoefRows::All {
-            return Err(anyhow!(
-                "corrcoef: rows option {:?} not supported by WGPU provider",
-                options.rows
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                format!(
+                    "corrcoef: rows option {:?} not supported by WGPU provider",
+                    options.rows
+                ),
             ));
         }
 
@@ -865,8 +869,10 @@ impl WgpuProvider {
         };
 
         if cols == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-corrcoef-empty");
-            return Ok(self.register_existing_buffer(out_buffer, vec![0, 0], 0));
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-corrcoef-empty")
+            })??;
+            return self.register_existing_buffer(out_buffer, vec![0, 0], 0);
         }
 
         if rows == 0 {
@@ -902,7 +908,7 @@ impl WgpuProvider {
         let centered_t = self.transpose_exec(&centered)?;
         let covariance = self.matmul_exec(&centered_t, &centered)?;
         let inv_denom = 1.0 / denom;
-        let inv_cov = self.fill_exec(&covariance.shape, inv_denom)?;
+        let inv_cov = self.fill_exec(covariance.shape(), inv_denom)?;
         let covariance_scaled = self.binary_op_exec(
             crate::backend::wgpu::types::BinaryOpCode::Mul,
             &covariance,
@@ -914,7 +920,7 @@ impl WgpuProvider {
             0,
             crate::backend::wgpu::types::DimReduceOp::Sum,
         )?;
-        let inv_var = self.fill_exec(&variance_sum.shape, inv_denom)?;
+        let inv_var = self.fill_exec(variance_sum.shape(), inv_denom)?;
         let variance = self.binary_op_exec(
             crate::backend::wgpu::types::BinaryOpCode::Mul,
             &variance_sum,
@@ -930,16 +936,16 @@ impl WgpuProvider {
             &variance,
             &abs_variance,
         )?;
-        let _ = self.free_exec(&abs_variance);
+        drop(abs_variance);
         let half_tensor = self.fill_exec(&self.get_entry(&variance_plus_abs)?.shape, 0.5)?;
         let variance_adjusted = self.binary_op_exec(
             crate::backend::wgpu::types::BinaryOpCode::Mul,
             &variance_plus_abs,
             &half_tensor,
         )?;
-        let _ = self.free_exec(&half_tensor);
-        let _ = self.free_exec(&variance_plus_abs);
-        let _ = self.free_exec(&variance);
+        drop(half_tensor);
+        drop(variance_plus_abs);
+        drop(variance);
 
         let std = self.unary_op_exec(
             crate::backend::wgpu::types::UnaryOpCode::Sqrt,
@@ -954,21 +960,21 @@ impl WgpuProvider {
         )?;
 
         // Free temporaries
-        let _ = self.free_exec(&means);
-        let _ = self.free_exec(&ones);
-        let _ = self.free_exec(&means_full);
-        let _ = self.free_exec(&centered);
-        let _ = self.free_exec(&centered_t);
-        let _ = self.free_exec(&covariance);
-        let _ = self.free_exec(&inv_cov);
-        let _ = self.free_exec(&covariance_scaled);
-        let _ = self.free_exec(&squared);
-        let _ = self.free_exec(&variance_sum);
-        let _ = self.free_exec(&inv_var);
-        let _ = self.free_exec(&variance_adjusted);
-        let _ = self.free_exec(&std);
-        let _ = self.free_exec(&std_t);
-        let _ = self.free_exec(&std_outer);
+        drop(means);
+        drop(ones);
+        drop(means_full);
+        drop(centered);
+        drop(centered_t);
+        drop(covariance);
+        drop(inv_cov);
+        drop(covariance_scaled);
+        drop(squared);
+        drop(variance_sum);
+        drop(inv_var);
+        drop(variance_adjusted);
+        drop(std);
+        drop(std_t);
+        drop(std_outer);
 
         Ok(correlation)
     }
@@ -978,10 +984,11 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
     ) -> Result<ProviderCovarianceToCorrelationResult> {
         let entry = self.get_entry(matrix)?;
-        ensure!(
-            entry.storage != GpuTensorStorage::ComplexInterleaved,
-            "covariance_to_correlation: complex covariance matrices are not supported"
-        );
+        if entry.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "covariance_to_correlation: complex covariance matrices are not supported",
+            ));
+        }
         let shape = entry.shape.clone();
         let (rows, cols) = match shape.len() {
             0 => (1usize, 1usize),
@@ -1008,124 +1015,158 @@ impl WgpuProvider {
             total <= u32::MAX as usize && rows <= u32::MAX as usize,
             "covariance_to_correlation: matrix exceeds GPU dispatch limits"
         );
+        if total != 0 {
+            self.require_ieee_words(entry.precision)?;
+        }
 
-        let correlation_buffer =
-            self.create_storage_buffer_checked(total, "runmat-cov2corr-correlation-out")?;
-        let sigma_buffer = self.create_storage_buffer_checked(rows, "runmat-cov2corr-sigma-out")?;
+        let (correlation_buffer, sigma_buffer) =
+            self.with_emission(|emission, _| -> Result<_> {
+                Ok((
+                    self.create_storage_buffer_checked(
+                        emission,
+                        total,
+                        "runmat-cov2corr-correlation-out",
+                    )?,
+                    self.create_storage_buffer_checked(
+                        emission,
+                        rows,
+                        "runmat-cov2corr-sigma-out",
+                    )?,
+                ))
+            })??;
 
         if total > 0 {
-            let validation_buffer =
-                self.create_storage_buffer_checked(total, "runmat-cov2corr-validation")?;
-            let error_buffer =
-                self.device_ref()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-cov2corr-error"),
-                        contents: bytes_of(&0u32),
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                    });
-            let shader = covariance_to_correlation_shader(self.precision);
-            let shader_module =
-                self.device_ref()
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: Some("runmat-cov2corr-shader"),
-                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                    });
-            let bind_layout =
-                self.device_ref()
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("runmat-cov2corr-layout"),
-                        entries: &covariance_to_correlation_bind_layout_entries(),
-                    });
-            let pipeline_layout =
-                self.device_ref()
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("runmat-cov2corr-pipeline-layout"),
-                        bind_group_layouts: &[&bind_layout],
-                        push_constant_ranges: &[],
-                    });
-            let pipeline = self.device_ref().create_compute_pipeline(
-                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                    label: Some("runmat-cov2corr-pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader_module,
-                    entry_point: "main",
-                },
-            );
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-            let mut offset = 0usize;
-            while offset < total {
-                let chunk_len = (total - offset).min(chunk_capacity);
-                let params = CovarianceToCorrelationParams {
-                    n: rows as u32,
-                    total: total as u32,
-                    offset: offset as u32,
-                    chunk: chunk_len as u32,
-                };
-                let params_buffer =
-                    self.device_ref()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-cov2corr-params"),
-                            contents: bytes_of(&params),
-                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            let (staging, error_size) =
+                self.with_emission(|emission, pending| -> Result<_> {
+                    let validation_buffer = self.create_storage_buffer_checked(
+                        emission,
+                        total,
+                        "runmat-cov2corr-validation",
+                    )?;
+                    let error_buffer =
+                        emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-cov2corr-error"),
+                            contents: bytes_of(&0u32),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                         });
-                let bind_group = self
-                    .device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-cov2corr-bind"),
-                        layout: &bind_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: correlation_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: sigma_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: error_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: validation_buffer.as_ref().as_entire_binding(),
-                            },
-                        ],
-                    });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
-                crate::backend::wgpu::dispatch::creation::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &pipeline,
-                    &bind_group,
-                    workgroups,
-                    "runmat-cov2corr-encoder",
-                    "runmat-cov2corr-pass",
-                );
-                offset += chunk_len;
-            }
+                    let shader = covariance_to_correlation_shader(self.precision);
+                    let shader_module =
+                        emission
+                            .device()
+                            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                                label: Some("runmat-cov2corr-shader"),
+                                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+                            });
+                    let bind_layout = emission.device().create_bind_group_layout(
+                        &wgpu::BindGroupLayoutDescriptor {
+                            label: Some("runmat-cov2corr-layout"),
+                            entries: &covariance_to_correlation_bind_layout_entries(),
+                        },
+                    );
+                    let pipeline_layout =
+                        emission
+                            .device()
+                            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                                label: Some("runmat-cov2corr-pipeline-layout"),
+                                bind_group_layouts: &[&bind_layout],
+                                push_constant_ranges: &[],
+                            });
+                    let pipeline = emission.device().create_compute_pipeline(
+                        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                            label: Some("runmat-cov2corr-pipeline"),
+                            layout: Some(&pipeline_layout),
+                            module: &shader_module,
+                            entry_point: "main",
+                        },
+                    );
+                    let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS
+                        as usize)
+                        * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+                    let mut offset = 0usize;
+                    while offset < total {
+                        let chunk_len = (total - offset).min(chunk_capacity);
+                        let params = CovarianceToCorrelationParams {
+                            n: rows as u32,
+                            total: total as u32,
+                            offset: offset as u32,
+                            chunk: chunk_len as u32,
+                        };
+                        let params_buffer =
+                            emission.create_initialized_buffer(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-cov2corr-params"),
+                                contents: bytes_of(&params),
+                                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                            });
+                        let bind_group =
+                            emission
+                                .device()
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-cov2corr-bind"),
+                                    layout: &bind_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: entry.buffer.as_ref().as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: correlation_buffer
+                                                .as_ref()
+                                                .as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: sigma_buffer.as_ref().as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 3,
+                                            resource: error_buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 4,
+                                            resource: params_buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 5,
+                                            resource: validation_buffer
+                                                .as_ref()
+                                                .as_entire_binding(),
+                                        },
+                                    ],
+                                });
+                        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                            chunk_len as u32,
+                            crate::backend::wgpu::config::WORKGROUP_SIZE,
+                        );
+                        crate::backend::wgpu::dispatch::creation::run(
+                            emission,
+                            pending,
+                            &pipeline,
+                            &bind_group,
+                            workgroups,
+                            "runmat-cov2corr-encoder",
+                            "runmat-cov2corr-pass",
+                        )?;
+                        offset += chunk_len;
+                    }
 
-            let error_size = std::mem::size_of::<u32>() as u64;
-            let staging = self.create_readback_buffer(error_size, "runmat-cov2corr-error-staging");
-            let mut encoder =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-cov2corr-error-copy"),
+                    let error_size = std::mem::size_of::<u32>() as u64;
+                    let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-cov2corr-error-staging"),
+                        size: error_size,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
                     });
-            encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
-            self.submit(encoder);
+                    let mut encoder = pending.profiled_encoder(
+                        emission,
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-cov2corr-error-copy"),
+                        },
+                    );
+                    encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
+                    self.submit(emission, pending, encoder)?;
+                    Ok((staging, error_size))
+                })??;
             let bytes = self.map_readback_bytes_sync(staging, error_size, "cov2corr")?;
             let code = u32::from_le_bytes(
                 bytes
@@ -1170,8 +1211,12 @@ impl WgpuProvider {
         }
 
         Ok(ProviderCovarianceToCorrelationResult {
-            correlation: self.register_existing_buffer(correlation_buffer, vec![rows, cols], total),
-            sigma: self.register_existing_buffer(sigma_buffer, vec![rows, 1], rows),
+            correlation: self.register_existing_buffer(
+                correlation_buffer,
+                vec![rows, cols],
+                total,
+            )?,
+            sigma: self.register_existing_buffer(sigma_buffer, vec![rows, 1], rows)?,
         })
     }
 }
@@ -1211,7 +1256,7 @@ fn covariance_to_correlation_shader(precision: NumericPrecision) -> String {
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
     let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
-    format!(
+    let source = format!(
         r#"
 const MAX_FINITE_COV2CORR: {ty} = {ty}({max_finite});
 
@@ -1237,12 +1282,16 @@ struct Params {{
 @group(0) @binding(4) var<uniform> params: Params;
 @group(0) @binding(5) var<storage, read_write> validation: Tensor;
 
-fn is_nan_cov2corr(x: {ty}) -> bool {{
-  return x != x;
+fn is_nan_cov2corr(value: {ty}) -> bool {{
+  @IEEE_NAN_PREDICATE@
+}}
+
+fn isFiniteCov2corr(value: {ty}) -> bool {{
+  @IEEE_FINITE_PREDICATE@
 }}
 
 fn is_finite_cov2corr(x: {ty}) -> bool {{
-  return (x == x) && (abs(x) < MAX_FINITE_COV2CORR);
+  return isFiniteCov2corr(x) && (abs(x) < MAX_FINITE_COV2CORR);
 }}
 
 fn nan_cov2corr() -> {ty} {{
@@ -1382,17 +1431,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         max_finite = max_finite,
         tol = tol,
         workgroup = workgroup,
+    );
+    crate::backend::wgpu::shaders::nan_predicate::inject_finite(
+        &crate::backend::wgpu::shaders::nan_predicate::inject(&source, precision),
+        precision,
     )
 }
 
 #[cfg(test)]
 mod covariance_conversion_tests {
-    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::{AccelProvider, HostTensorView};
 
     #[test]
     fn covariance_to_correlation_wgpu_returns_resident_outputs() {
-        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let covariance = provider
@@ -1418,14 +1471,14 @@ mod covariance_conversion_tests {
         assert!((sigma.data[0] - 2.0).abs() < 1.0e-8);
         assert!((sigma.data[1] - 3.0).abs() < 1.0e-8);
 
-        provider.free(&covariance).ok();
-        provider.free(&result.correlation).ok();
-        provider.free(&result.sigma).ok();
+        covariance.release().unwrap();
+        result.correlation.release().unwrap();
+        result.sigma.release().unwrap();
     }
 
     #[test]
     fn covariance_to_correlation_wgpu_rejects_invalid_covariance() {
-        let Ok(provider) = register_test_wgpu_provider(WgpuProviderOptions::default()) else {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
             return;
         };
         let covariance = provider
@@ -1440,7 +1493,7 @@ mod covariance_conversion_tests {
             .expect_err("invalid covariance");
 
         assert!(err.to_string().contains("symmetric"));
-        provider.free(&covariance).ok();
+        covariance.release().unwrap();
 
         let indefinite = provider
             .upload(&HostTensorView {
@@ -1456,6 +1509,6 @@ mod covariance_conversion_tests {
             .covariance_to_correlation(&indefinite)
             .expect_err("indefinite covariance");
         assert!(err.to_string().contains("positive semidefinite"));
-        provider.free(&indefinite).ok();
+        indefinite.release().unwrap();
     }
 }

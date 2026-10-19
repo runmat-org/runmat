@@ -1,9 +1,11 @@
 use runmat_execution::JobId;
 use serde::{Deserialize, Serialize};
 
-use super::{BatchSubmission, JobAttachment, LocalJobRecord, ProgramBatchSubmission};
+use super::{
+    BatchSubmission, GraphBatchSubmission, JobAttachment, LocalJobRecord, ProgramBatchSubmission,
+};
 
-pub const SUPERVISOR_PROTOCOL_VERSION: u16 = 5;
+pub const SUPERVISOR_PROTOCOL_VERSION: u16 = 6;
 pub const SUPERVISOR_MAX_MESSAGE_BYTES: u32 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -27,6 +29,9 @@ pub enum SupervisorCommand {
     },
     SubmitProgram {
         submission: Box<ProgramBatchSubmission>,
+    },
+    SubmitGraph {
+        submission: Box<GraphBatchSubmission>,
     },
     List,
     Show {

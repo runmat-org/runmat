@@ -9,6 +9,8 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 pub(super) enum RemoteResultObjects {
     Local(RemoteObjectStore),
     Pool(Arc<RemotePoolDriver>),
+    /// The response carries every value inline (Graph and runtime failures).
+    None,
 }
 
 impl RemoteResultObjects {
@@ -24,6 +26,7 @@ impl RemoteResultObjects {
             Self::Pool(pool) => pool
                 .execution_object(reference)?
                 .map(|bytes| bytes.as_ref().to_vec()),
+            Self::None => None,
         };
         bytes.ok_or_else(|| protocol("result object is absent from its execution owner"))
     }

@@ -122,7 +122,7 @@ pub fn qualify_that(
     };
     if !crate::class_registry::is_class_or_subclass(
         &constraint.class_name,
-        "matlab.unittest.constraints.Constraint",
+        &runmat_types::standard::UNIT_TEST_CONSTRAINT.owned(),
     ) {
         return Err(build_runtime_error(format!(
             "{builtin}: '{}' is not a compatible Constraint",
@@ -132,22 +132,32 @@ pub fn qualify_that(
         .with_builtin(builtin)
         .build());
     }
-    let passed = match constraint.class_name.as_str() {
-        "matlab.unittest.constraints.IsEqualTo" => constraint
+    let passed = if constraint
+        .class_name
+        .is(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO)
+    {
+        constraint
             .properties
-            .get("__runmat_expected")
-            .is_some_and(|expected| values_equal(&actual, expected)),
-        "matlab.unittest.constraints.IsTrue" => logical_scalar(&actual) == Some(true),
-        "matlab.unittest.constraints.IsFalse" => logical_scalar(&actual) == Some(false),
-        _ => {
-            return Err(build_runtime_error(format!(
-                "{builtin}: constraint '{}' requires an unsupported custom satisfaction hook",
-                constraint.class_name
-            ))
-            .with_identifier("RunMat:Testing:UnsupportedConstraint")
-            .with_builtin(builtin)
-            .build())
-        }
+            .get("Expected")
+            .is_some_and(|expected| crate::testing::constraint_values_equal(&actual, expected))
+    } else if constraint
+        .class_name
+        .is(runmat_types::standard::UNIT_TEST_IS_TRUE)
+    {
+        logical_scalar(&actual) == Some(true)
+    } else if constraint
+        .class_name
+        .is(runmat_types::standard::UNIT_TEST_IS_FALSE)
+    {
+        logical_scalar(&actual) == Some(false)
+    } else {
+        return Err(build_runtime_error(format!(
+            "{builtin}: constraint '{}' requires an unsupported custom satisfaction hook",
+            constraint.class_name
+        ))
+        .with_identifier("RunMat:Testing:UnsupportedConstraint")
+        .with_builtin(builtin)
+        .build());
     };
     finish_qualification(
         builtin,
@@ -203,8 +213,8 @@ fn finish_qualification(
 fn validate_receiver(builtin: &'static str, receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
+        Value::Object(object) => &object.class_name,
+        Value::HandleObject(handle) => &handle.class_name,
         _ => {
             return Err(build_runtime_error(format!(
                 "{builtin}: first argument must be a matlab.unittest.TestCase"
@@ -214,7 +224,10 @@ fn validate_receiver(builtin: &'static str, receiver: &Value) -> BuiltinResult<(
             .build())
         }
     };
-    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if crate::class_registry::is_class_or_subclass(
+        class_name,
+        &crate::testing::TEST_CASE_CLASS.owned(),
+    ) {
         Ok(())
     } else {
         Err(build_runtime_error(format!(
@@ -273,7 +286,11 @@ fn diagnostic_message(values: &[Value]) -> Option<String> {
             class_name,
             properties,
             ..
-        }) if class_name == "matlab.unittest.diagnostics.Diagnostic" => {
+        }) if crate::class_registry::is_class_or_subclass(
+            class_name,
+            &runmat_types::standard::UNIT_TEST_DIAGNOSTIC.owned(),
+        ) =>
+        {
             properties.get("Message").and_then(|value| match value {
                 Value::String(message) => Some(message.clone()),
                 _ => None,
@@ -348,6 +365,20 @@ mod tests {
     }
 
     #[test]
+    fn concrete_string_diagnostic_is_accepted_as_custom_failure_message() {
+        crate::testing::ensure_testing_classes();
+        let mut diagnostic =
+            ObjectInstance::new(runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC);
+        diagnostic
+            .properties
+            .insert("Message".into(), Value::String("specific failure".into()));
+        assert_eq!(
+            diagnostic_message(&[Value::Object(diagnostic)]),
+            Some("specific failure".into())
+        );
+    }
+
+    #[test]
     fn failed_verification_records_and_continues() {
         let guard = context();
         let value = futures::executor::block_on(qualify_binary(
@@ -386,6 +417,84 @@ mod tests {
             error.identifier.as_deref(),
             Some("RunMat:Test:AssertionFailed")
         );
+        assert_eq!(guard.handle().commands().len(), 1);
+    }
+
+    #[test]
+    fn equality_constraint_reads_its_public_expected_property() {
+        let mut constraint = ObjectInstance::new(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO);
+        constraint
+            .properties
+            .insert("Expected".into(), Value::Num(42.0));
+        let outcome = qualify_that(
+            "verifyThat",
+            QualificationKind::VerificationFailed,
+            crate::testing::test_case_object("test", false),
+            Value::Num(42.0),
+            Value::Object(constraint),
+            vec![],
+        )
+        .unwrap();
+        assert!(matches!(outcome, Value::Tensor(tensor) if tensor.is_empty()));
+    }
+
+    #[test]
+    fn equality_qualification_records_wide_integer_and_class_mismatches() {
+        let guard = context();
+        for (actual, expected) in [
+            (
+                Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_992)),
+                Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+            ),
+            (Value::Num(1.0), Value::Int(runmat_value::IntValue::U64(1))),
+        ] {
+            let mut constraint = ObjectInstance::new(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO);
+            constraint.properties.insert("Expected".into(), expected);
+            qualify_that(
+                "verifyThat",
+                QualificationKind::VerificationFailed,
+                crate::testing::test_case_object("test", false),
+                actual,
+                Value::Object(constraint),
+                vec![],
+            )
+            .unwrap();
+        }
+        assert_eq!(guard.handle().commands().len(), 2);
+    }
+
+    #[test]
+    fn boolean_constraints_require_logical_scalars() {
+        for (class, actual) in [
+            (runmat_types::standard::UNIT_TEST_IS_TRUE, Value::Bool(true)),
+            (
+                runmat_types::standard::UNIT_TEST_IS_FALSE,
+                Value::Bool(false),
+            ),
+        ] {
+            let outcome = qualify_that(
+                "verifyThat",
+                QualificationKind::VerificationFailed,
+                crate::testing::test_case_object("test", false),
+                actual,
+                Value::Object(ObjectInstance::new(class)),
+                vec![],
+            )
+            .unwrap();
+            assert!(matches!(outcome, Value::Tensor(tensor) if tensor.is_empty()));
+        }
+        let guard = context();
+        qualify_that(
+            "verifyThat",
+            QualificationKind::VerificationFailed,
+            crate::testing::test_case_object("test", false),
+            Value::Num(1.0),
+            Value::Object(ObjectInstance::new(
+                runmat_types::standard::UNIT_TEST_IS_TRUE,
+            )),
+            vec![],
+        )
+        .unwrap();
         assert_eq!(guard.handle().commands().len(), 1);
     }
 }

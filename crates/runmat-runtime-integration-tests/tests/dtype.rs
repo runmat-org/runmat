@@ -12,9 +12,9 @@ fn zeros_single_uses_f32_dtype() {
         ],
     )
     .expect("zeros single");
-    match result {
+    match result.value() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -32,9 +32,9 @@ fn ones_single_uses_f32_dtype() {
         ],
     )
     .expect("ones single");
-    match result {
+    match result.value() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 4]);
+            assert_eq!(t.shape(), &[3, 4]);
             assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -50,9 +50,9 @@ fn zeros_like_proto_preserves_numeric_dtype() {
         &[Value::String("like".into()), Value::Tensor(proto.clone())],
     )
     .expect("zeros like proto");
-    match result {
+    match result.value() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, proto.shape);
+            assert_eq!(t.shape(), proto.shape());
             assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -73,7 +73,7 @@ fn zeros_like_sparse_proto_preserves_sparse_storage() {
         ],
     )
     .expect("zeros like sparse proto");
-    match result {
+    match result.value() {
         Value::SparseTensor(sparse) => {
             assert_eq!(sparse.shape(), vec![3, 4]);
             assert_eq!(sparse.nnz(), 0);
@@ -113,7 +113,7 @@ fn zeros_like_typed_sparse_proto_preserves_integer_class() {
         )
         .expect("zeros like typed sparse prototype");
 
-        match result {
+        match result.value() {
             Value::SparseTensor(sparse) => {
                 assert_eq!(sparse.shape(), vec![3, 4]);
                 assert_eq!(sparse.nnz(), 0);
@@ -144,7 +144,7 @@ fn zeros_like_typed_sparse_proto_preserves_integer_class() {
         &[Value::String("like".into()), Value::SparseTensor(proto)],
     )
     .expect("zeros like typed sparse prototype shape");
-    match result {
+    match result.value() {
         Value::SparseTensor(sparse) => {
             assert_eq!(sparse.shape(), vec![2, 5]);
             assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0, 0]);
@@ -207,9 +207,9 @@ fn sparse_full_and_nonzeros_preserve_exact_integer_storage() {
 
     for storage in cases {
         let source = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
-        let sparse = match runmat_runtime::call_builtin("sparse", &[Value::Tensor(source)])
-            .expect("sparse integer tensor")
-        {
+        let sparse_result = runmat_runtime::call_builtin("sparse", &[Value::Tensor(source)])
+            .expect("sparse integer tensor");
+        let sparse = match sparse_result.value() {
             Value::SparseTensor(sparse) => sparse,
             other => panic!("expected sparse tensor, got {other:?}"),
         };
@@ -222,26 +222,27 @@ fn sparse_full_and_nonzeros_preserve_exact_integer_storage() {
         assert_eq!(sparse.integer_at(0, 0), None);
         assert_eq!(sparse.integer_at(1, 1), None);
 
-        let full =
-            match runmat_runtime::call_builtin("full", &[Value::SparseTensor(sparse.clone())])
-                .expect("full integer sparse")
-            {
-                Value::Tensor(tensor) => tensor,
-                other => panic!("expected tensor, got {other:?}"),
-            };
+        let full_result =
+            runmat_runtime::call_builtin("full", &[Value::SparseTensor(sparse.clone())])
+                .expect("full integer sparse");
+        let full = match full_result.value() {
+            Value::Tensor(tensor) => tensor,
+            other => panic!("expected tensor, got {other:?}"),
+        };
         assert_eq!(full.integer_storage(), Some(&storage));
 
-        let nonzeros =
-            match runmat_runtime::call_builtin("nonzeros", &[Value::SparseTensor(sparse)])
-                .expect("nonzeros integer sparse")
-            {
+        sparse_result.with_owned(|sparse| {
+            let nonzeros_result = runmat_runtime::call_builtin("nonzeros", &[sparse])
+                .expect("nonzeros integer sparse");
+            let nonzeros = match nonzeros_result.value() {
                 Value::Tensor(tensor) => tensor,
                 other => panic!("expected tensor, got {other:?}"),
             };
-        assert_eq!(
-            nonzeros.integer_storage().map(IntegerStorage::class_name),
-            Some(storage.class_name())
-        );
+            assert_eq!(
+                nonzeros.integer_storage().map(IntegerStorage::class_name),
+                Some(storage.class_name())
+            );
+        });
     }
 }
 
@@ -253,7 +254,7 @@ fn sparse_triplets_preserve_integer_values_and_saturate_duplicates() {
     let values = Tensor::new_integer(IntegerStorage::I8(vec![100, 100, 0]), vec![3, 1])
         .expect("int8 values");
 
-    let sparse = match runmat_runtime::call_builtin(
+    let sparse_result = runmat_runtime::call_builtin(
         "sparse",
         &[
             Value::Tensor(rows),
@@ -261,8 +262,8 @@ fn sparse_triplets_preserve_integer_values_and_saturate_duplicates() {
             Value::Tensor(values),
         ],
     )
-    .expect("integer sparse triplets")
-    {
+    .expect("integer sparse triplets");
+    let sparse = match sparse_result.value() {
         Value::SparseTensor(sparse) => sparse,
         other => panic!("expected sparse tensor, got {other:?}"),
     };
@@ -272,9 +273,10 @@ fn sparse_triplets_preserve_integer_values_and_saturate_duplicates() {
         Some(&IntegerStorage::I8(vec![i8::MAX]))
     );
 
-    let dense = match runmat_runtime::call_builtin("full", &[Value::SparseTensor(sparse)])
-        .expect("full integer triplets")
-    {
+    let dense_result = sparse_result.with_owned(|sparse| {
+        runmat_runtime::call_builtin("full", &[sparse]).expect("full integer triplets")
+    });
+    let dense = match dense_result.value() {
         Value::Tensor(tensor) => tensor,
         other => panic!("expected tensor, got {other:?}"),
     };
@@ -291,7 +293,7 @@ fn sparse_triplets_preserve_uint64_and_expand_integer_scalars() {
     let cols = Tensor::new(vec![1.0, 1.0], vec![2, 1]).expect("column subscripts");
     let values = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1]), vec![2, 1])
         .expect("uint64 values");
-    let sparse = match runmat_runtime::call_builtin(
+    let sparse_result = runmat_runtime::call_builtin(
         "sparse",
         &[
             Value::Tensor(rows),
@@ -299,8 +301,8 @@ fn sparse_triplets_preserve_uint64_and_expand_integer_scalars() {
             Value::Tensor(values),
         ],
     )
-    .expect("uint64 sparse triplets")
-    {
+    .expect("uint64 sparse triplets");
+    let sparse = match sparse_result.value() {
         Value::SparseTensor(sparse) => sparse,
         other => panic!("expected sparse tensor, got {other:?}"),
     };
@@ -312,7 +314,7 @@ fn sparse_triplets_preserve_uint64_and_expand_integer_scalars() {
     let rows = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1])
         .expect("integer row subscripts");
     let cols = Value::Int(runmat_value::IntValue::I16(1));
-    let sparse = match runmat_runtime::call_builtin(
+    let sparse_result = runmat_runtime::call_builtin(
         "sparse",
         &[
             Value::Tensor(rows),
@@ -320,8 +322,8 @@ fn sparse_triplets_preserve_uint64_and_expand_integer_scalars() {
             Value::Int(runmat_value::IntValue::I16(3)),
         ],
     )
-    .expect("expanded integer scalar sparse triplets")
-    {
+    .expect("expanded integer scalar sparse triplets");
+    let sparse = match sparse_result.value() {
         Value::SparseTensor(sparse) => sparse,
         other => panic!("expected sparse tensor, got {other:?}"),
     };
@@ -339,7 +341,7 @@ fn sparse_triplets_accept_matrix_subscripts_and_integer_values() {
     let values = Tensor::new_integer(IntegerStorage::U32(vec![1, 2, 3, u32::MAX]), vec![2, 2])
         .expect("uint32 values");
 
-    let sparse = match runmat_runtime::call_builtin(
+    let sparse_result = runmat_runtime::call_builtin(
         "sparse",
         &[
             Value::Tensor(rows),
@@ -347,8 +349,8 @@ fn sparse_triplets_accept_matrix_subscripts_and_integer_values() {
             Value::Tensor(values),
         ],
     )
-    .expect("matrix integer sparse triplets")
-    {
+    .expect("matrix integer sparse triplets");
+    let sparse = match sparse_result.value() {
         Value::SparseTensor(sparse) => sparse,
         other => panic!("expected sparse tensor, got {other:?}"),
     };
@@ -378,9 +380,10 @@ fn transpose_preserves_exact_sparse_integer_storage() {
     )
     .expect("uint64 sparse");
 
-    let transposed = match runmat_runtime::call_builtin("transpose", &[Value::SparseTensor(sparse)])
-        .expect("transpose sparse")
-    {
+    let transposed_result =
+        runmat_runtime::call_builtin("transpose", &[Value::SparseTensor(sparse)])
+            .expect("transpose sparse");
+    let transposed = match transposed_result.value() {
         Value::SparseTensor(sparse) => sparse,
         other => panic!("expected sparse tensor, got {other:?}"),
     };
@@ -402,9 +405,9 @@ fn randn_single_sets_f32_dtype() {
         ],
     )
     .expect("randn single");
-    match result {
+    match result.value() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![4, 5]);
+            assert_eq!(t.shape(), &[4, 5]);
             assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -425,9 +428,9 @@ fn randn_like_proto_preserves_dtype() {
         ],
     )
     .expect("randn like");
-    match result {
+    match result.value() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, proto.shape);
+            assert_eq!(t.shape(), proto.shape());
             assert_eq!(t.numeric_dtype(), NumericDType::F32);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -448,7 +451,7 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
         ],
     )
     .expect("gpuArray single upload");
-    if let Value::GpuTensor(ref handle) = gpu {
+    if let Value::GpuTensor(handle) = gpu.value() {
         let expected_handle_precision = runmat_accelerate_api::ProviderPrecision::F32;
         let precision =
             runmat_accelerate_api::handle_precision(handle).unwrap_or(expected_handle_precision);
@@ -458,9 +461,9 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
             runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
         };
         let gathered = runmat_runtime::dispatcher::gather_if_needed(&gpu).expect("gather single");
-        match gathered {
+        match &gathered {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, host.shape);
+                assert_eq!(t.shape(), host.shape());
                 assert_eq!(t.numeric_dtype(), expected_dtype);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -468,24 +471,25 @@ fn gpu_array_single_roundtrip_preserves_dtype() {
 
         let direct_eval = block_on(
             runmat_runtime::builtins::acceleration::gpu::gather::evaluate(std::slice::from_ref(
-                &gpu,
+                gpu.value(),
             )),
         )
         .expect("gather eval")
         .into_first();
         match direct_eval {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, host.shape);
+                assert_eq!(t.shape(), host.shape());
                 assert_eq!(t.numeric_dtype(), expected_dtype);
             }
             other => panic!("expected tensor from gather::evaluate, got {other:?}"),
         }
 
-        let builtin_gathered = runmat_runtime::call_builtin("gather", std::slice::from_ref(&gpu))
-            .expect("gather builtin");
-        match builtin_gathered {
+        let builtin_gathered =
+            runmat_runtime::call_builtin("gather", std::slice::from_ref(gpu.value()))
+                .expect("gather builtin");
+        match builtin_gathered.value() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, host.shape);
+                assert_eq!(t.shape(), host.shape());
                 assert_eq!(t.numeric_dtype(), expected_dtype);
             }
             other => panic!("expected tensor result from builtin gather, got {other:?}"),

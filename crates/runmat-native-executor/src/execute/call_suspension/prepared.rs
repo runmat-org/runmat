@@ -1,0 +1,71 @@
+use std::future::Future;
+use std::pin::Pin;
+
+use crate::{NativeExecutorError, NativeExecutorResult};
+
+use super::super::state::{EmbeddedOperationIdentity, HostState};
+use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
+
+pub(in crate::execute) fn take_completed_prepared_receiver(
+    state: &mut HostState,
+    embedded: Option<&EmbeddedOperationIdentity>,
+) -> NativeExecutorResult<Option<runmat_runtime::object::protocol::PreparedSubscriptReceiver>> {
+    let Some(completed) = state.completed_call.take() else {
+        return Ok(None);
+    };
+    let request = state.current_request.ok_or_else(|| {
+        NativeExecutorError::Host("completed receiver preparation has no active site".into())
+    })?;
+    if completed.request != request || completed.embedded.as_ref() != embedded {
+        state.completed_call = Some(completed);
+        return Err(NativeExecutorError::Host(
+            "completed receiver preparation does not match the exact resumed operation".into(),
+        ));
+    }
+    let CompletedPayload::PreparedReceiver { prepared, .. } = &completed.payload else {
+        state.completed_call = Some(completed);
+        return Err(NativeExecutorError::Host(
+            "completed receiver preparation payload has the wrong typed result".into(),
+        ));
+    };
+    let prepared = prepared.as_ref().clone();
+    if let Some(embedded) = embedded {
+        state.restore_embedded_call_regions(embedded);
+    }
+    Ok(Some(prepared))
+}
+
+pub(in crate::execute) fn begin_prepared_receiver(
+    state: &mut HostState,
+    embedded: Option<EmbeddedOperationIdentity>,
+    future: Pin<
+        Box<
+            dyn Future<
+                    Output = NativeExecutorResult<
+                        runmat_runtime::object::protocol::PreparedSubscriptReceiver,
+                    >,
+                > + 'static,
+        >,
+    >,
+) -> NativeExecutorResult<runmat_runtime::object::protocol::PreparedSubscriptReceiver> {
+    let future: CompletionFuture = Box::pin(async move {
+        future
+            .await
+            .map(Box::new)
+            .map(CallCompletion::PreparedReceiver)
+    });
+    let future = super::scope_completion(state, future);
+    let request = state.current_request.ok_or_else(|| {
+        NativeExecutorError::Host("pending receiver preparation has no active site".into())
+    })?;
+    let (continuation, generation) = state.next_suspension_identity()?;
+    state.pending_call = Some(PendingCall {
+        continuation,
+        generation,
+        request,
+        embedded,
+        retained_roots: Vec::new(),
+        future,
+    });
+    Err(NativeExecutorError::CallSuspended)
+}

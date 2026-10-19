@@ -323,10 +323,21 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 .map_err(map_imagesc_invalid_argument)?
         }
         super::image::ImageInputKind::TrueColorGpu(handle, channels) => {
-            super::image::build_truecolor_image_surface_gpu(
+            match super::image::build_truecolor_image_surface_gpu(
                 &handle, &x_axis, &y_axis, rows, cols, channels,
-            )
-            .map_err(map_imagesc_invalid_argument)?
+            )? {
+                Some(surface) => surface,
+                None => {
+                    let (x_host, y_host) =
+                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
+                    super::image::build_truecolor_image_surface(
+                        retained_c_data.clone(),
+                        x_host,
+                        y_host,
+                    )
+                    .map_err(map_imagesc_invalid_argument)?
+                }
+            }
         }
         super::image::ImageInputKind::Indexed(c_input) => {
             super::image::build_indexed_image_surface(
@@ -376,8 +387,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         &c_data_mapping,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_imagesc_internal(err));
@@ -395,7 +405,7 @@ fn parse_imagesc_color_limits(value: &Value) -> crate::BuiltinResult<Option<(f64
             "imagesc: color limits must be a two-element numeric vector",
         )
     })?;
-    if tensor.shape.iter().copied().product::<usize>() != 2 {
+    if tensor.shape().iter().copied().product::<usize>() != 2 {
         return Ok(None);
     }
     let values = tensor.materialize_f64();
@@ -652,6 +662,19 @@ mod tests {
         assert!(labels.contains(&"h = imagesc(C)"));
         assert!(labels.contains(&"h = imagesc(X, Y, C)"));
         assert!(labels.contains(&"h = imagesc(X, Y, C, Name, Value, ...)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn color_limit_parser_retains_two_element_low_rank_admission() {
+        let scalar = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        assert_eq!(parse_imagesc_color_limits(&scalar).unwrap(), None);
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        assert_eq!(
+            parse_imagesc_color_limits(&vector).unwrap(),
+            Some((1.0, 2.0))
+        );
     }
 
     #[test]

@@ -15,4 +15,8 @@ pub mod lsqnonlin;
 pub mod optimoptions;
 pub mod optimset;
 pub mod quad;
+pub(crate) mod quadrature;
+#[cfg(test)]
 pub(crate) mod type_resolvers;
+#[cfg(test)]
+mod scalar_provider_tests;

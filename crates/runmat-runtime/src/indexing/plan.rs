@@ -1,6 +1,7 @@
 use crate::indexing::selectors::{
-    index_scalar_from_value, logical_indices_linear, materialize_index_value,
-    numeric_tensor_indices, SliceSelector,
+    build_assignment_selectors, build_assignment_selectors_host, build_slice_selectors,
+    build_slice_selectors_host, index_scalar_from_value, logical_indices_linear,
+    materialize_index_value, numeric_tensor_indices, SliceSelector,
 };
 use crate::indexing::EndExpr;
 use crate::runtime_error::semantic_error as mex;
@@ -9,6 +10,66 @@ use runmat_value::Value;
 use std::future::Future;
 
 pub type VmResult<T> = Result<T, RuntimeError>;
+
+/// Whether an indexed store may extend numeric selector bounds. Deletion and
+/// other bounded stores retain the ordinary read-selector policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexedStorePlanMode {
+    Bounded,
+    Grow,
+}
+
+/// Executor-neutral selector and plan admission for indexed stores.
+pub async fn build_indexed_store_plan(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+    mode: IndexedStorePlanMode,
+) -> VmResult<IndexPlan> {
+    let selectors = match mode {
+        IndexedStorePlanMode::Bounded => {
+            build_slice_selectors(dims, colon_mask, end_mask, numeric, base_shape).await?
+        }
+        IndexedStorePlanMode::Grow => {
+            build_assignment_selectors(dims, colon_mask, end_mask, numeric, base_shape).await?
+        }
+    };
+    match mode {
+        IndexedStorePlanMode::Bounded => build_index_plan(&selectors, dims, base_shape),
+        IndexedStorePlanMode::Grow => build_assignment_plan(&selectors, dims, base_shape),
+    }
+}
+
+/// Decode and plan a host-only indexed store without constructing or polling
+/// the provider continuation. `None` means a selector needs GPU gathering.
+pub fn build_indexed_store_plan_host(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+    mode: IndexedStorePlanMode,
+) -> VmResult<Option<IndexPlan>> {
+    let selectors = match mode {
+        IndexedStorePlanMode::Bounded => {
+            build_slice_selectors_host(dims, colon_mask, end_mask, numeric, base_shape)?
+        }
+        IndexedStorePlanMode::Grow => {
+            build_assignment_selectors_host(dims, colon_mask, end_mask, numeric, base_shape)?
+        }
+    };
+    let Some(selectors) = selectors else {
+        return Ok(None);
+    };
+    match mode {
+        IndexedStorePlanMode::Bounded => build_index_plan(&selectors, dims, base_shape).map(Some),
+        IndexedStorePlanMode::Grow => build_assignment_plan(&selectors, dims, base_shape).map(Some),
+    }
+}
+
+const MAX_INDEX_PLAN_ELEMENTS: usize = 50_000_000;
 
 #[derive(Debug, Clone, Default)]
 pub struct IndexPlanProperties {
@@ -121,6 +182,34 @@ pub fn total_len_from_shape(shape: &[usize]) -> usize {
     }
 }
 
+/// Returns the dimensions visible to a MATLAB indexing expression.
+///
+/// A single subscript addresses the linearized array. When an expression has
+/// fewer subscripts than the array rank, the final supplied subscript addresses
+/// the product of that dimension and every remaining dimension.
+pub fn effective_index_shape(base_shape: &[usize], dims: usize) -> VmResult<Vec<usize>> {
+    if dims == 0 {
+        return Err(mex("MissingIndex", "At least one index is required"));
+    }
+    if dims == 1 {
+        return Ok(vec![checked_total_len_from_shape(base_shape)?]);
+    }
+    let mut shape = Vec::with_capacity(dims);
+    for dimension in 0..dims {
+        if dimension + 1 == dims {
+            let extent = base_shape
+                .iter()
+                .skip(dimension)
+                .try_fold(1usize, |total, extent| total.checked_mul(*extent))
+                .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
+            shape.push(extent);
+        } else {
+            shape.push(base_shape.get(dimension).copied().unwrap_or(1));
+        }
+    }
+    Ok(shape)
+}
+
 fn checked_total_len_from_shape(shape: &[usize]) -> VmResult<usize> {
     if is_scalar_shape(shape) {
         return Ok(1);
@@ -133,6 +222,46 @@ fn checked_total_len_from_shape(shape: &[usize]) -> VmResult<usize> {
 
 fn checked_u32_index(index: usize) -> VmResult<u32> {
     u32::try_from(index).map_err(|_| mex("IndexOutOfBounds", "Index exceeds supported range"))
+}
+
+fn checked_selection_cardinality(lengths: &[usize]) -> VmResult<usize> {
+    let count = lengths.iter().try_fold(1usize, |total, length| {
+        total
+            .checked_mul(*length)
+            .ok_or_else(|| mex("IndexOutOfBounds", "Index selection cardinality overflow"))
+    })?;
+    if count > MAX_INDEX_PLAN_ELEMENTS {
+        return Err(mex(
+            "IndexOutOfBounds",
+            "Index selection exceeds the supported materialization limit",
+        ));
+    }
+    Ok(count)
+}
+
+/// A numeric vector selector inherits a vector source's orientation. A
+/// non-vector source, or a matrix-shaped selector, keeps the selector shape.
+/// Colon and logical selection have separate shape rules.
+pub(crate) fn numeric_linear_output_shape(
+    source_shape: &[usize],
+    selector_shape: &[usize],
+    selected_len: usize,
+) -> Vec<usize> {
+    let vector = |shape: &[usize]| {
+        let rows = shape.first().copied().unwrap_or(1);
+        let cols = shape.get(1).copied().unwrap_or(1);
+        shape.iter().skip(2).all(|&extent| extent == 1) && (rows == 1 || cols == 1)
+    };
+    let source_is_non_scalar = source_shape.iter().any(|&extent| extent != 1);
+    if vector(source_shape) && source_is_non_scalar && vector(selector_shape) {
+        if source_shape.first().copied().unwrap_or(1) == 1 {
+            vec![1, selected_len]
+        } else {
+            vec![selected_len, 1]
+        }
+    } else {
+        selector_shape.to_vec()
+    }
 }
 
 fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> Vec<usize> {
@@ -182,6 +311,14 @@ pub fn build_index_plan(
             .first()
             .cloned()
             .unwrap_or(SliceSelector::Indices(Vec::new()));
+        let count = match &list {
+            SliceSelector::Colon => total_len,
+            SliceSelector::Scalar(_) => 1,
+            SliceSelector::Indices(values) | SliceSelector::LinearIndices { values, .. } => {
+                values.len()
+            }
+        };
+        checked_selection_cardinality(&[count])?;
         let indices = match &list {
             SliceSelector::Colon => (1..=total_len).collect::<Vec<usize>>(),
             SliceSelector::Scalar(i) => vec![*i],
@@ -215,11 +352,24 @@ pub fn build_index_plan(
         ));
     }
 
+    let effective_shape = effective_index_shape(base_shape, dims)?;
     let mut selection_lengths = Vec::with_capacity(dims);
+    for (dimension, selector) in selectors.iter().enumerate().take(dims) {
+        let extent = effective_shape[dimension];
+        let length = match selector {
+            SliceSelector::Colon => extent,
+            SliceSelector::Scalar(_) => 1,
+            SliceSelector::Indices(values) | SliceSelector::LinearIndices { values, .. } => {
+                values.len()
+            }
+        };
+        selection_lengths.push(length);
+    }
+    let total_out = checked_selection_cardinality(&selection_lengths)?;
     let mut per_dim_lists: Vec<Vec<usize>> = Vec::with_capacity(dims);
     let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
     for (d, sel) in selectors.iter().enumerate().take(dims) {
-        let dim_len = base_shape.get(d).copied().unwrap_or(1);
+        let dim_len = effective_shape[d];
         let idxs = match sel {
             SliceSelector::Colon => (1..=dim_len).collect::<Vec<usize>>(),
             SliceSelector::Scalar(i) => vec![*i],
@@ -229,14 +379,12 @@ pub fn build_index_plan(
         if idxs.iter().any(|&i| i == 0 || i > dim_len) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
-        selection_lengths.push(idxs.len());
         per_dim_lists.push(idxs);
         scalar_mask.push(matches!(sel, SliceSelector::Scalar(_)));
     }
 
     let mut out_shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
     if selection_lengths.contains(&0) {
-        let selection_lengths = out_shape.clone();
         return Ok(IndexPlan::new(
             Vec::new(),
             out_shape,
@@ -246,10 +394,7 @@ pub fn build_index_plan(
         ));
     }
 
-    let mut base_norm = base_shape.to_vec();
-    if base_norm.len() < dims {
-        base_norm.resize(dims, 1);
-    }
+    let base_norm = effective_shape;
     let mut strides = vec![1usize; dims];
     for d in 1..dims {
         strides[d] = strides[d - 1]
@@ -257,7 +402,7 @@ pub fn build_index_plan(
             .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
     }
 
-    let mut indices = Vec::new();
+    let mut indices = Vec::with_capacity(total_out);
     let mut index_error: Option<RuntimeError> = None;
     cartesian_product(&per_dim_lists, |multi| {
         if index_error.is_some() {
@@ -290,11 +435,9 @@ pub fn build_index_plan(
         return Err(err);
     }
 
-    let total_out: usize = selection_lengths.iter().product();
     if total_out == 1 {
         out_shape = vec![1, 1];
     }
-    let selection_lengths = out_shape.clone();
     Ok(IndexPlan::new(
         indices,
         out_shape,
@@ -312,15 +455,51 @@ pub fn build_sparse_assignment_plan(
     dims: usize,
     base_shape: &[usize],
 ) -> VmResult<IndexPlan> {
-    if dims != 2 {
-        return build_index_plan(selectors, dims, base_shape);
+    build_assignment_plan(selectors, dims, base_shape)
+}
+
+/// Builds an indexed-assignment plan that may grow an aggregate. Colon and
+/// logical selectors must already have been materialized against the original
+/// shape; numeric selectors may extend addressed dimensions.
+pub fn build_assignment_plan(
+    selectors: &[SliceSelector],
+    dims: usize,
+    base_shape: &[usize],
+) -> VmResult<IndexPlan> {
+    let effective_shape = effective_index_shape(base_shape, dims)?;
+    if dims == 1 {
+        let selector = selectors
+            .first()
+            .cloned()
+            .unwrap_or(SliceSelector::Indices(Vec::new()));
+        let values = match &selector {
+            SliceSelector::Colon => (1..=effective_shape[0]).collect::<Vec<_>>(),
+            SliceSelector::Scalar(value) => vec![*value],
+            SliceSelector::Indices(values) | SliceSelector::LinearIndices { values, .. } => {
+                values.clone()
+            }
+        };
+        if values.contains(&0) {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        let target_len = values
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0)
+            .max(effective_shape[0]);
+        let target_shape = linear_growth_shape(base_shape, target_len)?;
+        let planned_selector = match selector {
+            SliceSelector::Colon => SliceSelector::Indices(values),
+            other => other,
+        };
+        return build_index_plan(&[planned_selector], 1, &target_shape);
     }
 
-    let mut target_shape = base_shape.to_vec();
-    target_shape.resize(dims, 1);
+    let mut target_shape = effective_shape;
     let mut planned_selectors = Vec::with_capacity(dims);
     for (d, target_len) in target_shape.iter_mut().enumerate().take(dims) {
-        let original_len = base_shape.get(d).copied().unwrap_or(1);
+        let original_len = *target_len;
         let selector = selectors
             .get(d)
             .cloned()
@@ -342,7 +521,41 @@ pub fn build_sparse_assignment_plan(
             other => other,
         });
     }
-    build_index_plan(&planned_selectors, dims, &target_shape)
+    let mut plan = build_index_plan(&planned_selectors, dims, &target_shape)?;
+    plan.base_shape = assignment_result_shape(base_shape, dims, &target_shape)?;
+    Ok(plan)
+}
+
+fn linear_growth_shape(base_shape: &[usize], target_len: usize) -> VmResult<Vec<usize>> {
+    let mut shape = base_shape.to_vec();
+    if shape.len() < 2 {
+        shape.resize(2, 1);
+    }
+    let current_len = checked_total_len_from_shape(&shape)?;
+    if target_len <= current_len {
+        return Ok(shape);
+    }
+    if current_len == 0 {
+        return Ok(vec![1, target_len]);
+    }
+    if shape.iter().skip(2).all(|extent| *extent == 1) && shape[0] == 1 {
+        shape[1] = target_len;
+        shape.truncate(2);
+        return Ok(shape);
+    }
+    if shape.iter().skip(1).all(|extent| *extent == 1) {
+        shape[0] = target_len;
+        shape.truncate(2);
+        return Ok(shape);
+    }
+    let leading = shape
+        .iter()
+        .take(shape.len() - 1)
+        .try_fold(1usize, |total, extent| total.checked_mul(*extent))
+        .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))?;
+    let last = target_len.div_ceil(leading.max(1));
+    *shape.last_mut().expect("shape has at least two dimensions") = last;
+    Ok(shape)
 }
 
 #[derive(Clone)]
@@ -437,30 +650,32 @@ where
     build_expr_index_plan_with_growth(spec, resolve_end, true).await
 }
 
-async fn build_expr_index_plan_with_growth<ResolveEnd, Fut>(
+pub async fn build_expr_assignment_plan<ResolveEnd, Fut>(
     spec: ExprPlanSpec<'_>,
-    mut resolve_end: ResolveEnd,
-    allow_sparse_growth: bool,
+    resolve_end: ResolveEnd,
 ) -> Result<IndexPlan, RuntimeError>
 where
     ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
     Fut: Future<Output = Result<f64, RuntimeError>>,
 {
-    let allow_sparse_growth = allow_sparse_growth && spec.dims == 2;
-    let rank = spec.shape.len();
-    let full_shape: Vec<usize> = if spec.dims == 1 {
-        vec![checked_total_len_from_shape(spec.shape)?]
-    } else if rank < spec.dims {
-        let mut s = spec.shape.to_vec();
-        s.resize(spec.dims, 1);
-        s
-    } else {
-        spec.shape.to_vec()
-    };
+    build_expr_index_plan_with_growth(spec, resolve_end, true).await
+}
+
+async fn build_expr_index_plan_with_growth<ResolveEnd, Fut>(
+    spec: ExprPlanSpec<'_>,
+    mut resolve_end: ResolveEnd,
+    allow_growth: bool,
+) -> Result<IndexPlan, RuntimeError>
+where
+    ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
+    Fut: Future<Output = Result<f64, RuntimeError>>,
+{
+    let full_shape = effective_index_shape(spec.shape, spec.dims)?;
 
     let range_pos_by_dim = validate_expr_range_selector_plan(&spec)?;
     let mut selectors: Vec<ExprSel> = Vec::with_capacity(spec.dims);
     let mut linear_output_shape: Option<Vec<usize>> = None;
+    let mut linear_numeric_selector = false;
     let mut num_iter = 0usize;
     for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
         let is_colon = selector_mask_has_dim(spec.colon_mask, d);
@@ -563,7 +778,8 @@ where
                     }
                     Value::Tensor(idx_t) => {
                         if spec.dims == 1 {
-                            linear_output_shape = Some(idx_t.shape.clone());
+                            linear_output_shape = Some(idx_t.shape().to_vec());
+                            linear_numeric_selector = true;
                         }
                         let vv = numeric_tensor_indices(idx_t, None)?;
                         selectors.push(ExprSel::Indices(vv));
@@ -620,7 +836,7 @@ where
                 let end_i = end_i as i64;
                 if stp > 0 {
                     while cur <= end_i {
-                        if cur < 1 || (!allow_sparse_growth && cur > dim_len) {
+                        if cur < 1 || (!allow_growth && cur > dim_len) {
                             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                         }
                         v.push(cur as usize);
@@ -628,7 +844,7 @@ where
                     }
                 } else {
                     while cur >= end_i {
-                        if cur < 1 || (!allow_sparse_growth && cur > dim_len) {
+                        if cur < 1 || (!allow_growth && cur > dim_len) {
                             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                         }
                         v.push(cur as usize);
@@ -640,7 +856,7 @@ where
         };
         if idxs
             .iter()
-            .any(|&i| i == 0 || (!allow_sparse_growth && i > full_shape[d]))
+            .any(|&i| i == 0 || (!allow_growth && i > full_shape[d]))
         {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
@@ -650,7 +866,7 @@ where
     }
 
     let mut planned_shape = full_shape.clone();
-    if allow_sparse_growth && spec.dims > 1 {
+    if allow_growth {
         for (d, indices) in per_dim_indices.iter().enumerate().take(spec.dims) {
             if let Some(&max_index) = indices.iter().max() {
                 planned_shape[d] = planned_shape[d].max(max_index);
@@ -672,10 +888,16 @@ where
     if total_out == 0 {
         let output_shape = if spec.dims == 1 {
             if let Some(shape) = linear_output_shape.clone() {
-                shape
+                if linear_numeric_selector {
+                    numeric_linear_output_shape(spec.shape, &shape, 0)
+                } else {
+                    shape
+                }
             } else if linear_selector_is_colon {
                 vec![0, 1]
-            } else if linear_selector_is_range || base_is_row_vector {
+            } else if linear_selector_is_range {
+                numeric_linear_output_shape(spec.shape, &[1, 0], 0)
+            } else if base_is_row_vector {
                 vec![1, 0]
             } else {
                 vec![0, 1]
@@ -712,7 +934,7 @@ where
             output_shape,
             selection_lengths,
             spec.dims,
-            planned_shape,
+            assignment_result_shape(spec.shape, spec.dims, &planned_shape)?,
         ));
     }
 
@@ -746,12 +968,18 @@ where
 
     let output_shape = if spec.dims == 1 {
         if let Some(shape) = linear_output_shape {
-            shape
+            if linear_numeric_selector {
+                numeric_linear_output_shape(spec.shape, &shape, total_out)
+            } else {
+                shape
+            }
         } else if total_out <= 1 {
             vec![1, 1]
         } else if linear_selector_is_colon {
             vec![total_out, 1]
-        } else if linear_selector_is_range || base_is_row_vector {
+        } else if linear_selector_is_range {
+            numeric_linear_output_shape(spec.shape, &[1, total_out], total_out)
+        } else if base_is_row_vector {
             vec![1, total_out]
         } else {
             vec![total_out, 1]
@@ -788,18 +1016,82 @@ where
         output_shape,
         selection_lengths,
         spec.dims,
-        planned_shape,
+        assignment_result_shape(spec.shape, spec.dims, &planned_shape)?,
     ))
+}
+
+fn assignment_result_shape(
+    base_shape: &[usize],
+    dims: usize,
+    planned_shape: &[usize],
+) -> VmResult<Vec<usize>> {
+    if dims == 1 {
+        return linear_growth_shape(base_shape, planned_shape[0]);
+    }
+    let original_effective = effective_index_shape(base_shape, dims)?;
+    if planned_shape == original_effective {
+        return Ok(base_shape.to_vec());
+    }
+    let mut result = planned_shape.to_vec();
+    if result.len() < 2 {
+        result.resize(2, 1);
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_expr_index_plan, build_index_plan, build_sparse_assignment_plan, ExprPlanSpec,
+        build_assignment_plan, build_expr_index_plan, build_index_plan,
+        build_sparse_assignment_plan, checked_selection_cardinality, numeric_linear_output_shape,
+        ExprPlanSpec,
     };
     use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
     use crate::indexing::EndExpr;
     use runmat_value::{IntegerStorage, LogicalArray, Tensor, Value};
+
+    #[test]
+    fn numeric_linear_vector_result_uses_source_orientation_only_for_vector_pairs() {
+        for (source, selector, count, expected) in [
+            (vec![4, 1], vec![1, 2], 2, vec![2, 1]),
+            (vec![1, 4], vec![2, 1], 2, vec![1, 2]),
+            (vec![4, 1], vec![2, 2], 4, vec![2, 2]),
+            (vec![2, 2], vec![1, 2], 2, vec![1, 2]),
+            (vec![2, 2], vec![2], 2, vec![2]),
+            (vec![0, 1], vec![1, 0], 0, vec![0, 1]),
+        ] {
+            assert_eq!(
+                numeric_linear_output_shape(&source, &selector, count),
+                expected
+            );
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn expression_numeric_selector_uses_vector_source_orientation() {
+        let numeric = [Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![2]).unwrap(),
+        )];
+        let plan = futures::executor::block_on(build_expr_index_plan(
+            ExprPlanSpec {
+                dims: 1,
+                colon_mask: 0,
+                end_mask: 0,
+                range_dims: &[],
+                range_params: &[],
+                range_start_exprs: &[],
+                range_step_exprs: &[],
+                range_end_exprs: &[],
+                numeric: &numeric,
+                shape: &[1, 2],
+            },
+            |_, _| async { Ok(0.0) },
+        ))
+        .expect("rank-one selector");
+        assert_eq!(plan.indices, vec![1, 0]);
+        assert_eq!(plan.output_shape, vec![1, 2]);
+    }
 
     #[test]
     fn sparse_assignment_plan_expands_numeric_dimensions_but_keeps_colon_at_old_extent() {
@@ -809,6 +1101,108 @@ mod tests {
         assert_eq!(plan.base_shape, vec![4, 2]);
         assert_eq!(plan.selection_lengths, vec![2, 2]);
         assert_eq!(plan.indices, vec![2, 3, 6, 7]);
+    }
+
+    #[test]
+    fn fewer_subscripts_collapse_remaining_dimensions() {
+        let plan = build_index_plan(
+            &[SliceSelector::Scalar(2), SliceSelector::Scalar(4)],
+            2,
+            &[2, 2, 2],
+        )
+        .unwrap();
+        assert_eq!(plan.indices, vec![7]);
+    }
+
+    #[test]
+    fn bounded_plan_preserves_selector_geometry_separately_from_result_shape() {
+        let shape = [1, 1, 3];
+        let scalar = build_index_plan(
+            &[
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(2),
+            ],
+            3,
+            &shape,
+        )
+        .unwrap();
+        assert_eq!(scalar.output_shape, vec![1, 1]);
+        assert_eq!(scalar.selection_lengths, vec![1, 1, 1]);
+        assert_eq!(scalar.indices, vec![1]);
+
+        let empty = build_index_plan(
+            &[
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(1),
+                SliceSelector::Indices(Vec::new()),
+            ],
+            3,
+            &shape,
+        )
+        .unwrap();
+        assert!(empty.indices.is_empty());
+        assert_eq!(empty.selection_lengths, vec![1, 1, 0]);
+    }
+
+    #[test]
+    fn assignment_plan_grows_linear_and_multidimensional_targets() {
+        let linear = build_assignment_plan(&[SliceSelector::Scalar(5)], 1, &[2, 2]).unwrap();
+        assert_eq!(linear.indices, vec![4]);
+        assert_eq!(linear.base_shape, vec![2, 3]);
+
+        let subscripts = build_assignment_plan(
+            &[SliceSelector::Scalar(3), SliceSelector::Scalar(2)],
+            2,
+            &[2, 2],
+        )
+        .unwrap();
+        assert_eq!(subscripts.indices, vec![5]);
+        assert_eq!(subscripts.base_shape, vec![3, 2]);
+
+        let nd_shape = [2, 1, 3];
+        let bounded_linear = build_assignment_plan(&[SliceSelector::Scalar(4)], 1, &nd_shape)
+            .expect("in-bounds N-D linear assignment");
+        assert_eq!(bounded_linear.base_shape, nd_shape.to_vec());
+        let growing_linear = build_assignment_plan(&[SliceSelector::Scalar(7)], 1, &nd_shape)
+            .expect("N-D linear assignment grows the final axis");
+        assert_eq!(growing_linear.base_shape, vec![2, 1, 4]);
+        let nd_with_leading_singleton = [1, 2, 3];
+        let growing_leading_singleton =
+            build_assignment_plan(&[SliceSelector::Scalar(7)], 1, &nd_with_leading_singleton)
+                .expect("N-D linear growth retains nonsingleton trailing axes");
+        assert_eq!(growing_leading_singleton.base_shape, vec![1, 2, 4]);
+
+        let bounded_nd = build_assignment_plan(
+            &[
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(2),
+            ],
+            3,
+            &nd_shape,
+        )
+        .expect("in-bounds three-subscript assignment");
+        assert_eq!(bounded_nd.base_shape, nd_shape.to_vec());
+        let growing_nd = build_assignment_plan(
+            &[
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(4),
+            ],
+            3,
+            &nd_shape,
+        )
+        .expect("three-subscript assignment grows the third axis");
+        assert_eq!(growing_nd.base_shape, vec![2, 1, 4]);
+
+        let collapsed_growth = build_assignment_plan(
+            &[SliceSelector::Scalar(2), SliceSelector::Scalar(4)],
+            2,
+            &nd_shape,
+        )
+        .expect("fewer subscripts intentionally collapse trailing axes");
+        assert_eq!(collapsed_growth.base_shape, vec![2, 4]);
     }
 
     #[test]
@@ -967,7 +1361,7 @@ mod tests {
     }
 
     #[test]
-    fn expr_linear_range_on_column_vector_uses_range_shape() {
+    fn expr_linear_range_on_column_vector_uses_source_orientation() {
         futures::executor::block_on(async {
             let plan = build_expr_index_plan(
                 ExprPlanSpec {
@@ -995,13 +1389,13 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(plan.indices, vec![0, 1, 2, 3, 4, 5]);
-            assert_eq!(plan.output_shape, vec![1, 6]);
+            assert_eq!(plan.output_shape, vec![6, 1]);
             assert_eq!(plan.selection_lengths, vec![6]);
         })
     }
 
     #[test]
-    fn expr_empty_linear_range_uses_range_shape() {
+    fn expr_empty_linear_range_uses_source_orientation() {
         futures::executor::block_on(async {
             let plan = build_expr_index_plan(
                 ExprPlanSpec {
@@ -1029,7 +1423,7 @@ mod tests {
             .await
             .unwrap();
             assert!(plan.indices.is_empty());
-            assert_eq!(plan.output_shape, vec![1, 0]);
+            assert_eq!(plan.output_shape, vec![0, 1]);
             assert_eq!(plan.selection_lengths, vec![0]);
         })
     }
@@ -1172,6 +1566,39 @@ mod tests {
     }
 
     #[test]
+    fn index_plan_rejects_oversized_linear_colon_before_materialization() {
+        let err = build_index_plan(
+            &[SliceSelector::Colon],
+            1,
+            &[super::MAX_INDEX_PLAN_ELEMENTS + 1, 1],
+        )
+        .expect_err("oversized colon must fail before allocating indices");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+        assert!(err.message().contains("materialization limit"));
+    }
+
+    #[test]
+    fn index_plan_rejects_oversized_cartesian_product_before_enumeration() {
+        let repeated = vec![1; 10_000];
+        let selectors = [
+            SliceSelector::Indices(repeated.clone()),
+            SliceSelector::Indices(repeated),
+        ];
+        let err = build_index_plan(&selectors, 2, &[1, 1])
+            .expect_err("oversized Cartesian selection must fail before enumeration");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+        assert!(err.message().contains("materialization limit"));
+    }
+
+    #[test]
+    fn index_plan_cardinality_overflow_is_deterministic() {
+        let err = checked_selection_cardinality(&[usize::MAX, 2])
+            .expect_err("overflowing selection cardinality must fail");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+        assert!(err.message().contains("cardinality overflow"));
+    }
+
+    #[test]
     fn expr_plan_supports_dims_beyond_mask_width() {
         futures::executor::block_on(async {
             let numeric = vec![Value::Num(1.0); 31];
@@ -1267,7 +1694,7 @@ mod tests {
     }
 
     #[test]
-    fn expr_plan_linear_tensor_selector_preserves_tensor_shape() {
+    fn expr_plan_linear_numeric_vector_selector_uses_source_orientation() {
         futures::executor::block_on(async {
             let shape = vec![1, 10];
             let numeric = vec![Value::Tensor(
@@ -1295,6 +1722,7 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, vec![1, 2]);
             assert_eq!(plain.output_shape, expr.output_shape);
             assert_eq!(plain.selection_lengths, expr.selection_lengths);
         })

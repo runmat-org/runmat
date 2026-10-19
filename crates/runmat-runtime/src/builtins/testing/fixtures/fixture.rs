@@ -4,16 +4,18 @@ use runmat_value::{HandleRef, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 
-const FIXTURE_CLASS: &str = "matlab.unittest.fixtures.Fixture";
-const PATH_FIXTURE_CLASS: &str = "matlab.unittest.fixtures.PathFixture";
-const TEMPORARY_FOLDER_FIXTURE_CLASS: &str = "matlab.unittest.fixtures.TemporaryFolderFixture";
+const FIXTURE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.fixtures.Fixture");
+const PATH_FIXTURE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.fixtures.PathFixture");
+const TEMPORARY_FOLDER_FIXTURE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("matlab.unittest.fixtures.TemporaryFolderFixture");
 
 static TEMPORARY_FOLDER_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.fixtures.PathFixture",
-    category = "testing/fixtures",
-    summary = "Construct a fixture that adds a folder to the session search path.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::fixtures::fixture"
 )]
 async fn path_fixture(path: Value) -> BuiltinResult<Value> {
@@ -27,8 +29,7 @@ async fn path_fixture(path: Value) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.fixtures.TemporaryFolderFixture",
-    category = "testing/fixtures",
-    summary = "Construct a fixture that creates an isolated temporary folder when applied.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::fixtures::fixture"
 )]
 async fn temporary_folder_fixture(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -51,50 +52,77 @@ async fn temporary_folder_fixture(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.applyFixture",
-    category = "testing/fixtures",
-    summary = "Apply a fixture to the active test and register its cleanup.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::fixtures::fixture"
 )]
 async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> {
     validate_test_case(&receiver)?;
     let handle = fixture_handle(&fixture)?;
-    if crate::class_registry::is_class_or_subclass(&handle.class_name, PATH_FIXTURE_CLASS) {
-        let path = handle_text_property(&handle, "Path")?;
-        crate::call_builtin_async("addpath", &[Value::String(path.clone())]).await?;
-        crate::testing::record_runtime_teardown(
-            Value::FunctionHandle("rmpath".into()),
-            vec![Value::String(path)],
-        )
+    let kind = fixture_kind(&handle)?;
+    crate::testing::ensure_runtime_teardown_available()
         .map_err(|message| testing_error("applyFixture", message))?;
-    } else if crate::class_registry::is_class_or_subclass(
-        &handle.class_name,
-        TEMPORARY_FOLDER_FIXTURE_CLASS,
-    ) {
-        let folder = temporary_folder_path();
-        runmat_filesystem::create_dir_all_async(&folder)
-            .await
-            .map_err(|error| {
-                testing_error(
-                    "applyFixture",
-                    format!("applyFixture: could not create '{folder}': {error}"),
-                )
-            })?;
-        set_handle_property(&fixture, "Folder", Value::String(folder.clone()))?;
-        crate::testing::record_runtime_teardown(
-            Value::FunctionHandle("rmdir".into()),
-            vec![Value::String(folder), Value::String("s".into())],
-        )
-        .map_err(|message| testing_error("applyFixture", message))?;
-    } else if !crate::class_registry::is_class_or_subclass(&handle.class_name, FIXTURE_CLASS) {
-        return Err(testing_error(
-            "applyFixture",
-            format!(
-                "applyFixture: '{}' is not a matlab.unittest.fixtures.Fixture",
-                handle.class_name
-            ),
-        ));
+    match kind {
+        FixtureKind::Path => {
+            let path = handle_text_property(&handle, "Path")?;
+            crate::call_builtin_async("addpath", &[Value::String(path.clone())]).await?;
+            crate::testing::record_runtime_teardown(
+                Value::FunctionHandle("rmpath".into()),
+                vec![Value::String(path)],
+            )
+            .map_err(|message| testing_error("applyFixture", message))?;
+        }
+        FixtureKind::TemporaryFolder => {
+            let folder = temporary_folder_path();
+            runmat_filesystem::create_dir_all_async(&folder)
+                .await
+                .map_err(|error| {
+                    testing_error(
+                        "applyFixture",
+                        format!("applyFixture: could not create '{folder}': {error}"),
+                    )
+                })?;
+            set_handle_property(&fixture, "Folder", Value::String(folder.clone()))?;
+            crate::testing::record_runtime_teardown(
+                Value::FunctionHandle("rmdir".into()),
+                vec![Value::String(folder), Value::String("s".into())],
+            )
+            .map_err(|message| testing_error("applyFixture", message))?;
+        }
     }
     Ok(fixture)
+}
+
+enum FixtureKind {
+    Path,
+    TemporaryFolder,
+}
+
+fn fixture_kind(handle: &HandleRef) -> BuiltinResult<FixtureKind> {
+    if crate::class_registry::is_class_or_subclass(&handle.class_name, &PATH_FIXTURE_CLASS.owned())
+    {
+        return Ok(FixtureKind::Path);
+    }
+    if crate::class_registry::is_class_or_subclass(
+        &handle.class_name,
+        &TEMPORARY_FOLDER_FIXTURE_CLASS.owned(),
+    ) {
+        return Ok(FixtureKind::TemporaryFolder);
+    }
+    let message = if crate::class_registry::is_class_or_subclass(
+        &handle.class_name,
+        &FIXTURE_CLASS.owned(),
+    ) {
+        format!(
+            "applyFixture: fixture class '{}' does not have a setup implementation",
+            handle.class_name
+        )
+    } else {
+        format!(
+            "applyFixture: '{}' is not a matlab.unittest.fixtures.Fixture",
+            handle.class_name
+        )
+    };
+    Err(testing_error("applyFixture", message))
 }
 
 fn temporary_folder_path() -> String {
@@ -124,11 +152,16 @@ fn fixture_handle(value: &Value) -> BuiltinResult<HandleRef> {
 fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
-        _ => "",
+        Value::Object(object) => Some(&object.class_name),
+        Value::HandleObject(handle) => Some(&handle.class_name),
+        _ => None,
     };
-    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if class_name.is_some_and(|identity| {
+        crate::class_registry::is_class_or_subclass(
+            identity,
+            &crate::testing::TEST_CASE_CLASS.owned(),
+        )
+    }) {
         Ok(())
     } else {
         Err(testing_error(
@@ -198,4 +231,53 @@ fn testing_error(builtin: &'static str, message: impl Into<String>) -> crate::Ru
         .with_identifier("RunMat:Testing:InvalidFixture")
         .with_builtin(builtin)
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    #[test]
+    fn constructors_create_concrete_handle_fixtures_without_applying_them() {
+        let path = block_on(path_fixture(Value::String("not-yet-created".into()))).unwrap();
+        let Value::HandleObject(path_handle) = &path else {
+            panic!("PathFixture must be a handle")
+        };
+        assert_eq!(path_handle.class_name, PATH_FIXTURE_CLASS.owned());
+        assert_eq!(
+            handle_text_property(path_handle, "Path").unwrap(),
+            "not-yet-created"
+        );
+
+        let temporary = block_on(temporary_folder_fixture(vec![])).unwrap();
+        let Value::HandleObject(temp_handle) = &temporary else {
+            panic!("TemporaryFolderFixture must be a handle")
+        };
+        assert_eq!(
+            temp_handle.class_name,
+            TEMPORARY_FOLDER_FIXTURE_CLASS.owned()
+        );
+        assert_eq!(handle_text_property(temp_handle, "Folder").unwrap(), "");
+        assert_eq!(
+            block_on(temporary_folder_fixture(vec![Value::Num(1.0)]))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:Testing:InvalidFixture")
+        );
+    }
+
+    #[test]
+    fn application_outside_test_rejects_before_path_or_filesystem_work() {
+        let receiver = crate::testing::test_case_object("", false);
+        let path = block_on(path_fixture(Value::String("not-yet-created".into()))).unwrap();
+        let error = block_on(apply_fixture(receiver.clone(), path)).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidFixture"));
+        assert!(error.to_string().contains("active test lifecycle"));
+
+        let temporary = block_on(temporary_folder_fixture(vec![])).unwrap();
+        let error = block_on(apply_fixture(receiver, temporary)).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidFixture"));
+        assert!(error.to_string().contains("active test lifecycle"));
+    }
 }

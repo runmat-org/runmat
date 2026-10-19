@@ -1,13 +1,10 @@
 //! MATLAB-compatible legacy `interp1q` builtin.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, INTERP1Q_ERROR_INTERNAL as ERROR_INTERNAL,
+    INTERP1Q_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT, INTERP1Q_GPU_INPUT_EXTENSION,
+    INTERP1Q_INTEGER_DATA_EXTENSION, INTERP1Q_INTEGER_QUERY_EXTENSION,
+    INTERP1Q_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Value};
@@ -26,137 +23,26 @@ use super::pp::{
 
 const NAME: &str = "interp1q";
 
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Vq",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Linearly interpolated query values.",
-}];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Interp1qOperand {
+    SampleLocations,
+    SampleValues,
+    QueryLocations,
+}
 
-const INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Strictly increasing sample locations.",
-    },
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample values.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query locations.",
-    },
-];
+impl Interp1qOperand {
+    fn label(self) -> &'static str {
+        match self {
+            Self::SampleLocations => "X",
+            Self::SampleValues => "V",
+            Self::QueryLocations => "Xq",
+        }
+    }
 
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Vq = interp1q(X, V, Xq)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INTERP1Q.INVALID_INPUT",
-    identifier: Some("RunMat:interp1q:InvalidInput"),
-    when:
-        "Arguments cannot be converted to the legacy one-dimensional linear interpolation domain.",
-    message: "interp1q: invalid input",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INTERP1Q.INTERNAL",
-    identifier: Some("RunMat:interp1q:Internal"),
-    when: "Interpolation evaluation or output construction fails unexpectedly.",
-    message: "interp1q: internal interpolation failure",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_INTERNAL];
-
-pub const INTERP1Q_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const INTERP1Q_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "interp1q-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interp1q with typed-integer X or V data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Interp1qIntegerDataExtension"),
-};
-const INTERP1Q_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "interp1q-integer-query",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interp1q with typed-integer query coordinates is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Interp1qIntegerQueryExtension"),
-};
-const INTERP1Q_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "interp1q-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interp1q with logical numeric input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Interp1qLogicalInputExtension"),
-};
-const INTERP1Q_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "interp1q-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "interp1q with resident gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Interp1qGpuInputExtension"),
-};
-pub const INTERP1Q_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    INTERP1Q_INTEGER_DATA_EXTENSION,
-    INTERP1Q_INTEGER_QUERY_EXTENSION,
-    INTERP1Q_LOGICAL_INPUT_EXTENSION,
-    INTERP1Q_GPU_INPUT_EXTENSION,
-];
-
-const INTERP1Q_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X or V",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer samples must be exactly representable before the binary64 interpolation boundary.",
-    }];
-const INTERP1Q_INTEGER_QUERY_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Xq",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer query coordinates must be exactly representable before interpolation.",
-    }];
-pub const INTERP1Q_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = interp1q(integer_X_or_V, V_or_X, Xq)",
-        inputs: &INTERP1Q_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat retains this useful legacy extension through one checked binary64 boundary; MATLAB-compatible modes accept only documented single/double data.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = interp1q(X, V, integer_Xq)",
-        inputs: &INTERP1Q_INTEGER_QUERY_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer queries are checked before conversion; resident input is independently gated because interp1q has no documented gpuArray surface.",
-    },
-];
+    fn is_coordinate(self) -> bool {
+        matches!(self, Self::SampleLocations | Self::QueryLocations)
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::interpolation::interp1q")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -187,29 +73,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Interpolation is a runtime sink.",
 };
 
-fn interp1q_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.get(2) {
-        Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
-        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        _ => Type::tensor(),
-    }
-}
-
 #[runtime_builtin(
     name = "interp1q",
-    category = "math/interpolation",
-    summary = "Legacy quick one-dimensional linear interpolation.",
-    keywords = "interp1q,interpolation,linear,legacy",
-    accel = "sink",
-    sink = true,
-    type_resolver(interp1q_type),
-    descriptor(crate::builtins::math::interpolation::interp1q::INTERP1Q_DESCRIPTOR),
-    extensions(crate::builtins::math::interpolation::interp1q::INTERP1Q_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::interpolation::interp1q::INTERP1Q_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::interpolation::interp1q"
 )]
 async fn interp1q_builtin(x: Value, v: Value, xq: Value) -> BuiltinResult<Value> {
@@ -318,10 +184,10 @@ fn reshape_matrix_output(
         return Ok(result);
     };
     let mut shape = vec![query.values.len()];
-    if series.trailing_shape.is_empty() {
+    if series.component_shape.is_empty() {
         shape.push(series.series);
     } else {
-        shape.extend(series.trailing_shape.iter().copied());
+        shape.extend(series.component_shape.iter().copied());
     }
     let storage = tensor.into_numeric_storage().map_err(|err| {
         build_runtime_error(format!("interp1q: {err}"))
@@ -354,8 +220,9 @@ struct ComplexSeries {
 
 impl ComplexSeries {
     async fn from_values(x_value: Value, y_value: Value) -> BuiltinResult<Self> {
-        let x = real_vector_from_value(x_value, "X").await?;
-        let (y_data, y_shape, complex_output) = numeric_data_from_value(y_value, "V").await?;
+        let x = real_vector_from_value(x_value, Interp1qOperand::SampleLocations).await?;
+        let (y_data, y_shape, complex_output) =
+            numeric_data_from_value(y_value, Interp1qOperand::SampleValues).await?;
         super::pp::validate_breaks(&x, NAME)
             .map_err(|err| wrap_error(err, &ERROR_INVALID_INPUT))?;
         let n = x.len();
@@ -406,7 +273,8 @@ fn value_is_complex(value: &Value) -> bool {
 }
 
 async fn real_query_points(value: Value) -> BuiltinResult<RealQuery> {
-    let (values, shape) = real_coordinate_data_from_value(value, "Xq").await?;
+    let (values, shape) =
+        real_coordinate_data_from_value(value, Interp1qOperand::QueryLocations).await?;
     let len = values.len();
     Ok(RealQuery {
         values,
@@ -414,12 +282,12 @@ async fn real_query_points(value: Value) -> BuiltinResult<RealQuery> {
     })
 }
 
-async fn real_vector_from_value(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
-    let (values, shape) = real_coordinate_data_from_value(value, label).await?;
+async fn real_vector_from_value(value: Value, operand: Interp1qOperand) -> BuiltinResult<Vec<f64>> {
+    let (values, shape) = real_coordinate_data_from_value(value, operand).await?;
     if !super::pp::is_vector_shape(&shape) && values.len() > 1 {
         return Err(error_with_detail(
             &ERROR_INVALID_INPUT,
-            format!("{label} must be a vector"),
+            format!("{} must be a vector", operand.label()),
         ));
     }
     Ok(values)
@@ -427,7 +295,7 @@ async fn real_vector_from_value(value: Value, label: &str) -> BuiltinResult<Vec<
 
 async fn real_coordinate_data_from_value(
     value: Value,
-    label: &str,
+    operand: Interp1qOperand,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
     let gathered = crate::dispatcher::gather_if_needed_async(&value)
         .await
@@ -437,7 +305,7 @@ async fn real_coordinate_data_from_value(
         Value::Int(value) => Ok((vec![value.to_f64()], vec![1, 1])),
         Value::Bool(value) => Ok((vec![if value { 1.0 } else { 0.0 }], vec![1, 1])),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             Ok((tensor_utils::tensor_into_values_f64(tensor), shape))
         }
         Value::LogicalArray(array) => Ok((
@@ -446,35 +314,36 @@ async fn real_coordinate_data_from_value(
                 .into_iter()
                 .map(|bit| if bit != 0 { 1.0 } else { 0.0 })
                 .collect(),
-            array.shape,
+            array.shape.to_vec(),
         )),
         Value::Complex(re, im) => {
-            validate_real_coordinate(label, im)?;
+            validate_real_coordinate(operand, im)?;
             Ok((vec![re], vec![1, 1]))
         }
         Value::ComplexTensor(tensor) => {
-            for &(_, im) in &tensor.materialize_f64() {
-                validate_real_coordinate(label, im)?;
+            let (storage, shape) = tensor.into_complex_storage_and_shape();
+            for &(_, im) in &storage.materialize_f64() {
+                validate_real_coordinate(operand, im)?;
             }
             Ok((
-                tensor
+                storage
                     .materialize_f64()
                     .into_iter()
                     .map(|(re, _)| re)
                     .collect(),
-                tensor.shape,
+                shape.to_vec(),
             ))
         }
         other => Err(error_with_detail(
             &ERROR_INVALID_INPUT,
-            format!("{label} must be numeric, got {other:?}"),
+            format!("{} must be numeric, got {other:?}", operand.label()),
         )),
     }
 }
 
 async fn numeric_data_from_value(
     value: Value,
-    label: &str,
+    operand: Interp1qOperand,
 ) -> BuiltinResult<(Vec<(f64, f64)>, Vec<usize>, bool)> {
     let gathered = crate::dispatcher::gather_if_needed_async(&value)
         .await
@@ -488,7 +357,7 @@ async fn numeric_data_from_value(
             false,
         )),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             Ok((
                 tensor_utils::tensor_into_values_f64(tensor)
                     .into_iter()
@@ -504,35 +373,39 @@ async fn numeric_data_from_value(
                 .into_iter()
                 .map(|bit| (if bit != 0 { 1.0 } else { 0.0 }, 0.0))
                 .collect(),
-            array.shape,
+            array.shape.to_vec(),
             false,
         )),
         Value::Complex(re, im) => {
-            validate_real_coordinate(label, im)?;
+            validate_real_coordinate(operand, im)?;
             Ok((vec![(re, im)], vec![1, 1], true))
         }
         Value::ComplexTensor(tensor) => {
-            if label == "X" || label == "Xq" {
-                for &(_, im) in &tensor.materialize_f64() {
-                    validate_real_coordinate(label, im)?;
+            let (storage, shape) = tensor.into_complex_storage_and_shape();
+            if operand.is_coordinate() {
+                for &(_, im) in &storage.materialize_f64() {
+                    validate_real_coordinate(operand, im)?;
                 }
             }
-            Ok((tensor.materialize_f64(), tensor.shape, true))
+            Ok((storage.materialize_f64(), shape.to_vec(), true))
         }
         other => Err(error_with_detail(
             &ERROR_INVALID_INPUT,
-            format!("{label} must be numeric, got {other:?}"),
+            format!("{} must be numeric, got {other:?}", operand.label()),
         )),
     }
 }
 
-fn validate_real_coordinate(label: &str, im: f64) -> BuiltinResult<()> {
-    if label == "V" || im == 0.0 {
+fn validate_real_coordinate(operand: Interp1qOperand, im: f64) -> BuiltinResult<()> {
+    if !operand.is_coordinate() || im == 0.0 {
         return Ok(());
     }
     Err(error_with_detail(
         &ERROR_INVALID_INPUT,
-        format!("{label} must contain real interpolation coordinates"),
+        format!(
+            "{} must contain real interpolation coordinates",
+            operand.label()
+        ),
     ))
 }
 
@@ -644,7 +517,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), &[1, 2]);
         assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0]);
     }
 
@@ -751,7 +624,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0, 150.0, 300.0]);
     }
 
@@ -766,8 +639,37 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), &[1, 2]);
         assert_eq!(tensor.materialize_f64(), vec![(15.0, 2.0), (30.0, 5.0)]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn interp1q_complex_values_preserve_rank_zero_and_rank_one_query_projection() {
+        let values = || {
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(10.0, 1.0), (20.0, 3.0), (40.0, 7.0)], vec![3, 1])
+                    .unwrap(),
+            )
+        };
+        let scalar = block_on(interp1q_builtin(
+            row(&[1.0, 2.0, 3.0]),
+            values(),
+            Value::Tensor(Tensor::new(vec![1.5], Vec::new()).unwrap()),
+        ))
+        .expect("rank-zero complex interpolation query");
+        assert_eq!(scalar, Value::Complex(15.0, 2.0));
+
+        let Value::ComplexTensor(vector) = block_on(interp1q_builtin(
+            row(&[1.0, 2.0, 3.0]),
+            values(),
+            Value::Tensor(Tensor::new(vec![1.5, 2.5], vec![2]).unwrap()),
+        ))
+        .expect("rank-one complex interpolation query") else {
+            panic!("expected rank-one complex tensor");
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![(15.0, 2.0), (30.0, 5.0)]);
     }
 
     #[test]
@@ -805,7 +707,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![(15.0, 2.0), (30.0, 5.0), (150.0, -2.0), (300.0, -5.0)]

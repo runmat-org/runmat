@@ -9,25 +9,51 @@ use crate::{CompatMode, RunMatSession};
 pub(crate) fn services(
     compat: CompatMode,
     project: Option<runmat_package::FrozenProjectHandoff>,
+    #[cfg(not(target_arch = "wasm32"))]
+    child_tasks: runmat_runtime::context::RuntimeLocalTaskChildFactory,
 ) -> runmat_runtime::testing::RuntimeTestServices {
     let run_project = project.clone();
-    let run = move |args: Vec<Value>, coverage: Option<MatlabCoverageSelection>| {
+    #[cfg(not(target_arch = "wasm32"))]
+    let run_child_tasks = child_tasks.clone();
+    let run = move |caller: Option<runmat_runtime::context::RuntimeContext>,
+                    args: Vec<Value>,
+                    coverage: Option<MatlabCoverageSelection>| {
         let project = run_project.clone();
-        Box::pin(async move { run_arguments(compat, project, args, coverage).await })
-            as runmat_runtime::testing::RunSuiteFuture
+        #[cfg(not(target_arch = "wasm32"))]
+        let child_tasks = run_child_tasks.clone();
+        Box::pin(run_arguments(
+            compat,
+            project,
+            caller,
+            args,
+            coverage,
+            #[cfg(not(target_arch = "wasm32"))]
+            child_tasks,
+        )) as runmat_runtime::testing::RunSuiteFuture
     };
     let suite_run = run.clone();
     let discover_project = project;
+    #[cfg(not(target_arch = "wasm32"))]
+    let discover_child_tasks = child_tasks;
     runmat_runtime::testing::RuntimeTestServices::new(
-        move |suite, plugins| {
+        move |caller, suite, plugins| {
             let args = suite_targets(suite);
             let coverage = plugins.iter().find_map(coverage_plugin_selection);
-            suite_run(args, coverage)
+            suite_run(caller, args, coverage)
         },
-        move |args| run(args, None),
-        move |args| {
+        move |caller, args| run(caller, args, None),
+        move |caller, args| {
             let project = discover_project.clone();
-            Box::pin(async move { discover_arguments(compat, project, args).await })
+            #[cfg(not(target_arch = "wasm32"))]
+            let child_tasks = discover_child_tasks.clone();
+            Box::pin(discover_arguments(
+                compat,
+                project,
+                caller,
+                args,
+                #[cfg(not(target_arch = "wasm32"))]
+                child_tasks,
+            ))
         },
     )
 }
@@ -35,22 +61,55 @@ pub(crate) fn services(
 async fn run_arguments(
     compat: CompatMode,
     project: Option<runmat_package::FrozenProjectHandoff>,
+    caller: Option<runmat_runtime::context::RuntimeContext>,
     args: Vec<Value>,
     coverage: Option<MatlabCoverageSelection>,
+    #[cfg(not(target_arch = "wasm32"))]
+    child_tasks: runmat_runtime::context::RuntimeLocalTaskChildFactory,
 ) -> runmat_runtime::BuiltinResult<Value> {
     let (snapshot, selected_names, requested_coverage) =
         snapshot_from_arguments(compat, project.as_ref(), args).await?;
-    let mut session = configured_session(compat, project)?;
-    let run = session
-        .run_test_snapshot(
-            &snapshot,
-            &TestSelector {
-                names: selected_names,
-                ..TestSelector::default()
-            },
-        )
-        .await
-        .map_err(domain_error)?;
+    let mut session = construct_child_session(
+        compat,
+        caller,
+        #[cfg(not(target_arch = "wasm32"))]
+        child_tasks,
+    )?;
+    if let Some(project) = project {
+        #[cfg(not(target_arch = "wasm32"))]
+        install_child_project(&mut session, project)?.await?;
+        #[cfg(target_arch = "wasm32")]
+        session
+            .install_project_handoff(project)
+            .map_err(|error| runtime_error("RunMat:Testing:ProjectHandoff", error.to_string()))?;
+    }
+    let selector = TestSelector {
+        names: selected_names,
+        ..TestSelector::default()
+    };
+    let runtime = session.runtime_context().clone();
+    let test_session = &mut session;
+    let test_snapshot = &snapshot;
+    let test_selector = &selector;
+    let mut completed_run = None;
+    let completed_report = &mut completed_run;
+    // The nested lifecycle/child-execution future is large. Construct its
+    // one exact-admitted continuation inside the admission boundary, after
+    // the caller's poll frame has passed only these small references. A
+    // by-value future argument would still reserve its large temporary in
+    // this frame during every nested VM poll. Core owns the metadata report;
+    // the shared continuation boundary returns only unit, not raw Values.
+    runmat_runtime::execution::admit_domain_continuation_with(&runtime, move || async move {
+        *completed_report = Some(
+            test_session
+                .run_test_snapshot(test_snapshot, test_selector)
+                .await
+                .map_err(domain_error)?,
+        );
+        Ok(())
+    })?
+    .await?;
+    let run = completed_run.expect("successful test continuation produces its report");
     let coverage = coverage.or_else(|| requested_coverage.then(MatlabCoverageSelection::default));
     result_value(&run, coverage.as_ref())
 }
@@ -58,11 +117,27 @@ async fn run_arguments(
 async fn discover_arguments(
     compat: CompatMode,
     project: Option<runmat_package::FrozenProjectHandoff>,
+    caller: Option<runmat_runtime::context::RuntimeContext>,
     args: Vec<Value>,
+    #[cfg(not(target_arch = "wasm32"))]
+    child_tasks: runmat_runtime::context::RuntimeLocalTaskChildFactory,
 ) -> runmat_runtime::BuiltinResult<Value> {
     let (snapshot, selected_names, _) =
         snapshot_from_arguments(compat, project.as_ref(), args).await?;
-    let session = configured_session(compat, project)?;
+    let mut session = construct_child_session(
+        compat,
+        caller,
+        #[cfg(not(target_arch = "wasm32"))]
+        child_tasks,
+    )?;
+    if let Some(project) = project {
+        #[cfg(not(target_arch = "wasm32"))]
+        install_child_project(&mut session, project)?.await?;
+        #[cfg(target_arch = "wasm32")]
+        session
+            .install_project_handoff(project)
+            .map_err(|error| runtime_error("RunMat:Testing:ProjectHandoff", error.to_string()))?;
+    }
     let discovery = session
         .discover_tests(&snapshot)
         .map_err(domain_error)?
@@ -164,19 +239,47 @@ async fn snapshot_from_arguments(
     Ok((snapshot, selected_names, coverage))
 }
 
-fn configured_session(
-    compat: CompatMode,
-    project: Option<runmat_package::FrozenProjectHandoff>,
-) -> runmat_runtime::BuiltinResult<RunMatSession> {
-    let mut session = RunMatSession::with_options(false, false).map_err(|error| {
-        runtime_error("RunMat:Testing:SessionInitialization", error.to_string())
-    })?;
-    session.set_compat_mode(compat);
-    if let Some(project) = project {
+/// Construct the selected project-install future inside its admitted owner.
+/// Keeping this cold branch out of the test driver's inline state avoids
+/// reserving its preparation temporaries during every nested test poll.
+#[cfg(not(target_arch = "wasm32"))]
+fn install_child_project<'a>(
+    session: &'a mut RunMatSession,
+    project: runmat_package::FrozenProjectHandoff,
+) -> runmat_runtime::BuiltinResult<runmat_runtime::execution::RuntimeContinuationFuture<'a, ()>> {
+    let runtime = session.runtime_context().clone();
+    runmat_runtime::execution::admit_domain_continuation_with(&runtime, move || async move {
         session
             .install_project_handoff(project)
-            .map_err(|error| runtime_error("RunMat:Testing:ProjectHandoff", error.to_string()))?;
-    }
+            .await
+            .map(|_| ())
+            .map_err(|error| runtime_error("RunMat:Testing:ProjectHandoff", error.to_string()))
+    })
+}
+
+fn construct_child_session(
+    compat: CompatMode,
+    caller: Option<runmat_runtime::context::RuntimeContext>,
+    #[cfg(not(target_arch = "wasm32"))]
+    child_tasks: runmat_runtime::context::RuntimeLocalTaskChildFactory,
+) -> runmat_runtime::BuiltinResult<RunMatSession> {
+    let caller = caller.ok_or_else(|| {
+        runtime_error(
+            "RunMat:Testing:RequiresExecutor",
+            "test child requires the originating runtime context",
+        )
+    })?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut session =
+        RunMatSession::with_options_on_parent_driver(false, false, &child_tasks, &caller).map_err(
+            |error| runtime_error("RunMat:Testing:SessionInitialization", error.to_string()),
+        )?;
+    #[cfg(target_arch = "wasm32")]
+    let mut session =
+        RunMatSession::with_options_for_test_child(false, false, &caller).map_err(|error| {
+            runtime_error("RunMat:Testing:SessionInitialization", error.to_string())
+        })?;
+    session.set_compat_mode(compat);
     Ok(session)
 }
 
@@ -228,8 +331,7 @@ fn result_value(
                         coverage.summary(runmat_test::coverage::CoverageMetric::Statement);
                     let functions =
                         coverage.summary(runmat_test::coverage::CoverageMetric::Function);
-                    let mut summary =
-                        runmat_value::ObjectInstance::new("RunMatCoverageResult".into());
+                    let mut summary = runmat_value::ObjectInstance::new("RunMatCoverageResult");
                     summary.properties.insert(
                         "StatementsCovered".into(),
                         Value::Num(statements.covered as f64),
@@ -271,7 +373,10 @@ fn coverage_plugin_selection(value: &Value) -> Option<MatlabCoverageSelection> {
     let Value::Object(object) = value else {
         return None;
     };
-    if object.class_name != "matlab.unittest.plugins.CodeCoveragePlugin" {
+    if !object
+        .class_name
+        .is(runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN)
+    {
         return None;
     }
     let folders = match object.properties.get("Folders") {

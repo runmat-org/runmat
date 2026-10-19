@@ -92,7 +92,7 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
             .get(row)
             .map(|value| if *value != 0 { "true" } else { "false" }.to_string())
             .unwrap_or_default(),
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::datetime_string_array(value)
                 .ok()
                 .flatten()

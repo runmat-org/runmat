@@ -1,5 +1,5 @@
 use crate::{BasicBlockId, MirLocalId, MirOperand, MirPlace, MirRvalue};
-use runmat_hir::Span;
+use runmat_types::Span;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

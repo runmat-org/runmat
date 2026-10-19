@@ -1,6 +1,42 @@
 use super::*;
 
 impl HostState {
+    /// Resolve catch authority from the shared MIR-authored NativeBlock scope.
+    pub fn active_catch_exception(&self) -> Option<std::rc::Rc<runmat_value::MException>> {
+        self.current_block
+            .and_then(|current| {
+                self.function
+                    .blocks
+                    .iter()
+                    .find(|block| block.id == current)
+            })
+            .and_then(|block| block.catch_scopes.last())
+            .and_then(|scope| self.catch_exceptions.get(scope).cloned())
+            .or_else(|| self.inherited_catch.clone())
+    }
+
+    pub fn bind_catch_exception(
+        &mut self,
+        block: NativeBlockId,
+        exception: runmat_value::MException,
+    ) -> NativeExecutorResult<()> {
+        let scope = self
+            .function
+            .blocks
+            .iter()
+            .find(|candidate| candidate.id == block)
+            .and_then(|block| block.catch_scopes.last())
+            .copied()
+            .ok_or_else(|| {
+                NativeExecutorError::Host(
+                    "native catch edge has no MIR-authored lexical catch scope".into(),
+                )
+            })?;
+        self.catch_exceptions
+            .insert(scope, std::rc::Rc::new(exception));
+        Ok(())
+    }
+
     pub fn has_for_loop(&self, header: NativeBlockId) -> bool {
         self.active_for_loops.contains_key(&header)
     }
@@ -21,13 +57,24 @@ impl HostState {
         );
     }
 
-    pub fn for_loop_mut(
+    pub fn take_for_loop(&mut self, header: NativeBlockId) -> NativeExecutorResult<ActiveForLoop> {
+        self.active_for_loops
+            .remove(&header)
+            .ok_or_else(|| NativeExecutorError::Host("native for-loop state is unavailable".into()))
+    }
+
+    pub fn restore_for_loop(
         &mut self,
         header: NativeBlockId,
-    ) -> NativeExecutorResult<&mut ActiveForLoop> {
-        self.active_for_loops
-            .get_mut(&header)
-            .ok_or_else(|| NativeExecutorError::Host("native for-loop state is unavailable".into()))
+        active: ActiveForLoop,
+    ) -> NativeExecutorResult<()> {
+        if self.active_for_loops.contains_key(&header) {
+            return Err(NativeExecutorError::Host(
+                "native for-loop state was restored twice".into(),
+            ));
+        }
+        self.active_for_loops.insert(header, active);
+        Ok(())
     }
 
     pub fn observe_loop_backedge(&mut self, point: runmat_types::ProgramPointId) {
@@ -59,33 +106,32 @@ impl HostState {
     ) -> Option<crate::region::OptimizedRegionPlan> {
         self.optimized_regions
             .get(&optimized_site_identity(request))
-            .filter(|plan| !self.disabled_optimized_regions.contains(&plan.region))
             .cloned()
     }
 
-    pub fn disable_optimized_region(&mut self, region: runmat_types::RegionId) {
-        self.disabled_optimized_regions.insert(region);
-    }
-
     pub fn optimized_region_inputs(
-        &self,
+        &mut self,
         plan: &crate::region::OptimizedRegionPlan,
-    ) -> NativeExecutorResult<Vec<&runmat_value::Value>> {
-        plan.inputs
+    ) -> NativeExecutorResult<Option<Vec<&runmat_value::Value>>> {
+        // Session bindings may replace local references while refreshing. Finish
+        // every mutable authority lookup before borrowing values from the arena.
+        let references = plan
+            .inputs
             .iter()
-            .map(|value| {
-                let reference =
-                    self.locals
-                        .get(value.local as usize)
-                        .copied()
-                        .ok_or_else(|| {
-                            NativeExecutorError::Host(
-                                "numeric region input local is invalid".into(),
-                            )
-                        })?;
-                self.arena.get(reference)
-            })
-            .collect()
+            .map(|value| self.local_reference(value.local as usize))
+            .collect::<NativeExecutorResult<Vec<_>>>()?;
+        let mut unavailable = false;
+        let mut inputs = Vec::with_capacity(references.len());
+        for reference in references {
+            if reference.is_null() {
+                unavailable = true;
+            } else {
+                // A stale non-NULL reference remains a real execution error,
+                // even when another required input is still unassigned.
+                inputs.push(self.arena.get(reference)?);
+            }
+        }
+        Ok((!unavailable).then_some(inputs))
     }
 
     pub fn publish_optimized_region(

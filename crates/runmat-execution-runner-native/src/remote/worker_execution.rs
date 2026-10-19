@@ -2,36 +2,79 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::AttemptId;
-use runmat_execution_artifact::{
-    ExecutableForm, ProgramExecutionRequest, ProgramExecutionResponse,
-};
+use runmat_execution::resource::{ResourceInventory, ResourceRequest};
+use runmat_execution_artifact::{ExecutableForm, ProgramExecutionResponse, WorkerProgramRequest};
 use runmat_execution_runner::{AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess};
 use runmat_meshing_core::{MeshingCancellationSignal, MeshingProgress};
 use runmat_meshing_execution::{MeshingProgressSink, MeshingStageKernel};
 
 use super::object_transfer::RemoteObjectStore;
 
+/// One attempt-scoped cancellation authority. The typed source wakes runtime
+/// and Graph listeners; the shared flag reaches synchronous physics kernels.
 #[derive(Default)]
-pub(super) struct AttemptCancellation(Arc<AtomicBool>);
+pub(super) struct AttemptCancellation {
+    source: runmat_execution::cancellation::CancellationSource,
+    flag: Arc<AtomicBool>,
+}
 
 impl AttemptCancellation {
     pub(super) fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
+        self.flag.store(true, Ordering::Release);
+        self.source.cancel(runmat_execution::CancellationReason::User);
+    }
+
+    pub(super) fn token(&self) -> runmat_execution::cancellation::CancellationToken {
+        self.source.token()
     }
 
     pub(super) fn flag(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.0)
+        Arc::clone(&self.flag)
     }
 
     pub(super) fn was_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.flag.load(Ordering::Acquire) || self.source.token().is_cancelled()
     }
 }
 
 impl MeshingCancellationSignal for AttemptCancellation {
     fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.was_cancelled()
     }
+}
+
+pub(super) struct GraphAttemptContext {
+    pub(super) run_identity: String,
+    pub(super) resources: ResourceInventory,
+    pub(super) host: runmat_execution::host::ExecutionHostInventory,
+}
+
+/// The admitted program and its exact materialized/assigned authority move
+/// together into one worker execution.
+pub(super) struct WorkerExecutionInput {
+    pub attempt_id: AttemptId,
+    pub program: WorkerProgramRequest,
+    pub graph_attempt: Option<GraphAttemptContext>,
+    pub project: Option<Arc<crate::materialized_project::MaterializedProject>>,
+    pub bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+    /// Frozen portable environment of the installed bundle.
+    pub environment: Vec<(String, String)>,
+    /// Scheduler reservation this attempt executes under.
+    pub resources: ResourceRequest,
+}
+
+/// Request-local effect ports and cancellation, separate from program proof.
+pub(super) struct WorkerExecutionPorts {
+    pub collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+    pub meshing_host: Option<RemoteMeshingHost>,
+    pub objects: RemoteObjectStore,
+    pub cancellation: Arc<AttemptCancellation>,
+    pub progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
+}
+
+pub(super) enum WorkerExecutionOutcome {
+    Response(ProgramExecutionResponse),
+    RetirementUnverified(String),
 }
 
 #[derive(Clone)]
@@ -84,26 +127,102 @@ impl RemoteMeshingHost {
     }
 }
 
-/// Frozen language inputs installed together for one original program attempt.
-pub(super) struct RemoteProgramContext {
-    pub project: Option<Arc<crate::materialized_project::MaterializedProject>>,
-    pub environment: Vec<(String, String)>,
-    pub resources: runmat_execution::resource::ResourceRequest,
+pub(super) async fn execute(
+    input: WorkerExecutionInput,
+    ports: WorkerExecutionPorts,
+) -> WorkerExecutionOutcome {
+    let WorkerExecutionInput {
+        attempt_id,
+        program,
+        graph_attempt,
+        project,
+        bundle,
+        environment,
+        resources,
+    } = input;
+    let WorkerExecutionPorts {
+        collective,
+        meshing_host,
+        objects,
+        cancellation,
+        progress_sender,
+    } = ports;
+    let program = match program {
+        WorkerProgramRequest::Direct(program) => program,
+        WorkerProgramRequest::Graph(graph) => {
+            drop(progress_sender);
+            let Some(graph_attempt) = graph_attempt else {
+                return WorkerExecutionOutcome::RetirementUnverified(
+                    "remote Graph child lacks authenticated attempt context".into(),
+                );
+            };
+            return match super::driver::local_graph::execute_remote_attempt(
+                &graph_attempt.run_identity,
+                attempt_id,
+                graph,
+                graph_attempt.resources,
+                resources,
+                graph_attempt.host,
+                cancellation.token(),
+            )
+            .await
+            {
+                Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(result)) => {
+                    WorkerExecutionOutcome::Response(result.response)
+                }
+                Ok(super::pool_execution::RemotePoolExecutionOutcome::Cancelled) => {
+                    WorkerExecutionOutcome::Response(failure("remote Graph attempt was cancelled"))
+                }
+                Ok(super::pool_execution::RemotePoolExecutionOutcome::Indeterminate(message)) => {
+                    WorkerExecutionOutcome::RetirementUnverified(message)
+                }
+                Err(error) => WorkerExecutionOutcome::RetirementUnverified(error.to_string()),
+            };
+        }
+    };
+    WorkerExecutionOutcome::Response(
+        execute_direct(
+            attempt_id,
+            program,
+            DirectContext {
+                project,
+                bundle,
+                environment,
+                resources,
+                collective,
+            },
+            meshing_host,
+            objects,
+            cancellation,
+            progress_sender,
+        )
+        .await,
+    )
 }
 
-pub(super) async fn execute(
+struct DirectContext {
+    project: Option<Arc<crate::materialized_project::MaterializedProject>>,
+    bundle: Option<Arc<runmat_execution_artifact::ExecutionBundle>>,
+    environment: Vec<(String, String)>,
+    resources: ResourceRequest,
+    collective: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeCollectiveService>>,
+}
+
+async fn execute_direct(
     attempt_id: AttemptId,
-    program: ProgramExecutionRequest,
-    context: RemoteProgramContext,
+    program: runmat_execution_artifact::ProgramExecutionRequest,
+    context: DirectContext,
     meshing_host: Option<RemoteMeshingHost>,
     mut objects: RemoteObjectStore,
     cancellation: Arc<AttemptCancellation>,
     progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
 ) -> ProgramExecutionResponse {
-    let RemoteProgramContext {
+    let DirectContext {
         project,
+        bundle,
         environment,
         resources,
+        collective,
     } = context;
     #[cfg(all(test, feature = "occt-native"))]
     if let Some(held) = meshing_host.as_ref().and_then(|host| host.held_attempt) {
@@ -213,9 +332,9 @@ pub(super) async fn execute(
     drop(progress_sender);
     crate::test_workload::execute_host_program_request_in_context(
         program,
-        project
-            .as_deref()
-            .map(crate::materialized_project::MaterializedProject::handoff),
+        project.as_deref(),
+        collective,
+        bundle,
         Some(&environment),
         Some(cancellation.flag()),
         Some(&resources),
@@ -239,8 +358,8 @@ pub(super) fn report(
     wall_millis: u64,
 ) -> AttemptReport {
     let success = match response {
-        ProgramExecutionResponse::Success { value } => {
-            AttemptSuccess::new(request, vec![value], Vec::new(), wall_millis, 0, 0)
+        ProgramExecutionResponse::Success { outputs } => {
+            AttemptSuccess::new(request, outputs, Vec::new(), wall_millis, 0, 0)
         }
         ProgramExecutionResponse::ExternalizedSuccess {
             outputs,
@@ -261,11 +380,17 @@ pub(super) fn report(
                 None => Err("remote result egress accounting overflowed".into()),
             }
         }
+        // Graph and SPMD results carry no per-attempt scheduler accounting.
+        ProgramExecutionResponse::GraphSuccess { graph } => Ok(AttemptSuccess::Graph { graph }),
+        ProgramExecutionResponse::SpmdSuccess { outputs } => Ok(AttemptSuccess::Spmd { outputs }),
         ProgramExecutionResponse::Failure { message } => {
             return AttemptReport::Failed {
                 kind: AttemptFailureKind::Execution,
                 message,
             }
+        }
+        ProgramExecutionResponse::RuntimeFailure { failure } => {
+            return AttemptReport::RuntimeFailed { failure }
         }
     };
     match success {
@@ -308,7 +433,7 @@ mod tests {
     use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
     use runmat_execution::resource::ResourceRequest;
     use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-    use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, TaskId};
+    use runmat_execution::{ExecutionScopeId, OutputContract, PoolId, ProgramCallable, TaskId};
     use runmat_execution_artifact::ProgramExecutionResponse;
     use runmat_execution_runner::{AttemptReport, AttemptRequest};
 
@@ -334,21 +459,37 @@ mod tests {
             worker_id: WorkerId::derive(&[b"worker"]),
             ordinal: 0,
             driver_fence: 1,
+            resource_assignment: Default::default(),
             task: TaskRequest {
+                schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
                 console: None,
                 environment: runmat_execution::EnvironmentSnapshot::default(),
                 id: task_id,
                 scope_id: ExecutionScopeId::derive(&[b"scope"]),
                 pool_id: PoolId::derive(&[b"pool"]),
-                program_artifact_id: ArtifactId::derive(&[b"artifact"]),
-                callable: Callable {
-                    owner_identity: "test".into(),
-                    qualified_name: "test".into(),
-                    entrypoint_digest: Digest::sha256(b"entrypoint"),
-                },
+                executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                    ArtifactId::derive(&[b"artifact"]),
+                ),
+                callable: Callable::for_program(
+                    "test",
+                    &ProgramCallable::semantic(runmat_types::ProgramFunctionId(0), None),
+                ),
+                host: runmat_execution::host::ExecutionHostRequirement::portable(
+                    runmat_core::program_environment(runmat_core::CompatMode::Matlab),
+                    runmat_types::CapabilitySet(BTreeSet::from([
+                        runmat_types::CapabilityRequirement::HostRuntime,
+                    ])),
+                    runmat_types::InteropManifest::empty(),
+                    BTreeSet::from([
+                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                    ]),
+                )
+                .unwrap(),
+                invocation_context: runmat_execution::ProgramInvocationContext::Direct,
                 inputs: Vec::new(),
                 outputs: OutputContract {
                     requested_outputs: 1,
+                    owned_work: None,
                 },
                 resources: ResourceRequest {
                     cpu_millicores: 1_000,
@@ -368,9 +509,9 @@ mod tests {
         let report = report(
             &request,
             ProgramExecutionResponse::Success {
-                value: runmat_execution::value::ValuePayload::Inline(Box::new(
+                outputs: vec![runmat_execution::value::ValuePayload::Inline(Box::new(
                     runmat_execution::value::InlineValue::Null,
-                )),
+                ))],
             },
             1,
         );

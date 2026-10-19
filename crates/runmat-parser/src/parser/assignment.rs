@@ -92,12 +92,13 @@ impl Parser {
 
     pub(super) fn is_simple_assignment_ahead(&self) -> bool {
         // Heuristic: at statement start, if we see Ident ... '=' before a terminator, treat as assignment.
-        self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
+        self.peek_token().is_some_and(Token::can_be_identifier)
+            && self.peek_token_at(1) == Some(&Token::Assign)
     }
 
     pub(super) fn try_parse_lvalue_assign(&mut self) -> Result<Option<Stmt>, SyntaxError> {
         let save = self.pos;
-        let lvalue = if self.peek_token() == Some(&Token::Ident) {
+        let lvalue = if self.peek_token().is_some_and(Token::can_be_identifier) {
             let base_token = self.next().unwrap();
             self.parse_lvalue_base_with_postfix(base_token)?
         } else {
@@ -159,7 +160,7 @@ impl Parser {
         if self.consume(&Token::Tilde) {
             return Ok(MultiAssignTarget::Discard);
         }
-        if self.peek_token() != Some(&Token::Ident) {
+        if !self.peek_token().is_some_and(Token::can_be_identifier) {
             return Err("expected multi-assignment target".into());
         }
         let base_token = self.next().unwrap();

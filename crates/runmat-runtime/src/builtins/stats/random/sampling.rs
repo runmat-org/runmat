@@ -11,7 +11,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, IntValue, LogicalArray, NumericStorage, StringArray, Tensor, Value,
+    CellArray, CharArray, IntValue, LogicalArray, NumericDType, NumericStorage, StringArray,
+    Tensor, Value,
 };
 
 use crate::builtins::common::random;
@@ -920,6 +921,7 @@ fn parse_weights(name: &str, value: Value, expected: usize) -> BuiltinResult<Vec
 }
 
 fn sample_indices(
+    turn: &mut random::RandomTurn,
     name: &str,
     population_len: usize,
     k: usize,
@@ -936,25 +938,26 @@ fn sample_indices(
         ));
     }
     match (replacement, weights) {
-        (true, Some(weights)) => weighted_with_replacement(name, k, weights),
-        (false, Some(weights)) => weighted_without_replacement(name, k, weights),
+        (true, Some(weights)) => weighted_with_replacement(turn, name, k, weights),
+        (false, Some(weights)) => weighted_without_replacement(turn, name, k, weights),
         (true, None) => {
-            let uniforms = random::generate_uniform(k, name)?;
+            let uniforms = random::generate_uniform(turn, k, name)?;
             Ok(uniforms
                 .into_iter()
                 .map(|u| ((u * population_len as f64).floor() as usize).min(population_len - 1))
                 .collect())
         }
-        (false, None) => unweighted_without_replacement(name, population_len, k),
+        (false, None) => unweighted_without_replacement(turn, name, population_len, k),
     }
 }
 
 fn unweighted_without_replacement(
+    turn: &mut random::RandomTurn,
     name: &str,
     population_len: usize,
     k: usize,
 ) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     let mut pool = (0..population_len).collect::<Vec<_>>();
     let mut out = Vec::with_capacity(k);
     for (draw, u) in uniforms.into_iter().enumerate() {
@@ -965,9 +968,14 @@ fn unweighted_without_replacement(
     Ok(out)
 }
 
-fn weighted_with_replacement(name: &str, k: usize, weights: &[f64]) -> BuiltinResult<Vec<usize>> {
+fn weighted_with_replacement(
+    turn: &mut random::RandomTurn,
+    name: &str,
+    k: usize,
+    weights: &[f64],
+) -> BuiltinResult<Vec<usize>> {
     let total = weights.iter().sum::<f64>();
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     Ok(uniforms
         .into_iter()
         .map(|u| choose_weighted(weights, total, u))
@@ -975,11 +983,12 @@ fn weighted_with_replacement(name: &str, k: usize, weights: &[f64]) -> BuiltinRe
 }
 
 fn weighted_without_replacement(
+    turn: &mut random::RandomTurn,
     name: &str,
     k: usize,
     weights: &[f64],
 ) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     let mut weights = weights.to_vec();
     let mut out = Vec::with_capacity(k);
     for u in uniforms {
@@ -1208,7 +1217,7 @@ fn sample_value_axis(
 ) -> BuiltinResult<Value> {
     match data {
         Value::Tensor(t) => {
-            let shape = normalize_shape(t.shape.clone());
+            let shape = normalize_shape(t.shape().to_vec());
             sample_tensor_axis(t, &shape, axis, indices, name)
         }
         Value::Num(value) => {
@@ -1228,7 +1237,7 @@ fn sample_value_axis(
         }
         Value::LogicalArray(array) => sample_logical_axis(
             &array.data,
-            &normalize_shape(array.shape),
+            &normalize_shape(array.shape.to_vec()),
             axis,
             indices,
             name,
@@ -1256,8 +1265,8 @@ fn sample_value_axis(
 
 fn shape_of_sampled_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(t) => Ok(normalize_shape(t.shape.clone())),
-        Value::LogicalArray(a) => Ok(normalize_shape(a.shape.clone())),
+        Value::Tensor(t) => Ok(normalize_shape(t.shape().to_vec())),
+        Value::LogicalArray(a) => Ok(normalize_shape(a.shape.to_vec())),
         Value::StringArray(a) => Ok(normalize_shape(a.shape.clone())),
         Value::CharArray(a) => Ok(vec![a.rows, a.cols]),
         Value::Cell(a) => Ok(normalize_shape(a.shape.clone())),
@@ -1418,10 +1427,14 @@ async fn parse_datasample_args(data: Value, rest: Vec<Value>) -> BuiltinResult<D
     })
 }
 
-fn datasample_compute(args: DatasampleArgs) -> BuiltinResult<(Value, Value)> {
+fn datasample_compute(
+    turn: &mut random::RandomTurn,
+    args: DatasampleArgs,
+) -> BuiltinResult<(Value, Value)> {
     let shape = shape_of_sampled_value(&args.data)?;
     let axis = args.dim.unwrap_or_else(|| first_non_singleton(&shape));
     let indices = sample_indices(
+        turn,
         "datasample",
         shape[axis],
         args.k,
@@ -1460,10 +1473,11 @@ pub mod datasample {
             gathered_rest.push(super::gathered(argument, "datasample").await?);
         }
         let args = super::parse_datasample_args(value, gathered_rest).await?;
-        let (sample, idx) = super::datasample_compute(args)?;
+        let mut turn = random::acquire_turn(None, "datasample").await?;
+        let (sample, idx) = super::datasample_compute(&mut turn, args)?;
         match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![sample])),
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![sample])),
             Some(out_count) => Ok(crate::output_count::output_list_with_padding(
                 out_count,
                 vec![sample, idx],
@@ -1475,7 +1489,7 @@ pub mod datasample {
 
 enum RandsamplePopulation {
     Range(usize),
-    Values(Value, Vec<usize>, usize),
+    Values(Box<Value>, Vec<usize>, usize),
 }
 
 struct RandsampleArgs {
@@ -1528,7 +1542,7 @@ async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs
                 ));
             }
             let axis = first_non_singleton(&shape);
-            RandsamplePopulation::Values(first, shape, axis)
+            RandsamplePopulation::Values(Box::new(first), shape, axis)
         }
     };
     let pop_len = match &population {
@@ -1555,10 +1569,11 @@ async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs
     })
 }
 
-fn randsample_compute(args: RandsampleArgs) -> BuiltinResult<Value> {
+fn randsample_compute(turn: &mut random::RandomTurn, args: RandsampleArgs) -> BuiltinResult<Value> {
     match args.population {
         RandsamplePopulation::Range(n) => {
             let indices = sample_indices(
+                turn,
                 "randsample",
                 n,
                 args.k,
@@ -1578,13 +1593,14 @@ fn randsample_compute(args: RandsampleArgs) -> BuiltinResult<Value> {
         }
         RandsamplePopulation::Values(value, shape, axis) => {
             let indices = sample_indices(
+                turn,
                 "randsample",
                 shape[axis],
                 args.k,
                 args.replacement,
                 args.weights.as_deref(),
             )?;
-            sample_value_axis(value, axis, &indices, "randsample")
+            sample_value_axis(*value, axis, &indices, "randsample")
         }
     }
 }
@@ -1611,13 +1627,14 @@ pub mod randsample {
     pub(crate) async fn randsample_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ensure_randsample_extensions(&args).await?;
         let resident_population = args.first().and_then(|value| match value {
-            Value::GpuTensor(handle) if tensor::element_count(&handle.shape) > 1 => {
+            Value::GpuTensor(handle) if tensor::element_count(handle.shape()) > 1 => {
                 Some(handle.clone())
             }
             _ => None,
         });
         let args = super::parse_randsample_args(args).await?;
-        let output = super::randsample_compute(args)?;
+        let mut turn = random::acquire_turn(None, "randsample").await?;
+        let output = super::randsample_compute(&mut turn, args)?;
         if let Some(source) = resident_population {
             let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&source)
                 .ok_or_else(|| {
@@ -1626,7 +1643,7 @@ pub mod randsample {
                         "randsample: resident population owner is unavailable",
                     )
                 })?;
-            return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+            return crate::builtins::common::provider_restore::upload_value_like(
                 provider,
                 output,
                 "randsample",
@@ -1646,7 +1663,7 @@ async fn ensure_randsample_extensions(args: &[Value]) -> BuiltinResult<()> {
         let scalar = match first {
             Value::Int(_) => true,
             Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
-            Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+            Value::GpuTensor(handle) => tensor::element_count(handle.shape()) == 1,
             _ => false,
         };
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -1731,11 +1748,11 @@ async fn parse_unidrnd_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usiz
         ));
     }
     let shape = if args.len() == 1 {
-        normalize_shape(n.shape.clone())
+        normalize_shape(n.shape().to_vec())
     } else {
         parse_shape_args("unidrnd", &args[1..]).await?
     };
-    if !tensor::is_scalar_tensor(&n) && normalize_shape(n.shape.clone()) != shape {
+    if !tensor::is_scalar_tensor(&n) && normalize_shape(n.shape().to_vec()) != shape {
         return Err(sampling_error(
             "unidrnd",
             "unidrnd: requested size must match non-scalar n",
@@ -1781,7 +1798,8 @@ pub mod unidrnd {
         }
         let (n, shape) = super::parse_unidrnd_args(args).await?;
         let len = tensor::element_count(&shape);
-        let uniforms = random::generate_uniform(len, "unidrnd")?;
+        let mut turn = random::acquire_turn(None, "unidrnd").await?;
+        let uniforms = random::generate_uniform(&mut turn, len, "unidrnd")?;
         let data = uniforms
             .into_iter()
             .enumerate()
@@ -1924,14 +1942,14 @@ fn dividerand_counts(q: usize, ratios: [f64; 3]) -> [usize; 3] {
     counts
 }
 
-fn dividerand_permutation(q: usize) -> BuiltinResult<Vec<usize>> {
+fn dividerand_permutation(turn: &mut random::RandomTurn, q: usize) -> BuiltinResult<Vec<usize>> {
     if q > MAX_DIVIDERAND_Q {
         return Err(sampling_error(
             "dividerand",
             format!("dividerand: Q exceeds the maximum supported value of {MAX_DIVIDERAND_Q}"),
         ));
     }
-    let uniforms = random::generate_uniform(q, "dividerand")?;
+    let uniforms = random::generate_uniform(turn, q, "dividerand")?;
     let mut pool = Vec::new();
     pool.try_reserve_exact(q)
         .map_err(|_| sampling_error("dividerand", "dividerand: requested output is too large"))?;
@@ -1954,12 +1972,15 @@ fn row_index_value(indices: &[usize]) -> BuiltinResult<Value> {
         .map_err(|err| sampling_error("dividerand", format!("dividerand: {err}")))
 }
 
-fn dividerand_compute(args: DividerandArgs) -> BuiltinResult<[Value; 3]> {
+fn dividerand_compute(
+    turn: &mut random::RandomTurn,
+    args: DividerandArgs,
+) -> BuiltinResult<[Value; 3]> {
     let counts = dividerand_counts(args.q, args.ratios);
     let permutation = if args.q == 0 {
         Vec::new()
     } else {
-        dividerand_permutation(args.q)?
+        dividerand_permutation(turn, args.q)?
     };
     let train_end = counts[0];
     let val_end = train_end + counts[1];
@@ -2000,12 +2021,13 @@ pub mod dividerand {
             )?;
         }
         let parsed = super::parse_dividerand_args(args).await?;
-        let [train, val, test] = super::dividerand_compute(parsed)?;
+        let mut turn = random::acquire_turn(None, "dividerand").await?;
+        let [train, val, test] = super::dividerand_compute(&mut turn, parsed)?;
         match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![train])),
-            Some(2) => Ok(Value::OutputList(vec![train, val])),
-            Some(3) => Ok(Value::OutputList(vec![train, val, test])),
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![train])),
+            Some(2) => Ok(Value::output_list(vec![train, val])),
+            Some(3) => Ok(Value::output_list(vec![train, val, test])),
             None => Ok(train),
             Some(_) => Err(super::sampling_error(
                 "dividerand",
@@ -2246,6 +2268,12 @@ enum BootstatRow {
     Logical(Vec<u8>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BootstatClass {
+    Numeric(NumericDType),
+    Logical,
+}
+
 impl BootstatRow {
     fn len(&self) -> usize {
         match self {
@@ -2254,30 +2282,37 @@ impl BootstatRow {
         }
     }
 
-    fn class_name(&self) -> &'static str {
+    fn class(&self) -> BootstatClass {
         match self {
-            Self::Numeric(storage) => storage.class_name(),
-            Self::Logical(_) => "logical",
+            Self::Numeric(storage) => BootstatClass::Numeric(storage.numeric_dtype()),
+            Self::Logical(_) => BootstatClass::Logical,
         }
     }
 }
 
 async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
-    let mut value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
-    if let Value::OutputList(values) = value {
-        if values.len() != 1 {
+    // Adapt callback output arity before passing a scalar value to gathering.
+    let value = match value {
+        Value::OutputList(values) if values.len() == 1 => {
+            crate::sequence::into_first_output(values)?.expect("one bootstat output")
+        }
+        Value::OutputList(_) => {
             return Err(sampling_error(
                 "bootstrp",
                 "bootstrp: bootfun must return exactly one output",
             ));
         }
-        value = values.into_iter().next().unwrap_or(Value::Num(0.0));
-        value = gather_if_needed_async(&value)
-            .await
-            .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
+        value => value,
+    };
+    if matches!(value, Value::OutputList(_)) {
+        return Err(sampling_error(
+            "bootstrp",
+            "bootstrp: bootfun must return exactly one output",
+        ));
     }
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
     match value {
         Value::OutputList(_) => Err(sampling_error(
             "bootstrp",
@@ -2292,7 +2327,7 @@ async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
             .into_numeric_storage()
             .map(BootstatRow::Numeric)
             .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}"))),
-        Value::LogicalArray(a) => Ok(BootstatRow::Logical(a.data)),
+        Value::LogicalArray(a) => Ok(BootstatRow::Logical(a.data.into_vec())),
         other => Err(sampling_error(
             "bootstrp",
             format!("bootstrp: bootfun must return numeric or logical values, got {other:?}"),
@@ -2327,10 +2362,10 @@ fn assemble_bootstat(rows: Vec<BootstatRow>, nboot: usize) -> BuiltinResult<Valu
         return empty_bootstat(nboot);
     };
     let width = first.len();
-    let class_name = first.class_name();
+    let class = first.class();
     if rows
         .iter()
-        .any(|row| row.len() != width || row.class_name() != class_name)
+        .any(|row| row.len() != width || row.class() != class)
     {
         return Err(sampling_error(
             "bootstrp",
@@ -2395,13 +2430,16 @@ async fn bootstrp_compute(
     };
     let mut rows = Vec::with_capacity(args.nboot);
     for _ in 0..args.nboot {
+        let mut turn = random::acquire_turn(None, "bootstrp").await?;
         let indices = sample_indices(
+            &mut turn,
             "bootstrp",
             args.sample_len,
             args.sample_len,
             true,
             args.weights.as_deref(),
         )?;
+        drop(turn);
         if !is_empty_function(&args.bootfun) {
             let mut callback_args = Vec::with_capacity(args.data.len());
             for value in args.data.iter().cloned() {
@@ -2425,7 +2463,7 @@ async fn bootstrp_compute(
                             format!("bootstrp: bootfun failed: {}", err.message()),
                         )
                     })?;
-            rows.push(bootstat_row(result).await?);
+            rows.push(result.with_owned_async(bootstat_row).await?);
         }
         if let Some(samples) = samples.as_mut() {
             samples.push(indices);
@@ -2453,6 +2491,7 @@ pub mod bootstrp {
 
     #[runtime_builtin(
         name = "bootstrp",
+        execution_stack = "process",
         category = "stats/random",
         summary = "Bootstrap samples and evaluate a statistic.",
         keywords = "bootstrp,bootstrap,resampling,statistics,weights",
@@ -2465,7 +2504,7 @@ pub mod bootstrp {
     pub(crate) async fn bootstrp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         let requested_outputs = crate::output_count::current_output_count();
         match requested_outputs {
-            Some(0) => return Ok(Value::OutputList(Vec::new())),
+            Some(0) => return Ok(Value::output_list(Vec::new())),
             Some(count) if count > 2 => {
                 return Err(super::sampling_error(
                     "bootstrp",
@@ -2479,8 +2518,8 @@ pub mod bootstrp {
         let args = super::parse_bootstrp_args(args).await?;
         let eval = super::bootstrp_compute(args, include_bootsam).await?;
         match requested_outputs {
-            Some(1) => Ok(Value::OutputList(vec![eval.bootstat])),
-            Some(2) => Ok(Value::OutputList(vec![
+            Some(1) => Ok(Value::output_list(vec![eval.bootstat])),
+            Some(2) => Ok(Value::output_list(vec![
                 eval.bootstat,
                 eval.bootsam.unwrap_or(Value::Num(0.0)),
             ])),
@@ -2538,6 +2577,34 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_callback_arity_is_adapted_before_scalar_gather() {
+        let exact = u64::MAX;
+        for value in [
+            Value::Int(IntValue::U64(exact)),
+            Value::output_list(vec![Value::Int(IntValue::U64(exact))]),
+        ] {
+            let row = block_on(bootstat_row(value)).expect("one exact callback value");
+            let BootstatRow::Numeric(NumericStorage::U64(values)) = row else {
+                panic!("callback output must preserve its native uint64 class");
+            };
+            assert_eq!(values, vec![exact]);
+        }
+        for values in [
+            Vec::new(),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+            vec![Value::output_list(vec![Value::Num(1.0)])],
+        ] {
+            let error = match block_on(bootstat_row(Value::output_list(values))) {
+                Ok(_) => panic!("invalid callback arity must fail"),
+                Err(error) => error,
+            };
+            assert!(error
+                .message()
+                .contains("bootfun must return exactly one output"));
+        }
+    }
+
+    #[test]
     fn sampling_tensor_axis_preserves_every_native_numeric_class() {
         let storages = [
             NumericStorage::F64(vec![1.0, 2.0, 3.0, 4.0]),
@@ -2560,7 +2627,7 @@ mod tests {
             let Value::Tensor(sampled) = sampled else {
                 panic!("expected sampled tensor");
             };
-            assert_eq!(sampled.shape, vec![2, 2]);
+            assert_eq!(sampled.shape(), &[2, 2]);
             assert_eq!(sampled.into_numeric_storage(), Ok(expected));
         }
     }
@@ -2571,7 +2638,7 @@ mod tests {
         random::reset_rng();
         let data =
             Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 10.0, 20.0, 30.0], vec![3, 2]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(datasample::datasample_builtin(
             data,
             vec![Value::Num(2.0), Value::from("Replace"), Value::Bool(false)],
@@ -2582,14 +2649,14 @@ mod tests {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 2]);
+                        assert_eq!(t.shape(), &[2, 2]);
                         assert_eq!(t.materialize_f64().len(), 4);
                     }
                     other => panic!("expected tensor sample, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 1]);
+                        assert_eq!(t.shape(), &[2, 1]);
                         assert!(t
                             .materialize_f64()
                             .iter()
@@ -2599,6 +2666,23 @@ mod tests {
                 }
             }
             other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn datasample_normalizes_rank_zero_and_rank_one_singleton_populations() {
+        let _lock = random::test_guard();
+        random::reset_rng();
+        for shape in [vec![], vec![1]] {
+            let population = Value::Tensor(Tensor::new(vec![7.0], shape).unwrap());
+            let sample = block_on(datasample::datasample_builtin(
+                population,
+                vec![Value::Num(1.0)],
+            ))
+            .expect("sample singleton population");
+            assert_eq!(shape_of_sampled_value(&sample).unwrap(), [1, 1]);
+            assert_eq!(sample, Value::Num(7.0));
         }
     }
 
@@ -2793,7 +2877,7 @@ mod tests {
         .unwrap();
         match range {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2812,7 +2896,7 @@ mod tests {
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2824,7 +2908,7 @@ mod tests {
 
     #[test]
     fn randsample_restores_exact_integer_population_to_its_owner() {
-        let _lock = random::test_guard();
+        let _guard = random::test_guard();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         random::reset_rng();
         crate::builtins::common::test_support::with_test_provider(|provider| {
@@ -2837,8 +2921,9 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("upload integer population");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let Value::GpuTensor(output) = block_on(randsample::randsample_builtin(vec![
                 Value::GpuTensor(source),
                 Value::Num(2.0),
@@ -2846,7 +2931,7 @@ mod tests {
             .expect("resident integer population") else {
                 panic!("expected resident output");
             };
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), &[1, 2]);
             assert!(runmat_accelerate_api::handle_is_explicit(&output));
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&output),
@@ -2882,8 +2967,9 @@ mod tests {
             expected.sort_by_key(|value| format!("{value:?}"));
             let population = Tensor::new_integer(storage, vec![1, 2]).expect("population");
             let source = gpu_helpers::upload_tensor(provider, &population).expect("upload");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let output = block_on(randsample::randsample_builtin(vec![
                 Value::GpuTensor(source),
                 Value::Num(2.0),
@@ -2916,7 +3002,7 @@ mod tests {
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2930,7 +3016,7 @@ mod tests {
         let out = block_on(unidrnd::unidrnd_builtin(vec![n])).unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert_eq!(t.materialize_f64()[0], 1.0);
                 assert!((1.0..=2.0).contains(&t.materialize_f64()[1]));
                 assert!((1.0..=3.0).contains(&t.materialize_f64()[2]));
@@ -2948,7 +3034,7 @@ mod tests {
         let out = block_on(unidrnd::unidrnd_builtin(vec![n])).unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert!(t.materialize_f64().iter().all(|value| value.is_finite()));
                 assert!(t
                     .materialize_f64()
@@ -2961,7 +3047,7 @@ mod tests {
 
     #[test]
     fn unidrnd_typed_integer_roles_are_gated_and_wide_limits_must_be_exact() {
-        let _lock = random::test_guard();
+        let _guard = random::test_guard();
         random::reset_rng();
         let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
         let limit_error = block_on(unidrnd::unidrnd_builtin(vec![Value::Int(IntValue::U16(3))]))
@@ -2994,7 +3080,7 @@ mod tests {
     fn dividerand_partitions_indices_into_row_vectors() {
         let _lock = random::test_guard();
         random::reset_rng();
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let out = block_on(dividerand::dividerand_builtin(vec![
             Value::Num(10.0),
             Value::Num(0.6),
@@ -3009,7 +3095,7 @@ mod tests {
                 for (value, expected_len) in values.iter().zip([6usize, 2, 2]) {
                     match value {
                         Value::Tensor(t) => {
-                            assert_eq!(t.shape, vec![1, expected_len]);
+                            assert_eq!(t.shape(), &[1, expected_len]);
                             seen.extend_from_slice(&t.materialize_f64());
                         }
                         other => panic!("expected tensor indices, got {other:?}"),
@@ -3027,14 +3113,15 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         {
-            let _guard = crate::output_count::push_output_count(Some(3));
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let out = block_on(dividerand::dividerand_builtin(vec![Value::Num(4.0)])).unwrap();
             match out {
                 Value::OutputList(values) => {
                     let shapes = values
                         .iter()
                         .map(|value| match value {
-                            Value::Tensor(t) => t.shape.clone(),
+                            Value::Tensor(t) => t.shape().to_vec(),
                             other => panic!("expected tensor indices, got {other:?}"),
                         })
                         .collect::<Vec<_>>();
@@ -3046,7 +3133,8 @@ mod tests {
 
         random::reset_rng();
         {
-            let _guard = crate::output_count::push_output_count(Some(3));
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let out = block_on(dividerand::dividerand_builtin(vec![
                 Value::Num(3.0),
                 Value::Num(1.0),
@@ -3056,9 +3144,9 @@ mod tests {
             .unwrap();
             match out {
                 Value::OutputList(values) => {
-                    assert!(matches!(&values[0], Value::Tensor(t) if t.shape == vec![1, 3]));
-                    assert!(matches!(&values[1], Value::Tensor(t) if t.shape == vec![1, 0]));
-                    assert!(matches!(&values[2], Value::Tensor(t) if t.shape == vec![1, 0]));
+                    assert!(matches!(&values[0], Value::Tensor(t) if t.shape() == [1, 3]));
+                    assert!(matches!(&values[1], Value::Tensor(t) if t.shape() == [1, 0]));
+                    assert!(matches!(&values[2], Value::Tensor(t) if t.shape() == [1, 0]));
                 }
                 other => panic!("expected output list, got {other:?}"),
             }
@@ -3107,7 +3195,7 @@ mod tests {
             );
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             drop(strict);
-            provider.free(&handle).expect("free resident Q");
+            drop(handle);
         });
     }
 
@@ -3244,7 +3332,7 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let wide = 9_007_199_254_740_993_u64;
         let data = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![2, 1])
@@ -3256,7 +3344,7 @@ mod tests {
         );
         let Value::OutputList(outputs) = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Int(IntValue::U16(2)),
-            Value::FunctionHandle("min".to_string()),
+            Value::FunctionHandle("min".into()),
             data,
             Value::from("Weights"),
             weights,
@@ -3267,13 +3355,13 @@ mod tests {
         assert!(matches!(
             &outputs[0],
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 1]
+                if tensor.shape() == [2, 1]
                     && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![wide, wide]))
         ));
         assert!(matches!(
             &outputs[1],
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 2]
+                if tensor.shape() == [2, 2]
                     && tensor.materialize_f64() == vec![1.0; 4]
         ));
     }
@@ -3316,7 +3404,7 @@ mod tests {
                 .expect("RunMat resident nboot") else {
                     panic!("expected empty bootstat tensor");
                 };
-                assert_eq!(output.shape, vec![2, 0]);
+                assert_eq!(output.shape(), &[2, 0]);
             }
         });
     }
@@ -3342,7 +3430,7 @@ mod tests {
             let Value::Tensor(tensor) = output else {
                 panic!("expected tensor bootstat");
             };
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(tensor.into_numeric_storage(), Ok(expected));
         }
 
@@ -3360,10 +3448,10 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(4.0),
-            Value::FunctionHandle("mean".to_string()),
+            Value::FunctionHandle("mean".into()),
             data,
             Value::from("Weights"),
             Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![3, 1]).unwrap()),
@@ -3374,7 +3462,7 @@ mod tests {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![4, 1]);
+                        assert_eq!(t.shape(), &[4, 1]);
                         assert_eq!(t.materialize_f64(), vec![10.0; 4]);
                     }
                     Value::Num(value) => assert_eq!(*value, 10.0),
@@ -3382,7 +3470,7 @@ mod tests {
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![3, 4]);
+                        assert_eq!(t.shape(), &[3, 4]);
                         assert_eq!(t.materialize_f64(), vec![1.0; 12]);
                     }
                     other => panic!("expected tensor bootsam, got {other:?}"),
@@ -3397,7 +3485,7 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),
             Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
@@ -3408,12 +3496,12 @@ mod tests {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
-                    Value::Tensor(t) => assert_eq!(t.shape, vec![2, 0]),
+                    Value::Tensor(t) => assert_eq!(t.shape(), &[2, 0]),
                     other => panic!("expected empty tensor bootstat, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![3, 2]);
+                        assert_eq!(t.shape(), &[3, 2]);
                         assert!(t
                             .materialize_f64()
                             .iter()
@@ -3434,13 +3522,13 @@ mod tests {
         let y = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]).unwrap());
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(3.0),
-            Value::FunctionHandle("corr".to_string()),
+            Value::FunctionHandle("corr".into()),
             x,
             y,
         ]))
         .unwrap();
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 1]),
             other => panic!("expected tensor bootstat, got {other:?}"),
         }
     }
@@ -3451,13 +3539,13 @@ mod tests {
         random::reset_rng();
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(3.0),
-            Value::FunctionHandle("mean".to_string()),
+            Value::FunctionHandle("mean".into()),
             Value::Num(42.0),
         ]))
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert_eq!(t.materialize_f64(), vec![42.0; 3]);
             }
             other => panic!("expected tensor bootstat, got {other:?}"),
@@ -3469,7 +3557,7 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let row = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),
             Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
@@ -3480,7 +3568,7 @@ mod tests {
         match out {
             Value::OutputList(values) => match &values[1] {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![4, 2]);
+                    assert_eq!(t.shape(), &[4, 2]);
                     assert!(t
                         .materialize_f64()
                         .iter()
@@ -3498,18 +3586,18 @@ mod tests {
         let y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
         let err = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),
-            Value::FunctionHandle("corr".to_string()),
+            Value::FunctionHandle("corr".into()),
             x,
             y,
         ]))
         .unwrap_err();
         assert!(err.message().contains("same number of rows"));
 
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         let err = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),
-            Value::FunctionHandle("definitely_missing_bootstrap_callback".to_string()),
+            Value::FunctionHandle("definitely_missing_bootstrap_callback".into()),
             data,
         ]))
         .unwrap_err();

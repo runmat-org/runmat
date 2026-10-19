@@ -274,7 +274,7 @@ pub fn analyze_program_with_catalog(
     let runtime_dependent = resolution.runtime_dependent;
     diagnostics.extend(resolution.diagnostics);
 
-    let compiled = compile_lowering(&lowering, &mir);
+    let compiled = compile_lowering(&lowering, &mir, &facts);
     let compile_failure = compiled.as_ref().err().cloned();
     if let Some(error) = &compile_failure {
         diagnostics.push(
@@ -294,6 +294,7 @@ pub fn analyze_program_with_catalog(
 
     diagnostics.sort_by_key(|diagnostic| {
         (
+            diagnostic.primary.source,
             diagnostic.primary.span.start,
             diagnostic.primary.span.end,
             diagnostic.code.clone(),
@@ -301,6 +302,7 @@ pub fn analyze_program_with_catalog(
     });
     diagnostics.dedup_by(|left, right| {
         left.code == right.code
+            && left.primary.source == right.primary.source
             && left.primary.span == right.primary.span
             && left.message == right.message
     });
@@ -329,17 +331,30 @@ pub fn analyze_program_with_catalog(
 fn compile_lowering(
     lowering: &LoweringResult,
     mir: &MirAssembly,
+    analysis: &AnalysisStore,
 ) -> Result<runmat_vm::Bytecode, CompileError> {
     let Some(entrypoint) = lowering.assembly.entrypoints.first() else {
-        let bound_functions =
-            runmat_vm::compile_semantic_function_registry(&lowering.assembly, mir)?;
+        let bound_functions = runmat_vm::compile_semantic_function_registry_with_analysis(
+            &lowering.assembly,
+            mir,
+            analysis,
+        )?;
         let function_registry = runmat_vm::FunctionRegistry::new(bound_functions.clone());
-        let mut bytecode = runmat_vm::Bytecode::empty();
+        let declarations = runmat_vm::compile_class_declarations(
+            &lowering.assembly,
+            mir,
+            lowering.assembly.primary_source,
+        );
+        let mut bytecode = runmat_vm::Bytecode::with_instructions(declarations, 0);
+        bytecode.source_id = lowering
+            .assembly
+            .primary_source
+            .map(runmat_vm::BytecodeSourceRef::Program);
         bytecode.bound_functions = bound_functions;
         bytecode.function_registry = function_registry;
         return Ok(bytecode);
     };
-    runmat_vm::compile(&lowering.assembly, mir, entrypoint.id)
+    runmat_vm::compile_with_analysis(&lowering.assembly, mir, entrypoint.id, analysis)
 }
 
 fn parse_failure_message(failure: &ParseFailure) -> String {
@@ -367,23 +382,26 @@ fn source_position_span(source: &str, position: usize) -> Span {
 struct EnvironmentEffect {
     span: Span,
     effect: HirEnvironmentEffect,
+    source: Option<runmat_types::ProgramSourceId>,
 }
 
 fn environment_effects(mir: &MirAssembly) -> Vec<EnvironmentEffect> {
     let mut effects = Vec::new();
-    for body in mir.bodies.values() {
+    for (function, body) in &mir.bodies {
+        let source = mir.functions.get(function).map(|metadata| metadata.source);
         for block in &body.blocks {
             for statement in &block.statements {
                 if let MirStmtKind::EnvironmentEffect(effect) = &statement.kind {
                     effects.push(EnvironmentEffect {
                         span: statement.span,
                         effect: effect.clone(),
+                        source,
                     });
                 }
             }
         }
     }
-    effects.sort_by_key(|effect| effect.span.start);
+    effects.sort_by_key(|effect| (effect.source, effect.span.start));
     effects
 }
 
@@ -402,6 +420,7 @@ fn call_resolution_diagnostics(
     let mut evidence = Vec::new();
     let mut runtime_dependent = false;
     for call in &lowering.hir_index.calls {
+        let diagnostic_start = diagnostics.len();
         let name = call
             .name
             .display_name()
@@ -445,12 +464,13 @@ fn call_resolution_diagnostics(
                 )
                 .with_category("call-resolution"),
             );
+            attach_diagnostic_source(&mut diagnostics[diagnostic_start..], call.source);
             continue;
         }
         let causal_effect = environment_effects
             .iter()
             .rev()
-            .find(|effect| effect.span.start < call.span.start);
+            .find(|effect| effect.source == call.source && effect.span.start < call.span.start);
         if let Some(effect) = causal_effect {
             runtime_dependent = true;
             evidence.push(ResolutionEvidence {
@@ -517,8 +537,10 @@ fn call_resolution_diagnostics(
                 .with_category("call-resolution"),
             );
         }
+        attach_diagnostic_source(&mut diagnostics[diagnostic_start..], call.source);
     }
     for handle in &lowering.hir_index.function_handles {
+        let diagnostic_start = diagnostics.len();
         let FunctionHandleTarget::DynamicName(_) = &handle.target else {
             continue;
         };
@@ -529,7 +551,7 @@ fn call_resolution_diagnostics(
         if let Some(effect) = environment_effects
             .iter()
             .rev()
-            .find(|effect| effect.span.start < handle.span.start)
+            .find(|effect| effect.source == handle.source && effect.span.start < handle.span.start)
         {
             runtime_dependent = true;
             evidence.push(ResolutionEvidence {
@@ -582,11 +604,23 @@ fn call_resolution_diagnostics(
                 .with_category("call-resolution"),
             );
         }
+        attach_diagnostic_source(&mut diagnostics[diagnostic_start..], handle.source);
     }
     ResolutionDiagnostics {
         diagnostics,
         evidence,
         runtime_dependent,
+    }
+}
+
+fn attach_diagnostic_source(
+    diagnostics: &mut [HirDiagnostic],
+    source: Option<runmat_types::ProgramSourceId>,
+) {
+    if let Some(source) = source {
+        for diagnostic in diagnostics {
+            diagnostic.set_source(source);
+        }
     }
 }
 
@@ -608,6 +642,117 @@ mod tests {
 
     fn analyze(source: &str) -> FrontendAnalysis {
         analyze_source(source, CompatMode::default(), &LoweringContext::empty())
+    }
+
+    #[test]
+    fn function_only_and_empty_compiler_products_keep_explicit_primary_source() {
+        let primary = runmat_types::ProgramSourceId(7);
+        for source in ["function y = helper(); y = 1; end", "% empty source"] {
+            let ast = runmat_parser::parse(source).unwrap();
+            let sources = vec![primary; ast.body.len()];
+            let analysis = analyze_program_with_catalog(
+                &ast,
+                &LoweringContext::empty()
+                    .with_primary_source(primary)
+                    .with_top_level_sources(&sources),
+                None,
+            );
+            assert!(analysis.compile_failure.is_none(), "{source}");
+            let lowering = analysis.lowering.as_ref().expect("HIR");
+            assert!(lowering.assembly.entrypoints.is_empty());
+            assert_eq!(lowering.assembly.primary_source, Some(primary));
+            let bytecode = analysis.bytecode.expect("function-only bytecode");
+            assert_eq!(
+                bytecode.source_id,
+                Some(runmat_vm::BytecodeSourceRef::Program(primary))
+            );
+            for body in bytecode.function_registry.functions.values() {
+                assert_eq!(
+                    body.source_id,
+                    Some(runmat_vm::BytecodeSourceRef::Program(primary))
+                );
+            }
+        }
+        let source_less = analyze("function y = helper(); y = 1; end")
+            .bytecode
+            .expect("generic source-less product remains valid");
+        assert_eq!(source_less.source_id, None);
+    }
+
+    #[test]
+    fn constructorless_class_product_retains_primary_declaration_and_methods() {
+        let primary = runmat_types::ProgramSourceId(7);
+        for (source, expected_methods) in [
+            (
+                "classdef ColdBase < handle\n properties\n seed = 13\n end\nend",
+                0,
+            ),
+            (
+                "classdef ColdBase < handle\n properties\n seed = 13\n end\n methods\n function value = marker(obj)\n value = obj.seed;\n end\n function value = secondMarker(obj)\n value = obj.seed + 1;\n end\n end\nend",
+                2,
+            ),
+        ] {
+            let ast = runmat_parser::parse(source).expect("class source");
+            let sources = vec![primary; ast.body.len()];
+            let analysis = analyze_program_with_catalog(
+                &ast,
+                &LoweringContext::empty()
+                    .with_primary_source(primary)
+                    .with_top_level_sources(&sources),
+                None,
+            );
+            assert!(analysis.compile_failure.is_none(), "{source}");
+            let lowering = analysis.lowering.as_ref().expect("HIR");
+            assert!(lowering.assembly.entrypoints.is_empty());
+            let bytecode = analysis.bytecode.expect("declaration-only bytecode");
+            assert_eq!(
+                bytecode.source_id,
+                Some(runmat_vm::BytecodeSourceRef::Program(primary))
+            );
+            let declarations = bytecode.instructions.iter().filter_map(|instruction| {
+                if let runmat_vm::Instr::RegisterClass { name, methods, .. } = instruction {
+                    Some((name.display_name(), methods.len()))
+                } else {
+                    None
+                }
+            });
+            assert_eq!(
+                declarations.collect::<Vec<_>>(),
+                vec![("ColdBase", expected_methods)]
+            );
+        }
+    }
+
+    #[test]
+    fn script_entry_and_companion_body_keep_distinct_admitted_sources() {
+        let ast = runmat_parser::parse("value = companion(); function y = companion(); y = 2; end")
+            .unwrap();
+        let primary = runmat_types::ProgramSourceId(7);
+        let companion = runmat_types::ProgramSourceId(9);
+        let sources = [primary, companion];
+        let analysis = analyze_program_with_catalog(
+            &ast,
+            &LoweringContext::empty()
+                .with_primary_source(primary)
+                .with_top_level_sources(&sources),
+            None,
+        );
+        assert!(analysis.compile_failure.is_none());
+        let bytecode = analysis.bytecode.expect("compiled script and companion");
+        assert_eq!(
+            bytecode.source_id,
+            Some(runmat_vm::BytecodeSourceRef::Program(primary))
+        );
+        let companion_body = bytecode
+            .function_registry
+            .functions
+            .values()
+            .find(|body| body.display_name == "companion")
+            .expect("compiled companion");
+        assert_eq!(
+            companion_body.source_id,
+            Some(runmat_vm::BytecodeSourceRef::Program(companion))
+        );
     }
 
     #[test]
@@ -654,10 +799,10 @@ mod tests {
         let graph_digest = runmat_package::ContentDigest::sha256("graph");
         let source_revision = runmat_package::ContentDigest::sha256("sources");
         let definition = runmat_package::ProjectSymbolDefinition {
-            name: "helper".to_string(),
-            qualified_name: "helper".to_string(),
+            name: "helper".into(),
+            qualified_name: "helper".into(),
             source_path: PathBuf::from("src/helper.m"),
-            package_name: "demo".to_string(),
+            package_name: "demo".into(),
             dependency_alias: None,
             package_instance: Some(package_instance),
             source_id: Some(source_id),
@@ -681,7 +826,7 @@ mod tests {
         assert_eq!(
             analysis.resolution,
             vec![ResolutionEvidence {
-                name: "helper".to_string(),
+                name: "helper".into(),
                 span: analysis.resolution[0].span,
                 state: ResolutionState::Resolved,
                 reason: "matched a statically indexed project source".to_string(),

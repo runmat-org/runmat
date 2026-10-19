@@ -39,6 +39,8 @@ pub enum OperationTypePattern {
     Style,
     PropertyName,
     PropertyValue,
+    /// A function handle or other callable value.
+    Callable,
     Analysis(AnalysisValueType),
     List(Box<OperationTypePattern>),
 }

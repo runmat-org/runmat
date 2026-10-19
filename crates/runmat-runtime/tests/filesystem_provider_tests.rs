@@ -4,9 +4,9 @@ use pollster::block_on;
 use runmat_filesystem::{self as vfs, SandboxFsProvider};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{RemoteFsConfig, RemoteFsProvider};
-use runmat_runtime::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
 use runmat_runtime::call_builtin;
 use runmat_runtime::call_builtin_async_with_outputs;
+use runmat_runtime::execution::RootedValue;
 use runmat_value::{CellArray, Tensor, Value};
 use std::convert::TryFrom;
 use std::io::{Cursor, Write};
@@ -16,19 +16,19 @@ use std::time::Duration;
 use tempfile::tempdir;
 use zip::write::SimpleFileOptions;
 
-fn assert_status_one(value: Value, label: &str) {
+fn assert_status_one(value: RootedValue, label: &str) {
     assert_eq!(value, Value::Num(1.0), "{label} should return success");
 }
 
-fn assert_path_value(value: Value, expected: &str, label: &str) {
-    let actual = String::try_from(&value).unwrap_or_else(|_| {
+fn assert_path_value(value: RootedValue, expected: &str, label: &str) {
+    let actual = String::try_from(value.value()).unwrap_or_else(|_| {
         panic!("{label} should return a path string, got {value:?}");
     });
     assert_eq!(actual.replace('\\', "/"), expected, "{label}");
 }
 
-fn assert_string_contains(value: Value, expected: &str, label: &str) {
-    let actual = String::try_from(&value).unwrap_or_else(|_| {
+fn assert_string_contains(value: RootedValue, expected: &str, label: &str) {
+    let actual = String::try_from(value.value()).unwrap_or_else(|_| {
         panic!("{label} should return a string, got {value:?}");
     });
     assert!(
@@ -264,15 +264,16 @@ fn exercise_recent_import_export_builtins_through_provider() {
         1,
     ))
     .expect("fopen succeeds");
-    let Value::OutputList(open_values) = fid else {
+    let Value::OutputList(open_values) = fid.value() else {
         panic!("expected fopen output list");
     };
-    let Value::Num(fid) = open_values[0] else {
+    let Value::Num(fid) = &open_values[0] else {
         panic!("expected numeric fid");
     };
+    let fid = *fid;
     let scanned = call_builtin("textscan", &[Value::Num(fid), Value::from("%f %s")])
         .expect("textscan succeeds");
-    let Value::Cell(scanned_cells) = scanned else {
+    let Value::Cell(scanned_cells) = scanned.value() else {
         panic!("expected textscan cell output");
     };
     assert_eq!(
@@ -319,7 +320,6 @@ fn exercise_recent_import_export_builtins_through_provider() {
 
 #[test]
 fn sandbox_provider_supports_repl_and_tabular_builtins() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
     let _provider_lock = vfs::provider_override_lock();
     let temp = tempdir().expect("temp dir");
     let sandbox = Arc::new(
@@ -353,7 +353,6 @@ fn sandbox_provider_supports_repl_and_tabular_builtins() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn remote_provider_supports_repl_and_tabular_builtins() {
-    let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
     let _provider_lock = vfs::provider_override_lock();
     let server = remote_test_support::RemoteTestServer::spawn();
     let remote = Arc::new(

@@ -15,6 +15,7 @@ pub enum HostCapability {
     NativeLibrary,
     Mex,
     Jvm,
+    Python,
     Subprocess,
 }
 
@@ -29,6 +30,7 @@ impl HostCapability {
             Self::NativeLibrary => "native-library",
             Self::Mex => "mex",
             Self::Jvm => "jvm",
+            Self::Python => "python",
             Self::Subprocess => "subprocess",
         }
     }
@@ -53,6 +55,7 @@ impl FromStr for HostCapability {
             "native-library" => Ok(Self::NativeLibrary),
             "mex" => Ok(Self::Mex),
             "jvm" => Ok(Self::Jvm),
+            "python" => Ok(Self::Python),
             "subprocess" => Ok(Self::Subprocess),
             _ => Err(ManifestError::InvalidCapability(value.to_string())),
         }

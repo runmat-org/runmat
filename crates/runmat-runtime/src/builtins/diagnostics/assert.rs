@@ -1,318 +1,24 @@
 //! MATLAB-compatible `assert` builtin that mirrors MATLAB diagnostic semantics.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::diagnostic_identifier::{
+    is_qualified as is_message_identifier,
+    is_unqualified_field as looks_like_unqualified_identifier,
 };
+use runmat_builtins::{
+    BuiltinErrorDescriptor, ASSERT_COMPLEX_CONDITION_EXTENSION, ASSERT_ERROR_ASSERTION_FAILED,
+    ASSERT_ERROR_INVALID_CONDITION, ASSERT_ERROR_INVALID_INPUT, ASSERT_ERROR_NOT_ENOUGH_INPUTS,
+    ASSERT_ERROR_TOO_MANY_OUTPUTS, ASSERT_UNQUALIFIED_IDENTIFIER_EXTENSION,
+};
+#[cfg(test)]
+use runmat_builtins::{ASSERT_DESCRIPTOR, ASSERT_EXTENSIONS, ASSERT_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::format::{flatten_arguments, format_variadic};
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::diagnostics::type_resolvers::assert_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "assert";
-
-const ASSERT_OUTPUTS: [BuiltinParamDescriptor; 0] = [];
-
-pub(crate) const ASSERT_COMPLEX_CONDITION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "assert-complex-condition",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "assert with a complex condition is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:AssertComplexConditionExtension"),
-    };
-
-pub(crate) const ASSERT_UNQUALIFIED_IDENTIFIER_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "assert-unqualified-identifier",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "assert with an unqualified custom error identifier is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:AssertUnqualifiedIdentifierExtension"),
-    };
-
-pub const ASSERT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    ASSERT_COMPLEX_CONDITION_EXTENSION,
-    ASSERT_UNQUALIFIED_IDENTIFIER_EXTENSION,
-];
-
-const ASSERT_INTEGER_CONDITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "cond",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Every real integer scalar or array is convertible to logical; the condition passes only when it is nonempty and every element is nonzero.",
-    }];
-
-const ASSERT_COMPLEX_INTEGER_CONDITION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "cond",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode additionally accepts paired complex-integer storage and tests each element for a nonzero real or imaginary component.",
-    }];
-
-const ASSERT_INTEGER_FORMAT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Formatting replacement values accept numeric scalars and preserve exact integer values through integer and string conversion specifiers.",
-    }];
-
-pub const ASSERT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "assert(integer_cond, ...)",
-        inputs: &ASSERT_INTEGER_CONDITION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Truth testing reads exact authoritative integer storage. The public builtin has no output; resident conditions gather to the host because assert accepts gpuArray input but does not execute on the GPU.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "assert(complex_integer_cond, ...)",
-        inputs: &ASSERT_COMPLEX_INTEGER_CONDITION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Public logical conversion rejects complex numeric values. RunMat mode retains the pre-existing nonzero-component predicate without floating materialization.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "assert(cond, msg, integer_A...)",
-        inputs: &ASSERT_INTEGER_FORMAT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Each documented replacement A is a character vector, string scalar, or numeric scalar. Integer scalars remain exact during host formatting, including after resident gather.",
-    },
-];
-
-const ASSERT_INPUTS_CONDITION: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "condition",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical or logically convertible condition that must evaluate to true.",
-}];
-
-const ASSERT_INPUTS_MESSAGE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "condition",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical or logically convertible condition that must evaluate to true.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Assertion failed.\""),
-        description: "Failure message text.",
-    },
-];
-
-const ASSERT_INPUTS_MESSAGE_VARIADIC: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "condition",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical or logically convertible condition that must evaluate to true.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Assertion failed.\""),
-        description: "Failure message template text.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Formatting values for the message template.",
-    },
-];
-
-const ASSERT_INPUTS_IDENTIFIER_MESSAGE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "condition",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical or logically convertible condition that must evaluate to true.",
-    },
-    BuiltinParamDescriptor {
-        name: "message_id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"RunMat:assertion:failed\""),
-        description: "Message identifier.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Assertion failed.\""),
-        description: "Failure message text.",
-    },
-];
-
-const ASSERT_INPUTS_IDENTIFIER_MESSAGE_VARIADIC: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "condition",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical or logically convertible condition that must evaluate to true.",
-    },
-    BuiltinParamDescriptor {
-        name: "message_id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"RunMat:assertion:failed\""),
-        description: "Message identifier.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Assertion failed.\""),
-        description: "Failure message template text.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Formatting values for the message template.",
-    },
-];
-
-const ASSERT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "assert(condition)",
-        inputs: &ASSERT_INPUTS_CONDITION,
-        outputs: &ASSERT_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "assert(condition, message)",
-        inputs: &ASSERT_INPUTS_MESSAGE,
-        outputs: &ASSERT_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "assert(condition, message, A...)",
-        inputs: &ASSERT_INPUTS_MESSAGE_VARIADIC,
-        outputs: &ASSERT_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "assert(condition, message_id, message)",
-        inputs: &ASSERT_INPUTS_IDENTIFIER_MESSAGE,
-        outputs: &ASSERT_OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "assert(condition, message_id, message, A...)",
-        inputs: &ASSERT_INPUTS_IDENTIFIER_MESSAGE_VARIADIC,
-        outputs: &ASSERT_OUTPUTS,
-    },
-];
-
-const ASSERT_ERROR_ASSERTION_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.ASSERTION_FAILED",
-    identifier: Some("RunMat:assertion:failed"),
-    when: "Condition evaluates to false and no custom identifier/message override is provided.",
-    message: "Assertion failed.",
-};
-
-const ASSERT_ERROR_INVALID_CONDITION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.INVALID_CONDITION",
-    identifier: Some("RunMat:assertion:invalidCondition"),
-    when: "First argument is not logical or convertible to a logical condition.",
-    message: "assert: first input must be logical or convertible to logical.",
-};
-
-const ASSERT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.INVALID_INPUT",
-    identifier: Some("RunMat:assertion:invalidInput"),
-    when: "Message identifier/message text or formatting payload is invalid.",
-    message: "assert: invalid input argument",
-};
-
-const ASSERT_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.NOT_ENOUGH_INPUTS",
-    identifier: Some("RunMat:minrhs"),
-    when: "No condition argument is provided.",
-    message: "Not enough input arguments.",
-};
-
-const ASSERT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ASSERT.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:assertion:TooManyOutputs"),
-    when: "One or more public outputs are requested from assert.",
-    message: "assert: too many output arguments",
-};
-
-const ASSERT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    ASSERT_ERROR_ASSERTION_FAILED,
-    ASSERT_ERROR_INVALID_CONDITION,
-    ASSERT_ERROR_INVALID_INPUT,
-    ASSERT_ERROR_NOT_ENOUGH_INPUTS,
-    ASSERT_ERROR_TOO_MANY_OUTPUTS,
-];
-
-pub const ASSERT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ASSERT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ASSERT_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::assert")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "assert",
-    op_kind: GpuOpKind::Custom("control"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Control-flow builtin; GPU tensors are gathered to host memory before evaluation.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::diagnostics::assert")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "assert",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Control-flow builtin with no fusion support.",
-};
 
 fn assert_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     assert_error_with_message(error.message, error)
@@ -365,14 +71,7 @@ where
 
 #[runtime_builtin(
     name = "assert",
-    category = "diagnostics",
-    summary = "Throw an error when a condition is false, matching MATLAB assert semantics.",
-    keywords = "assert,diagnostics,validation,error",
-    accel = "metadata",
-    type_resolver(assert_type),
-    descriptor(crate::builtins::diagnostics::assert::ASSERT_DESCRIPTOR),
-    extensions(crate::builtins::diagnostics::assert::ASSERT_EXTENSIONS),
-    integer_capabilities(crate::builtins::diagnostics::assert::ASSERT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::diagnostics::assert"
 )]
 async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -526,8 +225,8 @@ fn evaluate_complex_tensor(tensor: &ComplexTensor) -> crate::BuiltinResult<Condi
             return Ok(ConditionOutcome::Fail);
         }
         for idx in 0..storage.len() {
-            let real = storage.real.value_at(idx);
-            let imag = storage.imag.value_at(idx);
+            let real = storage.real().value_at(idx);
+            let imag = storage.imag().value_at(idx);
             if real.is_none_or(|value| value.is_zero()) && imag.is_none_or(|value| value.is_zero())
             {
                 return Ok(ConditionOutcome::Fail);
@@ -705,28 +404,6 @@ fn normalize_identifier(raw: &str) -> String {
     }
 }
 
-fn is_message_identifier(text: &str) -> bool {
-    let trimmed = text.trim();
-    let fields: Vec<&str> = trimmed.split(':').collect();
-    if fields.len() < 2 {
-        return false;
-    }
-    fields.into_iter().all(is_identifier_field)
-}
-
-fn looks_like_unqualified_identifier(text: &str) -> bool {
-    let trimmed = text.trim();
-    !trimmed.contains(':') && is_identifier_field(trimmed)
-}
-
-fn is_identifier_field(field: &str) -> bool {
-    let mut chars = field.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
-}
-
 fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
@@ -757,7 +434,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{BuiltinIntegerInputAvailability, BuiltinIntegerOutputClassRule};
     use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
@@ -1178,7 +855,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = assert_builtin(vec![Value::GpuTensor(handle)]).expect("assert");
@@ -1223,7 +900,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let err =
@@ -1250,10 +927,12 @@ pub(crate) mod tests {
                     &Tensor::new_integer(storage, vec![2, 1]).expect("condition"),
                 )
                 .expect("upload");
+                let lease = handle.allocation_lease().downgrade();
                 let err = assert_builtin(vec![Value::GpuTensor(handle.clone())])
                     .expect_err("resident zero fails");
                 assert_eq!(err.identifier(), Some(assert_default_identifier()));
-                let _ = provider.free(&handle);
+                drop((err, handle));
+                assert!(lease.acquire().is_none());
             }
 
             let handle = gpu_helpers::upload_tensor(
@@ -1262,6 +941,7 @@ pub(crate) mod tests {
                     .expect("format value"),
             )
             .expect("upload");
+            let lease = handle.allocation_lease().downgrade();
             let err = assert_builtin(vec![
                 Value::Bool(false),
                 Value::String("%u".to_string()),
@@ -1269,7 +949,8 @@ pub(crate) mod tests {
             ])
             .expect_err("resident scalar formats");
             assert_eq!(err.message(), u64::MAX.to_string());
-            let _ = provider.free(&handle);
+            drop((err, handle));
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -1296,7 +977,7 @@ pub(crate) mod tests {
 
     #[test]
     fn assert_rejects_requested_public_output() {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let err = assert_builtin(vec![Value::Bool(true)]).expect_err("assert has no output");
         assert_eq!(err.identifier(), ASSERT_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
@@ -1319,7 +1000,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let err = unwrap_error(
@@ -1360,7 +1041,10 @@ pub(crate) mod tests {
             let err = assert_builtin(vec![Value::GpuTensor(handle.clone())])
                 .expect_err("resident zero fails");
             assert_eq!(err.identifier(), Some(assert_default_identifier()));
-            let _ = provider.free(&handle);
+            handle.allocation_lease().validate_live().unwrap();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().unwrap();
+            assert!(physical.acquire().is_none());
         }
 
         let handle = gpu_helpers::upload_tensor(
@@ -1376,15 +1060,10 @@ pub(crate) mod tests {
         ])
         .expect_err("resident scalar formats");
         assert_eq!(err.message(), u64::MAX.to_string());
-        let _ = provider.free(&handle);
-    }
-
-    #[test]
-    fn assert_has_no_public_output_type() {
-        assert_eq!(
-            assert_type(&[Type::Bool], &ResolveContext::new(Vec::new())),
-            Type::Unknown
-        );
+        handle.allocation_lease().validate_live().unwrap();
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().unwrap();
+        assert!(physical.acquire().is_none());
     }
 
     #[test]
@@ -1405,7 +1084,8 @@ pub(crate) mod tests {
                 ASSERT_UNQUALIFIED_IDENTIFIER_EXTENSION
             ]
         );
-        assert!(ASSERT_SIGNATURES
+        assert!(ASSERT_DESCRIPTOR
+            .signatures
             .iter()
             .all(|signature| signature.outputs.is_empty()));
     }

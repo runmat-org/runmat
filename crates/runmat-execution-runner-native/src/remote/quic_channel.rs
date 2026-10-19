@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use runmat_execution::resource::Capability;
 use runmat_execution::Digest;
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
@@ -42,6 +43,15 @@ pub struct QuicRemoteWorkerChannel {
     progress: Arc<
         Mutex<HashMap<runmat_execution::identity::AttemptId, VecDeque<crate::ProgramProgress>>>,
     >,
+    collectives: Arc<
+        Mutex<
+            HashMap<
+                runmat_execution::identity::AttemptId,
+                VecDeque<runmat_execution::CollectiveRequest>,
+            >,
+        >,
+    >,
+    verified_ready: Arc<Mutex<Option<std::collections::BTreeSet<Capability>>>>,
 }
 
 pub struct RemoteWorkerChannelConfig {
@@ -75,14 +85,30 @@ impl QuicRemoteWorkerChannel {
         let RemoteWorkerChannelConfig {
             run_identity,
             node_identity,
-            worker,
+            mut worker,
             driver_fence,
             session_id,
             run_key,
             limits,
         } = config;
+        // The allocation supplies capacity and host placement, not software
+        // support. Only the encrypted reply from the running binary may add it.
+        worker
+            .resources
+            .capabilities
+            .remove(&Capability::GraphSelectedValuesV11);
+        worker
+            .resources
+            .capabilities
+            .remove(&Capability::GraphCallableArgumentsV12);
+        let expected_worker = worker.id;
+        let expected_pool = worker.pool_id;
+        let expected_run = run_identity.clone();
         let pending = Arc::new(Mutex::new(ReplyRegistry::default()));
         let progress = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
+        let collectives = Arc::new(Mutex::new(HashMap::<_, VecDeque<_>>::new()));
+        let verified_ready = Arc::new(Mutex::new(None));
+        let ready_state = Arc::clone(&verified_ready);
         let channel = Arc::new(Self {
             node_identity,
             worker,
@@ -101,20 +127,41 @@ impl QuicRemoteWorkerChannel {
             ),
             pending: Arc::clone(&pending),
             progress: Arc::clone(&progress),
+            collectives: Arc::clone(&collectives),
+            verified_ready,
         });
         let mut receiver =
             EncryptedFrameSession::new(run_identity, session_id, "worker-to-driver", 1, run_key)
                 .map_err(protocol)?;
         tokio::spawn(async move {
+            let ready = receive::ReadyExpectation {
+                run_identity: expected_run,
+                session_id,
+                driver_fence,
+                worker_id: expected_worker,
+                pool_id: expected_pool,
+                capabilities: ready_state,
+            };
+            let registries = receive::Registries {
+                pending: &pending,
+                progress: &progress,
+                collectives: &collectives,
+            };
             if let Err(error) =
-                receive::run(route.as_ref(), &mut receiver, limits, &pending, &progress).await
+                receive::run(route.as_ref(), &mut receiver, limits, &ready, registries).await
             {
                 pending
                     .lock()
                     .expect("remote reply registry poisoned")
                     .fail(error);
             }
+            collectives
+                .lock()
+                .expect("remote collective registry poisoned")
+                .clear();
         });
+        // Register V10 immediately. The existing pool reconciliation loop
+        // observes authenticated ReadyV1 later without delaying V10 startup.
         Ok(channel)
     }
 
@@ -224,6 +271,13 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
         }
     }
 
+    fn verified_software_capabilities(&self) -> Option<std::collections::BTreeSet<Capability>> {
+        self.verified_ready
+            .lock()
+            .expect("worker readiness poisoned")
+            .clone()
+    }
+
     async fn install_bundle(
         &self,
         bundle_digest: Digest,
@@ -241,6 +295,91 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
         {
             RemoteWorkerOutcome::BundleStored { receipt } => Ok(receipt),
             _ => Err(protocol("remote worker returned the wrong bundle reply")),
+        }
+    }
+
+    async fn stage_graph_program(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+        encrypted_manifest: &[u8],
+        downloads: &[runmat_execution_transport_native::control::DriverArtifactDownload],
+        maximum_program_bytes: u64,
+    ) -> NativeExecutionResult<super::RemoteGraphProgramReceipt> {
+        let (program_digest, program_length, chunk_count) = match self
+            .request(
+                FrameKind::Control,
+                RemoteWorkerCommand::BeginGraphProgram {
+                    attempt_id,
+                    encrypted_manifest: encrypted_manifest.to_vec(),
+                    maximum_program_bytes,
+                },
+            )
+            .await?
+        {
+            RemoteWorkerOutcome::GraphProgramPrepared {
+                program_digest,
+                program_length,
+                chunk_count,
+            } => (program_digest, program_length, chunk_count),
+            RemoteWorkerOutcome::GraphProgramStaged { receipt } => return Ok(receipt),
+            _ => {
+                return Err(protocol(
+                    "remote worker returned the wrong Graph preparation reply",
+                ))
+            }
+        };
+        if downloads.len() != chunk_count as usize {
+            return Err(protocol(
+                "Graph Program signed chunk count differs from worker manifest",
+            ));
+        }
+        for (ordinal, download) in downloads.iter().enumerate() {
+            if download.kind != "program-chunk" {
+                return Err(protocol(
+                    "Graph Program transfer contains a nonchunk descriptor",
+                ));
+            }
+            let ordinal = u32::try_from(ordinal)
+                .map_err(|_| protocol("Graph Program has too many chunks"))?;
+            match self
+                .request(
+                    FrameKind::Control,
+                    RemoteWorkerCommand::StageGraphProgramChunk {
+                        attempt_id,
+                        program_digest,
+                        ordinal,
+                        download: download.clone(),
+                    },
+                )
+                .await?
+            {
+                RemoteWorkerOutcome::Acknowledged => {}
+                _ => {
+                    return Err(protocol(
+                        "remote worker returned the wrong Graph chunk reply",
+                    ))
+                }
+            }
+        }
+        match self
+            .request(
+                FrameKind::Control,
+                RemoteWorkerCommand::FinishGraphProgram {
+                    attempt_id,
+                    program_digest,
+                },
+            )
+            .await?
+        {
+            RemoteWorkerOutcome::GraphProgramStaged { receipt }
+                if receipt.program_digest == program_digest
+                    && receipt.program_length == program_length =>
+            {
+                Ok(receipt)
+            }
+            _ => Err(protocol(
+                "remote worker returned the wrong Graph Program receipt",
+            )),
         }
     }
 
@@ -270,6 +409,35 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
             .map(VecDeque::into_iter)
             .map(Iterator::collect)
             .unwrap_or_default()
+    }
+
+    fn drain_collective_requests(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+    ) -> Vec<runmat_execution::CollectiveRequest> {
+        self.collectives
+            .lock()
+            .expect("remote collective registry poisoned")
+            .remove(&attempt_id)
+            .map(VecDeque::into_iter)
+            .map(Iterator::collect)
+            .unwrap_or_default()
+    }
+
+    async fn complete_collective(
+        &self,
+        attempt_id: runmat_execution::identity::AttemptId,
+        request: &runmat_execution::CollectiveRequest,
+        result: crate::protocol::CollectiveProcessResult,
+    ) -> NativeExecutionResult<()> {
+        self.ack(RemoteWorkerCommand::CompleteCollective {
+            attempt_id,
+            context: request.context.clone(),
+            id: request.id,
+            sequence: request.sequence,
+            result,
+        })
+        .await
     }
 
     async fn activate_bundle(

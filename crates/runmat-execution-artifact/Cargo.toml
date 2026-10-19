@@ -14,6 +14,7 @@ hkdf = { workspace = true }
 minicbor = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-package = { workspace = true }
+runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -22,6 +23,7 @@ zeroize = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 hpke = { workspace = true, features = ["getrandom"] }
+runmat-process-host = { workspace = true }
 tempfile = "3.12"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -31,3 +33,4 @@ hpke = { workspace = true }
 [dev-dependencies]
 hex = "0.4"
 runmat-types = { workspace = true }
+tempfile = "3.12"

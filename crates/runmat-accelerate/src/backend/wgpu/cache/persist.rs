@@ -4,7 +4,10 @@ use crate::backend::wgpu::types::NumericPrecision;
 
 /// Bump this when bind group layouts, shader-binding schemas, or the accepted
 /// WGSL language version changes.
-pub const PIPELINE_CACHE_VERSION: u32 = 7;
+// Version 8 retires the four-binding softmax ABI. Its former serialized layout
+// tag is now reconstructed with three bindings, so version 7 cannot be warmed
+// using the current layout recipes even when its source hash is intact.
+pub const PIPELINE_CACHE_VERSION: u32 = 8;
 
 #[derive(Serialize, Deserialize)]
 pub struct PipelineMeta {

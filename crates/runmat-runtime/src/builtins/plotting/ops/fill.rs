@@ -174,9 +174,7 @@ pub fn fill_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             for plot in plots_slot.take().expect("fill plots consumed once") {
                 let plot_index = figure.add_patch_plot_on_axes(plot, axes);
@@ -190,8 +188,7 @@ pub fn fill_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return render_result.map(|_| Value::Num(f64::NAN));
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_ascii_lowercase();
-        if !lower.contains("plotting is unavailable") && !lower.contains("non-main thread") {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(err);
         }
     }
@@ -321,7 +318,7 @@ mod tests {
         let Value::Tensor(x_data) = x_data else {
             panic!("expected typed XData tensor");
         };
-        assert_eq!(x_data.shape, vec![1, 3]);
+        assert_eq!(x_data.shape(), [1, 3]);
         assert_eq!(
             x_data.integer_storage(),
             Some(&IntegerStorage::U64(vec![wide, 1, 0]))
@@ -388,7 +385,7 @@ mod tests {
                 else {
                     panic!("expected typed {property}");
                 };
-                assert_eq!(data.shape, vec![3, 1]);
+                assert_eq!(data.shape(), [3, 1]);
                 assert_eq!(data.integer_storage(), Some(&expected));
             }
         }
@@ -416,7 +413,7 @@ mod tests {
             else {
                 panic!("expected typed {property}");
             };
-            assert_eq!(data.shape, shape);
+            assert_eq!(data.shape(), shape);
             assert_eq!(data.integer_storage(), Some(&expected));
         }
     }
@@ -451,7 +448,7 @@ mod tests {
             else {
                 panic!("expected XData");
             };
-            assert_eq!(x_data.shape, vec![1, 3]);
+            assert_eq!(x_data.shape(), [1, 3]);
             assert_eq!(
                 x_data.integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide, 2, 3]))
@@ -461,7 +458,7 @@ mod tests {
             else {
                 panic!("expected YData");
             };
-            assert_eq!(y_data.shape, vec![3, 1]);
+            assert_eq!(y_data.shape(), [3, 1]);
             assert_eq!(y_data.integer_storage(), Some(&expected_y));
         }
     }

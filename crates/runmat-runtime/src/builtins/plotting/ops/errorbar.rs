@@ -23,7 +23,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
-use super::gpu_helpers::gpu_errorbar_bounds;
+use super::gpu_helpers::axis_bounds_protecting;
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -428,7 +428,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     integer_capabilities(crate::builtins::plotting::errorbar::ERRORBAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::errorbar"
 )]
-pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(errorbar_invalid("too many output arguments"));
     }
@@ -447,14 +447,7 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .map_err(map_errorbar_invalid)?;
     let mut n_in = Some(errorbar_numeric_input(y_neg).map_err(map_errorbar_invalid)?);
     let mut p_in = Some(errorbar_numeric_input(y_pos).map_err(map_errorbar_invalid)?);
-    let opts = PlotRenderOptions {
-        ..Default::default()
-    };
-    let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-    let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
-    let figure_handle = crate::builtins::plotting::current_figure_handle();
-    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let axes = target_axes.unwrap_or(axes);
+    let mut prepared = async move {
         let x_arg = x_in.take().expect("x consumed");
         let y_arg = y_in.take().expect("y consumed");
         let yn_arg = n_in.take().expect("yn consumed");
@@ -476,7 +469,7 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 yn_arg.gpu_handle(),
                 yp_arg.gpu_handle(),
             ) {
-                match build_errorbar_gpu_plot(
+                if let Some(plot) = build_errorbar_gpu_plot(
                     BUILTIN_NAME,
                     x_gpu,
                     y_gpu,
@@ -486,41 +479,59 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                     yp_gpu,
                     &parsed,
                     &label,
-                ) {
-                    Ok(plot) => {
-                        let plot_index = figure.add_errorbar_on_axes(plot, axes);
-                        plot_indices_slot.borrow_mut().push((axes, plot_index));
-                        return Ok(());
-                    }
-                    Err(err) => log::warn!("errorbar GPU path unavailable: {err}"),
+                )
+                .await?
+                {
+                    return Ok(vec![plot]);
                 }
             }
         }
         let x = x_arg
-            .into_tensor(BUILTIN_NAME)
+            .into_tensor_async(BUILTIN_NAME)
+            .await
             .map_err(map_errorbar_invalid)?;
         let y = y_arg
-            .into_tensor(BUILTIN_NAME)
+            .into_tensor_async(BUILTIN_NAME)
+            .await
             .map_err(map_errorbar_invalid)?;
-        let xn = xn_in
-            .take()
-            .map(|v| v.into_tensor(BUILTIN_NAME))
-            .transpose()
-            .map_err(map_errorbar_invalid)?;
-        let xp = xp_in
-            .take()
-            .map(|v| v.into_tensor(BUILTIN_NAME))
-            .transpose()
-            .map_err(map_errorbar_invalid)?;
+        let xn = match xn_in.take() {
+            Some(value) => Some(
+                value
+                    .into_tensor_async(BUILTIN_NAME)
+                    .await
+                    .map_err(map_errorbar_invalid)?,
+            ),
+            None => None,
+        };
+        let xp = match xp_in.take() {
+            Some(value) => Some(
+                value
+                    .into_tensor_async(BUILTIN_NAME)
+                    .await
+                    .map_err(map_errorbar_invalid)?,
+            ),
+            None => None,
+        };
         let yn = yn_arg
-            .into_tensor(BUILTIN_NAME)
+            .into_tensor_async(BUILTIN_NAME)
+            .await
             .map_err(map_errorbar_invalid)?;
         let yp = yp_arg
-            .into_tensor(BUILTIN_NAME)
+            .into_tensor_async(BUILTIN_NAME)
+            .await
             .map_err(map_errorbar_invalid)?;
         let plots = build_errorbar_host_plots(x, y, xn, xp, yn, yp, &parsed, &label)
             .map_err(map_errorbar_invalid)?;
-        for plot in plots {
+        Ok::<_, crate::RuntimeError>(plots)
+    }
+    .await?;
+    let opts = PlotRenderOptions::default();
+    let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+        let axes = target_axes.unwrap_or(axes);
+        for plot in prepared.drain(..) {
             let plot_index = figure.add_errorbar_on_axes(plot, axes);
             plot_indices_slot.borrow_mut().push((axes, plot_index));
         }
@@ -541,8 +552,7 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         })
         .collect();
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handles[0]);
         }
         return Err(map_errorbar_invalid(err));
@@ -586,7 +596,7 @@ fn errorbar_gpu_inputs_eligible(
                 && !runmat_accelerate_api::handle_is_logical(handle)
                 && runmat_accelerate_api::handle_storage(handle)
                     == runmat_accelerate_api::GpuTensorStorage::Real
-                && handle.shape.iter().filter(|extent| **extent > 1).count() <= 1
+                && handle.shape().iter().filter(|extent| **extent > 1).count() <= 1
         }
         None => false,
     };
@@ -625,7 +635,7 @@ fn build_errorbar_host_plots(
         Some(&y_pos),
     ];
     for tensor in tensors.into_iter().flatten() {
-        if tensor.shape.len() > 2 && tensor.shape.iter().skip(2).any(|extent| *extent != 1) {
+        if tensor.shape().len() > 2 && tensor.shape().iter().skip(2).any(|extent| *extent != 1) {
             return Err(errorbar_invalid(
                 "inputs must be vectors or two-dimensional matrices",
             ));
@@ -771,10 +781,13 @@ fn build_errorbar_series(
     if let Some(marker) = parsed.marker.clone() {
         plot.set_marker(Some(marker));
     }
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
-fn build_errorbar_gpu_plot(
+async fn build_errorbar_gpu_plot(
     name: &'static str,
     x: &runmat_accelerate_api::GpuTensorHandle,
     y: &runmat_accelerate_api::GpuTensorHandle,
@@ -784,26 +797,37 @@ fn build_errorbar_gpu_plot(
     y_pos: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedErrorBarStyle,
     label: &str,
-) -> crate::BuiltinResult<ErrorBar> {
+) -> crate::BuiltinResult<Option<ErrorBar>> {
+    let mut gpu_exports = super::gpu_helpers::GpuBufferExports::default();
+    let precision = runmat_accelerate_api::handle_precision(x);
+    if [y, y_neg, y_pos]
+        .into_iter()
+        .chain(x_neg)
+        .chain(x_pos)
+        .any(|input| runmat_accelerate_api::handle_precision(input) != precision)
+    {
+        return Ok(None);
+    }
+    let (Some(x_ref), Some(y_ref), Some(yn_ref), Some(yp_ref)) = (
+        gpu_exports.export(x, name)?,
+        gpu_exports.export(y, name)?,
+        gpu_exports.export(y_neg, name)?,
+        gpu_exports.export(y_pos, name)?,
+    ) else {
+        return Ok(None);
+    };
+    let xn_ref = x_neg
+        .map(|input| gpu_exports.export(input, name))
+        .transpose()?
+        .flatten();
+    let xp_ref = x_pos
+        .map(|input| gpu_exports.export(input, name))
+        .transpose()?
+        .flatten();
+    if (x_neg.is_some() && xn_ref.is_none()) || (x_pos.is_some() && xp_ref.is_none()) {
+        return Ok(None);
+    }
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
-    let xn_ref = x_neg.and_then(runmat_accelerate_api::export_wgpu_buffer);
-    let xp_ref = x_pos.and_then(runmat_accelerate_api::export_wgpu_buffer);
-    let yn_ref = runmat_accelerate_api::export_wgpu_buffer(y_neg).ok_or_else(|| {
-        plotting_error(
-            name,
-            format!("{name}: unable to export GPU negative error data"),
-        )
-    })?;
-    let yp_ref = runmat_accelerate_api::export_wgpu_buffer(y_pos).ok_or_else(|| {
-        plotting_error(
-            name,
-            format!("{name}: unable to export GPU positive error data"),
-        )
-    })?;
     if x_ref.len != y_ref.len
         || x_ref.len != yn_ref.len
         || x_ref.len != yp_ref.len
@@ -829,30 +853,34 @@ fn build_errorbar_gpu_plot(
             .unwrap_or(x_ref.precision)
             != x_ref.precision
     {
-        return Err(plotting_error(
-            name,
-            format!("{name}: gpuArray precision must match across all errorbar inputs"),
-        ));
+        return Ok(None);
     }
     let scalar =
         ScalarType::from_is_f64(x_ref.precision == runmat_accelerate_api::ProviderPrecision::F64);
-    let bounds = if let (Some(xn), Some(xp)) = (x_neg, x_pos) {
-        let mut b = gpu_errorbar_bounds(x, y, y_neg, y_pos, name)?;
-        let (min_xn, max_xn) = super::gpu_helpers::axis_bounds(xn, name)?;
-        let (min_xp, max_xp) = super::gpu_helpers::axis_bounds(xp, name)?;
-        b.min.x -= max_xn.max(min_xn.abs());
-        b.max.x += max_xp.max(min_xp.abs());
-        b
-    } else {
-        gpu_errorbar_bounds(x, y, y_neg, y_pos, name)?
-    };
+    let mut protected = vec![x, y, y_neg, y_pos];
+    protected.extend(x_neg);
+    protected.extend(x_pos);
+    let (min_x, max_x) = axis_bounds_protecting(x, &protected, name).await?;
+    let (min_y, max_y) = axis_bounds_protecting(y, &protected, name).await?;
+    let (_, max_neg) = axis_bounds_protecting(y_neg, &protected, name).await?;
+    let (_, max_pos) = axis_bounds_protecting(y_pos, &protected, name).await?;
+    let mut bounds = runmat_plot::core::BoundingBox::new(
+        glam::Vec3::new(min_x, min_y - max_neg, 0.0),
+        glam::Vec3::new(max_x, max_y + max_pos, 0.0),
+    );
+    if let (Some(xn), Some(xp)) = (x_neg, x_pos) {
+        let (min_xn, max_xn) = axis_bounds_protecting(xn, &protected, name).await?;
+        let (min_xp, max_xp) = axis_bounds_protecting(xp, &protected, name).await?;
+        bounds.min.x -= max_xn.max(min_xn.abs());
+        bounds.max.x += max_xp.max(min_xp.abs());
+    }
     let inputs = ErrorBarGpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
-        x_neg_buffer: xn_ref.as_ref().map(|r| r.buffer.clone()),
-        x_pos_buffer: xp_ref.as_ref().map(|r| r.buffer.clone()),
-        y_neg_buffer: yn_ref.buffer.clone(),
-        y_pos_buffer: yp_ref.buffer.clone(),
+        x_buffer: x_ref.clone().into(),
+        y_buffer: y_ref.clone().into(),
+        x_neg_buffer: xn_ref.as_ref().map(|r| r.clone().into()),
+        x_pos_buffer: xp_ref.as_ref().map(|r| r.clone().into()),
+        y_neg_buffer: yn_ref.clone().into(),
+        y_pos_buffer: yp_ref.clone().into(),
         len: x_ref.len as u32,
         scalar,
     };
@@ -871,43 +899,52 @@ fn build_errorbar_gpu_plot(
     )
     .with_label(label);
     if let Some(marker) = parsed.marker.clone() {
-        let marker_gpu = line::pack_marker_vertices_from_xy(
-            &context.device,
-            &context.queue,
-            &MarkerGpuInputs {
-                x_buffer: x_ref.buffer.clone(),
-                y_buffer: y_ref.buffer.clone(),
-                len: x_ref.len as u32,
-                scalar,
-            },
-            &MarkerGpuParams {
-                color: marker.face_color,
-                half_width_px: 0.0,
-                viewport_width_px: 1.0,
-                viewport_height_px: 1.0,
-                x_min: 0.0,
-                x_span: 1.0,
-                y_min: 0.0,
-                y_span: 1.0,
-                x_log: false,
-                y_log: false,
-                line_style: runmat_plot::plots::LineStyle::Solid,
-                marker_size: marker.size,
-            },
-        )
-        .map_err(|e| {
-            plotting_error(
-                name,
-                format!("{name}: failed to build marker vertices: {e}"),
-            )
-        })?;
+        let marker_gpu = context
+            .access
+            .with_shared(|emission| {
+                line::pack_marker_vertices_from_xy(
+                    emission,
+                    &MarkerGpuInputs {
+                        x_buffer: x_ref.clone().into(),
+                        y_buffer: y_ref.clone().into(),
+                        len: x_ref.len as u32,
+                        scalar,
+                    },
+                    &MarkerGpuParams {
+                        color: marker.face_color,
+                        half_width_px: 0.0,
+                        viewport_width_px: 1.0,
+                        viewport_height_px: 1.0,
+                        x_min: 0.0,
+                        x_span: 1.0,
+                        y_min: 0.0,
+                        y_span: 1.0,
+                        x_log: false,
+                        y_log: false,
+                        line_style: runmat_plot::plots::LineStyle::Solid,
+                        marker_size: marker.size,
+                    },
+                )
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+            .map_err(|e| {
+                plotting_error(
+                    name,
+                    format!("{name}: failed to build marker vertices: {e}"),
+                )
+            })?;
         plot.set_marker(Some(marker));
         plot.set_marker_gpu_vertices(Some(marker_gpu));
     }
-    Ok(plot)
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
+    Ok(Some(plot))
 }
 
 struct ParsedErrorBarStyle {
+    visible: Option<bool>,
     color: glam::Vec4,
     line_width: f32,
     line_style: runmat_plot::plots::LineStyle,
@@ -956,6 +993,7 @@ fn parse_errorbar_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedError
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
     let marker = marker_metadata_from_appearance(&parsed.appearance);
     Ok(ParsedErrorBarStyle {
+        visible: parsed.appearance.visible,
         color: parsed.appearance.color,
         line_width: parsed.appearance.line_width,
         line_style: parsed.appearance.line_style,
@@ -1103,12 +1141,12 @@ fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
             }
         }
         Value::GpuTensor(handle) => {
-            if handle.shape.first().copied().unwrap_or(1) > 1
-                && handle.shape.get(1).copied().unwrap_or(1) > 1
+            if handle.shape().first().copied().unwrap_or(1) > 1
+                && handle.shape().get(1).copied().unwrap_or(1) > 1
             {
-                handle.shape[0]
+                handle.shape()[0]
             } else {
-                handle.shape.iter().product()
+                handle.shape().iter().product()
             }
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => 1,
@@ -1133,9 +1171,13 @@ fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
 
 #[cfg(test)]
 mod tests {
+    fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        futures::executor::block_on(super::errorbar_builtin(args))
+    }
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
+    use crate::builtins::plotting::state;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
@@ -1158,7 +1200,7 @@ mod tests {
             panic!("expected tensor axis");
         };
         assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
-        assert_eq!(x.shape, vec![3]);
+        assert_eq!(x.shape(), &[3]);
     }
 
     #[test]
@@ -1521,40 +1563,56 @@ mod tests {
         assert!(error.marker.is_none());
     }
 
-    #[test]
-    fn errorbar_rejects_complex_and_excess_outputs_before_mutation() {
-        let _guard = lock_plot_registry();
-        ensure_plot_test_env();
-        reset_hold_state_for_run();
-        let _ = clear_figure(None);
+    fn assert_invalid_errorbar_calls_preserve_state(assert_unchanged: impl Fn()) {
         let error = errorbar_builtin(vec![Value::Complex(1.0, 1.0), Value::Num(0.2)])
             .expect_err("complex data");
         assert_eq!(
             error.identifier(),
             ERRORBAR_ERROR_INVALID_ARGUMENT.identifier
         );
-        assert_eq!(
-            clone_figure(current_figure_handle())
-                .unwrap()
-                .plots()
-                .count(),
-            0
-        );
+        assert_unchanged();
 
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error =
             errorbar_builtin(vec![Value::Num(1.0), Value::Num(0.2)]).expect_err("excess outputs");
         assert_eq!(
             error.identifier(),
             ERRORBAR_ERROR_INVALID_ARGUMENT.identifier
         );
-        assert_eq!(
-            clone_figure(current_figure_handle())
-                .unwrap()
-                .plots()
-                .count(),
-            0
-        );
+        assert_unchanged();
+    }
+
+    #[test]
+    fn errorbar_rejects_complex_and_excess_outputs_without_creating_a_figure() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        state::reset_plot_state();
+        assert!(state::figure_handles().is_empty());
+        assert!(state::current_figure_handle_if_exists().is_none());
+        assert_invalid_errorbar_calls_preserve_state(|| {
+            assert!(state::figure_handles().is_empty());
+            assert!(state::current_figure_handle_if_exists().is_none());
+        });
+    }
+
+    #[test]
+    fn errorbar_rejects_complex_and_excess_outputs_without_mutating_an_existing_figure() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        state::reset_plot_state();
+        errorbar_builtin(vec![Value::Num(1.0), Value::Num(0.2)])
+            .expect("a valid errorbar creates the sentinel plot");
+        let handle = current_figure_handle();
+        let handles = state::figure_handles();
+        let revision = state::current_figure_revision(handle);
+        assert_eq!(clone_figure(handle).unwrap().plots().count(), 1);
+        assert!(revision.is_some());
+        assert_invalid_errorbar_calls_preserve_state(|| {
+            assert_eq!(state::figure_handles(), handles);
+            assert_eq!(state::current_figure_handle_if_exists(), Some(handle));
+            assert_eq!(state::current_figure_revision(handle), revision);
+            assert_eq!(clone_figure(handle).unwrap().plots().count(), 1);
+        });
     }
 
     #[test]
@@ -1606,22 +1664,23 @@ mod tests {
 
     #[test]
     fn errorbar_resident_integer_never_enters_floating_gpu_geometry() {
-        let make = |buffer_id| {
-            NumericInput::Gpu(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 2],
-                device_id: 0,
-                buffer_id,
-                descriptor: Default::default(),
-            })
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let make = |element| {
+            NumericInput::Gpu(
+                owner
+                    .allocate_zeroed(
+                        vec![1, 2],
+                        element,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .unwrap()
+                    .handle,
+            )
         };
-        let x = make(9_401_001);
-        let mut y = make(9_401_002);
-        let yn = make(9_401_003);
-        let yp = make(9_401_004);
-        let NumericInput::Gpu(handle) = &mut y else {
-            unreachable!()
-        };
-        handle.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U64);
+        let x = make(runmat_accelerate_api::NumericElementType::F64);
+        let y = make(runmat_accelerate_api::NumericElementType::U64);
+        let yn = make(runmat_accelerate_api::NumericElementType::F64);
+        let yp = make(runmat_accelerate_api::NumericElementType::F64);
         assert!(!errorbar_gpu_inputs_eligible(&x, &y, None, None, &yn, &yp));
     }
 }

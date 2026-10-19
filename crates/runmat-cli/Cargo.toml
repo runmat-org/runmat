@@ -52,6 +52,7 @@ openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
 runmat-core = { version = "=0.6.2", path = "../runmat-core" }
+runmat-mex = { workspace = true }
 runmat-aot = { workspace = true }
 runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-execution = { workspace = true }
@@ -65,10 +66,12 @@ runmat-analysis-fea = { workspace = true }
 runmat-analysis-language = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-meshing-execution = { workspace = true }
+runmat-native-ffi = { workspace = true }
+runmat-java = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-parser = { version = "=0.6.2", path = "../runmat-parser" }
 runmat-hir = { version = "=0.6.2", path = "../runmat-hir" }
-runmat-mir = { version = "=0.6.2", path = "../runmat-mir" }
+runmat-mir = { version = "=0.6.2", path = "../runmat-mir", features = ["compiler"] }
 runmat-vm = { version = "=0.6.2", path = "../runmat-vm" }
 runmat-runtime = { version = "=0.6.2", path = "../runmat-runtime" }
 runmat-gc = { version = "=0.6.2", path = "../runmat-gc" }
@@ -81,6 +84,7 @@ runmat-package = { workspace = true }
 runmat-package-cache = { workspace = true }
 runmat-package-cache-native = { workspace = true }
 runmat-time = { version = "=0.6.2", path = "../runmat-time" }
+runmat-types = { workspace = true }
 runmat-filesystem = { version = "=0.6.2", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.6.2", path = "../runmat-telemetry" }
 runmat-logging = { workspace = true, features = ["otlp"] }
@@ -91,14 +95,15 @@ runmat-test = { workspace = true }
 runmat-test-runner = { workspace = true }
 runmat-test-runner-execution = { workspace = true }
 runmat-test-runner-native = { workspace = true }
-runmat-types = { workspace = true }
+runmat-python = { workspace = true }
 sha2 = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)
-default = ["gui", "blas-lapack", "wgpu", "jit", "occt-native"]
+default = ["gui", "blas-lapack", "wgpu", "cuda", "jit", "occt-native"]
 wgpu = ["runmat-accelerate/wgpu", "runmat-runtime/wgpu"]
-gui = ["runmat-plot/gui"]
+cuda = ["runmat-accelerate/cuda"]
+gui = ["runmat-plot/gui", "runmat-runtime/gui", "runmat-core/gui"]
 blas-lapack = ["runmat-runtime/blas-lapack"]
 blas-only = ["runmat-runtime/blas-only"]
 jit = ["runmat-core/jit"]
@@ -111,8 +116,12 @@ occt-native = [
 
 [dev-dependencies]
 runmat-geometry-ops = { workspace = true }
+libc = "0.2"
 tempfile = "3.12" 
 git2 = { version = "0.20", default-features = false }
 serde_json = { workspace = true }
 openapiv3 = "2.0"
 serde_yaml = "0.9"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_IO"] }

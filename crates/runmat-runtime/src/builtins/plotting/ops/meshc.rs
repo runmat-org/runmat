@@ -1,6 +1,5 @@
 //! MATLAB-compatible `meshc` builtin (mesh with contour).
 
-use log::warn;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -293,68 +292,45 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let level_spec = ContourLevelSpec::Count(default_level_count());
     let contour_map = style.colormap.clone();
     let (mut surface, contour) = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
-        match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
-            Ok((min_z, max_z)) => match build_surface_gpu_plot_with_bounds_async(
-                BUILTIN_NAME,
-                &x_axis,
-                &y_axis,
-                &z_gpu,
-                min_z,
-                max_z,
-                style.colormap.clone(),
-                style.alpha,
-                style.flatten_z,
-            )
-            .await
-            {
-                Ok(surface_gpu) => {
-                    let mut surface = surface_gpu.with_wireframe(true);
-                    style.apply_to_plot(&mut surface);
-                    let base_z = surface.bounds().min.z;
-                    let contour = contour_for_surface_axes_input(
-                        BUILTIN_NAME,
-                        &x_axis,
-                        &y_axis,
-                        &z_input,
-                        Some(z_gpu),
-                        contour_map,
-                        base_z,
-                        &level_spec,
-                    )
-                    .await
-                    .map_err(map_meshc_invalid_argument)?;
-                    (surface, contour)
-                }
-                Err(err) => {
-                    warn!("meshc surface GPU path unavailable: {err}");
-                    let (x_host, y_host) =
-                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-                    let z_tensor = super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME)
-                        .await
-                        .map_err(map_meshc_invalid_argument)?;
-                    let grid = tensor_to_surface_grid_matlab_xy(z_tensor, rows, cols, BUILTIN_NAME)
-                        .map_err(map_meshc_invalid_argument)?;
-                    let mut surface =
-                        build_mesh_surface(x_host.clone(), y_host.clone(), grid.clone())
-                            .map_err(map_meshc_invalid_argument)?;
-                    style.apply_to_plot(&mut surface);
-                    let base_z = surface.bounds().min.z;
-                    let contour = build_contour_plot(
-                        BUILTIN_NAME,
-                        &x_host,
-                        &y_host,
-                        &grid,
-                        contour_map,
-                        base_z,
-                        &level_spec,
-                        &ContourLineColor::Auto,
-                    )
-                    .map_err(map_meshc_invalid_argument)?;
-                    (surface, contour)
-                }
-            },
-            Err(err) => {
-                warn!("meshc GPU bounds unavailable: {err}");
+        match super::op_common::surface_inputs::PreparedSurfaceGpu::prepare(
+            BUILTIN_NAME,
+            &x_axis,
+            &y_axis,
+            &z_gpu,
+        )
+        .await?
+        {
+            Some(mut prepared) => {
+                let (min_z, max_z) = prepared.z_bounds;
+                let mut surface = build_surface_gpu_plot_with_bounds_async(
+                    BUILTIN_NAME,
+                    &x_axis,
+                    &y_axis,
+                    &z_gpu,
+                    &mut prepared,
+                    min_z,
+                    max_z,
+                    style.colormap.clone(),
+                    style.alpha,
+                    style.flatten_z,
+                )
+                .await?
+                .with_wireframe(true);
+                style.apply_to_plot(&mut surface);
+                let base_z = surface.bounds().min.z;
+                let contour = contour_for_surface_axes_input(
+                    BUILTIN_NAME,
+                    &x_axis,
+                    &y_axis,
+                    &z_gpu,
+                    &mut prepared,
+                    contour_map,
+                    base_z,
+                    &level_spec,
+                )?;
+                (surface, contour)
+            }
+            None => {
                 let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
                     .await
                     .map_err(map_meshc_invalid_argument)?;
@@ -437,8 +413,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let handle =
         crate::builtins::plotting::state::register_surface_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_meshc_internal(err));
@@ -540,7 +515,7 @@ pub(crate) mod tests {
                 .expect("meshc ZData");
 
             assert!(
-                matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+                matches!(value, Value::Tensor(tensor) if tensor.shape() == [2, 2] && tensor.integer_storage() == Some(&expected))
             );
         });
     }

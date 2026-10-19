@@ -1,6 +1,7 @@
 pub(crate) mod attach;
 mod crypto;
 mod recovery;
+mod result;
 pub(crate) mod secret;
 pub(crate) mod submit;
 

@@ -32,8 +32,10 @@ use crate::builtins::strings::text_analytics::stopwords::{
 use crate::builtins::table::table_variables;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
-pub const TOKENIZED_DOCUMENT_CLASS: &str = "tokenizedDocument";
-pub const BAG_OF_WORDS_CLASS: &str = "bagOfWords";
+pub const TOKENIZED_DOCUMENT_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("tokenizedDocument");
+pub const BAG_OF_WORDS_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("bagOfWords");
 const MAX_DENSE_BAG_COUNT_CELLS: usize = 50_000_000;
 
 pub const REMOVE_STOP_WORDS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
@@ -583,10 +585,11 @@ fn ensure_tokenized_document_class_registered() {
             "HeadDetails",
             "DependencyDetails",
         ] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: TOKENIZED_DOCUMENT_CLASS.to_string(),
+            events: Default::default(),
+            name: TOKENIZED_DOCUMENT_CLASS.into(),
             parent: None,
             properties,
             methods: HashMap::new(),
@@ -598,10 +601,11 @@ fn ensure_bag_of_words_class_registered() {
     BAG_OF_WORDS_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Counts", "Vocabulary", "NumWords", "NumDocuments"] {
-            properties.insert(name.to_string(), property_def(name));
+            properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: BAG_OF_WORDS_CLASS.to_string(),
+            events: Default::default(),
+            name: BAG_OF_WORDS_CLASS.into(),
             parent: None,
             properties,
             methods: HashMap::new(),
@@ -611,7 +615,7 @@ fn ensure_bag_of_words_class_registered() {
 
 fn property_def(name: &str) -> crate::class_registry::RuntimeProperty {
     crate::class_registry::RuntimeProperty {
-        name: name.to_string(),
+        name: name.into(),
         is_static: false,
         is_constant: false,
         is_dependent: false,
@@ -2913,6 +2917,14 @@ fn bag_from_documents(documents: Vec<Vec<String>>) -> BuiltinResult<Value> {
     bag_object(vocabulary, counts, rows)
 }
 
+fn count_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinResult<Value> {
     let raw_words = words_from_word_vector_preserving_missing(words, "bagOfWords")?;
     let tensor = match counts {
@@ -2930,12 +2942,13 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
             ))
         }
     };
-    if tensor.cols != raw_words.len() {
+    let (rows, cols) = count_matrix_dimensions(&tensor);
+    if cols != raw_words.len() {
         return Err(text_analytics_error(
             "bagOfWords",
             format!(
                 "bagOfWords: counts columns ({}) must match uniqueWords length ({})",
-                tensor.cols,
+                cols,
                 raw_words.len()
             ),
         ));
@@ -2968,18 +2981,15 @@ fn bag_from_unique_words_and_counts(words: &Value, counts: &Value) -> BuiltinRes
         vocabulary.push(word.clone());
         keep_cols.push(col);
     }
-    let mut filtered_counts = Vec::with_capacity(checked_count_len(
-        tensor.rows,
-        keep_cols.len(),
-        "bagOfWords",
-    )?);
+    let mut filtered_counts =
+        Vec::with_capacity(checked_count_len(rows, keep_cols.len(), "bagOfWords")?);
     let values = tensor_utils::tensor_values_f64_cow(&tensor);
     for col in keep_cols {
-        for row in 0..tensor.rows {
-            filtered_counts.push(values[row + col * tensor.rows]);
+        for row in 0..rows {
+            filtered_counts.push(values[row + col * rows]);
         }
     }
-    bag_object(vocabulary, filtered_counts, tensor.rows)
+    bag_object(vocabulary, filtered_counts, rows)
 }
 
 fn bag_object(vocabulary: Vec<String>, counts: Vec<f64>, rows: usize) -> BuiltinResult<Value> {
@@ -3071,15 +3081,16 @@ fn filter_bag_columns(
         .filter_map(|(idx, word)| keep_word(word).then_some(idx))
         .collect::<Vec<_>>();
     let mut new_vocab = Vec::with_capacity(keep.len());
-    let mut new_counts = Vec::with_capacity(counts.rows * keep.len());
+    let (rows, _) = count_matrix_dimensions(&counts);
+    let mut new_counts = Vec::with_capacity(rows * keep.len());
     let count_values = tensor_utils::tensor_values_f64_cow(&counts);
     for col in keep {
         new_vocab.push(vocabulary[col].clone());
-        for row in 0..counts.rows {
-            new_counts.push(count_values[row + col * counts.rows]);
+        for row in 0..rows {
+            new_counts.push(count_values[row + col * rows]);
         }
     }
-    bag_object(new_vocab, new_counts, counts.rows)
+    bag_object(new_vocab, new_counts, rows)
 }
 
 fn documents_vocabulary(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<String>> {
@@ -3332,7 +3343,7 @@ mod tests {
         )
         .unwrap();
         let doc = object(run_tokenized(vec![Value::StringArray(input)]).expect("tokenized"));
-        assert_eq!(doc.class_name, TOKENIZED_DOCUMENT_CLASS);
+        assert!(doc.class_name.is(TOKENIZED_DOCUMENT_CLASS));
         assert_eq!(doc.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(
             string_array_property(&doc, "Vocabulary"),
@@ -3380,7 +3391,7 @@ mod tests {
             Vec::<String>::new()
         );
         let lengths = tensor_property(&doc, "DocumentLengths");
-        assert_eq!(lengths.shape, vec![1, 1]);
+        assert_eq!(lengths.shape(), [1, 1]);
         assert_eq!(lengths.materialize_f64(), vec![0.0]);
         let shape = tensor_property(&doc, "Shape");
         assert_eq!(shape.materialize_f64(), vec![1.0, 1.0]);
@@ -3389,7 +3400,7 @@ mod tests {
         assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(1.0)));
         assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(0.0)));
         let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape, vec![1, 0]);
+        assert_eq!(counts.shape(), [1, 0]);
         assert!(counts.materialize_f64().is_empty());
     }
 
@@ -3743,7 +3754,7 @@ mod tests {
         .unwrap();
         let docs = run_tokenized(vec![Value::StringArray(input)]).expect("tokenized");
         let bag = object(run_bag(vec![docs]).expect("bag"));
-        assert_eq!(bag.class_name, BAG_OF_WORDS_CLASS);
+        assert!(bag.class_name.is(BAG_OF_WORDS_CLASS));
         assert_eq!(
             string_array_property(&bag, "Vocabulary"),
             vec!["an", "example", "of", "a", "short", "sentence", "second"]
@@ -3751,7 +3762,7 @@ mod tests {
         let Some(Value::Tensor(counts)) = bag.properties.get("Counts") else {
             panic!("expected Counts");
         };
-        assert_eq!(counts.shape, vec![2, 7]);
+        assert_eq!(counts.shape(), [2, 7]);
         assert_eq!(counts.materialize_f64()[0], 1.0);
         assert_eq!(counts.materialize_f64()[1], 0.0);
         assert_eq!(counts.materialize_f64()[3 * 2], 1.0);
@@ -3806,7 +3817,7 @@ mod tests {
             .expect("scalar integer count"),
         );
         let actual = tensor_property(&bag, "Counts");
-        assert_eq!(actual.shape, vec![1, 1]);
+        assert_eq!(actual.shape(), [1, 1]);
         assert_eq!(actual.numeric_dtype(), runmat_value::NumericDType::F64);
         assert_eq!(actual.materialize_f64(), vec![7.0]);
     }
@@ -3826,12 +3837,14 @@ mod tests {
 
     #[test]
     fn bag_of_words_rejects_resident_inputs_before_provider_access() {
-        let resident = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_363_001,
-            descriptor: Default::default(),
-        };
+        let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident numeric admission fixture")
+            .handle;
         let error =
             run_bag(vec![Value::GpuTensor(resident)]).expect_err("resident input must reject");
         assert_eq!(error.identifier(), Some("RunMat:bagOfWords:InvalidInput"));
@@ -3878,6 +3891,40 @@ mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn bag_counts_preserve_rank_one_vocabulary_columns_and_rank_zero_rejection() {
+        let words = Value::StringArray(
+            StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap(),
+        );
+        let bag = run_bag(vec![
+            words.clone(),
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
+        ])
+        .expect("rank-one counts are one document with two vocabulary columns");
+        let bag_object = object(bag.clone());
+        let counts = tensor_property(&bag_object, "Counts");
+        assert_eq!(counts.shape(), [1, 2]);
+        assert_eq!(counts.materialize_f64(), vec![2.0, 3.0]);
+
+        let filtered = object(run_remove_short(bag, Value::Num(4.0)).unwrap());
+        assert_eq!(
+            string_array_property(&filtered, "Vocabulary"),
+            vec!["alpha"]
+        );
+        assert_eq!(
+            tensor_property(&filtered, "Counts").materialize_f64(),
+            vec![2.0]
+        );
+
+        let error = run_bag(vec![
+            words,
+            Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()),
+        ])
+        .expect_err("rank-zero counts have no vocabulary columns");
+        assert!(error.message().contains("counts columns (0)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bag_of_words_drops_missing_unique_word_and_count_column() {
         let words = StringArray::new(
@@ -3893,7 +3940,7 @@ mod tests {
             vec!["alpha", "beta"]
         );
         let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 2]);
+        assert_eq!(counts.shape(), [2, 2]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 2.0, 3.0]);
     }
 
@@ -3932,7 +3979,7 @@ mod tests {
         let Some(Value::Tensor(counts)) = filtered_bag.properties.get("Counts") else {
             panic!("expected Counts");
         };
-        assert_eq!(counts.shape, vec![1, 3]);
+        assert_eq!(counts.shape(), [1, 3]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 1.0]);
     }
 
@@ -3966,7 +4013,7 @@ mod tests {
             vec!["An", "of", "a", "short", "A", "second", "note"]
         );
         let counts = tensor_property(&filtered_bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 7]);
+        assert_eq!(counts.shape(), [2, 7]);
         assert_eq!(
             counts.materialize_f64(),
             vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
@@ -4021,7 +4068,7 @@ mod tests {
             vec!["Short", "sentence", "example"]
         );
         let counts = tensor_property(&filtered_bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 3]);
+        assert_eq!(counts.shape(), [2, 3]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
     }
 
@@ -4084,12 +4131,16 @@ mod tests {
 
     #[test]
     fn remove_stop_words_rejects_integer_and_resident_inputs_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_446_002,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         for invalid in [Value::Int(runmat_value::IntValue::U8(1)), resident] {
             let error = run_remove_stop(vec![invalid]).expect_err("numeric input must reject");
             assert!(!error.message().to_ascii_lowercase().contains("provider"));
@@ -4361,7 +4412,7 @@ mod tests {
 
         assert_eq!(string_array_property(&filtered, "Vocabulary"), vec!["keep"]);
         let counts = tensor_property(&filtered, "Counts");
-        assert_eq!(counts.shape, vec![2, 1]);
+        assert_eq!(counts.shape(), [2, 1]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 2.0]);
     }
 }

@@ -98,6 +98,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
     let node_mean = AccelNode {
         id: 1,
         label: AccelNodeLabel::Builtin {
+            origin: Default::default(),
             name: "mean".into(),
         },
         category: AccelOpCategory::Reduction,
@@ -139,7 +140,8 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
                 output: Some(v_sq),
             },
             FusionOp::Builtin {
-                name: "mean".to_string(),
+                origin: Default::default(),
+                name: "mean".into(),
                 inputs: vec![v_sq, v_all],
                 output: Some(v_mse),
             },
@@ -181,7 +183,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
     let out = execute_reduction(req, rows, 1, 0).expect("execute fused mean(all)");
     match out {
         Value::GpuTensor(h) => {
-            assert_eq!(h.shape, vec![1], "mean(all) should be scalar [1]");
+            assert_eq!(h.shape(), vec![1], "mean(all) should be scalar [1]");
         }
         _ => panic!("expected GPU tensor result"),
     }

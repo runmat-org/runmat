@@ -3,14 +3,13 @@ use crate::core::scene::GpuVertexBuffer;
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 const VERTICES_PER_BAR: u32 = 6;
 
 /// Inputs required to pack bar vertices directly on the GPU.
 #[derive(Clone, Debug)]
 pub struct BarGpuInputs {
-    pub values_buffer: Arc<wgpu::Buffer>,
+    pub values_buffer: crate::gpu::GpuInputBuffer,
     pub row_count: u32,
     pub scalar: ScalarType,
 }
@@ -79,11 +78,12 @@ struct BarUniforms {
 
 /// Builds a GPU-resident vertex buffer for bar charts directly from provider-owned value arrays.
 pub fn pack_vertices_from_values(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &BarGpuInputs,
     params: &BarGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.row_count == 0 {
         return Err("bar: input cannot be empty".to_string());
     }
@@ -143,15 +143,17 @@ pub fn pack_vertices_from_values(
 
     let vertex_count = inputs.row_count as u64 * VERTICES_PER_BAR as u64;
     let output_size = vertex_count * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("bar-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("bar-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
     let uniforms = BarUniforms {
         color: params.color.to_array(),
@@ -179,7 +181,11 @@ pub fn pack_vertices_from_values(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.values_buffer.as_entire_binding(),
+                resource: inputs
+                    .values_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -211,7 +217,7 @@ pub fn pack_vertices_from_values(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -219,7 +225,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::bar::F32,
         ScalarType::F64 => shaders::bar::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("bar-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

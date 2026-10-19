@@ -17,8 +17,7 @@ use std::collections::HashMap;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
-    register_wordcloud_handle, update_wordcloud_figure, update_wordcloud_handle_state,
-    PlotRenderOptions, WordCloudHandleState,
+    register_wordcloud_handle, PlotRenderOptions, WordCloudHandleState,
 };
 use crate::builtins::plotting::state::{select_axes_for_figure, select_figure, FigureHandle};
 use crate::builtins::plotting::style::{
@@ -291,9 +290,9 @@ impl Default for WordCloudOptions {
             layout_num: 1,
             size_power: 0.5,
             title: String::new(),
-            title_font_name: DEFAULT_FONT_NAME.to_string(),
+            title_font_name: DEFAULT_FONT_NAME.into(),
             visible: true,
-            font_name: DEFAULT_FONT_NAME.to_string(),
+            font_name: DEFAULT_FONT_NAME.into(),
             box_visible: false,
             units: "normalized".to_string(),
             position: DEFAULT_POSITION,
@@ -529,7 +528,7 @@ fn parse_data(args: Vec<Value>) -> BuiltinResult<WordCloudData> {
         [Value::Object(object), word_var, size_var] if is_table_object(object) => {
             table_words_and_sizes(object, word_var, size_var)
         }
-        [Value::Object(object), _topic_idx] if object.is_class("ldaModel") => Err(wordcloud_error(
+        [Value::Object(object), _topic_idx] if object.is_class(runmat_types::standard::LDA_MODEL) => Err(wordcloud_error(
             "LDA topic word clouds require ldaModel support and remain tracked by the Text Analytics umbrella",
         )),
         _ => Err(wordcloud_error(
@@ -552,13 +551,13 @@ fn validate_options_for_data(
 
 fn parse_single_data(value: &Value) -> BuiltinResult<WordCloudData> {
     match value {
-        Value::Object(object) if object.is_class("tokenizedDocument") => {
+        Value::Object(object) if object.is_class(runmat_types::standard::TOKENIZED_DOCUMENT) => {
             documents_counts(documents_from_object(object)?)
         }
-        Value::Object(object) if object.is_class("bagOfWords") => bag_of_words_counts(object),
-        Value::Object(object) if object.is_class("bagOfNgrams") => bag_of_ngrams_counts(object),
-        Value::Object(object) if object.is_class("categorical") => categorical_counts(object),
-        Value::Object(object) if object.is_class("ldaModel") => Err(wordcloud_error(
+        Value::Object(object) if object.is_class(runmat_types::standard::BAG_OF_WORDS) => bag_of_words_counts(object),
+        Value::Object(object) if object.is_class(runmat_types::standard::BAG_OF_NGRAMS) => bag_of_ngrams_counts(object),
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => categorical_counts(object),
+        Value::Object(object) if object.is_class(runmat_types::standard::LDA_MODEL) => Err(wordcloud_error(
             "LDA topic word clouds require ldaModel support and remain tracked by the Text Analytics umbrella",
         )),
         Value::Object(object) => Err(wordcloud_error(format!(
@@ -650,7 +649,8 @@ fn table_selector(value: &Value, names: &[String], label: &str) -> BuiltinResult
 }
 
 fn is_table_object(object: &ObjectInstance) -> bool {
-    object.is_class("table") || object.is_class("timetable")
+    object.is_class(runmat_types::standard::TABLE)
+        || object.is_class(runmat_types::standard::TIMETABLE)
 }
 
 fn text_documents(value: &Value) -> BuiltinResult<Vec<Vec<String>>> {
@@ -815,18 +815,28 @@ fn ngram_labels(array: &StringArray) -> Vec<String> {
     labels
 }
 
+/// Projects dense count/color tensors into their historical matrix geometry.
+fn wordcloud_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn counts_by_columns(words: Vec<String>, counts: Tensor) -> BuiltinResult<WordCloudData> {
-    if counts.cols != words.len() {
+    let (rows, cols) = wordcloud_matrix_dimensions(&counts);
+    if cols != words.len() {
         return Err(wordcloud_error(
             "count matrix column count must match word data length",
         ));
     }
-    let mut sizes = Vec::with_capacity(counts.cols);
+    let mut sizes = Vec::with_capacity(cols);
     let count_values = counts.materialize_f64();
-    for col in 0..counts.cols {
+    for col in 0..cols {
         let mut sum = 0.0;
-        for row in 0..counts.rows {
-            let value = count_values[row + col * counts.rows];
+        for row in 0..rows {
+            let value = count_values[row + col * rows];
             if !value.is_finite() || value < 0.0 {
                 return Err(wordcloud_error("counts must be finite nonnegative values"));
             }
@@ -969,8 +979,7 @@ fn render_wordcloud(data: WordCloudData, options: WordCloudOptions) -> BuiltinRe
     };
     let handle = register_wordcloud_handle(state);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(wordcloud_error_with_descriptor(
@@ -1064,12 +1073,24 @@ pub(crate) fn get_wordcloud_property(
     }
 }
 
-pub(crate) fn apply_wordcloud_property(
+fn property_state_error(
+    builtin: &'static str,
+    source: crate::builtins::plotting::state::FigureError,
+) -> RuntimeError {
+    let _ = builtin;
+    let mut error = wordcloud_error(format!("wordcloud: {source}"));
+    error.source = Some(Box::new(source));
+    error
+}
+
+pub(crate) fn apply_wordcloud_property_for_property(
+    authority: &crate::builtins::plotting::state::PropertyMutationTarget,
+
     handle: f64,
     state: &WordCloudHandleState,
     key: &str,
     value: &Value,
-    _builtin: &'static str,
+    builtin: &'static str,
 ) -> BuiltinResult<()> {
     if is_typed_integer_value(value) && is_option_key(&canonical_key(key)) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -1077,8 +1098,17 @@ pub(crate) fn apply_wordcloud_property(
             BUILTIN_NAME,
         )?;
     }
-    let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot(handle) {
+    let mut next = match crate::builtins::plotting::state::plot_child_handle_snapshot_for_property(
+        authority, handle,
+    ) {
         Ok(crate::builtins::plotting::state::PlotChildHandleState::WordCloud(current)) => current,
+        Err(err) if authority.is_selected() => return Err(property_state_error(builtin, err)),
+        _ if authority.is_selected() => {
+            return Err(property_state_error(
+                builtin,
+                crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle,
+            ))
+        }
         _ => state.clone(),
     };
     match canonical_key(key).as_str() {
@@ -1166,69 +1196,89 @@ pub(crate) fn apply_wordcloud_property(
             )));
         }
     }
-    refresh_wordcloud_rendering(&mut next)?;
-    update_wordcloud_handle_state(handle, next)
-        .map_err(|err| wordcloud_error(format!("wordcloud: {err}")))
+    refresh_wordcloud_rendering_for_property(authority, &mut next)?;
+    crate::builtins::plotting::state::update_wordcloud_handle_state_for_property(
+        authority, handle, next,
+    )
+    .map_err(|err| property_state_error(BUILTIN_NAME, err))
 }
 
-fn refresh_wordcloud_rendering(state: &mut WordCloudHandleState) -> BuiltinResult<()> {
+fn refresh_wordcloud_rendering_for_property(
+    authority: &crate::builtins::plotting::state::PropertyMutationTarget,
+    state: &mut WordCloudHandleState,
+) -> BuiltinResult<()> {
     let display =
         display_indices_from_parts(&state.word_data, &state.size_data, state.max_display_words);
-    let location = state.clone();
-    update_wordcloud_figure(&location, |figure| {
-        figure.set_axes_title(state.axes_index, state.title.clone());
-        figure.set_axes_title_style(
-            state.axes_index,
-            TextStyle {
-                visible: state.visible,
-                ..Default::default()
-            },
-        );
-        figure.set_axes_box_enabled(state.axes_index, state.box_visible);
-        ensure_annotation_slots(figure, state, display.len())?;
-        for (slot, annotation_index) in state.annotation_indices.iter().copied().enumerate() {
-            let Some(annotation) = figure.axes_text_annotation(state.axes_index, annotation_index)
-            else {
-                return Err(crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle);
-            };
-            let _ = annotation;
-            if let Some(idx) = display.get(slot).copied() {
-                figure.set_axes_text_annotation_text(
-                    state.axes_index,
-                    annotation_index,
-                    state.word_data[idx].clone(),
-                );
-                let mut style = TextStyle {
-                    color: Some(word_color(slot, idx, &options_from_state(state))),
-                    font_size: Some(font_size(
-                        state.size_data[idx],
-                        &state.size_data,
-                        &options_from_state(state),
-                    )),
+    crate::builtins::plotting::state::update_wordcloud_figure_for_property(
+        authority,
+        state.figure,
+        state.axes_index,
+        |figure| {
+            figure.set_axes_title(state.axes_index, state.title.clone());
+            figure.set_axes_title_style(
+                state.axes_index,
+                TextStyle {
                     visible: state.visible,
                     ..Default::default()
+                },
+            );
+            figure.set_axes_box_enabled(state.axes_index, state.box_visible);
+            ensure_annotation_slots(figure, state, display.len())?;
+            for (slot, annotation_index) in state.annotation_indices.iter().copied().enumerate() {
+                let Some(annotation) =
+                    figure.axes_text_annotation(state.axes_index, annotation_index)
+                else {
+                    return Err(
+                        crate::builtins::plotting::state::FigureError::InvalidPlotObjectHandle,
+                    );
                 };
-                if slot == 0 {
-                    style.font_weight = Some("bold".to_string());
+                let _ = annotation;
+                if let Some(idx) = display.get(slot).copied() {
+                    figure.set_axes_text_annotation_text(
+                        state.axes_index,
+                        annotation_index,
+                        state.word_data[idx].clone(),
+                    );
+                    let mut style = TextStyle {
+                        color: Some(word_color(slot, idx, &options_from_state(state))),
+                        font_size: Some(font_size(
+                            state.size_data[idx],
+                            &state.size_data,
+                            &options_from_state(state),
+                        )),
+                        visible: state.visible,
+                        ..Default::default()
+                    };
+                    if slot == 0 {
+                        style.font_weight = Some("bold".to_string());
+                    }
+                    figure.set_axes_text_annotation_position(
+                        state.axes_index,
+                        annotation_index,
+                        layout_position(slot, display.len(), &options_from_state(state)),
+                    );
+                    figure.set_axes_text_annotation_style(
+                        state.axes_index,
+                        annotation_index,
+                        style,
+                    );
+                } else {
+                    let mut style = TextStyle {
+                        visible: false,
+                        ..Default::default()
+                    };
+                    style.color = Some(DEFAULT_COLOR);
+                    figure.set_axes_text_annotation_style(
+                        state.axes_index,
+                        annotation_index,
+                        style,
+                    );
                 }
-                figure.set_axes_text_annotation_position(
-                    state.axes_index,
-                    annotation_index,
-                    layout_position(slot, display.len(), &options_from_state(state)),
-                );
-                figure.set_axes_text_annotation_style(state.axes_index, annotation_index, style);
-            } else {
-                let mut style = TextStyle {
-                    visible: false,
-                    ..Default::default()
-                };
-                style.color = Some(DEFAULT_COLOR);
-                figure.set_axes_text_annotation_style(state.axes_index, annotation_index, style);
             }
-        }
-        Ok(())
-    })
-    .map_err(|err| wordcloud_error(format!("wordcloud: {err}")))?;
+            Ok(())
+        },
+    )
+    .map_err(|err| property_state_error(BUILTIN_NAME, err))?;
     Ok(())
 }
 
@@ -1517,29 +1567,30 @@ fn color_list(value: &Value, name: &str, expected_rows: Option<usize>) -> Builti
     if len == 0 {
         return Ok(Vec::new());
     }
-    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = wordcloud_matrix_dimensions(&tensor);
+    if len == 3 && (rows == 1 || cols == 1) {
         let values = tensor_utils::tensor_values_f64(&tensor);
         return Ok(vec![rgb_triplet(&values, name)?]);
     }
-    if tensor.cols != 3 || len != tensor.rows.saturating_mul(3) {
+    if cols != 3 || len != rows.saturating_mul(3) {
         return Err(wordcloud_error(format!(
             "{name} matrix must have three columns"
         )));
     }
     if let Some(expected) = expected_rows {
-        if tensor.rows != expected {
+        if rows != expected {
             return Err(wordcloud_error(format!(
                 "{name} matrix rows must match WordData length"
             )));
         }
     }
-    let mut colors = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
+    let mut colors = Vec::with_capacity(rows);
+    for row in 0..rows {
         colors.push(rgb_triplet(
             &[
                 tensor_utils::tensor_value_f64(&tensor, row),
-                tensor_utils::tensor_value_f64(&tensor, row + tensor.rows),
-                tensor_utils::tensor_value_f64(&tensor, row + 2 * tensor.rows),
+                tensor_utils::tensor_value_f64(&tensor, row + rows),
+                tensor_utils::tensor_value_f64(&tensor, row + 2 * rows),
             ],
             name,
         )?);
@@ -1767,6 +1818,29 @@ mod tests {
             color_list(&Value::Tensor(color), "Color", Some(2)).expect("color list"),
             vec![Vec4::new(1.0, 0.0, 0.0, 1.0), Vec4::new(0.0, 1.0, 0.0, 1.0)]
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn wordcloud_preserves_dense_rank_one_color_matrix_geometry() {
+        let _guard = setup();
+        let handle = wordcloud_builtin(vec![
+            str_array(&["alpha"], vec![1, 1]),
+            tensor(vec![2.0], vec![1, 1]),
+            Value::String("Color".into()),
+            tensor(vec![1.0, 0.0, 0.0], vec![3]),
+        ])
+        .expect("rank-one RGB data is one color row");
+        assert!(handle.is_finite());
+
+        let error = wordcloud_builtin(vec![
+            str_array(&["alpha"], vec![1, 1]),
+            tensor(vec![2.0], vec![1, 1]),
+            Value::String("Color".into()),
+            tensor(vec![1.0], Vec::new()),
+        ])
+        .expect_err("rank-zero color data has no RGB columns");
+        assert!(error.message().contains("three columns"));
     }
 
     #[test]
@@ -1999,7 +2073,7 @@ mod tests {
         .expect_err("Color rows must match words at creation");
         assert!(err.to_string().contains("Color matrix rows"));
 
-        let lda = Value::Object(ObjectInstance::new("ldaModel".into()));
+        let lda = Value::Object(ObjectInstance::new("ldaModel"));
         let err = wordcloud_builtin(vec![lda, Value::Num(1.0)])
             .expect_err("LDA model should be explicit unsupported");
         assert!(err.to_string().contains("ldaModel"));
@@ -2023,7 +2097,7 @@ mod tests {
                 Value::StringArray(StringArray::new(words.clone(), vec![1, words.len()]).unwrap())
             })
             .collect::<Vec<_>>();
-        let mut object = ObjectInstance::new("tokenizedDocument".into());
+        let mut object = ObjectInstance::new("tokenizedDocument");
         object.properties.insert(
             "Documents".into(),
             Value::Cell(CellArray::new(cell_values, doc_count, 1).unwrap()),
@@ -2032,7 +2106,7 @@ mod tests {
     }
 
     fn bag_of_ngrams_object(ngrams_column_major: &[&str], counts: Vec<f64>) -> Value {
-        let mut object = ObjectInstance::new("bagOfNgrams".into());
+        let mut object = ObjectInstance::new("bagOfNgrams");
         object
             .properties
             .insert("Ngrams".into(), str_array(ngrams_column_major, vec![2, 2]));
@@ -2043,7 +2117,7 @@ mod tests {
     }
 
     fn categorical_object(categories: &[&str], codes: Vec<f64>) -> Value {
-        let mut object = ObjectInstance::new("categorical".into());
+        let mut object = ObjectInstance::new("categorical");
         object.properties.insert(
             "Categories".into(),
             str_array(categories, vec![1, categories.len()]),
@@ -2061,7 +2135,7 @@ mod tests {
         }
         let mut props = StructValue::new();
         props.insert("VariableNames", str_array(names, vec![1, names.len()]));
-        let mut object = ObjectInstance::new("table".into());
+        let mut object = ObjectInstance::new("table");
         object
             .properties
             .insert(TABLE_VARIABLES_FIELD.into(), Value::Struct(variables));

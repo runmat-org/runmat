@@ -19,7 +19,8 @@ use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::commands::bytecode::{emit_bytecode_with_catalog, write_bytecode_output};
 use crate::commands::fea::execute_fea_path;
 use crate::commands::package::install_project_for_source;
-use crate::commands::session::create_session;
+use crate::commands::piped_input::PipedInput;
+use crate::commands::session::{create_session_with_graphics, drive_with_graphics_callbacks};
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_frontend_error, format_runtime_diagnostic};
 use crate::presentation;
@@ -53,6 +54,32 @@ pub async fn execute_script_with_args(
     fea_json: bool,
     execution: ExecutionTargetArgs,
 ) -> Result<()> {
+    execute_script_with_graphics(
+        script,
+        args,
+        emit_bytecode_path,
+        cli,
+        config,
+        fea_json,
+        execution,
+        &runmat_core::SessionGraphicsHost::Unavailable,
+    )
+    .await
+}
+
+pub(crate) async fn execute_script_with_graphics(
+    script: PathBuf,
+    args: Vec<String>,
+    emit_bytecode_path: Option<PathBuf>,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    fea_json: bool,
+    execution: ExecutionTargetArgs,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
+    if script.as_path() == Path::new("-") {
+        return execute_stdin_script_with_graphics(emit_bytecode_path, cli, config, graphics).await;
+    }
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
 
@@ -85,7 +112,47 @@ pub async fn execute_script_with_args(
         return Ok(());
     }
 
-    execute_script_path(script, cli, config).await
+    let source_name = script.to_string_lossy().to_string();
+    execute_script_request(
+        script,
+        SourceInput::Path(source_name),
+        cli,
+        config,
+        graphics,
+    )
+    .await
+}
+
+/// CLI stdin is a whole script, not a sequence of REPL submissions. Its
+/// synthetic source name is deliberately not a project-owned file identity:
+/// package installation comes from the current directory, while compilation
+/// uses exactly the bytes captured by the CLI's exclusive stdin reader.
+pub(crate) async fn execute_stdin_script_with_graphics(
+    emit_bytecode_path: Option<PathBuf>,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
+    let content = PipedInput::stdin()?
+        .await
+        .context("Failed to read stdin script")?;
+    if let Some(path) = emit_bytecode_path {
+        let output = emit_bytecode_with_catalog(&content, config, None)
+            .context("Failed to emit bytecode for stdin script")?;
+        return write_bytecode_output(&path, &output);
+    }
+    let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
+    execute_script_request(
+        cwd.join("<stdin>"),
+        SourceInput::Text {
+            name: "<stdin>".to_owned(),
+            text: content,
+        },
+        cli,
+        config,
+        graphics,
+    )
+    .await
 }
 
 pub(crate) fn validate_local_script_arguments(args: &[String]) -> Result<()> {
@@ -140,17 +207,9 @@ pub(crate) async fn execute_script_contents(
         },
         cli,
         config,
+        &runmat_core::SessionGraphicsHost::Unavailable,
     )
     .await
-}
-
-async fn execute_script_path(
-    script: PathBuf,
-    cli: &Cli,
-    config: &RunMatRuntimeConfig,
-) -> Result<()> {
-    let source_name = script.to_string_lossy().to_string();
-    execute_script_request(script, SourceInput::Path(source_name), cli, config).await
 }
 
 async fn execute_script_request(
@@ -158,13 +217,15 @@ async fn execute_script_request(
     request_source: SourceInput,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<()> {
     let enable_jit = config.jit.enabled;
-    let mut engine = create_session(
+    let mut engine = create_session_with_graphics(
         enable_jit,
         config.runtime.verbose,
         config,
         "Failed to create execution engine",
+        graphics,
     )?;
     let _project_lease = install_project_for_source(&mut engine, &script, cli).await?;
     let mut script_run = engine.telemetry_run(TelemetryRunConfig {
@@ -179,11 +240,33 @@ async fn execute_script_request(
         HostExecutionPolicy::default(),
         engine.workspace_handle(),
     );
-    let response = engine.execute_request(request).await;
+    let interrupt = engine.interrupt_handle();
+    let signal_task = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            interrupt.cancel(runmat_execution::CancellationReason::User);
+        }
+    });
+    tokio::task::yield_now().await;
+    let local_tasks = engine.local_task_driver();
+    let callbacks = engine.graphics_callback_queue().cloned();
+    let response = local_tasks
+        .drive_until(drive_with_graphics_callbacks(
+            callbacks,
+            engine.execute_request(request),
+        ))
+        .await;
+    signal_task.abort();
+    let response = response.context("Local callback driver stopped during script execution")??;
     let source_context = response.source_context;
     let outcome = match response.result {
         Ok(outcome) => outcome,
         Err(err) => {
+            if let Err(shutdown_error) = engine.shutdown_foreign_runtime().await {
+                warn!(
+                    "could not finish foreign runtime lifecycle after execution failure: {shutdown_error}"
+                );
+            }
+            engine.shutdown_local_tasks();
             let failure = err.telemetry_failure_info();
             if let Some(run) = script_run.take() {
                 run.finish(TelemetryRunFinish {
@@ -197,9 +280,11 @@ async fn execute_script_request(
                     provider: capture_provider_snapshot(),
                 });
             }
-            if let Some(diag) = source_context.source_text().and_then(|source| {
-                format_frontend_error(&err, source_context.source_name(), source)
-            }) {
+            if let Some(diag) = format_frontend_error(
+                &err,
+                source_context.source_name(),
+                source_context.source_text(),
+            ) {
                 eprintln!("{diag}");
             } else {
                 eprintln!("{}: {err}", presentation::stderr().error("Execution error"));
@@ -207,6 +292,13 @@ async fn execute_script_request(
             return Err(AlreadyReportedCliError.into());
         }
     };
+    engine
+        .flush_graphics()
+        .await
+        .context("failed to flush native graphics")?;
+    let foreign_lifecycle = engine.shutdown_foreign_runtime().await;
+    engine.shutdown_local_tasks();
+    foreign_lifecycle.context("failed to finish foreign runtime lifecycle")?;
 
     let execution_time = start_time.elapsed();
     emit_execution_streams(&outcome.streams);
@@ -260,11 +352,12 @@ async fn execute_script_request(
         } else {
             info!("Script executed successfully in {:?}", execution_time);
         }
-        if let RuntimeFlow::Single(value) = outcome.flow {
-            if config.runtime.verbose {
-                println!("{value:?}");
-            } else {
-                println!("{value}");
+        // The session has already rendered unsuppressed values (including their
+        // assignment labels) into streams. Flow is the structured return value,
+        // not an additional console event. Keep verbose inspection diagnostic-only.
+        if config.runtime.verbose {
+            if let RuntimeFlow::Single(value) = &outcome.flow {
+                eprintln!("Execution result: {value:?}");
             }
         }
     }

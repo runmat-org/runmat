@@ -9,6 +9,7 @@ pub enum HiddenMode {
     MeshingWorker,
     ExecutionDriver,
     LocalSupervisor,
+    ExtensionHost,
 }
 
 impl HiddenMode {
@@ -19,6 +20,7 @@ impl HiddenMode {
             Self::MeshingWorker => "--__runmat-meshing-worker",
             Self::ExecutionDriver => "--__runmat-execution-driver",
             Self::LocalSupervisor => "--__runmat-local-supervisor",
+            Self::ExtensionHost => "--__runmat-extension-host",
         }
     }
 }
@@ -60,6 +62,7 @@ impl HiddenModeRegistry {
             HiddenMode::MeshingWorker,
             HiddenMode::ExecutionDriver,
             HiddenMode::LocalSupervisor,
+            HiddenMode::ExtensionHost,
         ]
         .into_iter()
         .find(|mode| argument == OsStr::new(mode.marker()))

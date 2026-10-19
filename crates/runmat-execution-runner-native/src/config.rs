@@ -3,7 +3,7 @@ use std::io;
 use std::path::PathBuf;
 
 use runmat_execution::{
-    resource::{AcceleratorRequest, Capability, ResourceRequest},
+    resource::Capability,
     ExecutionScopeId,
 };
 
@@ -33,7 +33,8 @@ pub struct NativeExecutionConfig {
     #[serde(default)]
     pub meshing_subtask_cache_root: Option<PathBuf>,
     pub worker_capabilities: BTreeSet<Capability>,
-    pub worker_accelerators: Vec<AcceleratorRequest>,
+    pub host_inventory: runmat_execution::host::ExecutionHostInventory,
+    pub accelerator_devices: Vec<runmat_execution::resource::AcceleratorDevice>,
 }
 
 impl NativeExecutionConfig {
@@ -48,6 +49,20 @@ impl NativeExecutionConfig {
             std::env::var_os("RUNMAT_EXECUTION_STATE_DIR").map(PathBuf::from),
             dirs::cache_dir(),
         )?;
+        let host_inventory = runmat_core::RunMatSession::with_options(false, false)
+            .map_err(io::Error::other)?
+            .execution_host_inventory(
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            )
+            .map_err(io::Error::other)?;
+        let epoch = local_inventory_epoch();
+        let mut accelerator_devices = runmat_accelerate_api::registered_providers()
+            .into_iter()
+            .map(|provider| provider.execution_accelerator_device(epoch))
+            .filter_map(|result| result.transpose())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io::Error::other)?;
+        accelerator_devices.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(Self {
             executable: std::env::current_exe()?,
             worker_arguments: vec![runmat_process_host::HiddenMode::ExecutionWorker
@@ -65,8 +80,13 @@ impl NativeExecutionConfig {
             worker_cpu_millicores: super::machine_capacity::cpu_millicores(),
             store_root,
             meshing_subtask_cache_root: None,
-            worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
-            worker_accelerators: Vec::new(),
+            worker_capabilities: BTreeSet::from([
+                Capability::ProcessIsolation,
+                Capability::GraphSelectedValuesV11,
+                Capability::GraphCallableArgumentsV12,
+            ]),
+            host_inventory,
+            accelerator_devices,
         })
     }
 
@@ -110,43 +130,27 @@ impl NativeExecutionConfig {
             || !self
                 .worker_capabilities
                 .contains(&Capability::ProcessIsolation)
+            || self.host_inventory.validate().is_err()
+            || self
+                .accelerator_devices
+                .windows(2)
+                .any(|pair| pair[0].id >= pair[1].id)
+            || self
+                .accelerator_devices
+                .iter()
+                .any(|device| device.validate().is_err())
         {
             return Err("native execution configuration contains an empty bound".into());
         }
-        ResourceRequest {
-            cpu_millicores: 1,
-            memory_bytes: 1,
-            scratch_bytes: 0,
-            max_wall_millis: 1,
-            max_artifact_bytes: 0,
-            max_egress_bytes: 0,
-            max_relay_bytes: 0,
-            accelerators: self.worker_accelerators.clone(),
-            required_capabilities: BTreeSet::new(),
-        }
-        .validate()
-        .map_err(|error| error.to_string())?;
-        let accelerator_classes = self
-            .worker_accelerators
-            .iter()
-            .map(|accelerator| &accelerator.class)
-            .collect::<BTreeSet<_>>();
-        let capability_classes = self
-            .worker_capabilities
-            .iter()
-            .filter_map(|capability| match capability {
-                Capability::Accelerator(class) => Some(class),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
-        if accelerator_classes != capability_classes {
-            return Err(
-                "native worker accelerator inventory and capabilities name different classes"
-                    .into(),
-            );
-        }
         Ok(())
     }
+}
+
+fn local_inventory_epoch() -> u64 {
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    (u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX) ^ u64::from(std::process::id())).max(1)
 }
 
 fn session_store_root(
@@ -187,7 +191,6 @@ pub(crate) fn fresh_scope_id(domain: &[u8], nonce: u64) -> ExecutionScopeId {
 
 #[cfg(test)]
 mod tests {
-    use runmat_execution::resource::{AcceleratorRequest, Capability};
     use std::path::PathBuf;
 
     use super::{fresh_scope_id, session_store_root, NativeExecutionConfig};
@@ -243,28 +246,6 @@ mod tests {
         let first = fresh_scope_id(b"test-native-session", 1);
         let second = fresh_scope_id(b"test-native-session", 1);
         assert_ne!(first, second);
-    }
-
-    #[test]
-    fn native_configuration_binds_accelerator_inventory_to_capabilities() {
-        let mut config = NativeExecutionConfig::for_current_executable().unwrap();
-        let request = AcceleratorRequest {
-            class: "metal".into(),
-            count: 1,
-            memory_bytes_each: 1024,
-        };
-        config.worker_accelerators.push(request.clone());
-        assert!(config.validate().is_err());
-
-        config
-            .worker_capabilities
-            .insert(Capability::Accelerator(request.class.clone()));
-        assert!(config.validate().is_ok());
-
-        config
-            .worker_capabilities
-            .insert(Capability::Accelerator("substituted".into()));
-        assert!(config.validate().is_err());
     }
 
     #[test]

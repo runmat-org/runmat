@@ -23,7 +23,11 @@ impl Reporter for TapReporter {
                     "not ok"
                 },
                 index + 1,
-                test.test_id.as_str().replace('\n', " ")
+                test.report_identity
+                    .as_ref()
+                    .map(runmat_test::result::TestReportIdentity::human_label)
+                    .unwrap_or_else(|| test.test_id.as_str().to_owned())
+                    .replace('\n', " ")
             ));
         }
         Ok(RenderedReport {

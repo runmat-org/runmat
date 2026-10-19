@@ -112,13 +112,33 @@ impl Driver {
                 self.snapshot.pools.insert(pool_id, PoolRecord::new(spec));
                 self.emit(DriverEventKind::PoolCreated { pool_id });
             }
+            DriverCommand::RefreshPoolCapabilities { pool_id } => {
+                let pool = self.pool_mut(pool_id)?;
+                let capabilities = pool
+                    .workers
+                    .values()
+                    .filter(|worker| worker.accepts_work())
+                    .flat_map(|worker| worker.spec.resources.capabilities.iter().cloned())
+                    .collect::<std::collections::BTreeSet<_>>();
+                if pool.spec.resource_limit.capabilities != capabilities {
+                    pool.spec.resource_limit.capabilities = capabilities;
+                }
+            }
             DriverCommand::SetPoolState { pool_id, state } => {
                 self.pool_mut(pool_id)?.state = state;
                 self.emit(DriverEventKind::PoolStateChanged { pool_id, state });
             }
             DriverCommand::ResizePool { pool_id, request } => {
                 let pool = self.pool_mut(pool_id)?;
-                let decision = request.decide(&pool.spec, pool.workers.len() as u32)?;
+                let available_workers = pool
+                    .workers
+                    .values()
+                    .filter(|worker| worker.accepts_work())
+                    .count();
+                let available_workers = u32::try_from(available_workers).map_err(|_| {
+                    RunnerError::Invalid("pool worker count exceeds the supported range".into())
+                })?;
+                let decision = request.decide(&pool.spec, available_workers)?;
                 if decision != ResizeDecision::Unchanged {
                     pool.state = PoolState::Resizing;
                     actions.push(DriverAction::ResizePool {
@@ -132,6 +152,24 @@ impl Driver {
                 }
             }
             DriverCommand::RegisterWorker(spec) => self.register_worker(spec)?,
+            DriverCommand::AdmitWorkerSoftwareCapabilities {
+                worker_id,
+                capabilities,
+            } => {
+                // A ReadyV1 can be observed before a concurrent removal. The
+                // canonical driver state, not that earlier observation, decides
+                // whether this worker may receive software capabilities.
+                if let Some(worker) = self
+                    .snapshot
+                    .pools
+                    .values_mut()
+                    .find_map(|pool| pool.workers.get_mut(&worker_id))
+                    .filter(|worker| worker.accepts_work())
+                {
+                    worker.spec.resources.capabilities.extend(capabilities);
+                }
+            }
+            DriverCommand::ActivateWorker(worker_id) => self.activate_worker(worker_id)?,
             DriverCommand::DrainWorker(worker_id) => self.drain_worker(worker_id)?,
             DriverCommand::WorkerLost(worker_id) => {
                 self.worker_lost(worker_id, &mut actions)?;
@@ -140,20 +178,7 @@ impl Driver {
                 self.worker_lost_with_report(worker_id, *report, &mut actions)?;
             }
             DriverCommand::Submit(submission) => self.submit(*submission)?,
-            DriverCommand::SubmitBatch(submissions) => {
-                if submissions.is_empty() {
-                    return Err(RunnerError::Invalid(
-                        "task submission batch must not be empty".into(),
-                    ));
-                }
-                let prior = self.snapshot.clone();
-                for submission in submissions {
-                    if let Err(error) = self.submit(submission) {
-                        self.snapshot = prior;
-                        return Err(error);
-                    }
-                }
-            }
+            DriverCommand::SubmitBatch(submissions) => self.submit_batch(submissions)?,
             DriverCommand::BackendReport(report) => {
                 self.apply_backend_report(report, &mut actions)?;
             }
@@ -202,6 +227,41 @@ impl Driver {
                         crate::TaskCancellationCause::Scope { scope_id, reason },
                         &mut actions,
                     )?;
+                }
+            }
+            DriverCommand::CancelGang {
+                gang,
+                reason,
+                now_millis,
+            } => {
+                gang.validate()
+                    .map_err(|error| RunnerError::Invalid(error.to_string()))?;
+                let tasks = self
+                    .snapshot
+                    .tasks
+                    .iter()
+                    .filter_map(|(task_id, task)| {
+                        match &task.submission.request.invocation_context {
+                            runmat_execution::ProgramInvocationContext::SpmdTask { task }
+                                if task.gang == gang =>
+                            {
+                                Some(*task_id)
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if tasks.is_empty() {
+                    return Err(RunnerError::Invalid(
+                        "SPMD gang has no tasks in this driver".into(),
+                    ));
+                }
+                self.emit(DriverEventKind::GangCancelled {
+                    gang_id: gang.id,
+                    reason,
+                });
+                for task_id in tasks {
+                    self.cancel_task(task_id, now_millis, &mut actions)?;
                 }
             }
             DriverCommand::Tick { now_millis } => {

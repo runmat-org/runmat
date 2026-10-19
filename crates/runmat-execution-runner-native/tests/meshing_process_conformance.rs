@@ -352,8 +352,7 @@ async fn parent() {
         .windows(2)
         .all(|pair| pair[0].sequence < pair[1].sequence));
     assert_eq!(decoded_progress.last().unwrap().completed_work, 1);
-    let outputs = success.outputs;
-    let result_objects = success.result_objects;
+    let (outputs, result_objects) = success.into_values().expect("ordinary task result");
     assert!(serde_json::to_vec(&outputs).unwrap().len() < 4096);
     assert!(result_objects.len() >= 3);
     let [ValuePayload::Object(root)] = outputs.as_slice() else {
@@ -459,7 +458,10 @@ async fn parent() {
     })
     .await
     .unwrap();
-    assert!(matches!(cancelled, Err(message) if message.contains("cancelled")));
+    assert!(matches!(
+        cancelled,
+        Err(runmat_execution_runner_native::NativeProgramFailure::Cancelled)
+    ));
     drop(cancel_task);
     drop(cancel_session);
     assert!(!cancel_store_root.exists());
@@ -489,6 +491,7 @@ async fn remote_conformance() {
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-meshing-worker"]),
         pool_id,
         resources: worker_inventory(),
+        host: worker_host_inventory(),
     };
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([17; 32]).unwrap();
@@ -574,11 +577,13 @@ async fn remote_conformance() {
             .await
             .expect("remote meshing completion timeout")
             .unwrap();
-        let [ValuePayload::Object(remote_root)] = success.outputs.as_slice() else {
+        let (success_outputs, success_result_objects) =
+            success.values().expect("ordinary task result");
+        let [ValuePayload::Object(remote_root)] = success_outputs else {
             panic!("remote meshing returned a non-object root")
         };
         let mut remote_store = TestStore::default();
-        for reference in &success.result_objects {
+        for reference in success_result_objects {
             remote_store.0.insert(
                 reference.logical_digest,
                 pool.execution_object(reference)
@@ -597,11 +602,11 @@ async fn remote_conformance() {
         assert!(imported
             .result_objects()
             .iter()
-            .all(|reference| success.result_objects.contains(reference)));
+            .all(|reference| success_result_objects.contains(reference)));
         runmat_meshing_execution::import_stage_evidence_observation(
             &remote_store,
             &host,
-            &success.result_objects,
+            success_result_objects,
             limits().inventory,
         )
         .unwrap();
@@ -627,11 +632,13 @@ async fn remote_conformance() {
             .await
             .expect("remote exact-input meshing timeout")
             .unwrap();
-        let [ValuePayload::Object(exact_root)] = exact_success.outputs.as_slice() else {
+        let (exact_outputs, exact_result_objects) =
+            exact_success.values().expect("ordinary task result");
+        let [ValuePayload::Object(exact_root)] = exact_outputs else {
             panic!("remote exact-input stage returned a non-object root")
         };
         let mut exact_result_store = TestStore::default();
-        for reference in &exact_success.result_objects {
+        for reference in exact_result_objects {
             exact_result_store.0.insert(
                 reference.logical_digest,
                 pool.execution_object(reference)
@@ -711,7 +718,7 @@ async fn remote_conformance() {
         let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = exact_serial else {
             panic!("serial exact-input reference did not externalize its result")
         };
-        assert_eq!(outputs, exact_success.outputs);
+        assert_eq!(outputs, exact_outputs);
 
         let mut serial_store = TestStore::default();
         seed_host_invocation(&mut serial_store, &host, &request);
@@ -726,7 +733,7 @@ async fn remote_conformance() {
         let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = serial else {
             panic!("serial meshing reference did not externalize its result")
         };
-        assert_eq!(outputs, success.outputs);
+        assert_eq!(outputs, success_outputs);
 
         let cancel_scope =
             runmat_execution::ExecutionScopeId::derive(&[b"remote-meshing-cancel-scope"]);
@@ -955,6 +962,13 @@ fn worker_inventory() -> ResourceInventory {
     }
 }
 
+fn worker_host_inventory() -> runmat_execution::host::ExecutionHostInventory {
+    runmat_core::RunMatSession::with_options(false, false)
+        .unwrap()
+        .execution_host_inventory(runmat_execution::security::ExecutionTrustTier::CustomerTrusted)
+        .unwrap()
+}
+
 fn config(root: &Path, worker_mode: &str) -> runmat_execution_runner_native::NativeExecutionConfig {
     let mut config =
         runmat_execution_runner_native::NativeExecutionConfig::for_current_executable().unwrap();
@@ -988,6 +1002,15 @@ fn submission_for(
             scope_id,
             pool_id,
             program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
+            host: request
+                .artifact
+                .execution_host_requirement(
+                    &request.recipe,
+                    BTreeSet::from([
+                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                    ]),
+                )
+                .unwrap(),
             artifact_access: host.artifact_access.clone(),
             cpu_millicores: 1000,
             maximum_egress_bytes: 0,

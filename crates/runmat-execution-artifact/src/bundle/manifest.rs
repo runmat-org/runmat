@@ -5,11 +5,11 @@ use runmat_execution::{Digest, ProgramRevision};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ArtifactError, ArtifactResult, BundleCodeClosure, LogicalObject, ObjectDescriptor,
-    ProgramArtifact, ProgramBuildRecipe,
+    ArtifactError, ArtifactResult, BundleCodeClosure, ForeignArtifactClosure, LogicalObject,
+    ObjectDescriptor, ProgramArtifact, ProgramBuildRecipe,
 };
 
-pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 3;
+pub const EXECUTION_BUNDLE_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +42,8 @@ pub struct BundleManifest {
     pub project_revision: ProjectRevisionRecord,
     pub code_closure: BundleCodeClosure,
     pub sources: Vec<ObjectDescriptor>,
+    pub foreign_artifacts: Vec<ObjectDescriptor>,
+    pub foreign_artifact_closures: Vec<ForeignArtifactClosure>,
     pub callables: Vec<BundleCallable>,
     pub recipes: Vec<ProgramBuildRecipe>,
     pub artifacts: Vec<ProgramArtifact>,
@@ -80,7 +82,7 @@ impl ExecutionBundle {
                 "compiled execution bundle has no source project to materialize".into(),
             ));
         };
-        let mut handoff = handoff.clone();
+        let mut handoff = handoff.as_ref().clone();
         handoff.project.workspace_root = root.to_path_buf();
         handoff.project.manifest_path = root.join("runmat.toml");
         for path in handoff.project.access_paths.values_mut() {
@@ -99,5 +101,9 @@ impl ExecutionBundle {
             self.manifest.code_closure,
             BundleCodeClosure::SourceProject { .. }
         )
+    }
+
+    pub fn requires_materialization(&self) -> bool {
+        self.requires_source_project() || !self.manifest.foreign_artifacts.is_empty()
     }
 }

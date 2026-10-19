@@ -120,6 +120,200 @@ fn async_frozen_handoff_matches_native_stable_state() {
 }
 
 #[test]
+fn native_interface_artifacts_are_frozen_across_dependency_packages() {
+    let (temp, manifest) = fixture();
+    let helper = temp.path().join("deps/helper");
+    fs::create_dir_all(helper.join("native")).unwrap();
+    fs::write(helper.join("native/helper.json"), b"manifest").unwrap();
+    fs::write(helper.join("native/helper.bin"), b"library").unwrap();
+    let dependency_manifest = fs::read_to_string(helper.join("runmat.toml")).unwrap();
+    fs::write(
+        helper.join("runmat.toml"),
+        format!(
+            "{dependency_manifest}\n[native-interfaces.helper]\nmanifest = \"native/helper.json\"\nlibrary = \"native/helper.bin\"\n"
+        ),
+    )
+    .unwrap();
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::NativeLibrary]),
+    )
+    .unwrap();
+    let [interface] = frozen.native_interfaces.as_slice() else {
+        panic!("expected one dependency-owned native interface");
+    };
+    assert_eq!(interface.name, "helper");
+    assert_eq!(
+        interface.manifest_path,
+        helper.join("native/helper.json").canonicalize().unwrap()
+    );
+    assert_eq!(
+        interface.library_path,
+        helper.join("native/helper.bin").canonicalize().unwrap()
+    );
+    assert_eq!(
+        interface.manifest_digest,
+        runmat_package::ContentDigest::sha256(b"manifest")
+    );
+    assert_eq!(
+        interface.library_digest,
+        runmat_package::ContentDigest::sha256(b"library")
+    );
+}
+
+#[test]
+fn native_interface_packages_require_native_library_capability() {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::create_dir_all(temp.path().join("native")).unwrap();
+    fs::write(temp.path().join("src/main.m"), "x = 1;\n").unwrap();
+    fs::write(temp.path().join("native/interface.json"), b"manifest").unwrap();
+    fs::write(temp.path().join("native/library.bin"), b"library").unwrap();
+    fs::write(
+        temp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "native-package"
+
+[sources]
+roots = ["src"]
+
+[native-interfaces.fixture]
+manifest = "native/interface.json"
+library = "native/library.bin"
+"#,
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&temp.path().join("runmat.toml"), BTreeSet::new())
+        .expect_err("portable host must reject native package");
+    assert!(error.to_string().contains("native-library"));
+}
+
+#[test]
+fn java_artifacts_are_frozen_and_require_a_jvm() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("lib")).unwrap();
+    fs::write(temp.path().join("lib/fixture.jar"), b"exact-jar").unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!("{root_manifest}\n[java-artifacts.fixture]\npath = \"lib/fixture.jar\"\n"),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a JVM package");
+    assert!(error.to_string().contains("jvm"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Jvm]),
+    )
+    .unwrap();
+    let [artifact] = frozen.java_artifacts.as_slice() else {
+        panic!("expected one Java artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(
+        artifact.digest,
+        runmat_package::ContentDigest::sha256(b"exact-jar")
+    );
+    assert_eq!(
+        artifact.path,
+        temp.path().join("lib/fixture.jar").canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn python_artifacts_are_frozen_and_require_python() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("python")).unwrap();
+    fs::write(
+        temp.path().join("python/fixture-1.0-py3-none-any.whl"),
+        b"exact-wheel",
+    )
+    .unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!(
+            "{root_manifest}\n[python-artifacts.fixture]\npath = \"python/fixture-1.0-py3-none-any.whl\"\nmodule = \"fixture\"\n"
+        ),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a Python package");
+    assert!(error.to_string().contains("python"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Python]),
+    )
+    .unwrap();
+    let [artifact] = frozen.python_artifacts.as_slice() else {
+        panic!("expected one Python artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(artifact.module, "fixture");
+    assert_eq!(
+        artifact.digest,
+        runmat_package::ContentDigest::sha256(b"exact-wheel")
+    );
+    assert_eq!(
+        artifact.path,
+        temp.path()
+            .join("python/fixture-1.0-py3-none-any.whl")
+            .canonicalize()
+            .unwrap()
+    );
+}
+
+#[test]
+fn mex_artifacts_are_frozen_and_require_mex_capability() {
+    let (temp, manifest) = fixture();
+    fs::create_dir_all(temp.path().join("mex")).unwrap();
+    fs::write(temp.path().join("mex/fixture.mex.runmat.json"), b"manifest").unwrap();
+    fs::write(temp.path().join("mex/fixture.mex"), b"module").unwrap();
+    let root_manifest = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!(
+            "{root_manifest}\n[mex-artifacts.fixture]\nmanifest = \"mex/fixture.mex.runmat.json\"\nmodule = \"mex/fixture.mex\"\n"
+        ),
+    )
+    .unwrap();
+
+    let error = build_frozen_project(&manifest, BTreeSet::new())
+        .expect_err("portable host must reject a MEX package");
+    assert!(error.to_string().contains("mex"));
+
+    let frozen = build_frozen_project(
+        &manifest,
+        BTreeSet::from([runmat_package::HostCapability::Mex]),
+    )
+    .unwrap();
+    let [artifact] = frozen.mex_artifacts.as_slice() else {
+        panic!("expected one MEX artifact");
+    };
+    assert_eq!(artifact.name, "fixture");
+    assert_eq!(
+        artifact.manifest_digest,
+        runmat_package::ContentDigest::sha256(b"manifest")
+    );
+    assert_eq!(
+        artifact.module_digest,
+        runmat_package::ContentDigest::sha256(b"module")
+    );
+    assert_eq!(
+        artifact.module_path,
+        temp.path().join("mex/fixture.mex").canonicalize().unwrap()
+    );
+}
+
+#[test]
 fn missing_dependency_manifest_is_a_package_loader_error() {
     let temp = TempDir::new().unwrap();
     fs::create_dir_all(temp.path().join("src")).unwrap();

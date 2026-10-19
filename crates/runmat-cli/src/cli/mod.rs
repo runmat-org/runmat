@@ -3,6 +3,8 @@ mod cluster;
 mod execution_target;
 mod fea;
 mod job;
+mod mex;
+mod native_interface;
 mod package;
 mod parse;
 mod remote;
@@ -18,6 +20,8 @@ pub use cluster::{
 pub use execution_target::{ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
 pub use fea::{FeaCommand, FeaRootArgs};
 pub use job::{JobCommand, JobRecoveryCommand};
+pub use mex::MexArgs;
+pub use native_interface::{NativeInterfaceCommand, NativeInterfacePrepareArgs};
 pub use package::{
     PackageCacheCommand, PackageCommand, PackageInspectArgs, PackageKeyCommand, PackageKeyTarget,
     PackageProjectArgs, PackagePublishArgs,

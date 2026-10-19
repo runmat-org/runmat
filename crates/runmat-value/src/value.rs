@@ -1,3 +1,4 @@
+use crate::callable::CallableInstanceKind;
 use crate::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,9 +25,11 @@ pub enum Value {
     /// Dense symbolic array with column-major shape semantics.
     SymbolicArray(SymbolicArray),
     Cell(CellArray),
-    // Struct (scalar or nested). Struct arrays are represented in higher layers;
-    // this variant holds a single struct's fields.
+    /// Scalar structure value. Empty and nonscalar structure arrays use
+    /// [`Value::StructArray`].
     Struct(StructValue),
+    /// Empty or nonscalar structure array with an explicit homogeneous schema.
+    StructArray(StructArray),
     // GPU-resident tensor handle (opaque; buffer managed by backend)
     GpuTensor(runmat_accelerate_api::GpuTensorHandle),
     // Simple object instance until full class system lands
@@ -38,20 +41,17 @@ pub enum Value {
     /// Event listener handle for events
     Listener(Listener),
     /// Multiple outputs captured as a list (internal destructuring helper)
-    OutputList(Vec<Value>),
+    OutputList(OutputListStorage),
     // Function handle pointing to a named function (builtin or user)
-    FunctionHandle(String),
+    FunctionHandle(NamedFunctionHandle),
     // Function handle whose resolution must stay at the external boundary.
-    ExternalFunctionHandle(String),
+    ExternalFunctionHandle(NamedFunctionHandle),
     // Function handle preserving typed method identity.
-    MethodFunctionHandle(String),
+    MethodFunctionHandle(NamedFunctionHandle),
     // Function handle with compiler/session semantic identity.
-    BoundFunctionHandle {
-        name: String,
-        function: usize,
-    },
+    BoundFunctionHandle(BoundFunctionHandle),
     Closure(Closure),
-    ClassRef(String),
+    ClassRef(runmat_types::ClassIdentity),
     MException(MException),
     /// Lazy executable work owned by the active runtime execution service.
     Future(runmat_execution::FutureHandle),
@@ -61,6 +61,72 @@ pub enum Value {
     Pool(runmat_execution::PoolHandle),
     /// Durable batch execution capability.
     Job(runmat_execution::JobHandle),
+    /// A distributed array whose partitions remain owned by an execution
+    /// service. The handle carries identity and fencing, never array payloads.
+    Distributed(Box<runmat_execution::DistributedValueHandle>),
+    /// Per-rank values retained by an SPMD gang. Entries are resolved through
+    /// the owning execution service rather than embedded in the language value.
+    Composite(Box<runmat_execution::CompositeHandle>),
     /// Opaque resource owned by a foreign runtime host and fenced by generation.
     Foreign(ForeignRef),
+}
+
+impl Value {
+    pub fn output_list(values: impl Into<OutputListStorage>) -> Self {
+        Self::OutputList(values.into())
+    }
+
+    pub fn function_handle(name: String) -> Self {
+        Self::FunctionHandle(NamedFunctionHandle::new(name))
+    }
+
+    pub fn external_function_handle(name: String) -> Self {
+        Self::ExternalFunctionHandle(NamedFunctionHandle::new(name))
+    }
+
+    pub fn method_function_handle(name: String) -> Self {
+        Self::MethodFunctionHandle(NamedFunctionHandle::new(name))
+    }
+
+    pub fn bound_function_handle(
+        name: String,
+        function: usize,
+        authority: BoundFunctionAuthority,
+        source_role: runmat_types::FunctionSourceRole,
+        source_file: Option<String>,
+    ) -> Self {
+        Self::BoundFunctionHandle(BoundFunctionHandle::new(
+            name,
+            function,
+            authority,
+            source_role,
+            source_file,
+        ))
+    }
+
+    pub fn callable_instance_key(&self) -> Option<CallableInstanceKey> {
+        match self {
+            Self::FunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Workspace,
+                handle.instance_id(),
+            )),
+            Self::ExternalFunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::External,
+                handle.instance_id(),
+            )),
+            Self::MethodFunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Method,
+                handle.instance_id(),
+            )),
+            Self::BoundFunctionHandle(handle) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Bound,
+                handle.instance_id(),
+            )),
+            Self::Closure(closure) => Some(CallableInstanceKey::new(
+                CallableInstanceKind::Closure,
+                closure.instance_id(),
+            )),
+            _ => None,
+        }
+    }
 }

@@ -10,7 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 futures = "0.3"
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-hir = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-native-codegen = { workspace = true, features = ["compiler"] }
@@ -35,3 +35,8 @@ runmat-runtime = { workspace = true, features = ["plot-web"] }
 runmat-builtins = { workspace = true }
 runmat-gc = { workspace = true }
 runmat-value = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+anyhow = { workspace = true }
+runmat-accelerate = { workspace = true }
+runmat-accelerate-api = { workspace = true }

@@ -22,7 +22,6 @@ fn accelerate_config_converts_to_runtime_options() {
             enabled: false,
             calibrate: false,
             log_level: AutoOffloadLogLevel::Info,
-            ..Default::default()
         },
     };
 

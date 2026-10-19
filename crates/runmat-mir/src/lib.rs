@@ -1,4 +1,6 @@
+#[cfg(feature = "compiler")]
 pub mod analysis;
+#[cfg(feature = "compiler")]
 pub mod lowering;
 pub mod parallel;
 
@@ -9,10 +11,13 @@ mod async_;
 mod block;
 mod body;
 mod call;
+#[cfg(feature = "compiler")]
 mod diagnostics;
+mod expression_region;
 mod function;
 mod ids;
 mod indexing;
+mod lexical_environment;
 mod operand;
 mod place;
 mod remap;
@@ -26,16 +31,22 @@ pub use block::*;
 pub use body::*;
 pub use call::*;
 pub use construct::*;
+#[cfg(feature = "compiler")]
 pub use diagnostics::*;
+pub use expression_region::*;
 pub use function::*;
 pub use ids::*;
 pub use indexing::*;
+pub use lexical_environment::*;
 pub use operand::*;
 pub use place::*;
-pub use remap::remap_function_ids;
+pub use remap::{remap_closed_function_ids, remap_function_ids};
 pub use rvalue::*;
 pub use stmt::*;
 pub use terminator::*;
 
 /// Portable schema for [`MirAssembly`] payloads retained in executable units.
-pub const MIR_SCHEMA_VERSION: u16 = 3;
+/// Version 14 identifies admitted incoming-workspace locals separately from
+/// newly declared locals so their entry initialization survives serialization.
+/// Version 16 adds external deferred targets (`MirRvalue::ExternalFuture`).
+pub const MIR_SCHEMA_VERSION: u16 = 16;

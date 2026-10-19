@@ -14,7 +14,8 @@ use crate::cli::value_types::{
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
 use crate::cli::{
-    BatchCommand, ClusterCommand, ExecutionTargetArgs, FeaCommand, JobCommand, PackageCommand,
+    BatchCommand, ClusterCommand, ExecutionTargetArgs, FeaCommand, JobCommand, MexArgs,
+    NativeInterfaceCommand, PackageCommand,
 };
 
 #[derive(Parser, Clone)]
@@ -47,6 +48,8 @@ Examples:
   runmat --no-jit                          # Start REPL with interpreter only
   runmat --gc-preset low-latency           # Optimize GC for low latency
   runmat script.m                          # Execute MATLAB/Octave script
+  runmat < script.m                        # Execute stdin as one script
+  runmat -                                 # Explicit stdin script alias
   runmat --emit-bytecode script.m           # Emit bytecode disassembly
   runmat version --detailed                # Show detailed version information
 "#,
@@ -303,12 +306,30 @@ pub enum Commands {
         /// Explicit system linker driver
         #[arg(long)]
         linker: Option<PathBuf>,
+        /// Canonical selected target-pack manifest (requires separate host admission)
+        #[arg(long, requires_all = ["selected_components", "selected_host_admission"], conflicts_with = "linker")]
+        selected_pack_manifest: Option<PathBuf>,
+        /// Directory of raw target-pack components, addressed by component ID
+        #[arg(long, requires_all = ["selected_pack_manifest", "selected_host_admission"])]
+        selected_components: Option<PathBuf>,
+        /// Independent operator-issued target, capability and qualified-link admission
+        #[arg(long, requires_all = ["selected_pack_manifest", "selected_components"])]
+        selected_host_admission: Option<PathBuf>,
         /// Retain temporary object, archive, and response-file inputs
         #[arg(long)]
         keep_temps: bool,
         /// Replace an existing output after preserving it until publication succeeds
         #[arg(short, long)]
         force: bool,
+    },
+    /// Build C, C++, Fortran, or CUDA sources into a platform-native MEX module
+    Mex(MexArgs),
+    /// Build CUDA sources into a GPU MEX module with nvcc
+    Mexcuda(MexArgs),
+    /// Prepare and inspect native shared-library interfaces
+    NativeInterface {
+        #[command(subcommand)]
+        command: NativeInterfaceCommand,
     },
     /// Check a MATLAB script or FEA document without running it
     Check {
@@ -339,7 +360,11 @@ pub enum Commands {
         detailed: bool,
     },
     /// Show system information
-    Info,
+    Info {
+        /// Emit versioned, machine-readable compiled runtime feature facts
+        #[arg(long)]
+        json: bool,
+    },
     /// Show acceleration provider information
     AccelInfo {
         /// Output provider information and telemetry as JSON
@@ -349,11 +374,15 @@ pub enum Commands {
         #[arg(long)]
         reset: bool,
     },
-    /// Apply auto-offload calibration from suite telemetry results
+    /// Refresh authoritative calibration or inspect imported calibration data
     #[cfg(feature = "wgpu")]
     AccelCalibrate {
-        /// Path to suite results JSON produced by the benchmark harness
-        input: PathBuf,
+        /// Optional original-template input or diagnostic suite results JSON
+        #[arg(required_unless_present = "refresh", conflicts_with = "refresh")]
+        input: Option<PathBuf>,
+        /// Measure current original CPU templates using the existing calibration owner
+        #[arg(long)]
+        refresh: bool,
         /// Preview updates without persisting the calibration cache
         #[arg(long)]
         dry_run: bool,
@@ -500,6 +529,30 @@ mod tests {
         AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, FeaCommand, MeshSourceUnitsArg,
     };
     use clap::Parser;
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn calibration_refresh_and_input_are_exclusive_and_dry_run_is_preserved() {
+        let cli =
+            Cli::try_parse_from(["runmat", "accel-calibrate", "--refresh", "--dry-run"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::AccelCalibrate {
+                input: None,
+                refresh: true,
+                dry_run: true,
+                ..
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["runmat", "accel-calibrate", "results.json", "--refresh"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["runmat", "accel-calibrate"]).is_err());
+        assert!(
+            Cli::try_parse_from(["runmat", "accel-calibrate", "results.json", "--dry-run"]).is_ok()
+        );
+    }
 
     #[test]
     fn public_namespace_ids_parse_and_foreign_namespaces_are_rejected() {
@@ -822,6 +875,56 @@ mod tests {
             link_plan_json.as_deref(),
             Some(std::path::Path::new("build/main.link.json"))
         );
+    }
+
+    #[test]
+    fn selected_compile_requires_separate_pack_and_host_admission_inputs() {
+        let selected = Cli::try_parse_from([
+            "runmat",
+            "compile",
+            "main.m",
+            "--policy",
+            "dynamic-runtime",
+            "--selected-pack-manifest",
+            "pack.json",
+            "--selected-components",
+            "pack-bytes",
+            "--selected-host-admission",
+            "qualified-host.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            selected.command,
+            Some(Commands::Compile {
+                selected_pack_manifest: Some(_),
+                selected_components: Some(_),
+                selected_host_admission: Some(_),
+                linker: None,
+                ..
+            })
+        ));
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "compile",
+            "main.m",
+            "--selected-pack-manifest",
+            "pack.json",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "compile",
+            "main.m",
+            "--selected-pack-manifest",
+            "pack.json",
+            "--selected-components",
+            "pack-bytes",
+            "--selected-host-admission",
+            "host.json",
+            "--linker",
+            "/usr/bin/cc",
+        ])
+        .is_err());
     }
 
     #[test]

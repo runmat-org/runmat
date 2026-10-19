@@ -1,10 +1,9 @@
 //! MATLAB-compatible `strtrim` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRTRIM_ERROR_CELL_ELEMENT, STRTRIM_ERROR_INTERNAL,
+    STRTRIM_ERROR_INVALID_INPUT, STRTRIM_STRING_CELL_EXTENSION,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
 
@@ -14,8 +13,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+    cell_has_valid_string_scalar, char_row_to_string_slice,
+    contains_numeric_or_resident_text_input, is_missing_string,
 };
+#[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -33,7 +34,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Executes on the CPU; GPU-resident inputs are gathered to host memory before trimming whitespace.",
+        "Executes on host text; resident numeric inputs reject before provider access or gathering.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -46,73 +47,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
+    notes: "Host text transformation; not eligible for fusion. Resident numeric inputs reject.",
 };
 
 const BUILTIN_NAME: &str = "strtrim";
-
-const STRTRIM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Trimmed text preserving input container kind and shape.",
-}];
-
-const STRTRIM_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String/char/cell text input to trim.",
-}];
-
-const STRTRIM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = strtrim(str)",
-    inputs: &STRTRIM_INPUTS,
-    outputs: &STRTRIM_OUTPUT,
-}];
-
-const STRTRIM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRTRIM.INVALID_INPUT",
-    identifier: Some("RunMat:strtrim:InvalidInput"),
-    when: "Input is not a string array, character array, or cell array of text scalars.",
-    message:
-        "strtrim: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const STRTRIM_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRTRIM.CELL_ELEMENT",
-    identifier: Some("RunMat:strtrim:CellElement"),
-    when: "Cell array contains a non-text element or non-row char array element.",
-    message: "strtrim: cell array elements must be string scalars or character vectors",
-};
-
-const STRTRIM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRTRIM.INTERNAL",
-    identifier: Some("RunMat:strtrim:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "strtrim: internal error",
-};
-
-const STRTRIM_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    STRTRIM_ERROR_INVALID_INPUT,
-    STRTRIM_ERROR_CELL_ELEMENT,
-    STRTRIM_ERROR_INTERNAL,
-];
-
-pub const STRTRIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRTRIM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRTRIM_ERRORS,
-};
-
-pub const STRTRIM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "strtrim removes whitespace from text containers. Numeric, integer, and provider-resident values reject before provider access and are not interpreted as character codes.",
-};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
@@ -135,18 +73,18 @@ fn strtrim_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strtrim",
-    category = "strings/transform",
-    summary = "Remove leading and trailing whitespace from text inputs.",
-    keywords = "strtrim,trim,whitespace,strings,character array,text",
-    accel = "sink",
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::strtrim::STRTRIM_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::strtrim::STRTRIM_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
 async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
     if contains_numeric_or_resident_text_input(&value) {
         return Err(strtrim_error(&STRTRIM_ERROR_INVALID_INPUT));
+    }
+    if cell_has_valid_string_scalar(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRTRIM_STRING_CELL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
@@ -260,7 +198,11 @@ fn trim_string(text: String) -> String {
 }
 
 fn trim_whitespace(text: &str) -> String {
-    let trimmed = text.trim_matches(|c: char| c.is_whitespace());
+    let strict = !crate::compatibility::runmat_extensions_enabled();
+    let trimmed = text.trim_matches(|c: char| {
+        c.is_whitespace()
+            && (!strict || !matches!(c, '\u{0085}' | '\u{00A0}' | '\u{2007}' | '\u{202F}'))
+    });
     trimmed.to_string()
 }
 
@@ -346,6 +288,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_cell_array_mixed_content() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("  GPU  ")),
@@ -369,6 +312,44 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn strtrim_string_cell_is_mode_gated_before_gather() {
+        let cell = CellArray::new(vec![Value::String(" data ".into())], 1, 1).unwrap();
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                run_strtrim(Value::Cell(cell.clone())).expect_err("strict cellstr contract");
+            assert_eq!(
+                error.identifier(),
+                STRTRIM_STRING_CELL_EXTENSION.error_identifier
+            );
+            let scalar = StringArray::new(vec![" data ".into()], vec![1, 1]).unwrap();
+            let wrapped = CellArray::new(vec![Value::StringArray(scalar)], 1, 1).unwrap();
+            let error = run_strtrim(Value::Cell(wrapped)).expect_err("scalar string-array cell");
+            assert_eq!(
+                error.identifier(),
+                STRTRIM_STRING_CELL_EXTENSION.error_identifier
+            );
+        }
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = run_strtrim(Value::Cell(cell)).expect("RunMat text cell extension");
+        let Value::Cell(result) = result else {
+            panic!("cell output")
+        };
+        assert_eq!(result.get(0, 0).unwrap(), Value::String("data".into()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strtrim_invalid_mixed_cell_keeps_element_error() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let cell =
+            CellArray::new(vec![Value::String(" a ".into()), Value::Num(1.0)], 1, 2).unwrap();
+        let error = run_strtrim(Value::Cell(cell)).expect_err("invalid cell element");
+        assert_eq!(error.identifier(), STRTRIM_ERROR_CELL_ELEMENT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn strtrim_preserves_missing_strings() {
         let result =
             run_strtrim(Value::String("<missing>".into())).expect("strtrim missing string");
@@ -386,9 +367,31 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_trims_unicode_whitespace() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = Value::String("\u{00A0}RunMat\u{2003}".into());
         let result = run_strtrim(input).expect("strtrim unicode whitespace");
         assert_eq!(result, Value::String("RunMat".into()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strtrim_strict_preserves_significant_whitespace() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for significant in ['\u{0085}', '\u{00A0}', '\u{2007}', '\u{202F}'] {
+            let input = format!("  {significant}RunMat{significant}  ");
+            let expected = format!("{significant}RunMat{significant}");
+            assert_eq!(
+                run_strtrim(Value::String(input)).expect("strict string trim"),
+                Value::String(expected.clone())
+            );
+            assert_eq!(
+                run_strtrim(Value::CharArray(CharArray::new_row(&format!(
+                    "  {significant}RunMat{significant}  "
+                ))))
+                .expect("strict character trim"),
+                Value::CharArray(CharArray::new_row(&expected))
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -402,6 +405,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_cell_array_accepts_string_scalar() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let scalar = StringArray::new(vec![" padded ".into()], vec![1, 1]).unwrap();
         let cell = CellArray::new(vec![Value::StringArray(scalar)], 1, 1).unwrap();
         let trimmed = run_strtrim(Value::Cell(cell)).expect("strtrim cell string scalar");

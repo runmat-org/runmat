@@ -149,7 +149,7 @@ fn dimensions_from_single_argument(value: &Value) -> crate::BuiltinResult<Vec<us
     match value {
         Value::Num(_) | Value::Int(_) => Ok(vec![parse_scalar_size(value)?]),
         Value::Tensor(tensor) if tensor.len() == 1 => Ok(vec![parse_scalar_size(value)?]),
-        Value::Tensor(tensor) if tensor.shape.len() == 2 && tensor.shape[0] == 1 => (0..tensor
+        Value::Tensor(tensor) if tensor.shape().len() == 2 && tensor.shape()[0] == 1 => (0..tensor
             .len())
             .map(|index| {
                 parse_numeric_scalar_size(
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn gobjects_defaults_to_scalar_placeholder() {
         let tensor = tensor_from(block_on(gobjects_builtin(Vec::new())).unwrap());
-        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(tensor.shape(), &[1, 1]);
         assert_eq!(tensor.materialize_f64().len(), 1);
         assert!(tensor.materialize_f64()[0].is_nan());
     }
@@ -282,24 +282,24 @@ mod tests {
     #[test]
     fn gobjects_accepts_scalar_dims_and_size_vector() {
         let square = tensor_from(block_on(gobjects_builtin(vec![Value::Num(3.0)])).unwrap());
-        assert_eq!(square.shape, vec![3, 3]);
+        assert_eq!(square.shape(), &[3, 3]);
         assert!(square.materialize_f64().iter().all(|value| value.is_nan()));
 
         let rect = tensor_from(
             block_on(gobjects_builtin(vec![Value::Num(2.0), Value::Num(3.0)])).unwrap(),
         );
-        assert_eq!(rect.shape, vec![2, 3]);
+        assert_eq!(rect.shape(), &[2, 3]);
 
         let size_vec = Tensor::new(vec![4.0, 1.0], vec![1, 2]).unwrap();
         let vector =
             tensor_from(block_on(gobjects_builtin(vec![Value::Tensor(size_vec)])).unwrap());
-        assert_eq!(vector.shape, vec![4, 1]);
+        assert_eq!(vector.shape(), &[4, 1]);
     }
 
     #[test]
     fn gobjects_rejects_invalid_dimensions() {
         let negative = tensor_from(block_on(gobjects_builtin(vec![Value::Num(-1.0)])).unwrap());
-        assert_eq!(negative.shape, vec![0, 0]);
+        assert_eq!(negative.shape(), &[0, 0]);
         assert!(block_on(gobjects_builtin(vec![Value::Num(1.5)])).is_err());
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         assert!(block_on(gobjects_builtin(vec![Value::Tensor(matrix)])).is_err());
@@ -320,7 +320,7 @@ mod tests {
         ] {
             let tensor =
                 tensor_from(block_on(gobjects_builtin(vec![Value::Int(integer)])).unwrap());
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
         }
     }
 
@@ -334,7 +334,7 @@ mod tests {
         ] {
             let tensor =
                 tensor_from(block_on(gobjects_builtin(vec![Value::Int(integer)])).unwrap());
-            assert_eq!(tensor.shape, vec![0, 0]);
+            assert_eq!(tensor.shape(), &[0, 0]);
         }
         let tensor = tensor_from(
             block_on(gobjects_builtin(vec![
@@ -343,7 +343,7 @@ mod tests {
             ]))
             .unwrap(),
         );
-        assert_eq!(tensor.shape, vec![0, 3]);
+        assert_eq!(tensor.shape(), &[0, 3]);
     }
 
     #[test]
@@ -354,7 +354,7 @@ mod tests {
         )
         .expect("row");
         let tensor = tensor_from(block_on(gobjects_builtin(vec![Value::Tensor(row)])).unwrap());
-        assert_eq!(tensor.shape, vec![2, 3]);
+        assert_eq!(tensor.shape(), &[2, 3]);
 
         let column = Tensor::new(vec![2.0, 3.0], vec![2, 1]).expect("column");
         let error = block_on(gobjects_builtin(vec![Value::Tensor(column)])).unwrap_err();
@@ -368,6 +368,22 @@ mod tests {
         .is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn gobjects_low_rank_size_inputs_keep_scalar_before_row_vector_admission() {
+        let scalar = Tensor::new(vec![2.0], Vec::new()).expect("rank-zero scalar size");
+        let output = tensor_from(block_on(gobjects_builtin(vec![Value::Tensor(scalar)])).unwrap());
+        assert_eq!(output.shape(), &[2, 2]);
+
+        let rank_one = Tensor::new(vec![2.0, 3.0], vec![2]).expect("rank-one sizes");
+        let error = block_on(gobjects_builtin(vec![Value::Tensor(rank_one)])).unwrap_err();
+        assert_eq!(error.identifier(), GOBJECTS_ERROR_INVALID_SIZE.identifier);
+
+        let row = Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("row sizes");
+        let output = tensor_from(block_on(gobjects_builtin(vec![Value::Tensor(row)])).unwrap());
+        assert_eq!(output.shape(), &[2, 3]);
+    }
+
     #[test]
     fn gobjects_rejects_logical_and_resident_controls_before_provider_access() {
         for value in [
@@ -375,12 +391,16 @@ mod tests {
             Value::LogicalArray(
                 runmat_value::LogicalArray::new(vec![1], vec![1, 1]).expect("logical"),
             ),
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 999_991,
-                buffer_id: 999_991,
-                descriptor: Default::default(),
-            }),
+            Value::GpuTensor(
+                runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                    .allocate_zeroed(
+                        vec![1, 1],
+                        runmat_accelerate_api::NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .unwrap()
+                    .handle,
+            ),
         ] {
             let error = block_on(gobjects_builtin(vec![value])).unwrap_err();
             assert_eq!(error.identifier(), GOBJECTS_ERROR_INVALID_SIZE.identifier);

@@ -4,6 +4,8 @@
 //! and platform-aware sorting so builtins such as `ls` and `dir`
 //! can focus on their user-facing semantics.
 
+pub(crate) mod enumeration;
+
 #[cfg(not(windows))]
 use crate::builtins::common::env as runtime_env;
 use std::cmp::Ordering;

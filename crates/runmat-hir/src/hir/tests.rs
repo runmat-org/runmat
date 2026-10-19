@@ -13,10 +13,11 @@ fn assembly_owns_core_items() {
 
     let assembly = HirAssembly {
         bound_function_modifiers: Default::default(),
+        primary_source: None,
         modules: vec![HirModule {
             id: module,
             name: QualifiedName(vec![SymbolName("demo".into())]),
-            source_id: SourceId(0),
+            source_id: ProgramSourceId(0),
             source_unit: SourceUnitKind::ScriptFile,
             imports: vec![],
             top_level_functions: vec![],
@@ -94,6 +95,30 @@ fn function_abi_can_reuse_shared_input_output_binding() {
     assert_eq!(abi.fixed_inputs[0], abi.fixed_outputs[0]);
     assert_eq!(abi.implicit_nargin, Some(BindingId(1)));
     assert_eq!(abi.implicit_nargout, Some(BindingId(2)));
+}
+
+#[test]
+fn fixed_output_bindings_exclude_only_variadic_declaration() {
+    let mut abi = FunctionAbi {
+        fixed_inputs: vec![],
+        varargin: None,
+        fixed_outputs: vec![BindingId(0), BindingId(1)],
+        varargout: None,
+        implicit_nargin: None,
+        implicit_nargout: None,
+    };
+    assert_eq!(
+        abi.fixed_output_bindings().copied().collect::<Vec<_>>(),
+        abi.fixed_outputs
+    );
+    abi.varargout = Some(BindingId(1));
+    assert_eq!(
+        abi.fixed_output_bindings().copied().collect::<Vec<_>>(),
+        vec![BindingId(0)]
+    );
+    abi.fixed_outputs.remove(0);
+    assert_eq!(abi.fixed_output_bindings().count(), 0);
+    assert_eq!(abi.fixed_outputs, vec![BindingId(1)]);
 }
 
 #[test]

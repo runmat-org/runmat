@@ -123,7 +123,6 @@ pub(crate) fn execute<'a>(
 
 fn pipeline(provider: &WgpuProvider) -> Arc<SparseSpmvPipeline> {
     let mut cache = provider
-        .device_caches
         .sparse_pipelines
         .spmv
         .lock()

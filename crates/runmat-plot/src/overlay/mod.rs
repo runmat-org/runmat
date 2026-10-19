@@ -11,3 +11,10 @@ pub(crate) mod cad_overlay;
 
 #[path = "../gui/product_ui.rs"]
 pub(crate) mod product_ui;
+
+// egui 0.27 painted native rect strokes centered on their bounds. The
+// existing browser overlay used inside strokes. Preserve each presentation.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const OUTLINE_STROKE_KIND: egui::StrokeKind = egui::StrokeKind::Middle;
+#[cfg(target_arch = "wasm32")]
+pub(crate) const OUTLINE_STROKE_KIND: egui::StrokeKind = egui::StrokeKind::Inside;

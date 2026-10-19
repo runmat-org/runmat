@@ -1,201 +1,25 @@
+use runmat_builtins::SUBTITLE_INTEGER_AXES_EXTENSION;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    SUBTITLE_DESCRIPTOR, SUBTITLE_ERROR_INTERNAL, SUBTITLE_ERROR_INVALID_ARGUMENT,
+    SUBTITLE_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::{map_figure_error, parse_text_command};
+use super::op_common::{annotation_error, map_figure_error, parse_text_command};
 use super::state::set_figure_subtitle_for_axes;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
-
-pub const SUBTITLE_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "subtitle-integer-axes-handle",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "Allow typed-integer aliases for encoded axes handles",
-        error_identifier: Some("RunMat:compatibility:SubtitleIntegerAxesHandleExtension"),
-    };
-pub const SUBTITLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SUBTITLE_INTEGER_AXES_EXTENSION];
-const SUBTITLE_INTEGER_FONT_SIZE: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "FontSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents every native integer class for the FontSize property.",
-    }];
-const SUBTITLE_INTEGER_AXES: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat graphics handles are internally encoded numeric scalars; typed-integer aliases are separately gated.",
-    }];
-pub const SUBTITLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = subtitle(..., 'FontSize', integer_size)",
-        inputs: &SUBTITLE_INTEGER_FONT_SIZE,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The documented property crosses the graphics font-size boundary after exact scalar classification; the returned text handle is a host double scalar.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = subtitle(integer_ax, txt, ...)",
-        inputs: &SUBTITLE_INTEGER_AXES,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "RunMat mode parses the gated scalar exactly before resolving the encoded axes handle; strict mode rejects before graphics state access.",
-    },
-];
-
-const SUBTITLE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created/updated subtitle object.",
-}];
-
-const SUBTITLE_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "txt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Subtitle text (string/char/cellstr-like multiline forms).",
-}];
-
-const SUBTITLE_INPUTS_AX_TEXT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Subtitle text (string/char/cellstr-like multiline forms).",
-    },
-];
-
-const SUBTITLE_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Subtitle text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const SUBTITLE_INPUTS_AX_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Subtitle text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const SUBTITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = subtitle(txt)",
-        inputs: &SUBTITLE_INPUTS_TEXT,
-        outputs: &SUBTITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = subtitle(ax, txt)",
-        inputs: &SUBTITLE_INPUTS_AX_TEXT,
-        outputs: &SUBTITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = subtitle(txt, Name, Value, ...)",
-        inputs: &SUBTITLE_INPUTS_TEXT_PROPS,
-        outputs: &SUBTITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = subtitle(ax, txt, Name, Value, ...)",
-        inputs: &SUBTITLE_INPUTS_AX_TEXT_PROPS,
-        outputs: &SUBTITLE_OUTPUT_HANDLE,
-    },
-];
-
-const SUBTITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBTITLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:subtitle:InvalidArgument"),
-    when: "Axes handle, text payload, or property/value arguments are invalid.",
-    message: "subtitle: invalid argument",
-};
-
-const SUBTITLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBTITLE.INTERNAL",
-    identifier: Some("RunMat:subtitle:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "subtitle: internal operation failed",
-};
-
-const SUBTITLE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [SUBTITLE_ERROR_INVALID_ARGUMENT, SUBTITLE_ERROR_INTERNAL];
-
-pub const SUBTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUBTITLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SUBTITLE_ERRORS,
-};
 
 #[runtime_builtin(
     name = "subtitle",
-    category = "plotting",
-    summary = "Set subtitle text for the current or specified axes.",
-    keywords = "subtitle,plotting,title",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::subtitle::SUBTITLE_DESCRIPTOR),
-    extensions(crate::builtins::plotting::subtitle::SUBTITLE_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::subtitle::SUBTITLE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::subtitle"
 )]
 pub fn subtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &SUBTITLE_DESCRIPTOR,
+        &SUBTITLE_ERROR_TOO_MANY_OUTPUTS,
+        "subtitle",
+    )?;
     if args.len() >= 2
         && args
             .first()
@@ -206,14 +30,16 @@ pub fn subtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "subtitle",
         )?;
     }
-    let command = parse_text_command("subtitle", &args)?;
-    set_figure_subtitle_for_axes(
-        command.target.0,
-        command.target.1,
-        &command.text,
-        command.style,
-    )
-    .map_err(|err| map_figure_error("subtitle", err))
+    let command = parse_text_command("subtitle", &args)
+        .map_err(|error| annotation_error("subtitle", &SUBTITLE_ERROR_INVALID_ARGUMENT, error))?;
+    let target = command.resolve_target();
+    set_figure_subtitle_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
+        annotation_error(
+            "subtitle",
+            &SUBTITLE_ERROR_INTERNAL,
+            map_figure_error("subtitle", err),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -391,5 +217,20 @@ mod tests {
         ])
         .expect("extension mode accepts a typed integer axes alias");
         assert!(handle.is_finite());
+    }
+}
+
+#[cfg(test)]
+mod output_contract_tests {
+    #[test]
+    fn missing_required_input_uses_identity_diagnostic() {
+        let error = super::subtitle_builtin(vec![]).expect_err("missing annotation input");
+        assert_eq!(error.identifier(), Some("RunMat:subtitle:InvalidArgument"));
+    }
+    #[test]
+    fn excessive_outputs_reject_before_argument_or_graphics_effects() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = super::subtitle_builtin(vec![]).expect_err("excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:subtitle:TooManyOutputs"));
     }
 }

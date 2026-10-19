@@ -372,6 +372,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fcontour",
+    execution_stack = "process",
     category = "plotting",
     summary = "Plot contour lines of a function over a 2-D domain.",
     keywords = "fcontour,function contour,contour,plotting",
@@ -546,7 +547,7 @@ fn is_function_handle(value: &Value) -> bool {
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle { .. }
+            | Value::BoundFunctionHandle(_)
             | Value::Closure(_)
     )
 }
@@ -748,7 +749,7 @@ fn is_contour_pair_option(token: &str) -> bool {
 }
 
 fn ensure_numeric_vector_shape(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
-    let shape = &tensor.shape;
+    let shape = tensor.shape();
     if shape.len() != 2 || (shape[0] != 1 && shape[1] != 1) {
         return Err(fcontour_invalid(format!(
             "{role} must be a row or column vector"
@@ -1036,6 +1037,7 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
 
 fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> BuiltinResult<f64> {
     apply_axes_target(parsed.target_axes, BUILTIN_NAME)?;
+    let function_ref = function_surface_ref(&parsed.function, BUILTIN_NAME)?;
     let mut contour = Some(sampled.contour);
     let mut fill = sampled.fill;
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -1070,12 +1072,11 @@ fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> Builtin
         parsed.mesh_density,
         (parsed.domain.x_min, parsed.domain.x_max),
         (parsed.domain.y_min, parsed.domain.y_max),
-        function_surface_ref(&parsed.function),
+        function_ref,
         parsed.fill,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(err);
@@ -1106,12 +1107,28 @@ mod tests {
         ]
     }
 
-    fn with_test_function(
-        f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
-    ) -> crate::user_functions::FunctionInvokerGuard {
+    struct TestFunction {
+        runtime: crate::context::RuntimeContext,
+        binding: runmat_value::BoundFunctionBinding,
+        _bound: crate::user_functions::BoundFunctionInvokerGuard,
+        _numeric: crate::user_functions::FunctionInvokerGuard,
+    }
+
+    impl TestFunction {
+        fn value(&self) -> Value {
+            crate::user_functions::test_support::exact_local_value("surface", self.binding.clone())
+        }
+    }
+
+    fn with_test_function(f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static) -> TestFunction {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 1);
+        let entry = runtime.enter();
         let f = Arc::new(f);
-        crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+        let bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let numeric = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 1);
                 let f = Arc::clone(&f);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
@@ -1121,9 +1138,21 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(f(x, y))) })
+                Box::pin(async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        f(x, y),
+                    ))
+                })
             },
         )))
+        .expect("call-port scope");
+        drop(entry);
+        TestFunction {
+            runtime,
+            binding,
+            _bound: bound,
+            _numeric: numeric,
+        }
     }
 
     #[test]
@@ -1143,13 +1172,11 @@ mod tests {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         let _ = clear_figure(None);
-        let _invoker = with_test_function(|x, y| x * x + y);
+        let fixture = with_test_function(|x, y| x * x + y);
+        let _entry = fixture.runtime.enter();
 
-        let handle = block_on(fcontour_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let handle = block_on(fixture.runtime.scope(fcontour_builtin(vec![
+            fixture.value(),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(5.0),
@@ -1159,7 +1186,7 @@ mod tests {
             Value::Num(2.0),
             Value::String("DisplayName".into()),
             Value::String("parabola".into()),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -1196,21 +1223,19 @@ mod tests {
             Value::Num(2.0),
         )
         .unwrap();
-        let _invoker = with_test_function(|x, y| x - y);
+        let fixture = with_test_function(|x, y| x - y);
+        let _entry = fixture.runtime.enter();
 
-        let handle = block_on(fcontour_builtin(vec![
+        let handle = block_on(fixture.runtime.scope(fcontour_builtin(vec![
             Value::Num(ax),
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            fixture.value(),
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, -1.0, 1.0], vec![1, 4]).unwrap(),
             ),
             Value::String("r--".into()),
             Value::String("MeshDensity".into()),
             Value::Num(3.0),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -1224,18 +1249,16 @@ mod tests {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         let _ = clear_figure(None);
-        let _invoker = with_test_function(|x, y| x + y);
+        let fixture = with_test_function(|x, y| x + y);
+        let _entry = fixture.runtime.enter();
 
-        let handle = block_on(fcontour_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let handle = block_on(fixture.runtime.scope(fcontour_builtin(vec![
+            fixture.value(),
             Value::String("MeshDensity".into()),
             Value::Int(IntValue::U8(3)),
             Value::String("Fill".into()),
             Value::Int(IntValue::U16(1)),
-        ]))
+        ])))
         .unwrap();
 
         let fill = get_builtin(vec![Value::Num(handle), Value::String("Fill".into())]).unwrap();
@@ -1253,15 +1276,13 @@ mod tests {
     fn fcontour_rejects_invalid_mesh_density() {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
-        let _invoker = with_test_function(|x, y| x + y);
-        let err = block_on(fcontour_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+        let fixture = with_test_function(|x, y| x + y);
+        let _entry = fixture.runtime.enter();
+        let err = block_on(fixture.runtime.scope(fcontour_builtin(vec![
+            fixture.value(),
             Value::String("MeshDensity".into()),
             Value::Num(1.0),
-        ]))
+        ])))
         .expect_err("expected mesh-density validation error");
         assert_eq!(err.identifier(), FCONTOUR_ERROR_INVALID_ARGUMENT.identifier);
     }
@@ -1285,6 +1306,18 @@ mod tests {
         )
         .unwrap();
         assert!(parse_domain(&Value::Tensor(matrix)).is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn fcontour_domain_rejects_low_rank_tensor_vectors() {
+        for (shape, data) in [(Vec::new(), vec![-2.0]), (vec![2], vec![-2.0, 2.0])] {
+            let value = Value::Tensor(Tensor::new(data, shape).expect("domain tensor"));
+            let error = parse_domain(&value)
+                .err()
+                .expect("low-rank domain tensor must be rejected");
+            assert!(error.message().contains("row or column vector"));
+        }
     }
 
     #[test]
@@ -1346,13 +1379,8 @@ mod tests {
 
     #[test]
     fn fcontour_positional_integer_levels_require_runmat_extension_mode() {
-        let args = vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
-            Value::Int(IntValue::U8(5)),
-        ];
+        let fixture = with_test_function(|x, y| x + y);
+        let args = vec![fixture.value(), Value::Int(IntValue::U8(5))];
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = parse_fcontour_args(args.clone())

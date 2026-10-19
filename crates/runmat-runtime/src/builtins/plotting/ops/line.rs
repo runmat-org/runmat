@@ -210,8 +210,7 @@ pub async fn line_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .collect::<Vec<_>>();
 
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(plotting_error(BUILTIN_NAME, err.to_string()));
         }
     }
@@ -471,28 +470,22 @@ async fn build_2d_objects(
     }
 
     if let (Some(x_gpu), Some(y_gpu)) = (x.gpu_handle(), y.gpu_handle()) {
-        if x.len() == y.len()
-            && x.len() >= 2
-            && is_gpu_vector_shape(&x_gpu.shape)
-            && is_gpu_vector_shape(&y_gpu.shape)
+        if let Some(mut plot) = super::plot::build_line_gpu_plot_async_for_builtin(
+            BUILTIN_NAME,
+            x_gpu,
+            y_gpu,
+            label,
+            &base_appearance,
+        )
+        .await?
         {
-            if let Ok(mut plot) = super::plot::build_line_gpu_plot_async_for_builtin(
-                BUILTIN_NAME,
-                x_gpu,
-                y_gpu,
-                label,
-                &base_appearance,
-            )
-            .await
-            {
-                if label.is_empty() {
-                    plot.label = None;
-                }
-                if let Some(visible) = visible {
-                    plot.set_visible(visible);
-                }
-                return Ok(vec![LineObject::TwoD(plot)]);
+            if label.is_empty() {
+                plot.label = None;
             }
+            if let Some(visible) = visible {
+                plot.set_visible(visible);
+            }
+            return Ok(vec![LineObject::TwoD(plot)]);
         }
     }
 
@@ -668,10 +661,6 @@ fn is_numeric_value(value: &Value) -> bool {
         value,
         Value::Tensor(_) | Value::GpuTensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_)
     )
-}
-
-fn is_gpu_vector_shape(shape: &[usize]) -> bool {
-    shape.len() <= 1 || shape.iter().filter(|&&dim| dim > 1).count() <= 1
 }
 
 fn line_err(message: impl Into<String>) -> crate::RuntimeError {

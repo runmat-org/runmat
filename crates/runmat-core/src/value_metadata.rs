@@ -23,32 +23,28 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::CharArray(_) => "char".to_string(),
         Value::Symbolic(_) | Value::SymbolicArray(_) => "sym".to_string(),
         Value::Cell(_) => "cell".to_string(),
-        Value::Struct(_) => "struct".to_string(),
+        Value::Struct(_) | Value::StructArray(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => "function_handle".to_string(),
-        Value::HandleObject(handle) => {
-            if handle.class_name.is_empty() {
-                "handle".to_string()
-            } else {
-                handle.class_name.clone()
-            }
-        }
+        Value::HandleObject(handle) => handle.class_name.to_string(),
         Value::Listener(_) => "event.listener".to_string(),
         // Internal destructuring helper; shouldn't surface in user-facing values,
         // but handle it defensively for completeness.
         Value::OutputList(_) => "OutputList".to_string(),
         Value::ObjectArray(array) => array.class_name().to_string(),
-        Value::Object(obj) => obj.class_name.clone(),
+        Value::Object(obj) => obj.class_name.to_string(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
         Value::Future(_) => "parallel.Future".to_string(),
         Value::Task(_) => "parallel.Task".to_string(),
         Value::Pool(_) => "parallel.Pool".to_string(),
         Value::Job(_) => "parallel.Job".to_string(),
+        Value::Distributed(_) => "distributed".to_string(),
+        Value::Composite(_) => "Composite".to_string(),
         Value::Foreign(reference) => reference.type_identity.name.clone(),
     }
 }
@@ -63,21 +59,32 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         | Value::Symbolic(_)
         | Value::Foreign(_) => Some(vec![1, 1]),
         Value::SymbolicArray(arr) => Some(arr.shape.clone()),
-        Value::LogicalArray(arr) => Some(arr.shape.clone()),
+        Value::LogicalArray(arr) => Some(arr.shape.as_slice().to_vec()),
         Value::StringArray(sa) => Some(sa.shape.clone()),
         Value::String(s) => Some(vec![1, s.chars().count()]),
         Value::CharArray(ca) => Some(ca.shape.clone()),
-        Value::Tensor(t) => Some(t.shape.clone()),
+        Value::Tensor(t) => Some(t.shape().to_vec()),
         Value::SparseTensor(s) => Some(vec![s.rows, s.cols]),
-        Value::ComplexTensor(t) => Some(t.shape.clone()),
+        Value::ComplexTensor(t) => Some(t.shape().to_vec()),
         Value::Cell(ca) => Some(ca.shape.clone()),
-        Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        Value::StructArray(array) => Some(array.shape().to_vec()),
+        Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
+        Value::Distributed(handle) => handle
+            .global_shape
+            .iter()
+            .copied()
+            .map(usize::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .ok(),
+        Value::Composite(_) => Some(vec![1, 1]),
         Value::ObjectArray(array) => Some(array.shape().to_vec()),
-        Value::Object(obj) if obj.is_class("datetime") => match obj.properties.get("__serial") {
-            Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
-            Some(Value::Num(_)) => Some(vec![1, 1]),
-            _ => None,
-        },
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
+            match obj.properties.get("__serial") {
+                Some(Value::Tensor(tensor)) => Some(tensor.shape().to_vec()),
+                Some(Value::Num(_)) => Some(vec![1, 1]),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -90,6 +97,22 @@ pub fn numeric_dtype_label(value: &Value) -> Option<&'static str> {
         Value::SparseTensor(s) => Some(s.class_name()),
         Value::LogicalArray(_) => Some("logical"),
         Value::Int(iv) => Some(iv.class_name()),
+        Value::Distributed(handle) => match &handle.value.kind {
+            runmat_types::ValueKindFact::Numeric(numeric) => Some(match numeric.class {
+                runmat_types::NumericClass::Double => "double",
+                runmat_types::NumericClass::Single => "single",
+                runmat_types::NumericClass::Int8 => "int8",
+                runmat_types::NumericClass::UInt8 => "uint8",
+                runmat_types::NumericClass::Int16 => "int16",
+                runmat_types::NumericClass::UInt16 => "uint16",
+                runmat_types::NumericClass::Int32 => "int32",
+                runmat_types::NumericClass::UInt32 => "uint32",
+                runmat_types::NumericClass::Int64 => "int64",
+                runmat_types::NumericClass::UInt64 => "uint64",
+            }),
+            runmat_types::ValueKindFact::Logical => Some("logical"),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -155,7 +178,8 @@ pub fn preview_numeric_values(
             false,
         )),
         Value::Tensor(t) => Some(preview_tensor(t, limit)),
-        Value::SparseTensor(s) => Some(preview_sparse_tensor(s, limit)),
+        Value::SparseTensor(s) if !s.is_complex() => Some(preview_sparse_tensor(s, limit)),
+        Value::SparseTensor(_) => None,
         Value::LogicalArray(arr) => Some(preview_logical_slice(arr, limit)),
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => None,
         Value::ComplexTensor(_) | Value::Complex(_, _) => None,
@@ -163,6 +187,7 @@ pub fn preview_numeric_values(
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -171,7 +196,7 @@ pub fn preview_numeric_values(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -179,6 +204,8 @@ pub fn preview_numeric_values(
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::GpuTensor(_) => None,
     }
@@ -240,7 +267,8 @@ mod tests {
     use super::*;
     use runmat_value::{
         ComplexTensor, ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignRef,
-        ForeignTypeIdentity, IntegerStorage, NumericDType, ObjectInstance, Tensor,
+        ForeignResourceKey, ForeignTypeIdentity, IntegerStorage, NumericDType, ObjectInstance,
+        Tensor,
     };
 
     #[test]
@@ -319,19 +347,21 @@ mod tests {
 
     #[test]
     fn foreign_reference_metadata_uses_declared_type_and_scalar_shape() {
-        let value = Value::Foreign(ForeignRef {
-            host_identity: "browser-main".into(),
-            handle: 5,
-            generation: 1,
-            type_identity: ForeignTypeIdentity {
+        let value = Value::Foreign(ForeignRef::detached(
+            ForeignResourceKey {
+                host_identity: "browser-main".into(),
+                handle: 5,
+                generation: 1,
+            },
+            ForeignTypeIdentity {
                 family: "web".into(),
                 name: "dom.Element".into(),
                 version: 1,
             },
-            ownership: ForeignOwnership::Borrowed,
-            affinity: ForeignAffinity::OriginThread,
-            lifetime: ForeignLifetime::External,
-        });
+            ForeignOwnership::Borrowed,
+            ForeignAffinity::OriginThread,
+            ForeignLifetime::External,
+        ));
         assert_eq!(matlab_class_name(&value), "dom.Element");
         assert_eq!(value_shape(&value), Some(vec![1, 1]));
         assert_eq!(preview_numeric_values(&value, 8), None);
@@ -367,6 +397,16 @@ mod tests {
                     .collect(),
                 true
             ))
+        );
+    }
+
+    #[test]
+    fn complex_sparse_values_do_not_claim_a_real_numeric_preview() {
+        let sparse = SparseTensor::new_complex(1, 1, vec![0, 1], vec![0], vec![(1.0, 2.0)])
+            .expect("complex sparse");
+        assert_eq!(
+            preview_numeric_values(&Value::SparseTensor(sparse), 1),
+            None
         );
     }
 

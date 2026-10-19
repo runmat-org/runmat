@@ -1010,7 +1010,16 @@ pub(crate) mod tests {
             .expect("upload");
         let err = run_strip(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
         assert_eq!(err.to_string(), STRIP_ERROR_INVALID_INPUT.message);
-        provider.free(&handle).ok();
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("borrowed input remains live");
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().expect("release final fixture reference");
+        assert!(
+            physical.acquire().is_none(),
+            "physical lease must expire after final release"
+        );
     }
 
     #[test]

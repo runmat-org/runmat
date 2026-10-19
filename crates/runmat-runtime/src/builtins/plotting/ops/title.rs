@@ -1,182 +1,34 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    TITLE_DESCRIPTOR, TITLE_ERROR_INTERNAL, TITLE_ERROR_INVALID_ARGUMENT,
+    TITLE_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::{map_figure_error, parse_numeric_text_command};
+use super::op_common::{annotation_error, map_figure_error, parse_numeric_text_command};
 use super::state::set_figure_title_for_axes;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
-
-const TITLE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created/updated title object.",
-}];
-
-const TITLE_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "txt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Title text (string/char/cellstr-like multiline forms).",
-}];
-
-const TITLE_INPUTS_AX_TEXT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Title text (string/char/cellstr-like multiline forms).",
-    },
-];
-
-const TITLE_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Title text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const TITLE_INPUTS_AX_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Title text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const TITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = title(txt)",
-        inputs: &TITLE_INPUTS_TEXT,
-        outputs: &TITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = title(ax, txt)",
-        inputs: &TITLE_INPUTS_AX_TEXT,
-        outputs: &TITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = title(txt, Name, Value, ...)",
-        inputs: &TITLE_INPUTS_TEXT_PROPS,
-        outputs: &TITLE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = title(ax, txt, Name, Value, ...)",
-        inputs: &TITLE_INPUTS_AX_TEXT_PROPS,
-        outputs: &TITLE_OUTPUT_HANDLE,
-    },
-];
-
-const TITLE_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "txt",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "A scalar integer title is formatted from its exact signed or unsigned decimal value.",
-    }];
-const TITLE_INTEGER_FONT_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "FontSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are documented for FontSize; accepted values are positive finite practical renderer sizes.",
-    }];
-pub const TITLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "h = title(integer_txt)", inputs: &TITLE_INTEGER_TEXT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The exact decimal spelling becomes the stored String property; the graphics handle remains an ordinary double handle." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = title(..., 'FontSize', integer_size)", inputs: &TITLE_INTEGER_FONT_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "FontSize crosses the client-renderer scalar boundary only after the shared positive finite size validation." },
-];
-
-const TITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TITLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:title:InvalidArgument"),
-    when: "Axes handle, text payload, or property/value arguments are invalid.",
-    message: "title: invalid argument",
-};
-
-const TITLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TITLE.INTERNAL",
-    identifier: Some("RunMat:title:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "title: internal operation failed",
-};
-
-const TITLE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [TITLE_ERROR_INVALID_ARGUMENT, TITLE_ERROR_INTERNAL];
-
-pub const TITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TITLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TITLE_ERRORS,
-};
 
 #[runtime_builtin(
     name = "title",
-    category = "plotting",
-    summary = "Set the title text for the current or specified axes.",
-    keywords = "title,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::title::TITLE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::title::TITLE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::title"
 )]
 pub fn title_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let command = parse_numeric_text_command("title", &args)?;
-    set_figure_title_for_axes(
-        command.target.0,
-        command.target.1,
-        &command.text,
-        command.style,
-    )
-    .map_err(|err| map_figure_error("title", err))
+    crate::output_count::validate_fixed_outputs(
+        &TITLE_DESCRIPTOR,
+        &TITLE_ERROR_TOO_MANY_OUTPUTS,
+        "title",
+    )?;
+    let command = parse_numeric_text_command("title", &args)
+        .map_err(|error| annotation_error("title", &TITLE_ERROR_INVALID_ARGUMENT, error))?;
+    let target = command.resolve_target();
+    set_figure_title_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
+        annotation_error(
+            "title",
+            &TITLE_ERROR_INTERNAL,
+            map_figure_error("title", err),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -226,6 +78,28 @@ mod tests {
             fig.axes_metadata(0).and_then(|m| m.title.as_deref()),
             Some("Signal")
         );
+    }
+
+    #[test]
+    fn numeric_text_with_property_pair_is_not_interpreted_as_axes_target() {
+        let _guard = setup_plot_tests();
+        let handle = title_builtin(vec![
+            Value::Num(42.0),
+            Value::String("FontSize".into()),
+            Value::Num(12.0),
+        ])
+        .expect("numeric text with a complete property pair");
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(
+            fig.axes_metadata(0).and_then(|meta| meta.title.as_deref()),
+            Some("42")
+        );
+        let value = crate::builtins::plotting::get::get_builtin(vec![
+            Value::Num(handle),
+            Value::String("FontSize".into()),
+        ])
+        .unwrap();
+        assert_eq!(value, Value::Num(12.0));
     }
 
     #[test]
@@ -332,5 +206,20 @@ mod tests {
                 .and_then(|metadata| metadata.title.as_deref()),
             Some("18446744073709551615")
         );
+    }
+}
+
+#[cfg(test)]
+mod output_contract_tests {
+    #[test]
+    fn missing_required_input_uses_identity_diagnostic() {
+        let error = super::title_builtin(vec![]).expect_err("missing annotation input");
+        assert_eq!(error.identifier(), Some("RunMat:title:InvalidArgument"));
+    }
+    #[test]
+    fn excessive_outputs_reject_before_argument_or_graphics_effects() {
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let error = super::title_builtin(vec![]).expect_err("excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:title:TooManyOutputs"));
     }
 }

@@ -77,7 +77,12 @@ The execution path resets and drains per-thread runtime buffers around every req
 | Page | Purpose |
 | --- | --- |
 | [Async Execution](/docs/runtime/execution/async) | Where execution awaits host input, builtin futures, GPU/provider work, filesystem/network work, async semantic calls, and current RunMat async extensions. |
+| [Parallel Execution](/docs/runtime/execution/parallel) | How to use `parfor`, SPMD, distributed arrays, collectives, pools, futures, cancellation, and native, browser, or remote worker backends. |
 | [Errors & Diagnostics](/docs/runtime/execution/errors) | How syntax, semantic, compile, runtime, warning, `MException`, catch/rethrow, and WASM error payloads are represented. |
 | [Remote Execution](/docs/runtime/execution/remote) | How to configure clusters, enroll customer nodes, submit content-blind jobs and tests, use browser workers, drain nodes, and configure organization recovery. |
+| [Native Library Interfaces](/docs/runtime/execution/native-libraries) | How to prepare, declare, package, compile, distribute, and call native shared-library interfaces. |
+| [C, C++, and MEX Extensions](/docs/runtime/execution/mex) | How to build, call, package, isolate, and distribute C, modern C++, Fortran, and GPU MEX modules. |
+| [Java Interoperability](/docs/runtime/execution/java) | How to configure the JVM, call Java code, manage classpaths, use callbacks, and dispatch Desktop UI calls on the EDT. |
+| [Python Interoperability](/docs/runtime/execution/python) | How to configure CPython, use `py.*` and Python workspaces, package wheels, and choose in-process or isolated execution. |
 
 For request and workspace details, see [Session Engine](/docs/runtime/session). For instruction-level behavior, see [Interpreter Dispatch & Execution Loop](/docs/runtime/vm/interpreter). For JIT behavior, see [JIT Compiler](/docs/runtime/jit).

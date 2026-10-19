@@ -370,7 +370,13 @@ impl GuiThreadManager {
             }
 
             // Set the figure data
-            window.set_figure(*figure);
+            if let Err(error) = window.set_figure(*figure) {
+                return GuiOperationResult::Error {
+                    message: format!("Failed to prepare plot: {error}"),
+                    error_code: GuiErrorCode::PlatformError,
+                    recoverable: true,
+                };
+            }
 
             // Run the window (this will block until the window is closed)
             match window.run().await {

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use base64::Engine as _;
 use runmat_execution::identity::{PoolId, WorkerId};
-use runmat_execution::resource::{AcceleratorRequest, ResourceInventory};
+use runmat_execution::resource::ResourceInventory;
 use runmat_execution_artifact::encryption::{decode_run_key_envelope, PortableExecutionEncryption};
 use runmat_execution_runner::WorkerSpec;
 use runmat_execution_transport_native::frame::FrameLimits;
@@ -12,19 +12,8 @@ use sha2::{Digest as _, Sha256};
 use super::worker_entry::{run_remote_meshing_worker_relay_cached, RemoteWorkerRelayRequest};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkerResources {
-    cpu_millicores: u32,
-    memory_bytes: u64,
-    scratch_bytes: u64,
-    accelerator_count: u16,
-    accelerator_class: Option<String>,
-    accelerator_memory_bytes: u64,
-    maximum_wall_millis: u64,
-}
-
 pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
+    runmat_accelerate::initialize_acceleration_provider();
     let run_id = required("RUNMAT_EXECUTION_RUN_ID")?;
     let allocation_id = required("RUNMAT_EXECUTION_ALLOCATION_ID")?;
     let allocation_fence = parse_u64("RUNMAT_EXECUTION_ALLOCATION_FENCING_TOKEN")?;
@@ -52,22 +41,15 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
     let run_key = PortableExecutionEncryption
         .open_run_key(&private_key, &envelope, &endpoint_fingerprint, &run_id, 1)
         .map_err(protocol)?;
-    let resources: WorkerResources =
+    let resources: runmat_execution_transport_native::control::AllocatedResources =
         serde_json::from_str(&required("RUNMAT_EXECUTION_WORKER_RESOURCES")?).map_err(protocol)?;
-    if resources.maximum_wall_millis == 0 {
+    if resources.request.maximum_wall_millis == 0 {
         return Err(invalid("worker maximum wall time is zero"));
     }
-    let accelerators = match (resources.accelerator_count, resources.accelerator_class) {
-        (0, _) => Vec::new(),
-        (count, Some(class)) => vec![AcceleratorRequest {
-            class,
-            count,
-            memory_bytes_each: resources.accelerator_memory_bytes / u64::from(count),
-        }],
-        _ => return Err(invalid("worker accelerator class is missing")),
-    };
-    crate::accelerator_placement::validate_active_provider_for(&accelerators)?;
+    crate::accelerator_placement::validate_active_provider_for(&resources.request.accelerators)?;
+    let accelerators = resources.accelerator_devices;
     let mut capabilities = super::pool_resources::native_worker_capabilities()?;
+    capabilities.extend(super::worker_protocol::software_capabilities());
     capabilities.extend(accelerators.iter().map(|accelerator| {
         runmat_execution::resource::Capability::Accelerator(accelerator.class.clone())
     }));
@@ -75,12 +57,14 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
         id: WorkerId::derive(&[run_id.as_bytes(), allocation_id.as_bytes()]),
         pool_id: PoolId::derive(&[run_id.as_bytes(), b"remote-pool"]),
         resources: ResourceInventory {
-            cpu_millicores: resources.cpu_millicores,
-            memory_bytes: resources.memory_bytes,
-            scratch_bytes: resources.scratch_bytes,
+            cpu_millicores: u32::try_from(resources.request.cpu_millicores)
+                .map_err(|_| invalid("worker CPU allocation exceeds scheduler units"))?,
+            memory_bytes: resources.request.memory_bytes,
+            scratch_bytes: resources.request.scratch_bytes,
             accelerators,
             capabilities,
         },
+        host: resources.host,
     };
     let relay_url = worker_relay_url(
         &required("RUNMAT_EXECUTION_SERVER_URL")?,
@@ -106,6 +90,10 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
             session_id: session_id(&run_id, &allocation_id),
             run_key,
             limits: FrameLimits::default(),
+            ready_v1: std::env::var("RUNMAT_EXECUTION_WORKER_READY_V1")
+                .ok()
+                .as_deref()
+                == Some("1"),
         },
         Some(bundle_cache),
         std::sync::Arc::new(crate::native_meshing_kernel_dispatcher()),

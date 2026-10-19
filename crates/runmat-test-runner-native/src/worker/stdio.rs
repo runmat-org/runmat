@@ -1,6 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
 use runmat_core::RunMatSession;
 use runmat_test::discovery::FrozenTestRunSnapshot;
 use runmat_test::plan::TestPlan;
@@ -82,15 +79,28 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                     .await?;
                     continue;
                 }
+                if let Some(mut previous) = installed.take() {
+                    previous
+                        .session
+                        .shutdown_foreign_runtime()
+                        .await
+                        .map_err(|error| {
+                            protocol_error("failed to shut down the previous worker session", error)
+                        })?;
+                }
                 let enable_jit = std::env::var("RUNMAT_TEST_JIT").as_deref() != Ok("0");
                 let mut session =
                     RunMatSession::with_options(enable_jit, false).map_err(|error| {
                         protocol_error("failed to initialize worker session", error)
                     })?;
                 if let Some(project) = bootstrap.project.clone() {
-                    session.install_project_handoff(project).map_err(|error| {
-                        protocol_error("failed to install frozen worker project", error)
-                    })?;
+                    let project = issue_local_project_paths(project)?;
+                    session
+                        .install_project_handoff(project)
+                        .await
+                        .map_err(|error| {
+                            protocol_error("failed to install frozen worker project", error)
+                        })?;
                 }
                 let run_id = plan.run_id.clone();
                 installed = Some(InstalledRun {
@@ -111,13 +121,13 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                     .await?;
                     continue;
                 };
-                let cancellation = Arc::new(AtomicBool::new(false));
+                let cancellation = runmat_execution::cancellation::CancellationSource::new();
                 let execution = run.session.execute_planned_test(
                     &run.snapshot,
                     &run.plan,
                     &test_id,
                     attempt,
-                    cancellation.clone(),
+                    cancellation.token(),
                 );
                 tokio::pin!(execution);
                 let result = loop {
@@ -128,7 +138,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                                 WorkerRequest::Cancel { run_id, .. }
                                     if run_id == run.plan.run_id =>
                                 {
-                                    cancellation.store(true, Ordering::Relaxed);
+                                    cancellation.cancel(runmat_execution::CancellationReason::User);
                                 }
                                 WorkerRequest::Cancel { .. } => {
                                     reject(
@@ -183,11 +193,59 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                 .await?;
             }
             WorkerRequest::Shutdown => {
+                if let Some(mut run) = installed.take() {
+                    run.session
+                        .shutdown_foreign_runtime()
+                        .await
+                        .map_err(|error| {
+                            protocol_error("failed to shut down the worker session", error)
+                        })?;
+                }
                 write_response(&mut output, &WorkerResponse::ShutdownComplete, limits).await?;
                 return Ok(());
             }
         }
     }
+}
+
+/// The bootstrap identifies a project revision, not a portable access root.
+/// Issue the native worker's own local paths before Core derives attribution
+/// for frozen test files. The selected source bytes still come from the run
+/// snapshot; this step never rereads a test body.
+fn issue_local_project_paths(
+    mut handoff: runmat_package::FrozenProjectHandoff,
+) -> NativeRunnerResult<runmat_package::FrozenProjectHandoff> {
+    let root = std::fs::canonicalize(".")
+        .map_err(|error| protocol_error("native worker cannot issue its project root", error))?;
+    let original_root = handoff.project.workspace_root.clone();
+    let manifest_relative = handoff
+        .project
+        .manifest_path
+        .strip_prefix(&original_root)
+        .map_err(|_| {
+            NativeRunnerError::Protocol("native manifest is outside project root".into())
+        })?;
+    let manifest = std::fs::canonicalize(root.join(manifest_relative)).map_err(|error| {
+        protocol_error("native worker cannot locate its project manifest", error)
+    })?;
+    if manifest.parent() != Some(root.as_path()) {
+        return Err(NativeRunnerError::Protocol(
+            "native worker manifest is outside its project root".into(),
+        ));
+    }
+    for path in handoff.project.access_paths.values_mut() {
+        let issued = path
+            .strip_prefix(&original_root)
+            .map_or_else(|_| path.clone(), |relative| root.join(relative));
+        *path = std::fs::canonicalize(issued)
+            .map_err(|error| protocol_error("native worker cannot locate project source", error))?;
+    }
+    handoff.project.workspace_root = root;
+    handoff.project.manifest_path = manifest;
+    handoff
+        .validate()
+        .map_err(|error| protocol_error("native worker project remap is invalid", error))?;
+    Ok(handoff)
 }
 
 async fn reject(

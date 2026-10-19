@@ -1,5 +1,6 @@
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 pub(super) use super::defaults::default_true;
@@ -45,6 +46,19 @@ pub struct GuiConfig {
     /// Enable maximized window
     #[serde(default)]
     pub maximized: bool,
+    /// Bounded ingress, independent of the number of already open windows.
+    #[serde(default = "default_gui_windows")]
+    pub maximum_pending_opens: NonZeroUsize,
+    #[serde(default = "default_gui_windows")]
+    pub maximum_windows: NonZeroUsize,
+    /// Retained scene-batch upper bound; not serialized export, renderer,
+    /// GPU-allocation or whole-process memory capacity.
+    #[serde(default = "default_gui_snapshot_bytes")]
+    pub maximum_snapshot_bytes: NonZeroUsize,
+    #[serde(default = "default_gui_callbacks")]
+    pub maximum_pending_callbacks: NonZeroUsize,
+    #[serde(default = "default_gui_callbacks")]
+    pub maximum_callback_registrations: NonZeroUsize,
 }
 
 /// Export configuration
@@ -121,6 +135,11 @@ impl Default for GuiConfig {
             height: default_window_height(),
             vsync: true,
             maximized: false,
+            maximum_pending_opens: default_gui_windows(),
+            maximum_windows: default_gui_windows(),
+            maximum_snapshot_bytes: default_gui_snapshot_bytes(),
+            maximum_pending_callbacks: default_gui_callbacks(),
+            maximum_callback_registrations: default_gui_callbacks(),
         }
     }
 }
@@ -158,6 +177,18 @@ fn default_window_width() -> u32 {
     1200
 }
 
+// Interactive defaults bound ingress/retention, not certified GPU or process
+// capacity. Embedders can select smaller/larger explicit live-host limits.
+fn default_gui_windows() -> NonZeroUsize {
+    NonZeroUsize::new(64).expect("nonzero GUI default")
+}
+fn default_gui_callbacks() -> NonZeroUsize {
+    NonZeroUsize::new(1024).expect("nonzero GUI default")
+}
+fn default_gui_snapshot_bytes() -> NonZeroUsize {
+    NonZeroUsize::new(256 * 1024 * 1024).expect("nonzero GUI default")
+}
+
 fn default_window_height() -> u32 {
     800
 }
@@ -168,4 +199,33 @@ fn default_dpi() -> u32 {
 
 fn default_scene_budget_bytes() -> usize {
     8 * 1024 * 1024
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_gui_limits_default_and_reject_zero_without_changing_export_budget() {
+        let gui: GuiConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(gui.maximum_windows.get(), 64);
+        assert_eq!(gui.maximum_pending_callbacks.get(), 1024);
+        assert_eq!(gui.maximum_snapshot_bytes.get(), 256 * 1024 * 1024);
+        assert_ne!(
+            gui.maximum_snapshot_bytes.get(),
+            ExportConfig::default().scene_budget_bytes
+        );
+        for field in [
+            "maximum_pending_opens",
+            "maximum_windows",
+            "maximum_snapshot_bytes",
+            "maximum_pending_callbacks",
+            "maximum_callback_registrations",
+        ] {
+            assert!(
+                serde_json::from_value::<GuiConfig>(serde_json::json!({ (field): 0 })).is_err(),
+                "{field}"
+            );
+        }
+    }
 }

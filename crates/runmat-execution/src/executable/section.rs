@@ -14,6 +14,31 @@ pub enum SectionRequirement {
     Required,
 }
 
+/// Sections whose interpretation is part of RunMat's executable contract.
+/// Hosts opt into these typed meanings rather than independently spelling a
+/// required wire name and schema version.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KnownExecutableSection {
+    StaticImports,
+    LinkedNativeImports,
+}
+
+impl KnownExecutableSection {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::StaticImports => "runmat.static_imports",
+            Self::LinkedNativeImports => "runmat.linked_native_imports",
+        }
+    }
+
+    pub const fn schema_version(self) -> u16 {
+        match self {
+            Self::StaticImports => 1,
+            Self::LinkedNativeImports => 1,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutableOptionalSection {
@@ -69,6 +94,16 @@ impl ExecutableOptionalSection {
 pub struct ExecutableSectionSupport(BTreeMap<String, u16>);
 
 impl ExecutableSectionSupport {
+    pub fn known(
+        sections: impl IntoIterator<Item = KnownExecutableSection>,
+    ) -> Result<Self, ContractError> {
+        Self::new(
+            sections
+                .into_iter()
+                .map(|section| (section.name().to_owned(), section.schema_version())),
+        )
+    }
+
     pub fn new(sections: impl IntoIterator<Item = (String, u16)>) -> Result<Self, ContractError> {
         let mut supported = BTreeMap::new();
         for (name, version) in sections {
@@ -106,5 +141,30 @@ impl ExecutableSectionSupport {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_static_import_support_rejects_an_unknown_required_section() {
+        let support =
+            ExecutableSectionSupport::known([KnownExecutableSection::StaticImports]).unwrap();
+        let known = ExecutableOptionalSection::new(
+            KnownExecutableSection::StaticImports.name(),
+            KnownExecutableSection::StaticImports.schema_version(),
+            SectionRequirement::Required,
+            Vec::new(),
+        );
+        support.validate_section(&known).expect("known section");
+        let unknown = ExecutableOptionalSection::new(
+            "runmat.unrecognized",
+            1,
+            SectionRequirement::Required,
+            Vec::new(),
+        );
+        assert!(support.validate_section(&unknown).is_err());
     }
 }

@@ -5,6 +5,24 @@ use runmat_execution_runner::scheduler::{release, ResourceAllocation};
 
 use super::{reserve_attempt_capacity, ActiveAttempt, WorkerState};
 
+struct SilentRoute;
+
+#[async_trait::async_trait]
+impl super::super::route::RemoteFrameRoute for SilentRoute {
+    async fn send(
+        &self,
+        _frame: runmat_execution_transport_native::frame::WireFrame,
+    ) -> crate::NativeExecutionResult<()> {
+        Ok(())
+    }
+
+    async fn receive(
+        &self,
+    ) -> crate::NativeExecutionResult<runmat_execution_transport_native::frame::WireFrame> {
+        std::future::pending().await
+    }
+}
+
 fn inventory() -> ResourceInventory {
     ResourceInventory {
         cpu_millicores: 2_000,
@@ -78,8 +96,14 @@ fn invalid_attempt_request_cannot_reserve_worker_capacity() {
     assert_eq!(allocated, ResourceAllocation::default());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn completed_attempt_releases_its_worker_reservation_once() {
+    tokio::task::LocalSet::new()
+        .run_until(completed_attempt_releases_its_worker_reservation_once_inner())
+        .await;
+}
+
+async fn completed_attempt_releases_its_worker_reservation_once_inner() {
     let attempt_id = runmat_execution::identity::AttemptId::derive(&[b"reservation-lifecycle"]);
     let resources = request(60);
     let mut state = WorkerState {
@@ -88,10 +112,15 @@ async fn completed_attempt_releases_its_worker_reservation_once() {
         bundle_digest: None,
         attempts: Default::default(),
         allocated: ResourceAllocation::default(),
+        cancelled_attempts: Default::default(),
         values: Default::default(),
         objects: super::super::object_transfer::RemoteObjectStore::new().unwrap(),
         draining: false,
         bundle_cache: None,
+        graph_staging: Default::default(),
+        graph_stage_download_in_flight: Default::default(),
+        graph_programs: Default::default(),
+        graph_cache: Default::default(),
     };
     reserve_attempt_capacity(&inventory(), &mut state.allocated, &resources).unwrap();
     let (_finished_sender, finished) = tokio::sync::watch::channel(false);
@@ -99,8 +128,27 @@ async fn completed_attempt_releases_its_worker_reservation_once() {
         attempt_id,
         ActiveAttempt {
             task: tokio::spawn(async {}),
+            reply: super::super::attempt_reply::AttemptReply::spawn(
+                std::sync::Arc::new(SilentRoute),
+                std::sync::Arc::new(tokio::sync::Mutex::new(
+                    runmat_execution_transport_native::frame::EncryptedFrameSession::new(
+                        "reservation-run",
+                        [3; 16],
+                        "worker-to-driver",
+                        1,
+                        runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy(
+                            [5; 32],
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                )),
+                runmat_execution_transport_native::frame::FrameLimits::default(),
+                "reservation-correlation".into(),
+            ),
             resources,
             cancellation: Default::default(),
+            collective: None,
             cooperative: true,
             finished,
         },

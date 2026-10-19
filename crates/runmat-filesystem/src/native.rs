@@ -2,8 +2,10 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 use crate::{
-    AtomicCreateResult, AtomicReplaceOutcome, DirEntry, FileHandle, FsFileType, FsMetadata,
-    FsProvider, OpenFlags,
+    AtomicCreateResult, AtomicReplaceOutcome, DirEntry, FileHandle, FsBoundedInput,
+    FsFilePayloadContract, FsFileType, FsManagedOpenedInputCost, FsManagedReadBacking,
+    FsManagedReadContract, FsMetadata, FsProvider, FsResourceContract, FsResourceLease,
+    FsResourceLeaseHandle, FsResourceRevision, OpenFlags,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -11,11 +13,16 @@ use serde_json::Value as JsonValue;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use url::Url;
 
 mod atomic_create;
 mod atomic_replace;
 mod private_directory;
+#[path = "native/staged.rs"]
+pub(crate) mod staged;
+#[path = "native/mapped.rs"]
+mod mapped;
 
 #[derive(Default)]
 pub struct NativeFsProvider;
@@ -80,6 +87,92 @@ impl FsProvider for NativeFsProvider {
             maximum_resident_bytes,
         )?))
     }
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        crate::FsPathNamespace::NativeOs
+    }
+
+    async fn open_mapped_backing(
+        &self,
+        path: &Path,
+        writable: bool,
+    ) -> io::Result<Option<Box<dyn crate::FsMappedBacking>>> {
+        mapped::open(path, writable).map(Some)
+    }
+
+    fn begin_staged_replace(
+        &self,
+        destination: &Path,
+    ) -> io::Result<Option<Box<dyn crate::FsStagedOutput>>> {
+        staged::begin(destination).map(Some)
+    }
+
+    fn acquire_native_path(
+        &self,
+        path: &Path,
+        intent: crate::NativePathIntent,
+    ) -> io::Result<Option<crate::NativePathGrant>> {
+        if intent == crate::NativePathIntent::ProcessWorkingDirectory && !path.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "process working directory is not an existing native directory",
+            ));
+        }
+        struct StableNativeMapping;
+        impl crate::NativePathAuthority for StableNativeMapping {
+            fn is_valid(&self) -> bool {
+                true
+            }
+
+            fn process_revocation(&self) -> crate::NativeProcessRevocation<'_> {
+                crate::NativeProcessRevocation::Stable
+            }
+        }
+        crate::NativePathGrant::issued_by_provider(
+            path.to_path_buf(),
+            intent,
+            Box::new(StableNativeMapping),
+        )
+        .map(Some)
+    }
+
+    async fn open_bounded_input(&self, path: &Path) -> io::Result<Option<FsBoundedInput>> {
+        if !path.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "bounded native input requires a resolved absolute path",
+            ));
+        }
+        let file = fs::File::open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Ok(None);
+        }
+        let metadata = FsMetadata::from(metadata);
+        FsBoundedInput::new_with_lease(
+            Box::new(file),
+            metadata,
+            FsResourceLeaseHandle::Static(&NATIVE_DIRECT_LEASE),
+        )
+        .map(Some)
+    }
+
+    fn managed_read_contract(&self) -> Option<FsManagedReadContract> {
+        Some(FsManagedReadContract {
+            revision: native_direct_revision(),
+            backing: FsManagedReadBacking::ExternalToRustManagedHeap,
+            capture_requested_heap_bytes: 0,
+            opened_requested_heap_bytes: std::mem::size_of::<fs::File>() as u64,
+        })
+    }
+
+    fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
+        Some(Arc::new(NativeDirectFileLease))
+    }
+
+    fn resource_lease_handle(&self) -> Option<FsResourceLeaseHandle> {
+        Some(FsResourceLeaseHandle::Static(&NATIVE_DIRECT_LEASE))
+    }
+
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut opts = fs::OpenOptions::new();
         opts.read(flags.read);
@@ -156,6 +249,10 @@ impl FsProvider for NativeFsProvider {
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fs::rename(from, to)
+    }
+
+    async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
         fs::rename(from, to)
     }
 
@@ -262,6 +359,38 @@ pub(crate) fn atomic_create_new_native_bounded(
     maximum_existing_bytes: Option<u64>,
 ) -> io::Result<AtomicCreateResult> {
     atomic_create::publish(path, bytes, maximum_existing_bytes, false)
+}
+
+struct NativeDirectFileLease;
+static NATIVE_DIRECT_LEASE: NativeDirectFileLease = NativeDirectFileLease;
+
+fn native_direct_revision() -> FsResourceRevision {
+    FsResourceRevision::for_provider(
+        "runmat.filesystem.native",
+        b"direct-file-handles-bounded-open-managed-v3",
+    )
+}
+
+impl FsResourceLease for NativeDirectFileLease {
+    fn contract(&self) -> FsResourceContract {
+        FsResourceContract {
+            revision: native_direct_revision(),
+            opened_input_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
+            opened_output_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        true // NativeFsProvider has no mutable configuration.
+    }
+
+    fn managed_opened_input_cost(&self) -> Option<FsManagedOpenedInputCost> {
+        // Only the Box<File> is freshly requested. The immutable lease is
+        // static; OS descriptor/kernel/stdlib internals remain out of scope.
+        Some(FsManagedOpenedInputCost {
+            requested_heap_bytes: std::mem::size_of::<fs::File>() as u64,
+        })
+    }
 }
 
 fn dataset_manifest_path(path: &str) -> PathBuf {

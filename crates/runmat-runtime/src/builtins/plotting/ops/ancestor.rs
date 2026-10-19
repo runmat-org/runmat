@@ -535,7 +535,7 @@ mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected empty tensor for absent legend");
         };
-        assert_eq!(tensor.shape, vec![0, 0]);
+        assert_eq!(tensor.shape(), [0, 0]);
         assert!(tensor.materialize_f64().is_empty());
     }
 
@@ -582,7 +582,7 @@ mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected empty tensor");
         };
-        assert_eq!(tensor.shape, vec![0, 0]);
+        assert_eq!(tensor.shape(), [0, 0]);
         assert!(tensor.materialize_f64().is_empty());
     }
 
@@ -604,7 +604,7 @@ mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor result");
         };
-        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(tensor.shape(), [1, 1]);
         assert_eq!(tensor.materialize_f64()[0], axes_handle);
     }
 
@@ -659,7 +659,7 @@ mod tests {
             panic!("expected empty handle array");
         };
         assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
-        assert_eq!(tensor.shape, vec![0, 0]);
+        assert_eq!(tensor.shape(), [0, 0]);
         assert!(tensor.materialize_f64().is_empty());
     }
 }

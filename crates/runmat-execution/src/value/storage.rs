@@ -14,18 +14,19 @@ impl ValueRef {
             authorization_scope,
             resident_fence,
         } = self;
+        // Accelerator fence text is retained beside the reference; bound it
+        // by its identifier lengths plus one feature slot per declared feature.
         let device_bytes = resident_fence
             .as_ref()
-            .and_then(|fence| {
-                let ResidentFence {
-                    worker_id: _,
-                    node_lease_id: _,
-                    process_generation: _,
-                    device_identity,
-                } = fence;
-                device_identity.as_ref()
-            })
-            .map_or(0, String::capacity);
+            .and_then(|fence| fence.accelerator.as_ref())
+            .map_or(0, |accelerator| {
+                let lease = &accelerator.lease;
+                lease.class.as_str().len()
+                    + lease.provider.id.as_str().len()
+                    + lease.provider.version.as_str().len()
+                    + lease.features.len()
+                        * std::mem::size_of::<crate::resource::AcceleratorFeature>()
+            });
         [
             media_type.capacity(),
             value_schema.capacity(),

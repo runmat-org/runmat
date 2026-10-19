@@ -121,6 +121,11 @@ impl WorkerBackend for ProcessBackend {
             command.arguments = self.config.worker_arguments.clone();
             command.environment = self.config.environment.clone();
             command.environment_policy = self.config.environment_policy.clone();
+            command.working_directory = self
+                .config
+                .project_handoff
+                .as_ref()
+                .map(|handoff| handoff.project.workspace_root.clone());
             command.max_stderr_bytes = self.config.max_stderr_bytes;
             let mut child = command.spawn().await.map_err(spawn_error)?;
             let process_id = child.id();

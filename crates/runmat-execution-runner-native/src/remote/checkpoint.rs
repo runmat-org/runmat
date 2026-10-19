@@ -62,13 +62,33 @@ impl RemoteDriverCheckpoint {
         phase: RemoteDriverCheckpointPhase,
         closure_catalog: Option<ProgramExecutionObjectLocation>,
     ) -> NativeExecutionResult<Self> {
+        Self::for_program(
+            sequence,
+            authority,
+            project_revision,
+            request_digest(request)?,
+            phase,
+            closure_catalog,
+        )
+    }
+
+    /// Bind a checkpoint to an exact admitted program identity: a Direct
+    /// request's canonical digest or a Graph Program object's digest.
+    pub(super) fn for_program(
+        sequence: u64,
+        authority: &DriverAuthority,
+        project_revision: &str,
+        program_digest: Digest,
+        phase: RemoteDriverCheckpointPhase,
+        closure_catalog: Option<ProgramExecutionObjectLocation>,
+    ) -> NativeExecutionResult<Self> {
         let checkpoint = Self {
             schema_version: 2,
             sequence,
             source_driver_fence: authority.fencing_token,
             run_id: authority.run_id.clone(),
             project_revision: project_revision.into(),
-            request_digest: request_digest(request)?,
+            request_digest: program_digest,
             phase,
             closure_catalog,
             pool_catalog: None,
@@ -86,18 +106,28 @@ impl RemoteDriverCheckpoint {
         Ok(self)
     }
 
+    #[cfg(test)]
     pub(super) fn validate_for_replacement(
         &self,
         authority: &DriverAuthority,
         project_revision: &str,
         request: &ProgramExecutionRequest,
     ) -> NativeExecutionResult<()> {
+        self.validate_for_program(authority, project_revision, request_digest(request)?)
+    }
+
+    pub(super) fn validate_for_program(
+        &self,
+        authority: &DriverAuthority,
+        project_revision: &str,
+        program_digest: Digest,
+    ) -> NativeExecutionResult<()> {
         self.validate_content()?;
         if !self.phase.is_resume_safe()
             || self.source_driver_fence >= authority.fencing_token
             || self.run_id != authority.run_id
             || self.project_revision != project_revision
-            || self.request_digest != request_digest(request)?
+            || self.request_digest != program_digest
         {
             return Err(protocol(
                 "remote driver checkpoint is unsafe, stale, or belongs to another execution",
@@ -249,7 +279,7 @@ mod tests {
     fn closure_catalog(run_id: &str) -> ProgramExecutionObjectLocation {
         ProgramExecutionObjectLocation {
             reference: ValueRef {
-                schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+                schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
                 id: ValueId::derive(&[b"closure-catalog"]),
                 logical_digest: digest("closure-catalog"),
                 encoded_length: 128,

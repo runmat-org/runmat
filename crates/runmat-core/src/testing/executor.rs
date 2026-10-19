@@ -125,11 +125,16 @@ impl<'a> CoreTestExecutor<'a> {
         }
         let source = self
             .catalog
-            .executable_source(&procedure.source, span_only)
+            .executable_source(&procedure.source)
             .map_err(uncaught)?;
         let unit = self
             .session
-            .compile_executable_unit(source, Some(self.catalog.revision()))
+            .compile_test_executable_unit(
+                source,
+                &procedure.source,
+                self.catalog.snapshot(),
+                span_only,
+            )
             .await
             .map_err(run_error_failure)?;
         self.units.insert(key, unit.clone());
@@ -235,8 +240,8 @@ fn callback_name(value: &Value) -> Option<String> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name) => Some(name.clone()),
-        Value::BoundFunctionHandle { name, .. } => Some(name.clone()),
+        | Value::MethodFunctionHandle(name) => Some(name.name().to_owned()),
+        Value::BoundFunctionHandle(handle) => Some(handle.name.clone()),
         Value::Closure(closure) => Some(closure.function_name.clone()),
         _ => None,
     }
@@ -252,8 +257,10 @@ fn take_console_output(runtime: &runmat_runtime::context::RuntimeContext) -> Str
     runmat_runtime::console::take_thread_buffer()
         .into_iter()
         .filter(|entry| entry.stream != runmat_runtime::console::ConsoleStream::ClearScreen)
-        .map(|entry| entry.text)
-        .collect()
+        .fold(String::new(), |mut output, entry| {
+            output.push_str(entry.text.as_str());
+            output
+        })
 }
 
 fn qualification_already_recorded(commands: &[TestCommand], error: &RunError) -> bool {

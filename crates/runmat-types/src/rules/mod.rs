@@ -1,23 +1,30 @@
 mod aggregate;
 mod call;
+mod conversion;
 mod indexing;
 mod join;
 mod literal;
 mod member;
 mod mutation;
 mod operator;
+mod real_arithmetic;
 mod satisfaction;
 mod shape;
 mod widen;
 
 pub use aggregate::*;
 pub use call::infer_call;
-pub use indexing::infer_index;
+pub use conversion::infer_numeric_conversion;
+pub use indexing::{infer_index, infer_index_sequence};
 pub use join::FactJoin;
 pub use literal::{infer_literal, infer_struct_literal};
-pub use member::{infer_member_read, infer_member_write};
+pub use member::{infer_member_read, infer_member_sequence, infer_member_write};
 pub use mutation::{infer_index_mutation, infer_mutation};
-pub use operator::{infer_binary, infer_unary};
+pub use operator::{
+    floating_binary_result_class, infer_binary, infer_unary, real_floating_add_mode,
+    RealFloatingAddMode,
+};
+pub use real_arithmetic::RealFloatingRecipe;
 pub use satisfaction::*;
 pub use shape::*;
 pub use widen::FactWiden;

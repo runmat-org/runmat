@@ -11,6 +11,8 @@ repository = "https://github.com/runmat-org/runmat"
 [features]
 default = ["compiler"]
 compiler = [
+    "dep:runmat-hir",
+    "runmat-mir/compiler",
     "dep:cranelift",
     "dep:cranelift-codegen",
     "dep:cranelift-module",
@@ -21,7 +23,10 @@ compiler = [
 
 [dependencies]
 runmat-execution = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-execution-artifact = { workspace = true }
+runmat-builtins = { workspace = true }
+runmat-hir = { workspace = true, optional = true }
+runmat-mir = { workspace = true, default-features = false }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -29,7 +34,7 @@ thiserror = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cranelift = { workspace = true, optional = true }
-cranelift-codegen = { workspace = true, optional = true }
+cranelift-codegen = { workspace = true, optional = true, features = ["x86", "arm64"] }
 cranelift-module = { workspace = true, optional = true }
 cranelift-native = { workspace = true, optional = true }
 cranelift-object = { workspace = true, optional = true }
@@ -40,7 +45,6 @@ target-lexicon = { workspace = true, optional = true }
 runmat-runtime = { workspace = true, features = ["plot-web"] }
 
 [dev-dependencies]
-runmat-hir = { workspace = true }
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

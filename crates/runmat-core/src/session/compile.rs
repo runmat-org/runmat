@@ -1,7 +1,66 @@
 use super::*;
 use crate::fusion::FusionPlannerMetadata;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+#[path = "compile/program_sources.rs"]
+pub(super) mod program_sources;
+#[path = "compile/test_source_authority.rs"]
+mod test_source_authority;
+use program_sources::identity::{executable_primary_access_path, executable_source_identity};
+use test_source_authority::CapturedTestSourceAuthority;
+
+fn fatal_frontend_diagnostic(
+    diagnostics: &[runmat_hir::HirDiagnostic],
+) -> Option<&runmat_hir::HirDiagnostic> {
+    diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == runmat_hir::HirDiagnosticSeverity::Error)
+}
+
+fn bind_frontend_diagnostic(
+    diagnostic: &runmat_hir::HirDiagnostic,
+    source_table: &program_sources::ProgramSourceTable,
+) -> RunError {
+    let mut error = runmat_vm::CompileError::new(diagnostic.message.clone())
+        .with_identifier(diagnostic.code.clone())
+        .with_span(diagnostic.primary.span);
+    if let Some(source) = diagnostic.primary.source {
+        error = error.with_source(source);
+    }
+    bind_compile_error(error, source_table)
+}
+
+fn bind_compile_error(
+    error: runmat_vm::CompileError,
+    source_table: &program_sources::ProgramSourceTable,
+) -> RunError {
+    let Some(source_id) = error.source else {
+        return RunError::Compile(error);
+    };
+    let Some(source) = source_table
+        .source_map
+        .entries()
+        .iter()
+        .find(|entry| entry.source_id == source_id)
+    else {
+        return RunError::Runtime(
+            build_runtime_error("frontend diagnostic refers to an unadmitted program source")
+                .with_identifier("RunMat:ExecutableSourceIdentity")
+                .build(),
+        );
+    };
+    if source_id == source_table.primary_source() {
+        RunError::Compile(error)
+    } else {
+        RunError::SourceCompile(crate::SourceCompileError {
+            error,
+            source: source.clone(),
+        })
+    }
+}
 
 mod facts;
 use facts::{function_output_arities, mir_local_fact_count_for_entrypoint};
@@ -76,7 +135,7 @@ fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<S
     Some(package_segments.join("."))
 }
 
-fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
+pub(super) fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
     for stmt in stmts {
         if let runmat_parser::Stmt::ClassDef { name, .. } = stmt {
             if !name.contains('.') {
@@ -211,14 +270,25 @@ fn qualify_private_companion_functions(
 
 #[derive(Default)]
 pub(super) struct CompanionSourceDiscovery {
-    pub statements: Vec<runmat_parser::Stmt>,
+    pub statements: Vec<DiscoveredSourceStatement>,
     pub source_catalog: Option<runmat_package::DiscoveredSourceSymbols>,
     pub project_symbol_aliases: HashMap<String, String>,
     pub private_function_names: HashSet<String>,
     pub private_function_owners: HashMap<String, String>,
     pub private_function_aliases: HashMap<String, HashMap<String, String>>,
-    pub function_source_contexts: HashMap<String, SourceContextData>,
-    private_statement_flags: Vec<bool>,
+    pub observed_sources: Vec<ObservedSourceRevision>,
+}
+
+pub(super) struct ObservedSourceRevision {
+    pub access_path: PathBuf,
+    pub content_revision: Option<runmat_execution::Digest>,
+    pub uses_pcode_reader: bool,
+}
+
+pub(super) struct DiscoveredSourceStatement {
+    pub statement: runmat_parser::Stmt,
+    pub is_private: bool,
+    pub source: Option<Arc<SourceContextData>>,
 }
 
 pub(super) struct ProjectCompilationContext {
@@ -227,6 +297,45 @@ pub(super) struct ProjectCompilationContext {
     frozen: Option<runmat_package::FrozenProject>,
     loose_index: Option<runmat_config::project::ProjectSourceIndex>,
     pub source_catalog: Option<runmat_package::DiscoveredSourceSymbols>,
+}
+
+impl ProjectCompilationContext {
+    /// Revision of the selected source inventory before companion contents are
+    /// read. It invalidates dynamic products when path precedence, package or
+    /// class ownership, or the visible private-file set changes.
+    pub(super) fn dynamic_inventory_revision(&self) -> runmat_execution::Digest {
+        if let Some(revision) = self
+            .source_catalog
+            .as_ref()
+            .and_then(|catalog| catalog.project_revision())
+        {
+            return runmat_execution::Digest::sha256(revision.cache_namespace());
+        }
+        let mut files = self
+            .loose_index
+            .as_ref()
+            .map(|index| {
+                index
+                    .files
+                    .iter()
+                    .map(|file| {
+                        (
+                            file.relative_path.to_string_lossy().replace('\\', "/"),
+                            file.qualified_name.clone(),
+                            file.package_path.clone(),
+                            file.class_name.clone(),
+                            file.class_qualified_name.clone(),
+                            file.is_private,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        files.sort();
+        runmat_execution::Digest::sha256(
+            serde_json::to_vec(&files).expect("source inventory rows are serializable"),
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -256,7 +365,9 @@ fn class_name_in_statements(stmts: &[runmat_parser::Stmt]) -> Option<&str> {
     })
 }
 
-fn source_context_function_names_in_statements(stmts: &[runmat_parser::Stmt]) -> Vec<String> {
+pub(super) fn source_context_function_names_in_statements(
+    stmts: &[runmat_parser::Stmt],
+) -> Vec<String> {
     let mut names = Vec::new();
     for stmt in stmts {
         match stmt {
@@ -295,12 +406,7 @@ impl CompanionSourceDiscovery {
         private_aliases: HashMap<String, String>,
         source_context: Option<SourceContextData>,
     ) {
-        if let Some(source_context) = source_context {
-            for function_name in source_context_function_names_in_statements(&body) {
-                self.function_source_contexts
-                    .insert(function_name, source_context.clone());
-            }
-        }
+        let source_context = source_context.map(Arc::new);
         let is_private = private_owner_scope.is_some();
         if is_private {
             let owner_scope = private_owner_scope.unwrap_or_default();
@@ -318,21 +424,23 @@ impl CompanionSourceDiscovery {
             }
         }
         for stmt in body {
-            self.statements.push(stmt);
-            self.private_statement_flags.push(is_private);
+            self.statements.push(DiscoveredSourceStatement {
+                statement: stmt,
+                is_private,
+                source: source_context.clone(),
+            });
         }
     }
 
-    fn apply_function_precedence(&mut self, primary_function_names: &HashSet<String>) {
+    pub(super) fn apply_function_precedence(&mut self, primary_function_names: &HashSet<String>) {
         let discovered_private_function_names: HashSet<String> = self
             .statements
             .iter()
-            .zip(self.private_statement_flags.iter())
-            .filter_map(|(stmt, is_private)| {
-                if !*is_private {
+            .filter_map(|discovered| {
+                if !discovered.is_private {
                     return None;
                 }
-                if let runmat_parser::Stmt::Function { name, .. } = stmt {
+                if let runmat_parser::Stmt::Function { name, .. } = &discovered.statement {
                     Some(name.clone())
                 } else {
                     None
@@ -341,27 +449,24 @@ impl CompanionSourceDiscovery {
             .collect();
 
         let old_statements = std::mem::take(&mut self.statements);
-        let old_private_flags = std::mem::take(&mut self.private_statement_flags);
         self.private_function_names.clear();
         self.private_function_owners.clear();
         self.private_function_aliases.clear();
 
-        for (stmt, is_private) in old_statements.into_iter().zip(old_private_flags) {
-            let keep = match &stmt {
+        for discovered in old_statements {
+            let keep = match &discovered.statement {
                 runmat_parser::Stmt::Function { name, .. } => {
                     !primary_function_names.contains(name)
-                        && (is_private || !discovered_private_function_names.contains(name))
+                        && (discovered.is_private
+                            || !discovered_private_function_names.contains(name))
                 }
                 _ => true,
             };
             if !keep {
-                if let runmat_parser::Stmt::Function { name, .. } = &stmt {
-                    self.function_source_contexts.remove(name);
-                }
                 continue;
             }
-            if is_private {
-                if let runmat_parser::Stmt::Function { name, .. } = &stmt {
+            if discovered.is_private {
+                if let runmat_parser::Stmt::Function { name, .. } = &discovered.statement {
                     self.private_function_names.insert(name.clone());
                     let owner_scope = function_owner_scope_from_qualified_name(name);
                     let owner_scope = if let Some((owner, _)) = name.split_once(".__private__.") {
@@ -377,8 +482,7 @@ impl CompanionSourceDiscovery {
                         .insert(function_leaf_name(name).to_string(), name.clone());
                 }
             }
-            self.statements.push(stmt);
-            self.private_statement_flags.push(is_private);
+            self.statements.push(discovered);
         }
     }
 }
@@ -512,19 +616,26 @@ pub(super) fn project_compilation_context_from_handoff(
     })
 }
 
+/// Exact project source bytes captured with a frozen handoff, keyed by access path.
+pub(crate) type CapturedSourceBytes = std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>;
+
 async fn compose_frozen_project_async(
     context: &ProjectCompilationContext,
     frozen: &runmat_package::FrozenProject,
     compat_mode: runmat_parser::CompatMode,
+    test_authority: Option<&CapturedTestSourceAuthority<'_>>,
 ) -> Result<CompanionSourceDiscovery, String> {
-    compose_frozen_source_view_async(context, frozen, compat_mode, None).await
+    compose_frozen_source_view_async(context, frozen, compat_mode, test_authority, None).await
 }
 
+/// Compose graph-declared companions. Test authorities and captured
+/// snapshots supply exact bytes; only an unconstrained view reads providers.
 async fn compose_frozen_source_view_async(
     context: &ProjectCompilationContext,
     frozen: &runmat_package::FrozenProject,
     compat_mode: runmat_parser::CompatMode,
-    captured: Option<&std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>>,
+    test_authority: Option<&CapturedTestSourceAuthority<'_>>,
+    captured: Option<&CapturedSourceBytes>,
 ) -> Result<CompanionSourceDiscovery, String> {
     let options = ParserOptions::new(compat_mode);
     let mut out = CompanionSourceDiscovery::default();
@@ -536,8 +647,12 @@ async fn compose_frozen_source_view_async(
         if source_paths_equivalent(access_path, &context.primary_source_path) {
             continue;
         }
-        let file_path = access_path.to_path_buf();
-        let (file_path, contents) = if let Some(captured) = captured {
+        let test_captured =
+            test_authority.and_then(|authority| authority.captured_text_for(access_path));
+        let (file_path, contents, uses_pcode_reader) = if let Some(text) = test_captured {
+            (access_path.to_path_buf(), Cow::Borrowed(text), false)
+        } else if let Some(captured) = captured {
+            let file_path = access_path.to_path_buf();
             let bytes = captured.get(&file_path).ok_or_else(|| {
                 format!("captured source is unavailable: {}", file_path.display())
             })?;
@@ -547,16 +662,16 @@ async fn compose_frozen_source_view_async(
                     file_path.display()
                 ));
             }
-            let text = String::from_utf8(bytes.clone()).map_err(|_| {
+            let text = std::str::from_utf8(bytes).map_err(|_| {
                 format!(
                     "captured MATLAB source is not UTF-8: {}",
                     file_path.display()
                 )
             })?;
-            (file_path, text)
+            (file_path, Cow::Borrowed(text), false)
         } else {
             let file_path =
-                runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&file_path)
+                runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(access_path)
                     .await;
             let contents =
                 runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
@@ -567,8 +682,13 @@ async fn compose_frozen_source_view_async(
                             file_path.display()
                         )
                     })?;
-            (file_path, contents)
+            (file_path, Cow::Owned(contents), true)
         };
+        out.observed_sources.push(ObservedSourceRevision {
+            access_path: file_path.clone(),
+            content_revision: Some(runmat_execution::Digest::sha256(contents.as_bytes())),
+            uses_pcode_reader,
+        });
         if !contents.contains("classdef") && !contents.contains("function") {
             continue;
         }
@@ -643,7 +763,7 @@ async fn compose_frozen_source_view_async(
                     &context.cwd,
                 ),
                 fullpath_name: Some(path_to_source_name(source_context_path)),
-                text: contents,
+                text: contents.into_owned(),
             }),
         );
     }
@@ -669,7 +789,16 @@ async fn compose_loose_project_async(
         if source_paths_equivalent(&path, &context.primary_source_path) {
             continue;
         }
-        let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
+        let contents = runmat_filesystem::read_to_string_async(&path).await;
+        out.observed_sources.push(ObservedSourceRevision {
+            access_path: path.clone(),
+            content_revision: contents
+                .as_ref()
+                .ok()
+                .map(|text| runmat_execution::Digest::sha256(text.as_bytes())),
+            uses_pcode_reader: false,
+        });
+        let Ok(contents) = contents else {
             continue;
         };
         if !contents.contains("classdef") && !contents.contains("function") {
@@ -722,7 +851,7 @@ pub(super) async fn compose_project_compilation_context_async(
     compat_mode: runmat_parser::CompatMode,
 ) -> Result<CompanionSourceDiscovery, String> {
     if let Some(frozen) = context.frozen.as_ref() {
-        compose_frozen_project_async(context, frozen, compat_mode).await
+        compose_frozen_project_async(context, frozen, compat_mode, None).await
     } else if let Some(loose_index) = context.loose_index.as_ref() {
         compose_loose_project_async(context, loose_index, compat_mode).await
     } else {
@@ -744,21 +873,54 @@ pub(super) async fn companion_source_statements_from_handoff_async(
     source_name: &str,
     compat_mode: runmat_parser::CompatMode,
     handoff: &runmat_package::FrozenProjectHandoff,
+    test_authority: Option<&CapturedTestSourceAuthority<'_>>,
 ) -> Result<CompanionSourceDiscovery, String> {
     let context = project_compilation_context_from_handoff(source_name, handoff)?;
-    compose_project_compilation_context_async(&context, compat_mode).await
+    compose_frozen_project_async(&context, &handoff.project, compat_mode, test_authority).await
 }
 
 impl RunMatSession {
     /// Compile one immutable source/revision product without executing it or
     /// publishing its functions into the interactive session.
-    pub async fn compile_executable_unit(
+    pub async fn compile_executable_unit<'a>(
         &mut self,
-        source: crate::ExecutableSource,
+        source: impl Into<Cow<'a, crate::ExecutableSource>>,
         program_revision: Option<runmat_execution::ProgramRevision>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
-        self.compile_executable_source_view(source, program_revision, None)
+        self.compile_executable_unit_inner(source.into(), program_revision, None, None)
             .await
+    }
+
+    /// Compile one selected test source from its frozen run, while retaining
+    /// the installed project's independent dependency/source authority.
+    pub async fn compile_test_executable_unit(
+        &mut self,
+        source: crate::ExecutableSource,
+        descriptor: &runmat_test::descriptor::SourceDescriptor,
+        snapshot: &runmat_test::discovery::FrozenTestRunSnapshot,
+        span_only: bool,
+    ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        let authority = CapturedTestSourceAuthority::new(
+            snapshot,
+            descriptor,
+            &source,
+            span_only,
+            self.project_handoff.as_ref(),
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableSourceIdentity")
+                    .build(),
+            )
+        })?;
+        self.compile_executable_unit_inner(
+            Cow::Owned(source),
+            Some(snapshot.program_revision.clone()),
+            Some(&authority),
+            None,
+        )
+        .await
     }
 
     /// Compile against an explicit immutable source inventory. Missing captures
@@ -768,7 +930,7 @@ impl RunMatSession {
         source: crate::ExecutableSource,
         program_revision: runmat_execution::ProgramRevision,
         handoff: &runmat_package::FrozenProjectHandoff,
-        captured: &std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+        captured: &CapturedSourceBytes,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
         handoff.validate().map_err(|error| {
             RunError::Runtime(
@@ -799,23 +961,24 @@ impl RunMatSession {
                 .build(),
             ));
         }
-        self.compile_executable_source_view(
-            source,
+        self.compile_executable_unit_inner(
+            Cow::Owned(source),
             Some(program_revision),
+            None,
             Some((handoff, captured)),
         )
         .await
     }
 
-    async fn compile_executable_source_view(
+    async fn compile_executable_unit_inner(
         &mut self,
-        source: crate::ExecutableSource,
+        source: Cow<'_, crate::ExecutableSource>,
         program_revision: Option<runmat_execution::ProgramRevision>,
-        snapshot: Option<(
-            &runmat_package::FrozenProjectHandoff,
-            &std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
-        )>,
+        test_authority: Option<&CapturedTestSourceAuthority<'_>>,
+        captured_snapshot: Option<(&runmat_package::FrozenProjectHandoff, &CapturedSourceBytes)>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        self.ensure_user_path_hydrated().await?;
+        let snapshot = captured_snapshot.map(|(handoff, _)| handoff);
         if let (Some(requested), Some(installed)) =
             (program_revision.as_ref(), self.project_revision())
         {
@@ -832,65 +995,120 @@ impl RunMatSession {
             }
         }
 
-        let previous_source_name = self.active_source_name.clone();
-        let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
-        let previous_pending = self.pending_companion_source_discovery.take();
-        self.active_source_name = source.relative_path.clone();
-        self.active_source_fullpath_name = Some(source.lookup_path().to_string());
-
-        let companion_result = if let Some((handoff, captured)) = snapshot {
-            match project_compilation_context_from_handoff(source.lookup_path(), handoff) {
-                Ok(context) => {
-                    compose_frozen_source_view_async(
-                        &context,
-                        &handoff.project,
-                        self.compat_mode,
-                        Some(captured),
-                    )
-                    .await
-                }
-                Err(error) => Err(error),
-            }
-        } else if let Some(handoff) = self.project_handoff.as_ref() {
-            companion_source_statements_from_handoff_async(
-                source.lookup_path(),
-                self.compat_mode,
-                handoff,
-            )
-            .await
+        let primary_access_path = if let Some(authority) = test_authority {
+            Ok(authority.primary_access_path().map(str::to_owned))
         } else {
-            discover_companion_source_statements_async(source.lookup_path(), self.compat_mode).await
-        };
-        let result = match companion_result {
-            Ok(companion) => {
-                self.pending_companion_source_discovery = Some(companion);
-                self.compile_input(&source.text)
-            }
-            Err(error) => Err(RunError::Runtime(
-                build_runtime_error(format!("project composition failed: {error}"))
-                    .with_identifier("RunMat:ProjectComposition")
+            executable_primary_access_path(&source, snapshot.or(self.project_handoff.as_ref()))
+        }
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableSourceIdentity")
                     .build(),
-            )),
+            )
+        })?;
+        let result = {
+            let mut scope = super::source_scope::SourceCompositionScope::enter(self);
+            let session = scope.session();
+            session.active_source_name = primary_access_path
+                .clone()
+                .unwrap_or_else(|| source.relative_path.clone());
+            session.active_source_fullpath_name = primary_access_path;
+
+            let companion_result = if let Some((handoff, captured)) = captured_snapshot {
+                match project_compilation_context_from_handoff(
+                    session.active_source_name.as_str(),
+                    handoff,
+                ) {
+                    Ok(context) => {
+                        compose_frozen_source_view_async(
+                            &context,
+                            &handoff.project,
+                            session.compat_mode,
+                            None,
+                            Some(captured),
+                        )
+                        .await
+                    }
+                    Err(error) => Err(error),
+                }
+            } else if let Some(handoff) = session.project_handoff.as_ref() {
+                companion_source_statements_from_handoff_async(
+                    session.active_source_name.as_str(),
+                    session.compat_mode,
+                    handoff,
+                    test_authority,
+                )
+                .await
+            } else if test_authority.is_some() {
+                Ok(CompanionSourceDiscovery::default())
+            } else {
+                discover_companion_source_statements_async(
+                    &source.relative_path,
+                    session.compat_mode,
+                )
+                .await
+            };
+            let companion_result = companion_result.and_then(|mut companion| {
+                if let Some(authority) = test_authority {
+                    authority.add_companions(&mut companion, session.compat_mode)?;
+                }
+                Ok(companion)
+            });
+            match companion_result {
+                Ok(companion) => {
+                    session.pending_companion_source_discovery = Some(companion);
+                    session.compile_input_with_portable_source(
+                        &source.text,
+                        Some(&source),
+                        test_authority,
+                    )
+                }
+                Err(error) => Err(RunError::Runtime(
+                    build_runtime_error(format!("project composition failed: {error}"))
+                        .with_identifier("RunMat:ProjectComposition")
+                        .build(),
+                )),
+            }
         };
 
-        self.active_source_name = previous_source_name;
-        self.active_source_fullpath_name = previous_source_fullpath_name;
-        self.pending_companion_source_discovery = previous_pending;
-
-        let prepared = result?;
-        let source_map = self.executable_source_map(&source);
-        let revision = crate::ExecutableRevision::derive(
+        let mut prepared = result?;
+        let source_map = prepared
+            .portable_source_map
+            .take()
+            .expect("portable compilation must retain its source table");
+        let revision = crate::ExecutableRevision::derive_with_selection(
             &source,
             program_revision,
             crate::program_environment(self.compat_mode),
+            test_authority.and_then(CapturedTestSourceAuthority::executable_selection),
         );
-        crate::ExecutableUnit::new(
-            source,
+        prepared
+            .attach_function_origins(&revision.program_revision, &source_map)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error.to_string())
+                        .with_identifier("RunMat:ExecutableFunctionIdentity")
+                        .with_source(error)
+                        .build(),
+                )
+            })?;
+        let PreparedExecution {
+            mir,
+            analysis,
+            bytecode,
+            published_registry_for_reuse,
+            private_companion_function_names,
+            mut current_function_ids,
+            ..
+        } = prepared;
+        let mut draft = crate::executable::ExecutableUnitDraft::prepare(
+            source.into_owned(),
             revision,
             source_map,
-            prepared.mir,
-            prepared.analysis,
-            prepared.bytecode,
+            mir,
+            analysis,
+            bytecode,
         )
         .and_then(|unit| self.program_service.bind_original_dependencies(unit))
         .map_err(|error| {
@@ -899,36 +1117,107 @@ impl RunMatSession {
                     .with_identifier("RunMat:ExecutableProduct")
                     .build(),
             )
-        })
+        })?;
+        let mut excluded_reused_ids = HashSet::new();
+        if let Some(remap) = super::semantic_definition::unchanged_product_remap(
+            draft.bytecode(),
+            &current_function_ids,
+            &published_registry_for_reuse,
+            &private_companion_function_names,
+        ) {
+            excluded_reused_ids.extend(remap.values().copied());
+            draft
+                .rebind_current_definitions(&published_registry_for_reuse, &remap)
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableFunctionIdentity")
+                            .build(),
+                    )
+                })?;
+            current_function_ids = current_function_ids
+                .into_iter()
+                .map(|id| remap.get(&id).copied().unwrap_or(id))
+                .collect();
+        }
+        let unit = draft.seal();
+        // The prepared product, not parser membership, decides which bodies
+        // this immutable program actually owns after unchanged-body reuse.
+        let current = unit.compiled_current_body_ids().map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableProduct")
+                    .build(),
+            )
+        })?;
+        if !current.is_disjoint(&excluded_reused_ids) || !current.is_subset(&current_function_ids) {
+            return Err(RunError::Runtime(
+                build_runtime_error("compiled body selection disagrees with reused definitions")
+                    .with_identifier("RunMat:ExecutableProduct")
+                    .build(),
+            ));
+        }
+        let selected = super::source_evaluation::selected_static_imports(
+            &unit,
+            &self.function_registry,
+            &current,
+            &excluded_reused_ids,
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableStaticImport")
+                    .build(),
+            )
+        })?;
+        unit.with_portable_selection(current, selected.imports)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableProduct")
+                        .build(),
+                )
+            })
     }
 
+    #[cfg(test)]
     pub(super) fn executable_source_map(
         &self,
         source: &crate::ExecutableSource,
-    ) -> crate::ExecutableSourceMap {
-        crate::ExecutableSourceMap::new(
-            self.source_pool
-                .entries()
-                .map(|(source_id, entry)| {
-                    let display_name = entry.name.to_string();
-                    let full_path = entry.fullpath_name.as_ref().map(ToString::to_string);
-                    let (owner_identity, relative_path) = executable_source_identity(
-                        source,
-                        self.project_handoff.as_ref(),
-                        &display_name,
-                        full_path.as_deref(),
-                    );
-                    crate::SourceMapEntry {
-                        source_id: source_id.0,
-                        owner_identity,
-                        relative_path,
-                        display_name,
-                        full_path,
-                        text: entry.text.to_string(),
-                    }
+    ) -> Result<crate::ExecutableSourceMap, String> {
+        let entries = self
+            .source_pool
+            .entries()
+            .map(|(source_id, entry)| {
+                let display_name = entry.name.to_string();
+                let full_path = entry.fullpath_name.as_ref().map(ToString::to_string);
+                let (owner_identity, relative_path) = executable_source_identity(
+                    source,
+                    self.project_handoff.as_ref(),
+                    self.current_source_fullpath_name(),
+                    &display_name,
+                    full_path.as_deref(),
+                )?;
+                Ok(crate::SourceMapEntry {
+                    source_id: runmat_types::ProgramSourceId(
+                        u32::try_from(source_id.0)
+                            .map_err(|_| "source ordinal exceeds portable identity")?,
+                    ),
+                    owner_identity,
+                    relative_path,
+                    content_revision: runmat_execution::Digest::sha256(entry.text.as_bytes()),
+                    display_name,
+                    full_path,
+                    text: entry.text.to_string(),
                 })
-                .collect(),
-        )
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(crate::ExecutableSourceMap::new(entries))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn published_function_registry_for_testing(&self) -> runmat_vm::FunctionRegistry {
+        self.function_registry.clone()
     }
 
     #[cfg(test)]
@@ -937,21 +1226,22 @@ impl RunMatSession {
         source_name: &str,
         input: &str,
     ) -> std::result::Result<PreparedExecution, RunError> {
-        let previous_source_name = self.active_source_name.clone();
-        let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
-        self.active_source_name = source_name.to_string();
-        self.active_source_fullpath_name = None;
-        let handoff = self.project_handoff.clone();
+        let mut scope = super::source_scope::SourceCompositionScope::enter(self);
+        let session = scope.session();
+        session.active_source_name = source_name.to_string();
+        session.active_source_fullpath_name = None;
+        let handoff = session.project_handoff.clone();
         let companion = futures::executor::block_on(async {
             if let Some(handoff) = handoff.as_ref() {
                 companion_source_statements_from_handoff_async(
                     source_name,
-                    self.compat_mode,
+                    session.compat_mode,
                     handoff,
+                    None,
                 )
                 .await
             } else {
-                discover_companion_source_statements_async(source_name, self.compat_mode).await
+                discover_companion_source_statements_async(source_name, session.compat_mode).await
             }
         })
         .map_err(|error| {
@@ -961,35 +1251,117 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        self.pending_companion_source_discovery = Some(companion);
-        let result = self.compile_input(input);
-        self.active_source_name = previous_source_name;
-        self.active_source_fullpath_name = previous_source_fullpath_name;
-        result
+        session.pending_companion_source_discovery = Some(companion);
+        session.compile_input(input)
     }
 
     pub(crate) fn compile_input(
         &mut self,
         input: &str,
     ) -> std::result::Result<PreparedExecution, RunError> {
+        self.compile_input_with_portable_source(input, None, None)
+    }
+
+    pub(super) fn canonical_interactive_source(
+        &self,
+        input: &str,
+    ) -> std::result::Result<crate::ExecutableSource, RunError> {
+        let display_name = self.current_source_name();
+        if let Some(captured) = self.active_primary_source.as_ref() {
+            let source = crate::ExecutableSource::with_captured_primary(input, captured.clone())
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build(),
+                    )
+                })?;
+            captured
+                .validate(
+                    self.project_handoff.as_ref().ok_or_else(|| {
+                        RunError::Runtime(
+                            build_runtime_error("captured primary has no installed project")
+                                .with_identifier("RunMat:ExecutableSourceIdentity")
+                                .build(),
+                        )
+                    })?,
+                    &source,
+                )
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build(),
+                    )
+                })?;
+            return Ok(source);
+        }
+        let fallback = crate::ExecutableSource::new("interactive", display_name, input);
+        let (owner_identity, relative_path) = executable_source_identity(
+            &fallback,
+            self.project_handoff.as_ref(),
+            self.current_source_fullpath_name(),
+            display_name,
+            self.current_source_fullpath_name(),
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableSourceIdentity")
+                    .build(),
+            )
+        })?;
+        Ok(crate::ExecutableSource::new(
+            owner_identity,
+            relative_path,
+            input,
+        ))
+    }
+
+    fn compile_input_with_portable_source(
+        &mut self,
+        input: &str,
+        portable_source: Option<&crate::ExecutableSource>,
+        test_authority: Option<&CapturedTestSourceAuthority<'_>>,
+    ) -> std::result::Result<PreparedExecution, RunError> {
+        self.sync_workspace_binding_metadata()
+            .map_err(RunError::Runtime)?;
         let source_name = self.current_source_name().to_string();
         let source_fullpath_name = self.current_source_fullpath_name().map(ToString::to_string);
-        let source_id = self.source_pool.intern_with_fullpath(
-            &source_name,
-            source_fullpath_name.as_deref(),
-            input,
-        );
+        // Selected executable sources have already crossed their own authority
+        // boundary; resolve an interactive source only for interactive input.
+        let interactive_source;
+        let source_for_table = match portable_source {
+            Some(source) => source,
+            None => {
+                interactive_source = self.canonical_interactive_source(input)?;
+                &interactive_source
+            }
+        };
+        self.source_pool
+            .intern_with_fullpath(&source_name, source_fullpath_name.as_deref(), input);
         let (
             ast,
             private_companion_function_names,
             private_companion_function_owners,
             private_companion_function_aliases,
-            companion_function_source_ids,
+            source_table,
             source_catalog,
             project_symbol_aliases,
         ) = {
             let _span = info_span!("runtime.parse").entered();
             let mut ast = parse_with_options(input, ParserOptions::new(self.compat_mode))?;
+            if let Some(authority) = test_authority {
+                authority
+                    .select_program(&mut ast, input.len())
+                    .map_err(|error| {
+                        RunError::Runtime(
+                            build_runtime_error(error)
+                                .with_identifier("RunMat:ExecutableSourceIdentity")
+                                .build(),
+                        )
+                    })?;
+            }
             let primary_function_names = function_names_in_statements(&ast.body)
                 .map(ToString::to_string)
                 .collect::<HashSet<_>>();
@@ -998,6 +1370,88 @@ impl RunMatSession {
                 .take()
                 .unwrap_or_default();
             companion.apply_function_precedence(&primary_function_names);
+            let mut retained_sources = Vec::new();
+            {
+                let retained_ids = self
+                    .function_registry
+                    .functions
+                    .values()
+                    .filter_map(|function| {
+                        function
+                            .source_id
+                            .and_then(runmat_vm::BytecodeSourceRef::runtime)
+                    })
+                    .collect::<HashSet<_>>();
+                for runtime_id in retained_ids {
+                    let source = runtime_id
+                        .resolve_in(&self.runtime_context)
+                        .and_then(|id| {
+                            runmat_runtime::source_context::source_info_in_context(
+                                &self.runtime_context,
+                                id,
+                            )
+                        })
+                        .ok_or_else(|| {
+                            RunError::Runtime(
+                            build_runtime_error(
+                                "retained function refers to a missing or foreign session source",
+                            )
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build(),
+                        )
+                        })?;
+                    let identity =
+                        runmat_runtime::source_context::portable_source_identity_in_context(
+                            &self.runtime_context,
+                            runtime_id,
+                        )
+                        .ok_or_else(|| {
+                            RunError::Runtime(
+                                build_runtime_error(
+                                    "retained function lacks its original portable source owner",
+                                )
+                                .with_identifier("RunMat:ExecutableSourceIdentity")
+                                .build(),
+                            )
+                        })?;
+                    retained_sources.push((
+                        runtime_id,
+                        SourceContextData {
+                            display_name: source.name.to_string(),
+                            fullpath_name: source.fullpath_name.as_deref().map(ToString::to_string),
+                            text: source.text.to_string(),
+                        },
+                        identity,
+                    ));
+                }
+            }
+            let source_table = if let Some(authority) = test_authority {
+                program_sources::ProgramSourceTable::build_with_test(
+                    source_for_table,
+                    source_fullpath_name.as_deref(),
+                    &companion,
+                    ast.body.len(),
+                    self.project_handoff.as_ref(),
+                    authority,
+                    &retained_sources,
+                )
+            } else {
+                program_sources::ProgramSourceTable::build(
+                    source_for_table,
+                    source_fullpath_name.as_deref(),
+                    &companion,
+                    ast.body.len(),
+                    self.project_handoff.as_ref(),
+                    &retained_sources,
+                )
+            }
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
+                )
+            })?;
             let private_companion_function_names =
                 std::mem::take(&mut companion.private_function_names);
             let private_companion_function_owners =
@@ -1006,29 +1460,20 @@ impl RunMatSession {
                 std::mem::take(&mut companion.private_function_aliases);
             let source_catalog = companion.source_catalog.take();
             let project_symbol_aliases = std::mem::take(&mut companion.project_symbol_aliases);
-            let companion_function_source_ids =
-                std::mem::take(&mut companion.function_source_contexts)
-                    .into_iter()
-                    .map(|(function_name, source_context)| {
-                        (
-                            function_name,
-                            self.source_pool.intern_with_fullpath(
-                                &source_context.display_name,
-                                source_context.fullpath_name.as_deref(),
-                                &source_context.text,
-                            ),
-                        )
-                    })
-                    .collect::<HashMap<_, _>>();
             if !companion.statements.is_empty() {
-                ast.body.append(&mut companion.statements);
+                ast.body.extend(
+                    companion
+                        .statements
+                        .drain(..)
+                        .map(|discovered| discovered.statement),
+                );
             }
             (
                 ast,
                 private_companion_function_names,
                 private_companion_function_owners,
                 private_companion_function_aliases,
-                companion_function_source_ids,
+                source_table,
                 source_catalog,
                 project_symbol_aliases,
             )
@@ -1048,6 +1493,7 @@ impl RunMatSession {
                 .map(|catalog| &catalog.symbols)
                 .cloned()
                 .unwrap_or_default();
+            let primary_source = source_table.primary_source();
             let frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
@@ -1056,6 +1502,8 @@ impl RunMatSession {
                     .with_function_modifiers(&function_modifiers)
                     .with_known_project_symbols(&known_project_symbols)
                     .with_project_symbol_aliases(&project_symbol_aliases)
+                    .with_top_level_sources(&source_table.statement_sources)
+                    .with_primary_source(primary_source)
                     .with_private_functions(
                         &private_companion_function_owners,
                         &private_companion_function_aliases,
@@ -1068,7 +1516,10 @@ impl RunMatSession {
                 return Err(error.into());
             }
             if let Some(error) = frontend.compile_failure {
-                return Err(error.into());
+                return Err(bind_compile_error(error, &source_table));
+            }
+            if let Some(diagnostic) = fatal_frontend_diagnostic(&frontend.diagnostics) {
+                return Err(bind_frontend_diagnostic(diagnostic, &source_table));
             }
             (
                 frontend
@@ -1082,74 +1533,52 @@ impl RunMatSession {
                     .expect("canonical frontend returned no bytecode without an error"),
             )
         };
-        if bytecode.layout.is_none() {
-            bytecode.layout = Some(runmat_vm::derive_layout(&lowering.assembly, &mir).map_err(
-                |error| {
-                    RunError::Runtime(
-                        build_runtime_error(format!(
-                            "failed to retain executable VM layout: {error:?}"
-                        ))
-                        .with_identifier("RunMat:ExecutableLayout")
+        crate::ExecutableUnit::retain_vm_layout(&mut bytecode, &lowering.assembly, &mir).map_err(
+            |error| {
+                RunError::Runtime(
+                    build_runtime_error(format!(
+                        "failed to retain executable VM layout: {error:?}"
+                    ))
+                    .with_identifier("RunMat:ExecutableLayout")
+                    .build(),
+                )
+            },
+        )?;
+        source_table
+            .validate_compiled_sources(&bytecode, &lowering.assembly)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
                         .build(),
-                    )
-                },
-            )?);
-        }
-        bytecode.source_id = Some(source_id);
-        // Frontend source IDs are compilation-local. Bind both retained MIR and
-        // VM functions to the session source pool before source-dependent analysis.
-        // Nested/anonymous functions inherit their lexical owner's source, not
-        // the primary file (nor a same-named companion's source).
-        let mut function_source_ids = HashMap::new();
-        for id in mir.functions.keys() {
-            let mut owner = *id;
-            let mut visited = HashSet::new();
-            let source = loop {
-                let metadata = mir
-                    .functions
-                    .get(&owner)
-                    .filter(|_| visited.insert(owner))
-                    .ok_or_else(|| {
-                        RunError::Runtime(
-                            build_runtime_error("invalid lexical function source ownership")
-                                .with_identifier("RunMat:ExecutableSourceIdentity")
-                                .build(),
-                        )
-                    })?;
-                if let Some(parent) = metadata.parent {
-                    owner = parent;
-                } else {
-                    break companion_function_source_ids
-                        .get(&metadata.name.0)
-                        .copied()
-                        .unwrap_or(source_id);
-                }
-            };
-            function_source_ids.insert(*id, source);
-        }
-        for (id, metadata) in &mut mir.functions {
-            metadata.source = u32::try_from(function_source_ids[id].0)
-                .map(runmat_types::ProgramSourceId)
-                .map_err(|_| {
-                    RunError::Runtime(
-                        build_runtime_error("function source identity exceeds the portable schema")
-                            .with_identifier("RunMat:ExecutableSourceIdentity")
-                            .build(),
-                    )
-                })?;
-        }
-        for (id, function) in &mut bytecode.function_registry.functions {
-            function.source_id = function_source_ids.get(id).copied();
+                )
+            })?;
+        let private_owners =
+            super::private_source_owner::CapturedPrivateSourceOwners::new(&source_table.source_map);
+        for function in bytecode.function_registry.functions.values_mut() {
+            function.private_source_owner =
+                function.source_id.and_then(|id| private_owners.get(id));
         }
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
+        let source_projection = source_table
+            .intern_runtime_projection(&mut self.source_pool, &self.runtime_context)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
+                )
+            })?;
         let (
             function_registry_after_success,
             next_semantic_function_id_after_success,
             function_id_remap,
+            published_registry_for_reuse,
         ) = self.prepare_session_semantic_function_registry(
             &mut bytecode,
             &private_companion_function_names,
-        );
+            Some(&source_projection),
+        )?;
         if !function_id_remap.is_empty() {
             runmat_mir::remap_function_ids(&mut mir, &function_id_remap).map_err(|error| {
                 RunError::Runtime(
@@ -1179,46 +1608,56 @@ impl RunMatSession {
             mir,
             analysis,
             bytecode,
+            portable_source_map: Some(source_table.source_map),
+            source_projection,
             function_registry_after_success,
+            published_registry_for_reuse,
+            private_companion_function_names,
+            current_function_ids: function_id_remap.values().copied().collect(),
             next_semantic_function_id_after_success,
         })
     }
 
-    pub(crate) fn populate_callstack(&self, error: &mut RuntimeError) {
-        if !error.context.call_stack.is_empty() || error.context.call_frames.is_empty() {
-            return;
-        }
-        let mut rendered = Vec::new();
-        if error.context.call_frames_elided > 0 {
-            rendered.push(format!(
-                "... {} frames elided ...",
-                error.context.call_frames_elided
-            ));
-        }
-        for frame in error.context.call_frames.iter().rev() {
-            let mut line = frame.function.clone();
-            if let (Some(source_id), Some((start, _end))) = (frame.source_id, frame.span) {
-                if let Some(source) = self.source_pool.get(SourceId(source_id)) {
-                    let (line_num, col) = line_col_from_offset(&source.text, start);
-                    line = format!("{} @ {}:{}:{}", frame.function, source.name, line_num, col);
-                }
-            }
-            rendered.push(line);
-        }
-        error.context.call_stack = rendered;
+    pub(crate) fn populate_callstack(
+        &self,
+        error: &mut RuntimeError,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) {
+        runmat_runtime::execution::preserve_source_call_stack_in_context(error, runtime);
     }
 
     fn prepare_session_semantic_function_registry(
         &self,
         bytecode: &mut runmat_vm::Bytecode,
         private_companion_function_names: &HashSet<String>,
-    ) -> (
-        runmat_vm::FunctionRegistry,
-        usize,
-        HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
-    ) {
+        source_projection: Option<&program_sources::SourceCompileProjection>,
+    ) -> std::result::Result<
+        (
+            runmat_vm::FunctionRegistry,
+            usize,
+            HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+            runmat_vm::FunctionRegistry,
+        ),
+        RunError,
+    > {
         let mut session_registry = self.function_registry.clone();
         let mut execution_registry = session_registry.clone();
+        if let Some(projection) = source_projection {
+            execution_registry
+                .project_current_source_ids(|runtime| {
+                    projection.program_ref_for_runtime_ref(runtime)
+                })
+                .map_err(|missing| {
+                    RunError::Runtime(
+                        build_runtime_error(format!(
+                            "retained source {missing:?} is absent from executable provenance"
+                        ))
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
+                    )
+                })?;
+        }
+        let published_registry_for_reuse = execution_registry.clone();
         // Published semantic functions share the retained executable layout's
         // function-id namespace. Reserve every unit-local layout id before
         // assigning session-stable ids so a closure/local function can never
@@ -1236,12 +1675,30 @@ impl RunMatSession {
         let mut next_semantic_function_id = self.next_semantic_function_id.max(first_id_after_unit);
         let current_registry = bytecode.function_registry();
         if current_registry.functions.is_empty() {
-            bytecode.function_registry = session_registry.clone();
+            bytecode.function_registry = execution_registry;
             bytecode.bound_functions = bytecode.function_registry.functions.clone();
-            bind_semantic_function_references(bytecode);
-            return (session_registry, next_semantic_function_id, HashMap::new());
+            let bindings = semantic_function_bindings(bytecode)?;
+            runmat_vm::remap_session_entrypoint(bytecode, &HashMap::new(), &bindings).map_err(
+                |error| {
+                    RunError::Runtime(
+                        build_runtime_error(format!("session entrypoint binding: {error}"))
+                            .with_identifier("RunMat:SelectedFusionStageProjection")
+                            .build(),
+                    )
+                },
+            )?;
+            bytecode.function_registry.finalize_selected_image_views();
+            session_registry.finalize_selected_image_views();
+            return Ok((
+                session_registry,
+                next_semantic_function_id,
+                HashMap::new(),
+                published_registry_for_reuse,
+            ));
         }
 
+        // Provisional identities remain fresh until the *decorated* product
+        // proves same-stage equality immediately before immutable sealing.
         let mut remap = HashMap::new();
         let mut ids: Vec<_> = current_registry.functions.keys().copied().collect();
         ids.sort_by_key(|id| id.0);
@@ -1251,9 +1708,6 @@ impl RunMatSession {
             remap.insert(old_id, new_id);
         }
 
-        for instr in &mut bytecode.instructions {
-            remap_semantic_function_instr(instr, &remap);
-        }
         let name_remaps: Vec<(String, runmat_hir::FunctionId)> = current_registry
             .names
             .iter()
@@ -1266,10 +1720,11 @@ impl RunMatSession {
                 continue;
             }
             if let Some(existing_id) = session_registry.resolve_name(&function.display_name) {
-                if let Some(source_id) = session_registry
-                    .get(existing_id)
-                    .and_then(|existing| existing.source_id)
-                {
+                if let Some(source_id) = session_registry.get(existing_id).and_then(|existing| {
+                    existing
+                        .source_id
+                        .and_then(runmat_vm::BytecodeSourceRef::runtime)
+                }) {
                     if !replaced_sources.contains(&source_id) {
                         replaced_sources.push(source_id);
                     }
@@ -1280,30 +1735,55 @@ impl RunMatSession {
             session_registry.remove_source(source_id);
         }
 
-        for (old_id, function) in current_registry.functions {
+        for (old_id, function) in current_registry.into_functions() {
             let Some(new_id) = remap.get(&old_id).copied() else {
                 continue;
             };
             let mut function = function;
-            function.function = new_id;
-            function.resume_points = std::mem::take(&mut function.resume_points)
-                .into_iter()
-                .map(|(mut point, pc)| {
-                    point.function = runmat_types::ProgramFunctionId(
-                        u32::try_from(new_id.0)
-                            .expect("session function identity exceeds portable schema"),
-                    );
-                    (point, pc)
-                })
-                .collect();
-            function.source_id = function.source_id.or(bytecode.source_id);
-            for instr in &mut function.instructions {
-                remap_semantic_function_instr(instr, &remap);
-            }
+            let program_function = runmat_types::ProgramFunctionId(
+                u32::try_from(new_id.0).expect("session function identity exceeds portable schema"),
+            );
+            let source = function.source_id.or(bytecode.source_id);
+            runmat_vm::remap_session_function(
+                &mut function,
+                new_id,
+                program_function,
+                source,
+                &remap,
+            )
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(format!("session function remap: {error}"))
+                        .with_identifier("RunMat:SelectedFusionStageProjection")
+                        .build(),
+                )
+            })?;
             let persist_function =
                 !private_companion_function_names.contains(&function.display_name);
             execution_registry.insert_replacing_name(function.clone());
             if persist_function {
+                if let Some(projection) = source_projection {
+                    if let Some(program) = function.source_id {
+                        let runtime = projection.runtime_ref_for_program_ref(program).ok_or_else(|| {
+                            RunError::Runtime(
+                                build_runtime_error("published function source is absent from executable provenance")
+                                    .with_identifier("RunMat:ExecutableSourceIdentity")
+                                    .build(),
+                            )
+                        })?;
+                        runmat_vm::rebind_session_source(&mut function, Some(runtime)).map_err(
+                            |error| {
+                                RunError::Runtime(
+                                    build_runtime_error(format!(
+                                        "session function source rebind: {error}"
+                                    ))
+                                    .with_identifier("RunMat:SelectedFusionStageProjection")
+                                    .build(),
+                                )
+                            },
+                        )?;
+                    }
+                }
                 session_registry.insert_replacing_name(function);
             }
         }
@@ -1319,8 +1799,24 @@ impl RunMatSession {
 
         bytecode.function_registry = execution_registry;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
-        bind_semantic_function_references(bytecode);
-        (session_registry, next_semantic_function_id, remap)
+        let bindings = semantic_function_bindings(bytecode)?;
+        runmat_vm::remap_session_entrypoint(bytecode, &remap, &bindings).map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(format!("session entrypoint remap: {error}"))
+                    .with_identifier("RunMat:SelectedFusionStageProjection")
+                    .build(),
+            )
+        })?;
+        // Remapping and session publication invalidate the compiler's
+        // generation, so seal both published registries before any call.
+        bytecode.function_registry.finalize_selected_image_views();
+        session_registry.finalize_selected_image_views();
+        Ok((
+            session_registry,
+            next_semantic_function_id,
+            remap,
+            published_registry_for_reuse,
+        ))
     }
 
     pub(crate) fn normalize_error_namespace(&self, error: &mut RuntimeError) {
@@ -1378,11 +1874,12 @@ impl RunMatSession {
     }
 
     pub(crate) fn prepare_variable_array_for_execution(
-        &mut self,
+        &self,
         bytecode: &runmat_vm::Bytecode,
         updated_var_mapping: &HashMap<String, usize>,
+        workspace: &runmat_runtime::workspace::BaseWorkspaceProjectionService,
         debug_trace: bool,
-    ) {
+    ) -> std::result::Result<Vec<Value>, RuntimeError> {
         // Create a new variable array of the correct size
         let max_var_id = updated_var_mapping.values().copied().max().unwrap_or(0);
         let required_len = std::cmp::max(bytecode.var_count, max_var_id + 1);
@@ -1395,9 +1892,15 @@ impl RunMatSession {
         }
 
         // Populate with existing values based on the variable mapping
+        let global_names = self.session_global_binding_names()?;
         for (var_name, &new_var_id) in updated_var_mapping {
             if new_var_id < new_variable_array.len() {
-                if let Some(value) = self.workspace_values.get(var_name) {
+                let value = if global_names.contains(var_name) {
+                    self.runtime_context.session_global_value(var_name)?
+                } else {
+                    workspace.lookup(var_name)?
+                };
+                if let Some(value) = value {
                     if debug_trace {
                         debug!(
                             var_name,
@@ -1406,7 +1909,7 @@ impl RunMatSession {
                             "[repl] prepare set var"
                         );
                     }
-                    new_variable_array[new_var_id] = value.clone();
+                    new_variable_array[new_var_id] = value;
                 }
             } else if debug_trace {
                 debug!(
@@ -1418,334 +1921,53 @@ impl RunMatSession {
             }
         }
 
-        // Update our variable array and mapping
-        self.variable_array = new_variable_array;
+        Ok(new_variable_array)
     }
 }
 
-fn executable_source_identity(
-    root: &crate::ExecutableSource,
-    handoff: Option<&runmat_package::FrozenProjectHandoff>,
-    display_name: &str,
-    full_path: Option<&str>,
-) -> (String, String) {
-    if display_name.replace('\\', "/") == root.relative_path.replace('\\', "/")
-        || full_path.is_some_and(|path| path.replace('\\', "/").ends_with(&root.relative_path))
-    {
-        return (root.owner_identity.clone(), root.relative_path.clone());
-    }
-    if let Some(handoff) = handoff {
-        for (descriptor, access_path) in handoff.project.all_sources() {
-            let relative_path = descriptor.id.relative_path.to_string();
-            let same_relative = display_name.replace('\\', "/") == relative_path.replace('\\', "/");
-            let same_access = full_path.is_some_and(|path| {
-                std::path::Path::new(path) == access_path
-                    || path.replace('\\', "/") == access_path.to_string_lossy().replace('\\', "/")
-            });
-            if same_relative || same_access {
-                return (descriptor.id.package_instance.to_string(), relative_path);
-            }
-        }
-    }
-    (root.owner_identity.clone(), display_name.replace('\\', "/"))
-}
-
-fn remap_semantic_function_instr(
-    instr: &mut runmat_vm::Instr,
-    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
-) {
-    match instr {
-        runmat_vm::Instr::CreateSemanticClosure(function, _, _)
-        | runmat_vm::Instr::CreateBoundFunctionHandle(function, _)
-        | runmat_vm::Instr::CreateSemanticFuture(function, _, _)
-        | runmat_vm::Instr::CreateSemanticFutureExpandMultiOutput(function, _, _)
-        | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
-        | runmat_vm::Instr::CallSemanticFunctionMultiUsingOutputSlot(function, _, _)
-        | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
-            if let Some(new_id) = remap.get(function).copied() {
-                *function = new_id;
-            }
-        }
-        runmat_vm::Instr::CallSemanticNestedFunctionMulti { function, .. }
-        | runmat_vm::Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { function, .. }
-        | runmat_vm::Instr::CallSemanticNestedFunctionExpandMultiOutput { function, .. } => {
-            if let Some(new_id) = remap.get(function).copied() {
-                *function = new_id;
-            }
-        }
-        runmat_vm::Instr::IndexSliceExpr {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        }
-        | runmat_vm::Instr::StoreSliceExpr {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        } => {
-            remap_optional_end_exprs(range_start_exprs, remap);
-            remap_optional_end_exprs(range_step_exprs, remap);
-            for expr in range_end_exprs {
-                remap_semantic_function_end_expr(expr, remap);
-            }
-            for (_, expr) in end_numeric_exprs {
-                remap_semantic_function_end_expr(expr, remap);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
-    let registry = bytecode.function_registry.clone();
-    bind_semantic_callback_literals(bytecode, &registry);
-    for instr in &mut bytecode.instructions {
-        match instr {
-            runmat_vm::Instr::CreateFunctionHandle(name) => {
-                if let Some(function) = registry.resolve_name(name) {
-                    *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone());
-                }
-            }
-            runmat_vm::Instr::IndexSliceExpr {
-                range_start_exprs,
-                range_step_exprs,
-                range_end_exprs,
-                end_numeric_exprs,
-                ..
-            }
-            | runmat_vm::Instr::StoreSliceExpr {
-                range_start_exprs,
-                range_step_exprs,
-                range_end_exprs,
-                end_numeric_exprs,
-                ..
-            } => {
-                bind_optional_end_exprs(range_start_exprs, &registry);
-                bind_optional_end_exprs(range_step_exprs, &registry);
-                for expr in range_end_exprs {
-                    bind_semantic_function_end_expr(expr, &registry);
-                }
-                for (_, expr) in end_numeric_exprs {
-                    bind_semantic_function_end_expr(expr, &registry);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn bind_semantic_callback_literals(
-    bytecode: &mut runmat_vm::Bytecode,
-    registry: &runmat_vm::FunctionRegistry,
-) {
-    let mut stack: Vec<usize> = Vec::new();
-    let mut replacements = Vec::new();
-
+fn semantic_function_bindings(
+    bytecode: &runmat_vm::Bytecode,
+) -> Result<Vec<runmat_vm::SessionCallableBinding>, RunError> {
+    let registry = &bytecode.function_registry;
+    let mut bindings = Vec::new();
     for (pc, instr) in bytecode.instructions.iter().enumerate() {
-        match instr {
-            runmat_vm::Instr::CallBuiltinMulti(name, argc, _)
-                if matches!(name.as_str(), "cellfun" | "arrayfun") && *argc > 0 =>
-            {
-                if stack.len() >= *argc {
-                    let producer = stack[stack.len() - *argc];
-                    if let Some((function, display_name)) =
-                        callback_literal(bytecode.instructions.get(producer), registry)
-                    {
-                        replacements.push((producer, function, display_name));
-                    }
+        if let runmat_vm::Instr::CreateFunctionHandle(name)
+        | runmat_vm::Instr::CreateExternalFunctionHandle(name) = instr
+        {
+            if let Some(function) = registry.resolve_name(name) {
+                if matches!(instr, runmat_vm::Instr::CreateFunctionHandle(_)) {
+                    bindings.push(runmat_vm::SessionCallableBinding::named(
+                        pc,
+                        function,
+                        name.clone(),
+                    ));
                 }
+                continue;
             }
-            runmat_vm::Instr::CallFevalMulti(argc, _) => {
-                let pops = *argc + 1;
-                if stack.len() >= pops {
-                    let producer = stack[stack.len() - pops];
-                    if let Some((function, display_name)) =
-                        callback_literal(bytecode.instructions.get(producer), registry)
-                    {
-                        replacements.push((producer, function, display_name));
-                    }
-                }
+            if runmat_builtins::builtin_name_is_known(name) {
+                continue;
             }
-            runmat_vm::Instr::CallFevalMultiUsingOutputSlot(argc, _) => {
-                let pops = *argc + 1;
-                if stack.len() >= pops {
-                    let producer = stack[stack.len() - pops];
-                    if let Some((function, display_name)) =
-                        callback_literal(bytecode.instructions.get(producer), registry)
-                    {
-                        replacements.push((producer, function, display_name));
-                    }
-                }
+            let constructor =
+                registry
+                    .resolve_session_constructor_handle(name)
+                    .map_err(|message| {
+                        RunError::Runtime(
+                            build_runtime_error(message)
+                                .with_identifier("RunMat:SelectedConstructorHandle")
+                                .build(),
+                        )
+                    })?;
+            if let Some(function) = constructor {
+                bindings.push(runmat_vm::SessionCallableBinding::constructor(
+                    pc,
+                    function,
+                    name.clone(),
+                ));
             }
-            runmat_vm::Instr::CallFevalExpandMultiOutput(_, _) => {
-                if let Some(effect) = instr.stack_effect() {
-                    if stack.len() >= effect.pops {
-                        let producer = stack[stack.len() - effect.pops];
-                        if let Some((function, display_name)) =
-                            callback_literal(bytecode.instructions.get(producer), registry)
-                        {
-                            replacements.push((producer, function, display_name));
-                        }
-                    }
-                }
-            }
-            runmat_vm::Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _) => {
-                if let Some(effect) = instr.stack_effect() {
-                    if stack.len() >= effect.pops {
-                        let producer = stack[stack.len() - effect.pops];
-                        if let Some((function, display_name)) =
-                            callback_literal(bytecode.instructions.get(producer), registry)
-                        {
-                            replacements.push((producer, function, display_name));
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        let Some(effect) = instr.stack_effect() else {
-            stack.clear();
-            continue;
-        };
-        if effect.pops > stack.len() {
-            stack.clear();
-        } else {
-            for _ in 0..effect.pops {
-                stack.pop();
-            }
-        }
-        for _ in 0..effect.pushes {
-            stack.push(pc);
         }
     }
-
-    for (producer, function, display_name) in replacements {
-        bytecode.instructions[producer] =
-            runmat_vm::Instr::CreateBoundFunctionHandle(function, display_name);
-    }
+    Ok(bindings)
 }
-
-fn callback_literal(
-    instr: Option<&runmat_vm::Instr>,
-    registry: &runmat_vm::FunctionRegistry,
-) -> Option<(runmat_hir::FunctionId, String)> {
-    let text = match instr? {
-        runmat_vm::Instr::LoadString(text) | runmat_vm::Instr::LoadCharRow(text) => text,
-        _ => return None,
-    };
-    let name = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
-    if name.is_empty() {
-        return None;
-    }
-    registry
-        .resolve_name(name)
-        .map(|function| (function, name.to_string()))
-}
-
-fn bind_optional_end_exprs(
-    exprs: &mut [Option<runmat_runtime::indexing::EndExpr>],
-    registry: &runmat_vm::FunctionRegistry,
-) {
-    for expr in exprs.iter_mut().flatten() {
-        bind_semantic_function_end_expr(expr, registry);
-    }
-}
-
-fn bind_semantic_function_end_expr(
-    expr: &mut runmat_runtime::indexing::EndExpr,
-    registry: &runmat_vm::FunctionRegistry,
-) {
-    match expr {
-        runmat_runtime::indexing::EndExpr::ResolvedCall { identity, args, .. } => {
-            if let runmat_hir::CallableIdentity::DynamicName(name) = identity {
-                let dynamic_name = name.0.clone();
-                if let Some(function) = registry.resolve_name(&dynamic_name) {
-                    *identity = runmat_hir::CallableIdentity::BoundFunction(function);
-                }
-            }
-            for arg in args {
-                bind_semantic_function_end_expr(arg, registry);
-            }
-        }
-        runmat_runtime::indexing::EndExpr::Add(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Sub(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Mul(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Div(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::LeftDiv(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Pow(lhs, rhs) => {
-            bind_semantic_function_end_expr(lhs, registry);
-            bind_semantic_function_end_expr(rhs, registry);
-        }
-        runmat_runtime::indexing::EndExpr::Neg(inner)
-        | runmat_runtime::indexing::EndExpr::Pos(inner)
-        | runmat_runtime::indexing::EndExpr::Floor(inner)
-        | runmat_runtime::indexing::EndExpr::Ceil(inner)
-        | runmat_runtime::indexing::EndExpr::Round(inner)
-        | runmat_runtime::indexing::EndExpr::Fix(inner) => {
-            bind_semantic_function_end_expr(inner, registry)
-        }
-        runmat_runtime::indexing::EndExpr::End
-        | runmat_runtime::indexing::EndExpr::Const(_)
-        | runmat_runtime::indexing::EndExpr::Var(_) => {}
-    }
-}
-
-fn remap_optional_end_exprs(
-    exprs: &mut [Option<runmat_runtime::indexing::EndExpr>],
-    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
-) {
-    for expr in exprs.iter_mut().flatten() {
-        remap_semantic_function_end_expr(expr, remap);
-    }
-}
-
-fn remap_semantic_function_end_expr(
-    expr: &mut runmat_runtime::indexing::EndExpr,
-    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
-) {
-    match expr {
-        runmat_runtime::indexing::EndExpr::ResolvedCall { identity, args, .. } => {
-            match identity {
-                runmat_hir::CallableIdentity::BoundFunction(function)
-                | runmat_hir::CallableIdentity::AnonymousFunction(function) => {
-                    if let Some(new_id) = remap.get(function).copied() {
-                        *function = new_id;
-                    }
-                }
-                _ => {}
-            }
-            for arg in args {
-                remap_semantic_function_end_expr(arg, remap);
-            }
-        }
-        runmat_runtime::indexing::EndExpr::Add(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Sub(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Mul(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Div(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::LeftDiv(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Pow(lhs, rhs) => {
-            remap_semantic_function_end_expr(lhs, remap);
-            remap_semantic_function_end_expr(rhs, remap);
-        }
-        runmat_runtime::indexing::EndExpr::Neg(inner)
-        | runmat_runtime::indexing::EndExpr::Pos(inner)
-        | runmat_runtime::indexing::EndExpr::Floor(inner)
-        | runmat_runtime::indexing::EndExpr::Ceil(inner)
-        | runmat_runtime::indexing::EndExpr::Round(inner)
-        | runmat_runtime::indexing::EndExpr::Fix(inner) => {
-            remap_semantic_function_end_expr(inner, remap)
-        }
-        runmat_runtime::indexing::EndExpr::End
-        | runmat_runtime::indexing::EndExpr::Const(_)
-        | runmat_runtime::indexing::EndExpr::Var(_) => {}
-    }
-}
-
 #[cfg(test)]
 mod source_discovery_tests {
     use super::*;
@@ -1826,11 +2048,49 @@ mod source_discovery_tests {
         discovery
             .statements
             .iter()
-            .filter_map(|statement| match statement {
+            .filter_map(|discovered| match &discovered.statement {
                 runmat_parser::Stmt::Function { name, .. } => Some(name.clone()),
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn precedence_keeps_the_winning_statement_and_its_source_together() {
+        let mut discovery = CompanionSourceDiscovery::default();
+        let first = "function y = helper(); y = 1; end";
+        let private = "function y = helper(); y = 2; end";
+        discovery.extend_body(
+            runmat_parser::parse(first).unwrap().body,
+            None,
+            HashMap::new(),
+            Some(SourceContextData {
+                display_name: "ordinary/helper.m".into(),
+                fullpath_name: Some("/project/ordinary/helper.m".into()),
+                text: first.into(),
+            }),
+        );
+        discovery.extend_body(
+            runmat_parser::parse(private).unwrap().body,
+            Some("owner"),
+            HashMap::new(),
+            Some(SourceContextData {
+                display_name: "private/helper.m".into(),
+                fullpath_name: Some("/project/private/helper.m".into()),
+                text: private.into(),
+            }),
+        );
+        discovery.apply_function_precedence(&HashSet::new());
+        assert_eq!(discovery.statements.len(), 1);
+        assert!(discovery.statements[0].is_private);
+        assert_eq!(
+            discovery.statements[0]
+                .source
+                .as_ref()
+                .unwrap()
+                .display_name,
+            "private/helper.m"
+        );
     }
 
     #[test]
@@ -1954,3 +2214,13 @@ roots = ["src"]
         );
     }
 }
+
+#[cfg(test)]
+#[path = "compile/name_binding_tests.rs"]
+mod name_binding_tests;
+#[cfg(test)]
+#[path = "compile/portable_source_tests.rs"]
+mod portable_source_tests;
+#[cfg(test)]
+#[path = "compile/stage_remap_tests.rs"]
+mod stage_remap_tests;

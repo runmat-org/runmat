@@ -53,7 +53,7 @@ fn compiled_eye_and_false_accept_every_integer_dimension_class() {
             .unwrap_or_else(|error| panic!("{constructor} compiled creation: {error}"));
         assert!(values.iter().any(|value| {
             matches!(value, Value::Tensor(tensor)
-                if tensor.shape == [2, 2]
+                if tensor.shape() == [2, 2]
                     && tensor.integer_storage()
                         == Some(&IntegerStorage::U64(vec![1, 0, 0, 1])))
         }));

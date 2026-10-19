@@ -83,6 +83,7 @@ pub(super) fn capture(
             bytes,
             revision,
             readonly,
+            ..
         } = entry
         {
             size = size
@@ -240,12 +241,14 @@ pub(super) fn publish_with_lease(
                 let path = confined(&root, &path)?;
                 writable_file(&next, &path, false)?;
                 ensure_parent_dirs(&mut next, &path)?;
+                let identity = successor_identity(next.entries.get(&path))?;
                 next.entries.insert(
                     path,
                     MemoryEntry::File {
                         bytes: Arc::new(bytes),
                         readonly: false,
                         revision: uuid::Uuid::new_v4().to_string(),
+                        identity,
                     },
                 );
             }

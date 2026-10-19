@@ -36,6 +36,28 @@ impl NumericStorage {
         }
     }
 
+    /// Construct zeroed storage whose backing capacity is exactly `len`.
+    /// This is the unmanaged counterpart used when a caller has physically
+    /// quoted the complete returned-value footprint.
+    pub fn zeros_exact(
+        dtype: NumericDType,
+        len: usize,
+    ) -> Result<Self, crate::ExactHostNumericAllocationError> {
+        use crate::exact_capacity_vec_with;
+        Ok(match dtype {
+            NumericDType::F64 => Self::F64(exact_capacity_vec_with(len, |_| 0.0_f64)?),
+            NumericDType::F32 => Self::F32(exact_capacity_vec_with(len, |_| 0.0_f32)?),
+            NumericDType::I8 => Self::I8(exact_capacity_vec_with(len, |_| 0_i8)?),
+            NumericDType::I16 => Self::I16(exact_capacity_vec_with(len, |_| 0_i16)?),
+            NumericDType::I32 => Self::I32(exact_capacity_vec_with(len, |_| 0_i32)?),
+            NumericDType::I64 => Self::I64(exact_capacity_vec_with(len, |_| 0_i64)?),
+            NumericDType::U8 => Self::U8(exact_capacity_vec_with(len, |_| 0_u8)?),
+            NumericDType::U16 => Self::U16(exact_capacity_vec_with(len, |_| 0_u16)?),
+            NumericDType::U32 => Self::U32(exact_capacity_vec_with(len, |_| 0_u32)?),
+            NumericDType::U64 => Self::U64(exact_capacity_vec_with(len, |_| 0_u64)?),
+        })
+    }
+
     pub fn ones(dtype: NumericDType, len: usize) -> Self {
         match dtype {
             NumericDType::F64 => Self::F64(vec![1.0; len]),
@@ -240,12 +262,10 @@ impl NumericStorage {
     }
 
     pub fn validate_shape(&self, shape: &[usize]) -> Result<(), String> {
-        let expected = shape
-            .iter()
-            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
-        let Some(expected) = expected else {
-            return Err(format!("numeric tensor shape {shape:?} overflows usize"));
-        };
+        let expected =
+            crate::array::BorrowedShapeAdmission::new(shape).finish_synchronously(|shape| {
+                format!("numeric tensor shape {shape:?} overflows usize")
+            })?;
         if self.len() != expected {
             return Err(format!(
                 "{} storage length {} doesn't match shape {:?} ({} elements)",

@@ -83,7 +83,7 @@ fn table_missing_interop_executes_from_scripts() {
     assert!(has_logical(&vars, &[0, 1, 0, 1, 1, 1]));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name == "table")));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name.is(runmat_types::StaticClassIdentity::new("table")))));
 }
 
 #[test]
@@ -95,5 +95,5 @@ fn numeric_table_fillmissing_executes_from_scripts() {
     assert!(has_logical(&vars, &[0, 1, 0, 0, 0, 1]));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name == "table")));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name.is(runmat_types::StaticClassIdentity::new("table")))));
 }

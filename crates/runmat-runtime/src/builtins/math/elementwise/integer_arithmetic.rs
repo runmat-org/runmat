@@ -5,8 +5,10 @@ use num_traits::{Signed, ToPrimitive};
 use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::math::elementwise::extended_precision::Extended;
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
+mod admission;
+pub(crate) use admission::validate_integer_binary_inputs;
 
 #[derive(Clone, Copy)]
 pub(crate) enum IntegerBinaryOp {
@@ -47,7 +49,10 @@ fn value_is_integer(value: &Value) -> bool {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
         Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
-        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        Value::GpuTensor(handle) => {
+            !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
         _ => false,
     }
 }
@@ -182,7 +187,7 @@ fn nonfinite_integer_remainder(
     integer_is_left: bool,
     operation: IntegerRemainderOp,
 ) -> IntValue {
-    let target = IntegerTarget::from_int_value(&integer);
+    let target = IntegerClass::from_int_value(&integer);
     if scalar.is_nan() || !integer_is_left {
         return target.cast_scalar(f64::NAN);
     }
@@ -277,14 +282,16 @@ pub(crate) fn try_integer_binary(
     if left.is_none() && right.is_none() {
         return Ok(None);
     }
+    validate_integer_binary_inputs(
+        lhs,
+        rhs,
+        real_scalar(lhs).is_some(),
+        real_scalar(rhs).is_some(),
+        builtin,
+    )?;
 
     let (integer, other, integer_is_left) = match (left, right) {
         (Some(left), Some(right)) => {
-            if left.target != right.target {
-                return Err(format!(
-                    "{builtin}: integer operands must have the same integer class"
-                ));
-            }
             if matches!(operation, IntegerBinaryOp::Power) {
                 validate_integer_exponent_storage(&right.storage, builtin)?;
             }
@@ -297,11 +304,7 @@ pub(crate) fn try_integer_binary(
         (None, None) => unreachable!("integer presence checked above"),
     };
 
-    let Some(scalar) = real_scalar(other) else {
-        return Err(format!(
-            "{builtin}: integer arrays can only be combined with scalar double values"
-        ));
-    };
+    let scalar = real_scalar(other).expect("integer admission validated the scalar double operand");
     if matches!(operation, IntegerBinaryOp::Power) {
         if integer_is_left {
             if !nonnegative_integer_exponent(scalar) {
@@ -340,7 +343,7 @@ pub(crate) fn integer_binary_scalar(
 struct IntegerOperand<'a> {
     storage: IntegerStorageRef<'a>,
     shape: Vec<usize>,
-    target: IntegerTarget,
+    target: IntegerClass,
 }
 
 enum IntegerStorageRef<'a> {
@@ -369,12 +372,12 @@ fn integer_operand(value: &Value) -> Option<IntegerOperand<'_>> {
         Value::Int(value) => Some(IntegerOperand {
             storage: IntegerStorageRef::Scalar(value),
             shape: vec![1, 1],
-            target: IntegerTarget::from_int_value(value),
+            target: IntegerClass::from_int_value(value),
         }),
         Value::Tensor(tensor) => tensor.integer_storage().map(|storage| IntegerOperand {
             storage: IntegerStorageRef::Array(storage),
-            shape: tensor.shape.clone(),
-            target: IntegerTarget::from_storage(storage),
+            shape: tensor.shape().to_vec(),
+            target: IntegerClass::from_storage(storage),
         }),
         _ => None,
     }
@@ -476,19 +479,19 @@ fn extended_integer_binary(
     extended_to_integer_like(result, &integer)
 }
 
-fn exact_integer_scalar(target: IntegerTarget, value: f64) -> Option<IntValue> {
+fn exact_integer_scalar(target: IntegerClass, value: f64) -> Option<IntValue> {
     if !value.is_finite() || value.fract() != 0.0 {
         return None;
     }
     let in_range = match target {
-        IntegerTarget::I8 => value >= i8::MIN as f64 && value < i8::MAX as f64 + 1.0,
-        IntegerTarget::I16 => value >= i16::MIN as f64 && value < i16::MAX as f64 + 1.0,
-        IntegerTarget::I32 => value >= i32::MIN as f64 && value < i32::MAX as f64 + 1.0,
-        IntegerTarget::I64 => value >= i64::MIN as f64 && value < 9_223_372_036_854_775_808.0,
-        IntegerTarget::U8 => value >= 0.0 && value < u8::MAX as f64 + 1.0,
-        IntegerTarget::U16 => value >= 0.0 && value < u16::MAX as f64 + 1.0,
-        IntegerTarget::U32 => value >= 0.0 && value < u32::MAX as f64 + 1.0,
-        IntegerTarget::U64 => (0.0..18_446_744_073_709_551_616.0).contains(&value),
+        IntegerClass::Int8 => value >= i8::MIN as f64 && value < i8::MAX as f64 + 1.0,
+        IntegerClass::Int16 => value >= i16::MIN as f64 && value < i16::MAX as f64 + 1.0,
+        IntegerClass::Int32 => value >= i32::MIN as f64 && value < i32::MAX as f64 + 1.0,
+        IntegerClass::Int64 => value >= i64::MIN as f64 && value < 9_223_372_036_854_775_808.0,
+        IntegerClass::UInt8 => value >= 0.0 && value < u8::MAX as f64 + 1.0,
+        IntegerClass::UInt16 => value >= 0.0 && value < u16::MAX as f64 + 1.0,
+        IntegerClass::UInt32 => value >= 0.0 && value < u32::MAX as f64 + 1.0,
+        IntegerClass::UInt64 => (0.0..18_446_744_073_709_551_616.0).contains(&value),
     };
     in_range.then(|| target.cast_scalar(value))
 }
@@ -899,7 +902,7 @@ fn storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
 }
 
 fn integer_values_into_value(
-    target: IntegerTarget,
+    target: IntegerClass,
     values: Vec<IntValue>,
     shape: Vec<usize>,
 ) -> Result<Value, String> {
@@ -916,6 +919,39 @@ fn integer_values_into_value(
 mod tests {
     use super::*;
     use runmat_value::LogicalArray;
+
+    #[test]
+    fn logical_u8_is_not_integer_arithmetic_even_with_integer_physical_storage() {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let logical = owner.allocate_logical(vec![1], vec![1, 1]).unwrap();
+        let resident = Value::GpuTensor(logical.handle.clone());
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&logical.handle),
+            Some(runmat_accelerate_api::IntegerElementType::U8)
+        );
+        assert!(!value_is_integer(&resident));
+        for other in [
+            Value::Bool(true),
+            Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+            resident.clone(),
+        ] {
+            for (left, right) in [(&resident, &other), (&other, &resident)] {
+                reject_integer_logical_operands(left, right, "plus").unwrap();
+                validate_integer_binary_inputs(left, right, true, true, "plus").unwrap();
+            }
+        }
+        for (left, right) in [
+            (&resident, &Value::Int(IntValue::I64(2))),
+            (&Value::Int(IntValue::I64(2)), &resident),
+        ] {
+            assert!(reject_integer_logical_operands(left, right, "plus")
+                .unwrap_err()
+                .contains("scalar double"));
+        }
+        drop(resident);
+        logical.handle.release().unwrap();
+        assert_eq!(logical.probe.retirements(), 1);
+    }
 
     fn integer(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
@@ -1004,6 +1040,27 @@ mod tests {
                 IntegerStorage::I16(vec![99, -101, 98, -102, 97, -103]),
                 vec![2, 3]
             )
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rank_zero_wide_integer_tensor_broadcasts_over_rank_one_exactly() {
+        let result = try_integer_binary(
+            &integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![]),
+            &integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![2]),
+            IntegerBinaryOp::Add,
+            "plus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(result.shape(), &[2]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_994, u64::MAX]))
         );
     }
 

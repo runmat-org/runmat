@@ -1,19 +1,27 @@
 //! Publish the scheduler's accepted terminal result together with its full history.
 //! A worker response alone cannot override cancellation, rejection or retry fences.
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
 
+use runmat_execution::identity::ArtifactId;
 use runmat_execution::state::TaskState;
+use runmat_execution::{CancellationReason, Digest, ProgramCallable, ProgramInvocationContext};
+use runmat_execution_artifact::GraphResponseAuthority;
 use runmat_execution_runner::task::AttemptRecord;
-use runmat_execution_runner::{
-    AttemptRequest, AttemptSuccess, DriverSnapshot, TaskExecutionEvidence,
-};
+use runmat_execution_runner::{AttemptRequest, DriverSnapshot, TaskExecutionEvidence};
 
-use super::TransferResult;
+use super::{TransferFailure, TransferResult};
+use crate::local_store::StreamedGraphArtifact;
 use crate::NativeCheckpointEvidence;
 
 const MAX_BUFFERED_PROGRESS: usize = 256;
+const NO_COMPLETION_ORDER: u64 = u64::MAX;
+static NEXT_TASK_COMPLETION_ORDER: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn next_task_completion_order() -> u64 {
+    NEXT_TASK_COMPLETION_ORDER.fetch_add(1, Ordering::Relaxed)
+}
 
 pub(super) struct CompletedTask {
     pub result: TransferResult,
@@ -25,10 +33,25 @@ struct PersistedCompletion {
     checkpoint: NativeCheckpointEvidence,
 }
 
+/// Exact staged Graph authority; the child receives only these scalars.
+pub(crate) struct GraphAttemptAuthority {
+    pub(super) artifact_id: ArtifactId,
+    pub(super) stored_digest: Digest,
+    pub(super) stored_length: u64,
+    pub(super) context: ProgramInvocationContext,
+    pub(super) requested_outputs: u16,
+    pub(super) callable: ProgramCallable,
+    pub(super) response: GraphResponseAuthority,
+}
+
 pub(crate) struct TaskCompletion {
     value: Mutex<Option<PersistedCompletion>>,
     progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
-    pub(super) cancelled: AtomicBool,
+    cancellation: runmat_execution::cancellation::CancellationSource,
+    /// 0 idle, 1 attempt launched, 2 cancelled before any launch.
+    pub(super) launch_state: AtomicU8,
+    completion_order: AtomicU64,
+    pub(super) graph_authority: Option<GraphAttemptAuthority>,
 }
 
 impl TaskCompletion {
@@ -36,8 +59,31 @@ impl TaskCompletion {
         Self {
             value: Mutex::new(None),
             progress: Mutex::new(VecDeque::new()),
-            cancelled: AtomicBool::new(false),
+            cancellation: runmat_execution::cancellation::CancellationSource::new(),
+            launch_state: AtomicU8::new(0),
+            completion_order: AtomicU64::new(NO_COMPLETION_ORDER),
+            graph_authority: None,
         }
+    }
+
+    pub(super) fn new_graph(
+        stored: StreamedGraphArtifact,
+        context: ProgramInvocationContext,
+        requested_outputs: u16,
+        callable: ProgramCallable,
+        response: GraphResponseAuthority,
+    ) -> Self {
+        let mut completion = Self::new();
+        completion.graph_authority = Some(GraphAttemptAuthority {
+            artifact_id: stored.id,
+            stored_digest: stored.digest,
+            stored_length: stored.length,
+            context,
+            requested_outputs,
+            callable,
+            response,
+        });
+        completion
     }
 
     pub(crate) fn try_native_completion(&self) -> Option<crate::NativeProgramCompletion> {
@@ -47,21 +93,40 @@ impl TaskCompletion {
             .as_ref()
             .map(|value| {
                 crate::NativeProgramCompletion::new(
-                    value.original.result.clone(),
+                    value
+                        .original
+                        .result
+                        .clone()
+                        .map_err(|failure| failure.to_string()),
                     value.original.evidence.clone(),
                     value.checkpoint.clone(),
                 )
             })
     }
 
+    /// Delivered result: an uncertain checkpoint blocks delivery without
+    /// rewriting the original execution.
     pub(crate) fn try_value(&self) -> Option<TransferResult> {
         self.value
             .lock()
             .expect("task completion poisoned")
             .as_ref()
             .map(|value| match value.checkpoint.delivery_error() {
-                Some(error) => Err(error),
+                Some(error) => Err(TransferFailure::Infrastructure(error)),
                 None => value.original.result.clone(),
+            })
+    }
+
+    pub(crate) fn verified_terminal(&self) -> Option<bool> {
+        self.value
+            .lock()
+            .expect("task completion poisoned")
+            .as_ref()
+            .map(|value| {
+                !matches!(
+                    value.original.result,
+                    Err(TransferFailure::RetirementUnverified(_))
+                )
             })
     }
 
@@ -105,7 +170,30 @@ impl TaskCompletion {
     }
 
     pub(crate) fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
+        self.cancel_with_reason(CancellationReason::User);
+    }
+
+    pub(crate) fn cancel_with_reason(&self, reason: CancellationReason) {
+        self.cancellation.cancel(reason);
+        // A Graph worker may still be executing foreign shutdown callbacks.
+        // Its terminal order is published only by complete(), after the
+        // process driver has observed cleanup or killed and reaped the child.
+        if self.graph_authority.is_none() {
+            self.mark_completed();
+        }
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancellation.token().is_cancelled()
+    }
+
+    pub(crate) fn cancellation_reason(&self) -> Option<CancellationReason> {
+        self.cancellation.token().reason()
+    }
+
+    pub(crate) fn completion_order(&self) -> Option<u64> {
+        let order = self.completion_order.load(Ordering::Acquire);
+        (order != NO_COMPLETION_ORDER).then_some(order)
     }
 
     pub(crate) fn record_progress(&self, progress: crate::protocol::ProgramProgress) {
@@ -131,7 +219,38 @@ impl TaskCompletion {
                 original: value,
                 checkpoint,
             });
+            self.mark_completed();
         }
+    }
+
+    /// Publish cancellation only if no attempt was ever launched; a launched
+    /// attempt publishes its own terminal after its process outcome.
+    pub(super) fn complete_cancelled_if_no_active_attempt(
+        &self,
+        checkpoint: NativeCheckpointEvidence,
+    ) {
+        if self
+            .launch_state
+            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.complete(
+                CompletedTask {
+                    result: Err(TransferFailure::Cancelled),
+                    evidence: None,
+                },
+                checkpoint,
+            );
+        }
+    }
+
+    fn mark_completed(&self) {
+        let _ = self.completion_order.compare_exchange(
+            NO_COMPLETION_ORDER,
+            next_task_completion_order(),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 }
 
@@ -159,9 +278,9 @@ pub(super) fn from_task_snapshot(
         Ok(evidence) => evidence,
         Err(error) => {
             return Some(CompletedTask {
-                result: Err(format!(
+                result: Err(TransferFailure::Infrastructure(format!(
                     "local scheduler terminal evidence is invalid: {error}"
-                )),
+                ))),
                 evidence: None,
             })
         }
@@ -173,20 +292,22 @@ pub(super) fn from_task_snapshot(
     {
         return None;
     }
+    // An unverified process-tree retirement remains visible through any
+    // terminal decision; otherwise the scheduler's state is authoritative.
+    let unverified = matches!(&observed, Err(TransferFailure::RetirementUnverified(_)));
     let result = match task.state {
-        TaskState::Succeeded => {
-            let commit = task.committed.as_ref()?;
-            Ok(AttemptSuccess {
-                outputs: commit.outputs.clone(),
-                result_objects: commit.result_objects.clone(),
-                resources: commit.resources.clone(),
-            })
+        TaskState::Succeeded => Ok(task.committed.as_ref()?.result.clone()),
+        TaskState::Failed | TaskState::Indeterminate | TaskState::Cancelled if unverified => {
+            observed
         }
-        TaskState::Failed => Err(observed
-            .err()
-            .unwrap_or_else(|| "local scheduler rejected worker result".into())),
-        TaskState::Cancelled => Err("execution was cancelled".into()),
-        TaskState::Indeterminate => Err("local task outcome is indeterminate".into()),
+        TaskState::Failed => Err(observed.err().unwrap_or_else(|| {
+            TransferFailure::Execution("local scheduler rejected worker result".into())
+        })),
+        TaskState::Cancelled => Err(TransferFailure::Cancelled),
+        TaskState::Indeterminate => Err(match observed {
+            Err(failure @ TransferFailure::WorkerLost(_)) => failure,
+            _ => TransferFailure::WorkerLost("local task outcome is indeterminate".into()),
+        }),
         _ => unreachable!("terminal task checked above"),
     };
     Some(CompletedTask {
@@ -197,12 +318,3 @@ pub(super) fn from_task_snapshot(
 
 #[cfg(test)]
 mod tests;
-
-impl crate::process_provider::ProcessControl for TaskCompletion {
-    fn cancellation(&self) -> &AtomicBool {
-        &self.cancelled
-    }
-    fn record_progress(&self, progress: crate::protocol::ProgramProgress) {
-        TaskCompletion::record_progress(self, progress);
-    }
-}

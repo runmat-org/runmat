@@ -1,0 +1,73 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("fprintf"), slug: Some("fprintf"),
+    summary: "Write formatted text to files or standard streams in MATLAB and RunMat.",
+    description: "`fprintf` formats data using a printf-style template and writes to a file, stdout, or stderr. Supported conversions, repeated formats, and column-major array traversal follow the documented forms; RunMat-specific identifier and format forms are independently gated.",
+    keywords: &["fprintf", "format", "printf", "write file", "stdout", "stderr", "encoding"],
+    related: &["sprintf", "compose", "fopen", "fclose", "fwrite", "fileread", "feof", "fgets", "filewrite", "fread", "frewind"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Formats, values, and byte count", paragraphs: &[
+            "`fprintf(formatSpec, A, ...)` writes to standard output. `fprintf(fid, formatSpec, A, ...)` writes to a double file identifier from `fopen`; identifiers 1 and 2 select stdout and stderr. The return value is a double scalar count of bytes written, which may exceed the character count in multibyte encodings. Omitting the output does not change the write.",
+            "The format repeats until flattened arguments are consumed. Numeric, logical, and text arrays are traversed column-first. Character vectors, string scalars, string arrays, and cells containing supported values can contribute formatting arguments. Exact integer values, including wide uint64, are retained for integer conversions; finite floating values that do not fit a signed integer conversion use scientific notation instead of truncation or clamping, retaining the specified flags, width, and precision as a RunMat policy. `%e`/`%E` use signed, at-least-two-digit exponents; `%g`/`%G` precision counts significant digits and suppresses trailing zeros unless `#` is present. A sole `%s` conversion may map valid integer character codes to text. Width and precision star arguments use the same flattened stream. A literal format with extra arguments is an error.",
+            "A file uses the encoding recorded by `fopen`. Explicit ASCII and Latin-1 reject unrepresentable characters; binary/raw and other labels use UTF-8 behavior. Files opened read-only reject writes. File flushing follows the handle and close policy; console buffering belongs to the host.",
+        ] },
+        BuiltinDocumentationSection { heading: "Compatibility and residency", paragraphs: &[
+            "Double file IDs and numeric streams 1 and 2 are compatible forms. Typed integer, single, and resident file IDs; numeric-code and resident format vectors; and case-insensitive `stdout`/`stderr` labels are separate RunMat extensions. Compatibility mode rejects these forms at their gate.",
+            "Provider-resident inputs are gathered to host storage before substitution. There is no formatting GPU kernel or fusion path; an unavailable owning provider yields a gather error. The current runtime formats complete host text before writing. Browser execution requires its installed console or filesystem service.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "file", title: "Write formatted text to a file", program: "[fid, msg] = fopen('report.txt', 'w');\nassert(fid ~= -1, msg);\ncount = fprintf(fid, 'Total: %d (%.2f%%)\\n', 42, 87.5);\nfclose(fid);\ncount", display_output: Some("count = 19"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 19); assert(strcmp(fileread('report.txt'), sprintf('Total: 42 (87.50%%)\\n')));" } },
+        BuiltinExample { id: "stdout", title: "Write to standard output", program: "n = 42;\ncount = fprintf('Processed %d items\\n', n);\ncount", display_output: Some("Processed 42 items"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Native, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 19);" } },
+        BuiltinExample { id: "stderr", title: "Write to standard error by stream name", program: "iter = 100;\ncount = fprintf('stderr', 'Warning: iteration limit reached (%d steps)\\n', iter);\ncount", display_output: Some("Warning: iteration limit reached (100 steps)"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Native, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 45);" } },
+        BuiltinExample { id: "matrix", title: "Format a matrix column-first", program: "A = [1 2 3; 4 5 6];\ncount = fprintf('%d %d\\n', A);\ncount", display_output: Some("1 4\n2 5\n3 6"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Native, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 12);" } },
+        BuiltinExample { id: "ascii-error", title: "Respect a file's ASCII encoding", program: "[fid, msg] = fopen('ascii.txt', 'w', 'native', 'ascii');\nassert(fid ~= -1, msg);\nerror_id = '';\ntry\n    fprintf(fid, 'café\\n');\ncatch err\n    error_id = err.identifier;\nend\nclose_status = fclose(fid);\nassert(strcmp(error_id, 'RunMat:fprintf:EncodeFailed'));\nassert(close_status == 0);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(error_id, 'RunMat:fprintf:EncodeFailed')); assert(close_status == 0); assert(isempty(fileread('ascii.txt')));" } },
+        BuiltinExample { id: "resident", title: "Format GPU-resident data on the host", program: "G = gpuArray([1.2 3.4 5.6]);\n[fid, msg] = fopen('gpu.txt', 'w');\nassert(fid ~= -1, msg);\ncount = fprintf(fid, '%.1f,', G);\nfclose(fid);\ncount", display_output: Some("count = 12"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Wgpu, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(count == 12); assert(strcmp(fileread('gpu.txt'), '1.2,3.4,5.6,'));" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Does fprintf count characters or bytes?", answer: "Bytes. UTF-8 output may use more than one byte per character." },
+        BuiltinDocumentationFaq { question: "Can I use stdout or stderr names?", answer: "Numeric IDs 1 and 2 are compatible. The case-insensitive stream names are independently gated RunMat conveniences." },
+        BuiltinDocumentationFaq { question: "What happens with a read-only file?", answer: "An invalid-identifier error reports that the file is not open for writing; use a permission containing w, a, or + in fopen." },
+        BuiltinDocumentationFaq { question: "Which encodings are supported?", answer: "UTF-8 is the default; ASCII and Latin-1 are explicit options recorded by fopen. Other labels follow the runtime's UTF-8 fallback." },
+        BuiltinDocumentationFaq { question: "How are multidimensional arrays handled?", answer: "Inputs are flattened in column-major order and the format repeats while values remain." },
+        BuiltinDocumentationFaq { question: "Does fprintf flush?", answer: "It writes through the handle. File data is flushed when the handle is closed; standard streams use host buffering." },
+        BuiltinDocumentationFaq { question: "What if the format has no conversions?", answer: "The literal format is written once; additional formatting arguments are an error." },
+        BuiltinDocumentationFaq { question: "Are cell arrays supported?", answer: "Cells containing supported scalar or text values are flattened column-first before formatting." },
+        BuiltinDocumentationFaq { question: "Can numeric and text arguments mix?", answer: "Yes. Values can be interleaved; star width and precision arguments consume the same flattened stream." },
+        BuiltinDocumentationFaq { question: "How do I suppress the return value?", answer: "Do not assign it. Omission does not change the write." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "sprintf", target: BuiltinDocumentationLinkTarget::Builtin("sprintf") },
+        BuiltinDocumentationLink { label: "compose", target: BuiltinDocumentationLinkTarget::Builtin("compose") },
+        BuiltinDocumentationLink { label: "fopen", target: BuiltinDocumentationLinkTarget::Builtin("fopen") },
+        BuiltinDocumentationLink { label: "fclose", target: BuiltinDocumentationLinkTarget::Builtin("fclose") },
+        BuiltinDocumentationLink { label: "fwrite", target: BuiltinDocumentationLinkTarget::Builtin("fwrite") },
+        BuiltinDocumentationLink { label: "fileread", target: BuiltinDocumentationLinkTarget::Builtin("fileread") },
+        BuiltinDocumentationLink { label: "feof", target: BuiltinDocumentationLinkTarget::Builtin("feof") },
+        BuiltinDocumentationLink { label: "fgets", target: BuiltinDocumentationLinkTarget::Builtin("fgets") },
+        BuiltinDocumentationLink { label: "filewrite", target: BuiltinDocumentationLinkTarget::Builtin("filewrite") },
+        BuiltinDocumentationLink { label: "fread", target: BuiltinDocumentationLinkTarget::Builtin("fread") },
+        BuiltinDocumentationLink { label: "frewind", target: BuiltinDocumentationLinkTarget::Builtin("frewind") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Formatted write owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf.rs") },
+            BuiltinDocumentationLink { label: "Argument and format admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf/admission.rs") },
+            BuiltinDocumentationLink { label: "Prepared call and target staging", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf/prepared.rs") },
+            BuiltinDocumentationLink { label: "File target authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf/target.rs") },
+            BuiltinDocumentationLink { label: "File encoding", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf/encoding.rs") },
+        ],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Column-major formatting", location: "builtins::io::filetext::fprintf::tests::fprintf_matrix_column_major" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "ASCII encoding failure", location: "builtins::io::filetext::fprintf::tests::fprintf_ascii_encoding_errors" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident gather", location: "builtins::io::filetext::fprintf::tests::fprintf_gpu_gathers_values" },
+        ],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

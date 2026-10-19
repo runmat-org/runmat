@@ -13,6 +13,10 @@ pub(crate) enum BrowserWorkerTopology {
 pub(crate) struct BrowserExecutionCapabilities {
     pub(crate) topology: BrowserWorkerTopology,
     pub(crate) max_workers: u32,
+    /// Host promises that launch settles only after physical worker exit and
+    /// cancel returns a Promise resolving after physical termination.
+    #[serde(default)]
+    pub(crate) owned_builtin_work: bool,
 }
 
 impl Default for BrowserExecutionCapabilities {
@@ -20,6 +24,7 @@ impl Default for BrowserExecutionCapabilities {
         Self {
             topology: BrowserWorkerTopology::Serial,
             max_workers: 1,
+            owned_builtin_work: false,
         }
     }
 }
@@ -31,6 +36,9 @@ impl BrowserExecutionCapabilities {
         }
         if self.topology == BrowserWorkerTopology::Serial && self.max_workers != 1 {
             return Err("the serial browser execution topology requires maxWorkers = 1".into());
+        }
+        if self.owned_builtin_work && !self.has_worker_isolation() {
+            return Err("ownedBuiltinWork requires isolated browser workers".into());
         }
         Ok(self)
     }

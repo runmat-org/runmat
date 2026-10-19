@@ -1,0 +1,13 @@
+mod documentation;
+
+use super::contract::*;
+use documentation::DOCUMENTATION;
+
+define_integer_conversion_contract!("int16", "INT16", NumericClass::Int16, DOCUMENTATION);
+
+pub use CATALOG_ENTRY as INT16_CATALOG_ENTRY;
+pub use DESCRIPTOR as INT16_DESCRIPTOR;
+pub use ERROR_INTERNAL as INT16_ERROR_INTERNAL;
+pub use ERROR_INVALID_ARGUMENT as INT16_ERROR_INVALID_ARGUMENT;
+pub use ERROR_INVALID_INPUT as INT16_ERROR_INVALID_INPUT;
+pub use INTEGER_CAPABILITIES as INT16_INTEGER_CAPABILITIES;

@@ -6,7 +6,9 @@ use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::auth::read_token;
-use super::model::{BatchSubmission, JobAttachment, LocalJobRecord, ProgramBatchSubmission};
+use super::model::{
+    BatchSubmission, GraphBatchSubmission, JobAttachment, LocalJobRecord, ProgramBatchSubmission,
+};
 use super::protocol::{
     SupervisorCommand, SupervisorRequest, SupervisorResponse, SUPERVISOR_MAX_MESSAGE_BYTES,
     SUPERVISOR_PROTOCOL_VERSION,
@@ -148,6 +150,22 @@ impl LocalSupervisorClient {
         self.connect_or_start().await?;
         match self
             .request(SupervisorCommand::SubmitProgram {
+                submission: Box::new(submission),
+            })
+            .await?
+        {
+            SupervisorResponse::Submitted { record, duplicate } => Ok((record, duplicate)),
+            response => unexpected(response),
+        }
+    }
+
+    pub async fn submit_graph(
+        &self,
+        submission: GraphBatchSubmission,
+    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+        self.connect_or_start().await?;
+        match self
+            .request(SupervisorCommand::SubmitGraph {
                 submission: Box::new(submission),
             })
             .await?

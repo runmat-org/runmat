@@ -11,6 +11,7 @@ pub mod fprintf;
 pub mod fread;
 pub mod frewind;
 pub mod fwrite;
+pub(crate) mod cooperation;
 pub(crate) mod helpers;
 pub mod lines;
 pub(crate) mod registry;

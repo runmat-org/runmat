@@ -891,8 +891,9 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("automatic integer length");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let result = pad_builtin(
                 Value::String("GPU".into()),
                 vec![Value::GpuTensor(handle.clone())],
@@ -900,15 +901,16 @@ pub(crate) mod tests {
             .expect("automatic residency is transparent");
             assert_eq!(result, Value::String("GPU  ".into()));
 
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let error = pad_builtin(
                 Value::String("GPU".into()),
                 vec![Value::GpuTensor(handle.clone())],
             )
             .expect_err("explicit gpuArray length is unsupported");
             assert_eq!(error.identifier(), PAD_ERROR_LENGTH.identifier);
-            provider.free(&handle).expect("free length");
+            handle.release().expect("release fixture handle");
         });
     }
 

@@ -21,7 +21,7 @@ use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "pan";
-const PAN_CLASS_NAME: &str = "matlab.graphics.interaction.internal.pan";
+const PAN_CLASS_NAME: runmat_types::StaticClassIdentity = runmat_types::standard::PAN_CONTROL;
 
 const INTEGER_TARGET_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "pan-integer-graphics-target",
@@ -330,12 +330,14 @@ fn parse_option(option: &str) -> BuiltinResult<PanModeCommand> {
 }
 
 fn pan_object_from_snapshot(snapshot: PanStateSnapshot) -> BuiltinResult<Value> {
-    let mut object = ObjectInstance::new(PAN_CLASS_NAME.to_string());
+    let mut object = ObjectInstance::new(PAN_CLASS_NAME.to_string()).with_graphics_receiver(
+        super::state::mode_properties::receiver(snapshot.figure, BUILTIN_NAME)?,
+    );
     update_object_properties(&mut object, snapshot);
     let target =
         runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| internal(err.to_string()))?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: PAN_CLASS_NAME.to_string(),
+        class_name: PAN_CLASS_NAME.into(),
         target,
         valid: true,
     }))
@@ -400,10 +402,7 @@ fn snapshot_from_object(handle: &HandleRef) -> BuiltinResult<PanStateSnapshot> {
         if object.class_name != PAN_CLASS_NAME {
             return None;
         }
-        let figure = object
-            .properties
-            .get("FigureHandle")
-            .and_then(numeric_scalar)?;
+        let receiver = object.graphics_receiver()?.clone();
         let axes_index = object
             .properties
             .get("AxesIndex")
@@ -415,7 +414,7 @@ fn snapshot_from_object(handle: &HandleRef) -> BuiltinResult<PanStateSnapshot> {
                     None
                 }
             });
-        Some((FigureHandle::from(figure.round() as u32), axes_index))
+        Some((receiver, axes_index))
     })
     .map_err(|err| internal(err.to_string()))?
     .ok_or_else(|| invalid("invalid pan object"))?;
@@ -464,23 +463,28 @@ pub fn get_pan_object_property(
             }
             value
         }
-        Some(name) => match canonical_property(name).as_deref() {
-            Some("Enable") => {
+        Some(name) => match canonical_property(name) {
+            Some(PanProperty::Enable) => {
                 Value::String(if snapshot.mode.enabled { "on" } else { "off" }.into())
             }
-            Some("Motion") => Value::String(snapshot.mode.motion.as_str().into()),
-            Some("UIContextMenu") => object_property_or_default(handle, name, Value::Num(0.0))?,
-            Some("ButtonDownFilter") | Some("ActionPreCallback") | Some("ActionPostCallback") => {
+            Some(PanProperty::Motion) => Value::String(snapshot.mode.motion.as_str().into()),
+            Some(PanProperty::UIContextMenu) => {
+                object_property_or_default(handle, name, Value::Num(0.0))?
+            }
+            Some(PanProperty::ButtonDownFilter)
+            | Some(PanProperty::ActionPreCallback)
+            | Some(PanProperty::ActionPostCallback) => {
                 object_property_or_default(handle, name, Value::String(String::new()))?
             }
-            Some("FigureHandle") => Value::Num(snapshot.figure.as_u32() as f64),
+            Some(PanProperty::FigureHandle) => Value::Num(snapshot.figure.as_u32() as f64),
             _ => return Err(invalid(format!("unsupported pan property '{name}'"))),
         },
     };
     Ok(Some(value))
 }
 
-pub fn set_pan_object_properties(
+pub(crate) fn set_pan_object_properties_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: &Value,
     args: &[Value],
     _builtin: &'static str,
@@ -491,12 +495,12 @@ pub fn set_pan_object_properties(
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(invalid("expected pan property/value pairs"));
     }
-    let snapshot = snapshot_from_object(&handle)?;
+    snapshot_from_object(&handle)?;
     for pair in args.chunks_exact(2) {
-        let name = super::style::value_as_string(&pair[0])
-            .ok_or_else(|| invalid("pan property names must be text"))?;
-        apply_pan_property(snapshot.figure, &name, &pair[1])?;
-        write_object_property(&handle, &name, pair[1].clone())?;
+        let name = super::properties::property_name_text(&pair[0], "set")
+            .map_err(|_| invalid("pan property names must be scalar text"))?;
+        apply_pan_property(mode_receiver(&handle)?, &name, &pair[1])?;
+        write_object_property(runtime, &handle, &name, pair[1].clone())?;
     }
     let refreshed = snapshot_from_object(&handle)?;
     runmat_gc::gc_with_value_mut(&handle.target, |target| {
@@ -513,7 +517,18 @@ fn object_property_or_default(
     name: &str,
     default: Value,
 ) -> BuiltinResult<Value> {
-    let key = canonical_property(name).unwrap_or_else(|| name.to_string());
+    if let Some(key) = canonical_property(name).and_then(PanProperty::persistent) {
+        return super::state::mode_properties::get(
+            &mode_receiver(handle)?,
+            key,
+            default,
+            BUILTIN_NAME,
+        );
+    }
+    let key = canonical_property(name)
+        .map(PanProperty::name)
+        .unwrap_or(name)
+        .to_string();
     runmat_gc::gc_with_value(&handle.target, |value| match value {
         Value::Object(object) => object.properties.get(&key).cloned().unwrap_or(default),
         _ => default,
@@ -521,8 +536,25 @@ fn object_property_or_default(
     .map_err(|err| internal(err.to_string()))
 }
 
-fn write_object_property(handle: &HandleRef, name: &str, value: Value) -> BuiltinResult<()> {
-    let key = canonical_property(name).unwrap_or_else(|| name.to_string());
+fn write_object_property(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: &HandleRef,
+    name: &str,
+    value: Value,
+) -> BuiltinResult<()> {
+    if let Some(key) = canonical_property(name).and_then(PanProperty::persistent) {
+        return super::state::mode_properties::set_in_context(
+            runtime,
+            &mode_receiver(handle)?,
+            key,
+            value,
+            BUILTIN_NAME,
+        );
+    }
+    let key = canonical_property(name)
+        .map(PanProperty::name)
+        .unwrap_or(name)
+        .to_string();
     runmat_gc::gc_with_value_mut(&handle.target, |target| {
         if let Value::Object(object) = target {
             object.properties.insert(key, value);
@@ -531,17 +563,25 @@ fn write_object_property(handle: &HandleRef, name: &str, value: Value) -> Builti
     .map_err(|err| internal(err.to_string()))
 }
 
-fn apply_pan_property(figure: FigureHandle, name: &str, value: &Value) -> BuiltinResult<()> {
-    match canonical_property(name).as_deref() {
-        Some("Enable") => set_pan_enabled_for_figure(figure, parse_on_off(value, "Enable")?)
+fn apply_pan_property(
+    figure: impl Into<super::state::FigureTarget>,
+    name: &str,
+    value: &Value,
+) -> BuiltinResult<()> {
+    match canonical_property(name) {
+        Some(PanProperty::Enable) => {
+            set_pan_enabled_for_figure(figure, parse_on_off(value, "Enable")?)
+                .map_err(|err| invalid(err.to_string()))
+        }
+        Some(PanProperty::Motion) => set_pan_motion_for_figure(figure, parse_motion(value)?)
             .map_err(|err| invalid(err.to_string())),
-        Some("Motion") => set_pan_motion_for_figure(figure, parse_motion(value)?)
-            .map_err(|err| invalid(err.to_string())),
-        Some("FigureHandle") | Some("AxesIndex") => Err(invalid(format!("{name} is read-only"))),
-        Some("UIContextMenu")
-        | Some("ButtonDownFilter")
-        | Some("ActionPreCallback")
-        | Some("ActionPostCallback") => Ok(()),
+        Some(PanProperty::FigureHandle) | Some(PanProperty::AxesIndex) => {
+            Err(invalid(format!("{name} is read-only")))
+        }
+        Some(PanProperty::UIContextMenu)
+        | Some(PanProperty::ButtonDownFilter)
+        | Some(PanProperty::ActionPreCallback)
+        | Some(PanProperty::ActionPostCallback) => Ok(()),
         _ => Err(invalid(format!("unsupported pan property '{name}'"))),
     }
 }
@@ -564,18 +604,65 @@ fn parse_motion(value: &Value) -> BuiltinResult<ZoomMotion> {
     }
 }
 
-fn canonical_property(name: &str) -> Option<String> {
+#[derive(Clone, Copy)]
+enum PanProperty {
+    Enable,
+    Motion,
+    UIContextMenu,
+    ButtonDownFilter,
+    ActionPreCallback,
+    ActionPostCallback,
+    FigureHandle,
+    AxesIndex,
+}
+impl PanProperty {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Enable => "Enable",
+            Self::Motion => "Motion",
+            Self::UIContextMenu => "UIContextMenu",
+            Self::ButtonDownFilter => "ButtonDownFilter",
+            Self::ActionPreCallback => "ActionPreCallback",
+            Self::ActionPostCallback => "ActionPostCallback",
+            Self::FigureHandle => "FigureHandle",
+            Self::AxesIndex => "AxesIndex",
+        }
+    }
+    fn persistent(self) -> Option<super::state::mode_properties::ModeProperty> {
+        use super::state::mode_properties::ModeProperty as Property;
+        use crate::context::GraphicsCallbackKind as Kind;
+        match self {
+            Self::UIContextMenu => Some(Property::PanContextMenu),
+            Self::ButtonDownFilter => Some(Property::Callback(Kind::PanButtonDownFilter)),
+            Self::ActionPreCallback => Some(Property::Callback(Kind::PanActionPre)),
+            Self::ActionPostCallback => Some(Property::Callback(Kind::PanActionPost)),
+            _ => None,
+        }
+    }
+}
+fn canonical_property(name: &str) -> Option<PanProperty> {
     match name.trim().to_ascii_lowercase().as_str() {
-        "enable" => Some("Enable".into()),
-        "motion" => Some("Motion".into()),
-        "uicontextmenu" => Some("UIContextMenu".into()),
-        "buttondownfilter" => Some("ButtonDownFilter".into()),
-        "actionprecallback" => Some("ActionPreCallback".into()),
-        "actionpostcallback" => Some("ActionPostCallback".into()),
-        "figurehandle" => Some("FigureHandle".into()),
-        "axesindex" => Some("AxesIndex".into()),
+        "enable" => Some(PanProperty::Enable),
+        "motion" => Some(PanProperty::Motion),
+        "uicontextmenu" => Some(PanProperty::UIContextMenu),
+        "buttondownfilter" => Some(PanProperty::ButtonDownFilter),
+        "actionprecallback" => Some(PanProperty::ActionPreCallback),
+        "actionpostcallback" => Some(PanProperty::ActionPostCallback),
+        "figurehandle" => Some(PanProperty::FigureHandle),
+        "axesindex" => Some(PanProperty::AxesIndex),
         _ => None,
     }
+}
+
+fn mode_receiver(handle: &HandleRef) -> BuiltinResult<runmat_value::GraphicsReceiverRef> {
+    runmat_gc::gc_with_value(&handle.target, |value| match value {
+        Value::Object(object) if object.class_name == PAN_CLASS_NAME => {
+            object.graphics_receiver().cloned()
+        }
+        _ => None,
+    })
+    .map_err(|cause| internal(cause.to_string()))?
+    .ok_or_else(|| invalid("pan object has no exact Figure receiver"))
 }
 
 #[cfg(test)]
@@ -587,6 +674,127 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, current_figure_handle, reset_hold_state_for_run,
     };
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn mode_properties_are_figure_owned_and_old_mode_objects_cannot_retarget_reused_figures() {
+        type Constructor = fn(Vec<Value>) -> BuiltinResult<Value>;
+        let cases: [(Constructor, &str, &str, Value); 3] = [
+            (
+                pan_builtin,
+                "ActionPreCallback",
+                "UIContextMenu",
+                Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+            ),
+            (
+                crate::builtins::plotting::zoom::zoom_builtin,
+                "ActionPostCallback",
+                "ContextMenu",
+                Value::Int(runmat_value::IntValue::I64(i64::MIN)),
+            ),
+            (
+                crate::builtins::plotting::datacursormode::datacursormode_builtin,
+                "UpdateFcn",
+                "Interpreter",
+                Value::String("latex".into()),
+            ),
+        ];
+        for (make, callback_property, metadata_property, metadata) in cases {
+            let _guard = lock_plot_registry();
+            ensure_plot_test_env();
+            super::super::state::reset_plot_state();
+            runmat_gc::gc_test_context(|| {
+                let first = crate::execution::RootedValue::new(
+                    make(Vec::new()).expect("first mode handle"),
+                )
+                .unwrap();
+                let callback = Value::FunctionHandle("retained_original_callback".into());
+                set_builtin(vec![
+                    first.value().clone(),
+                    Value::String(callback_property.into()),
+                    callback.clone(),
+                    Value::String(metadata_property.into()),
+                    metadata.clone(),
+                ])
+                .expect("store figure behavior");
+                let second = crate::execution::RootedValue::new(
+                    make(Vec::new()).expect("independent mode handle"),
+                )
+                .unwrap();
+                assert_eq!(
+                    get_builtin(vec![
+                        second.value().clone(),
+                        Value::String(callback_property.into())
+                    ])
+                    .unwrap(),
+                    callback
+                );
+                assert_eq!(
+                    get_builtin(vec![
+                        second.value().clone(),
+                        Value::String(metadata_property.into())
+                    ])
+                    .unwrap(),
+                    metadata
+                );
+                let replacement = Value::FunctionHandle("replacement_callback".into());
+                set_builtin(vec![
+                    second.value().clone(),
+                    Value::String(callback_property.into()),
+                    replacement.clone(),
+                ])
+                .unwrap();
+                assert_eq!(
+                    get_builtin(vec![
+                        first.value().clone(),
+                        Value::String(callback_property.into())
+                    ])
+                    .unwrap(),
+                    replacement
+                );
+                let empty =
+                    Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+                set_builtin(vec![
+                    first.value().clone(),
+                    Value::String(callback_property.into()),
+                    empty.clone(),
+                ])
+                .unwrap();
+                assert_eq!(
+                    get_builtin(vec![
+                        second.value().clone(),
+                        Value::String(callback_property.into())
+                    ])
+                    .unwrap(),
+                    empty
+                );
+                let old = current_figure_handle();
+                super::super::state::close_figure(Some(old)).unwrap();
+                let fresh = crate::execution::RootedValue::new(
+                    make(Vec::new()).expect("replacement figure and mode handle"),
+                )
+                .unwrap();
+                assert_eq!(
+                    current_figure_handle(),
+                    old,
+                    "exercise ordinary reused default coordinate"
+                );
+                assert!(get_builtin(vec![
+                    first.value().clone(),
+                    Value::String(callback_property.into())
+                ])
+                .is_err());
+                assert!(
+                    get_builtin(vec![second.value().clone(), Value::String("Enable".into())])
+                        .is_err()
+                );
+                assert!(
+                    get_builtin(vec![fresh.value().clone(), Value::String("Enable".into())])
+                        .is_ok()
+                );
+            });
+        }
+    }
 
     fn setup_plot_tests() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();

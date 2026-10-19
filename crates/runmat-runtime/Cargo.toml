@@ -12,8 +12,13 @@ links = "runmat_runtime_native"
 
 [dependencies]
 runmat-fea-source = { workspace = true }
+allocator-api2 = "=0.2.21"
+hashbrown = "=0.16.1"
+async-trait = "0.1"
 runmat-value = { workspace = true }
+runmat-extension-abi = { workspace = true }
 runmat-types = { workspace = true }
+runmat-mex = { workspace = true }
 inventory = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-execution = { workspace = true }
@@ -42,19 +47,35 @@ serde = { workspace = true, features = ["derive"] }
 glam = "0.24"
 once_cell = "1.19"
 encoding_rs = "0.8.35"
+http = "1.4"
+quick-xml = { version = "0.39.4", features = ["async-tokio"] }
+tokio = { version = "1.36", default-features = false, features = ["io-util", "rt", "sync"] }
 chrono = { workspace = true }
+jiff = { version = "=0.2.28", default-features = false, features = [
+    "std",
+    "js",
+    "tz-system",
+    "tzdb-bundle-platform",
+    "tzdb-zoneinfo",
+    "tzdb-concatenated",
+] }
 libc = "0.2"
 log = { workspace = true }
 tracing = "0.1"
 libm = "0.2"
+complex-bessel = { version = "=0.3.0", default-features = false }
 num-complex = "0.4"
 num-bigint = "0.4"
+num-rational = "=0.4.2"
 num-traits = "0.2"
 nalgebra = "0.32"
+faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg", "sparse-linalg"] }
 rustfft = "6.2"
 futures = "0.3"
+pin-project-lite = "0.2.17"
 async-recursion = "1.1"
 flate2 = "1.1"
+compression-codecs = { version = "0.4.38", default-features = false, features = ["gzip"] }
 
 # BLAS/LAPACK bindings for high-performance linear algebra (optional)
 blas = { version = "0.22", optional = true }
@@ -64,6 +85,7 @@ glob = "0.3"
 url = "2.5"
 base64 = "0.22"
 sha2 = "0.10"
+target-lexicon = { workspace = true }
 image = { version = "0.24", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp", "ico"] }
 calamine = { version = "0.35.0", features = ["chrono"] }
 zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
@@ -87,6 +109,11 @@ openblas-src = { version = "0.10", features = ["system", "cblas"], optional = tr
 hdf5 = { package = "hdf5-metno", version = "0.13.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+async-io = "2"
+runmat-process-host = { workspace = true }
+runmat-native-ffi = { workspace = true }
+runmat-java = { workspace = true }
+runmat-python = { workspace = true }
 arrow-array = "59.0.0"
 arrow-schema = "59.0.0"
 bytes = "1.12.0"
@@ -94,18 +121,22 @@ ndarray = "0.17"
 parquet = { version = "59.0.0", features = ["arrow"] }
 pollster = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "charset", "gzip", "json", "rustls-tls"] }
-tokio = { version = "1.36", features = ["rt"] }
+tokio = { version = "1.36", features = ["macros", "rt", "time", "sync", "net", "io-util"] }
+tempfile = "3.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Networking_WinSock"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "TextDecoder", "DomException", "CustomEvent", "CustomEventInit", "EventTarget"] }
+web-sys = { version = "0.3", features = ["Blob", "Url", "XmlHttpRequest", "XmlHttpRequestResponseType", "Window", "WorkerGlobalScope", "AbortController", "AbortSignal", "Headers", "Request", "RequestInit", "Response", "ReadableStream", "ReadableStreamDefaultReader", "TextDecoder", "DomException", "CustomEvent", "CustomEventInit", "EventTarget", "Event", "DomStringList", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbObjectStore", "IdbTransaction", "IdbTransactionMode"] }
 getrandom = { version = "0.2", features = ["js"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 tokio = { version = "1.36", default-features = false, features = ["macros", "rt"] }
-wgpu = "24.0.0"
+wgpu = { workspace = true }
 runmat-accelerate = { workspace = true, features = ["wgpu"] }
 
 [features]
@@ -150,8 +181,8 @@ occt-native = ["runmat-geometry-io/occt-native"]
 occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
 
 [dev-dependencies]
-async-trait = "0.1"
 runmat-geometry-fixtures = { workspace = true }
+runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 runmat-macros = { workspace = true } 
 matfile = "0.5.0"
 tempfile = "3.10"
@@ -162,8 +193,17 @@ wasm-bindgen-test = "0.3"
 axum = "0.7"
 tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
 runmat-accelerate = { workspace = true, features = ["wgpu"] }
-wgpu = "0.19"
+wgpu = { workspace = true }
 
 [dependencies.serde_json]
 version = "1.0"
 features = ["float_roundtrip"]
+
+[build-dependencies]
+sha2 = "0.10"
+serde_json = "1.0"
+
+[[test]]
+name = "native_ffi_session"
+path = "tests/native_ffi_session.rs"
+harness = false

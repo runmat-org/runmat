@@ -9,7 +9,7 @@ use crate::{
 
 use super::CompilationPolicy;
 
-pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 2;
+pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,6 +22,7 @@ pub struct RuntimeFamilyRetention {
 #[serde(deny_unknown_fields)]
 pub struct ProgramLinkPlan {
     pub schema_version: u16,
+    pub product: runmat_execution::host::NativeProductMode,
     pub policy: CompilationPolicy,
     pub program_graph_digest: String,
     pub program_source_digest: String,
@@ -30,18 +31,17 @@ pub struct ProgramLinkPlan {
     pub catalog_fingerprint: String,
     pub runtime_capabilities: RuntimeArchiveCapabilities,
     pub reachability: ReachabilityReport,
+    /// Canonical MIR identities; report node strings are presentation only.
+    pub retained_function_ids: BTreeSet<runmat_types::ProgramFunctionId>,
     pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
+    pub interop: runmat_types::InteropManifest,
     pub retained_runtime_families: Vec<RuntimeFamilyRetention>,
     pub omitted_runtime_families: Vec<String>,
 }
 
 impl ProgramLinkPlan {
     pub fn retained_functions(&self) -> BTreeSet<runmat_types::ProgramFunctionId> {
-        self.reachability
-            .retained_function_ids()
-            .filter_map(|function| u32::try_from(function).ok())
-            .map(runmat_types::ProgramFunctionId)
-            .collect()
+        self.retained_function_ids.clone()
     }
 }
 
@@ -50,12 +50,45 @@ pub fn build_program_link_plan(
     runtime: &RuntimeArchive,
     policy: CompilationPolicy,
 ) -> AotResult<ProgramLinkPlan> {
+    build_program_link_plan_with_interop(
+        unit,
+        runtime,
+        policy,
+        runmat_types::InteropManifest::empty(),
+    )
+}
+
+pub fn build_program_link_plan_with_interop(
+    unit: &runmat_core::ExecutableUnit,
+    runtime: &RuntimeArchive,
+    policy: CompilationPolicy,
+    interop: runmat_types::InteropManifest,
+) -> AotResult<ProgramLinkPlan> {
+    interop.validate().map_err(|error| {
+        AotError::contract(
+            "aot.compile.interop",
+            format!("{}: {}", error.path, error.message),
+        )
+    })?;
     runtime.manifest.validate()?;
     policy.validate(&runtime.manifest.capabilities)?;
     runtime
         .manifest
         .validate_environment(&unit.revision().program_revision.environment())?;
-    let reachability = unit.reachability_report();
+    let (reachability, retained_functions) = unit.reachability_analysis();
+    let retained_function_ids = retained_functions
+        .into_iter()
+        .map(|function| {
+            u32::try_from(function.0)
+                .map(runmat_types::ProgramFunctionId)
+                .map_err(|_| {
+                    AotError::contract(
+                        "aot.compile.function_identity",
+                        "reachable function identity exceeds portable bounds",
+                    )
+                })
+        })
+        .collect::<AotResult<BTreeSet<_>>>()?;
     if policy == CompilationPolicy::ClosedWorld && reachability.has_unknown_edges {
         return Err(AotError::contract(
             "aot.compile.reachability_unknown",
@@ -71,6 +104,7 @@ pub fn build_program_link_plan(
     );
     Ok(ProgramLinkPlan {
         schema_version: PROGRAM_LINK_PLAN_SCHEMA_VERSION,
+        product: runtime.manifest.product.clone(),
         policy,
         program_graph_digest: unit.revision().program_revision.graph_digest().to_string(),
         program_source_digest: unit.revision().program_revision.source_digest().to_string(),
@@ -79,7 +113,9 @@ pub fn build_program_link_plan(
         catalog_fingerprint: runtime.manifest.catalog_fingerprint.to_string(),
         runtime_capabilities: runtime.manifest.capabilities.clone(),
         reachability,
+        retained_function_ids,
         retained_builtin_bindings,
+        interop,
         retained_runtime_families,
         omitted_runtime_families,
     })
@@ -119,7 +155,7 @@ fn runtime_families(
     if reachability
         .nodes
         .iter()
-        .any(|node| node.kind == ReachabilityNodeKind::Builtin)
+        .any(|node| node.builtin_id().is_some())
     {
         let reason = if policy == CompilationPolicy::ClosedWorld {
             format!(
@@ -175,12 +211,12 @@ fn retained_builtin_bindings(
         return Ok(Vec::new());
     }
     let mut bindings = Vec::new();
-    for node in reachability
+    for (node, builtin) in reachability
         .nodes
         .iter()
-        .filter(|node| node.kind == ReachabilityNodeKind::Builtin)
+        .filter_map(|node| node.builtin_id().map(|builtin| (node, builtin)))
     {
-        let entry = runmat_builtins::builtin_catalog_entry_by_name(&node.symbol).ok_or_else(|| {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(&builtin.0).ok_or_else(|| {
             AotError::contract(
                 "aot.compile.closed_world_builtin",
                 format!(
@@ -222,12 +258,13 @@ fn retained_builtin_bindings(
             ));
         }
         bindings.extend(entry.bindings.iter().map(|binding| {
+            let identity = entry.binding_identity(binding);
             runmat_native_codegen::aot::AotBuiltinBinding {
-                name: binding.identity.builtin.name.to_string(),
-                variant: binding.identity.variant.to_string(),
+                name: identity.builtin.name.to_string(),
+                variant: identity.variant.to_string(),
                 native_symbol: runmat_builtins::native_binding_symbol(
-                    binding.identity.builtin.name,
-                    binding.identity.variant,
+                    identity.builtin.name,
+                    identity.variant,
                 ),
             }
         }));
@@ -246,19 +283,24 @@ fn family(module: &str, reason: &str) -> RuntimeFamilyRetention {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use runmat_mir::analysis::{
         ReachabilityCertainty, ReachabilityNode, ReachabilityNodeKind, ReachabilityReport,
         REACHABILITY_SCHEMA_VERSION,
     };
 
-    use super::{retained_builtin_bindings, CompilationPolicy};
+    use super::{
+        retained_builtin_bindings, CompilationPolicy, ProgramLinkPlan,
+        PROGRAM_LINK_PLAN_SCHEMA_VERSION,
+    };
 
     fn builtin_report(name: &str) -> ReachabilityReport {
         ReachabilityReport {
             schema_version: REACHABILITY_SCHEMA_VERSION,
             nodes: vec![ReachabilityNode {
                 id: format!("builtin:{}", name.to_ascii_lowercase()),
-                kind: ReachabilityNodeKind::Builtin,
+                kind: ReachabilityNodeKind::Builtin(runmat_types::BuiltinId(name.into())),
                 module: "runmat-builtins".into(),
                 symbol: name.into(),
                 certainty: ReachabilityCertainty::Definite,
@@ -270,25 +312,34 @@ mod tests {
 
     #[test]
     fn closed_world_maps_catalog_bindings_to_stable_native_symbols() {
-        let bindings =
-            retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report("abs"))
-                .expect("catalog-backed closed-world binding");
-        assert_eq!(bindings.len(), 1);
-        assert_eq!(bindings[0].name, "abs");
-        assert_eq!(bindings[0].variant, "default");
-        assert_eq!(
-            bindings[0].native_symbol,
-            runmat_builtins::native_binding_symbol("abs", "default")
-        );
+        for name in [
+            "abs", "angle", "conj", "double", "exp", "expm1", "imag", "int8", "int16", "int32",
+            "flintmax", "int64", "intmax", "intmin", "log", "log10", "log1p", "log2", "plus",
+            "real", "realmax", "realmin", "realsqrt", "sign", "single", "sqrt", "uint8", "uint16",
+            "uint32", "uint64",
+        ] {
+            let bindings =
+                retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report(name))
+                    .expect("catalog-backed closed-world binding");
+            assert_eq!(bindings.len(), 1);
+            assert_eq!(bindings[0].name, name);
+            assert_eq!(bindings[0].variant, "default");
+            assert_eq!(
+                bindings[0].native_symbol,
+                runmat_builtins::native_binding_symbol(name, "default")
+            );
+        }
     }
 
     #[test]
-    fn closed_world_rejects_legacy_and_unbounded_builtin_authorities() {
-        let legacy =
-            retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report("plus"))
-                .expect_err("legacy builtin must not imply exact retention");
+    fn closed_world_rejects_unregistered_and_unbounded_builtin_authorities() {
+        let unregistered = retained_builtin_bindings(
+            CompilationPolicy::ClosedWorld,
+            &builtin_report("unregistered_aot_fixture"),
+        )
+        .expect_err("an undeclared builtin must not imply exact retention");
         assert!(matches!(
-            legacy,
+            unregistered,
             crate::AotError::Contract {
                 code: "aot.compile.closed_world_builtin",
                 ..
@@ -305,5 +356,56 @@ mod tests {
                 ..
             }
         ));
+
+        let legacy_untyped = serde_json::json!({
+            "id": "builtin:abs",
+            "kind": "builtin",
+            "module": "runmat-builtins",
+            "symbol": "abs",
+            "certainty": "definite"
+        });
+        assert!(serde_json::from_value::<ReachabilityNode>(legacy_untyped).is_err());
+    }
+
+    #[test]
+    fn link_plan_retention_uses_typed_wire_field_not_report_spelling() {
+        let retained = BTreeSet::from([runmat_types::ProgramFunctionId(7)]);
+        let plan = ProgramLinkPlan {
+            schema_version: PROGRAM_LINK_PLAN_SCHEMA_VERSION,
+            product: runmat_execution::host::NativeProductMode::HostUnselected,
+            policy: CompilationPolicy::NativeSpecialized,
+            program_graph_digest: "graph".into(),
+            program_source_digest: "sources".into(),
+            target_triple: "test-target".into(),
+            runtime_archive_digest: "archive".into(),
+            catalog_fingerprint: "catalog".into(),
+            runtime_capabilities: super::RuntimeArchiveCapabilities::standalone_host(),
+            reachability: ReachabilityReport {
+                schema_version: REACHABILITY_SCHEMA_VERSION,
+                nodes: vec![ReachabilityNode {
+                    id: "function:not-an-ordinal".into(),
+                    kind: ReachabilityNodeKind::Function,
+                    module: "test".into(),
+                    symbol: "presentation".into(),
+                    certainty: ReachabilityCertainty::Definite,
+                }],
+                edges: Vec::new(),
+                has_unknown_edges: false,
+            },
+            retained_function_ids: retained.clone(),
+            retained_builtin_bindings: Vec::new(),
+            interop: runmat_types::InteropManifest::empty(),
+            retained_runtime_families: Vec::new(),
+            omitted_runtime_families: Vec::new(),
+        };
+        assert_eq!(plan.retained_functions(), retained);
+        let mut wire = serde_json::to_value(&plan).expect("serialize typed plan");
+        let decoded: ProgramLinkPlan =
+            serde_json::from_value(wire.clone()).expect("decode current plan");
+        assert_eq!(decoded.retained_functions(), retained);
+        wire.as_object_mut()
+            .expect("plan object")
+            .remove("retained_function_ids");
+        assert!(serde_json::from_value::<ProgramLinkPlan>(wire).is_err());
     }
 }

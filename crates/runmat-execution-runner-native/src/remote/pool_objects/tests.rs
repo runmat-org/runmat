@@ -115,7 +115,7 @@ fn stale_results_are_discarded_without_evicting_inputs_or_commits() {
 
 fn reference(scope: &str, bytes: &[u8], identity: &[u8]) -> ValueRef {
     ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"remote-object-test", identity]),
         logical_digest: Digest::sha256(bytes),
         encoded_length: bytes.len() as u64,

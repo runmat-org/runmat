@@ -14,301 +14,37 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::eig_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use nalgebra::linalg::Schur;
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, FactorOption};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, NumericScalar, Tensor, Value};
+
+#[path = "eig_publication.rs"]
+mod publication;
+use publication::upload_eig_eval_to_owner;
 
 const BUILTIN_NAME: &str = "eig";
 
 const REAL_EPS: f64 = 1e-12;
 
-const EIG_NONFLOATING_COEFFICIENT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "eig-nonfloating-coefficient",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "eig with an integer or logical coefficient matrix is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EigNonfloatingCoefficientExtension"),
-    };
-
-pub const EIG_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [EIG_NONFLOATING_COEFFICIENT_EXTENSION];
-
-const EIG_INTEGER_A_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Admitted integer coefficients must be exactly representable at the explicit binary64 eigensolver boundary.",
-}];
-const EIG_INTEGER_AB_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "First generalized coefficient matrix.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Second generalized coefficient matrix.",
-    },
-];
-
-pub const EIG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "eig(A, ...) with typed-integer A",
-        inputs: &EIG_INTEGER_A_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only coefficient extension with double outputs.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "eig(A, B, ...) with a typed-integer coefficient",
-        inputs: &EIG_INTEGER_AB_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Each integer coefficient is checked independently before binary64 materialization.",
-    },
-];
-
-const EIG_OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "d",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Eigenvalues as a column vector.",
-}];
-
-const EIG_OUTPUT_VD: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right eigenvectors.",
-    },
-    BuiltinParamDescriptor {
-        name: "D",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal matrix (or vector when `vector` option is used).",
-    },
-];
-
-const EIG_OUTPUT_VDW: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right eigenvectors.",
-    },
-    BuiltinParamDescriptor {
-        name: "D",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal matrix (or vector when `vector` option is used).",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left eigenvectors.",
-    },
-];
-
-const EIG_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input square matrix.",
-}];
-
-const EIG_INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input square matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional selectors (`balance`, `nobalance`, `vector`, `matrix`).",
-    },
-];
-
-const EIG_INPUTS_AB: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input square matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second square matrix in the generalized problem A*V = B*V*D.",
-    },
-];
-
-const EIG_INPUTS_AB_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input square matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second square matrix in the generalized problem A*V = B*V*D.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional selectors (`balance`, `nobalance`, `vector`, `matrix`).",
-    },
-];
-
-const EIG_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
-    BuiltinSignatureDescriptor {
-        label: "d = eig(A)",
-        inputs: &EIG_INPUTS_A,
-        outputs: &EIG_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eig(A, options...)",
-        inputs: &EIG_INPUTS_A_OPTIONS,
-        outputs: &EIG_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eig(A)",
-        inputs: &EIG_INPUTS_A,
-        outputs: &EIG_OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eig(A, options...)",
-        inputs: &EIG_INPUTS_A_OPTIONS,
-        outputs: &EIG_OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, W] = eig(A)",
-        inputs: &EIG_INPUTS_A,
-        outputs: &EIG_OUTPUT_VDW,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, W] = eig(A, options...)",
-        inputs: &EIG_INPUTS_A_OPTIONS,
-        outputs: &EIG_OUTPUT_VDW,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eig(A, B)",
-        inputs: &EIG_INPUTS_AB,
-        outputs: &EIG_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eig(A, B, options...)",
-        inputs: &EIG_INPUTS_AB_OPTIONS,
-        outputs: &EIG_OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eig(A, B)",
-        inputs: &EIG_INPUTS_AB,
-        outputs: &EIG_OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eig(A, B, options...)",
-        inputs: &EIG_INPUTS_AB_OPTIONS,
-        outputs: &EIG_OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, W] = eig(A, B)",
-        inputs: &EIG_INPUTS_AB,
-        outputs: &EIG_OUTPUT_VDW,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, W] = eig(A, B, options...)",
-        inputs: &EIG_INPUTS_AB_OPTIONS,
-        outputs: &EIG_OUTPUT_VDW,
-    },
-];
-
-const EIG_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIG.INVALID_ARGUMENT",
-    identifier: Some("RunMat:eig:InvalidArgument"),
-    when: "Option arguments or requested output count are invalid.",
-    message: "eig currently supports at most three outputs",
-};
-
-const EIG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIG.INVALID_INPUT",
-    identifier: Some("RunMat:eig:InvalidInput"),
-    when: "Input is unsupported or matrix shape is invalid.",
-    message: "eig: input matrix must be square",
-};
-
-const EIG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIG.INTERNAL",
-    identifier: Some("RunMat:eig:Internal"),
-    when: "Runtime cannot compute or materialize eig outputs.",
-    message: "eig: internal runtime failure",
-};
-
-const EIG_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    EIG_ERROR_INVALID_ARGUMENT,
-    EIG_ERROR_INVALID_INPUT,
-    EIG_ERROR_INTERNAL,
-];
-
-pub const EIG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &EIG_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &EIG_ERRORS,
+#[cfg(test)]
+use runmat_builtins::{EIG_DESCRIPTOR, EIG_EXTENSIONS};
+use runmat_builtins::{
+    EIG_ERROR_INTERNAL, EIG_ERROR_INVALID_ARGUMENT, EIG_ERROR_INVALID_INPUT,
+    EIG_NONFLOATING_COEFFICIENT_EXTENSION,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::eig")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eig",
     op_kind: GpuOpKind::Custom("eig-factor"),
-    supported_precisions: &[ScalarType::F64],
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("eig")],
     constant_strategy: ConstantStrategy::InlineLiteral,
@@ -317,7 +53,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Prefers the provider `eig` hook for standard eig(A) (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for generalized eig(A,B), complex spectra, or unsupported options.",
+    notes: "The WGPU `eig` hook gathers real single/double matrices, computes the host eigensystem, and restores real or complex factors in the source class. Generalized inputs and unsupported options use the exact-owner host path.",
 };
 
 fn eig_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -372,15 +108,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "eig",
-    category = "math/linalg/factor",
-    summary = "Compute eigenvalue decompositions.",
-    keywords = "eig,eigenvalues,eigenvectors,linalg",
-    accel = "sink",
-    sink = true,
-    type_resolver(eig_type),
-    descriptor(crate::builtins::math::linalg::factor::eig::EIG_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::factor::eig::EIG_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::factor::eig::EIG_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
 async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -388,17 +116,21 @@ async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         let require_left = out_count >= 3;
         let eval = evaluate(value, &rest, require_left).await?;
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.eigenvalues()]));
+            return Ok(Value::output_list(vec![eval.eigenvalues()]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![eval.right(), eval.diagonal()]));
+            return Ok(Value::output_list(vec![eval.right(), eval.diagonal()]));
         }
         if out_count == 3 {
             let left = eval.left()?;
-            return Ok(Value::OutputList(vec![eval.right(), eval.diagonal(), left]));
+            return Ok(Value::output_list(vec![
+                eval.right(),
+                eval.diagonal(),
+                left,
+            ]));
         }
         return Err(eig_error(&EIG_ERROR_INVALID_ARGUMENT));
     }
@@ -440,20 +172,45 @@ impl EigEval {
         })
     }
 
-    fn from_provider(result: runmat_accelerate_api::ProviderEigResult) -> Self {
+    fn from_provider(
+        mut result: runmat_accelerate_api::ProviderEigResult,
+        input: &GpuTensorHandle,
+    ) -> BuiltinResult<Self> {
+        let adoption = (|| {
+            for output in [
+                &mut result.eigenvalues,
+                &mut result.diagonal,
+                &mut result.right,
+            ]
+            .into_iter()
+            .chain(result.left.iter_mut())
+            {
+                gpu_helpers::propagate_output_provenance(output, [input])?;
+                output.allocation_lease().validate_live().map_err(|error| {
+                    build_runtime_error(format!("eig: cannot adopt provider output: {error}"))
+                        .with_source(error)
+                        .build()
+                })?;
+                runmat_accelerate_api::mark_residency(output);
+            }
+            Ok::<(), RuntimeError>(())
+        })();
+        if let Err(error) = adoption {
+            return Err(reject_provider_eig_result(result, error));
+        }
         let runmat_accelerate_api::ProviderEigResult {
             eigenvalues,
             diagonal,
             right,
             left,
         } = result;
-        EigEval {
+        Ok(EigEval {
             eigenvalues: Value::GpuTensor(eigenvalues),
             diagonal_matrix: Value::GpuTensor(diagonal.clone()),
             diagonal_output: Value::GpuTensor(diagonal),
             right: Value::GpuTensor(right),
             left: left.map(Value::GpuTensor),
-        }
+        })
     }
 }
 
@@ -491,21 +248,17 @@ pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> Built
     match value {
         Value::GpuTensor(handle) => {
             if is_nonfloating_coefficient(&Value::GpuTensor(handle.clone())) {
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(with_eig_context)?;
-                ensure_exact_eig_integer_boundary(&Value::Tensor(tensor.clone()), "A")?;
-                let eval = evaluate_host(Value::Tensor(tensor), options, require_left).await?;
-                return upload_eig_eval_to_owner(eval, &handle);
+                let gathered = gather_eig_resident_value(&handle).await?;
+                ensure_exact_eig_integer_boundary(&gathered, "A")?;
+                let eval = evaluate_host(gathered, options, require_left).await?;
+                return upload_eig_eval_to_owner(eval, &handle, options.vector_output, &[]);
             }
             if let Some(eval) = evaluate_gpu(&handle, options, require_left).await? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(with_eig_context)?;
-            let eval = evaluate_host(Value::Tensor(tensor), options, require_left).await?;
-            upload_eig_eval_to_owner(eval, &handle)
+            let gathered = gather_eig_resident_value(&handle).await?;
+            let eval = evaluate_host(gathered, options, require_left).await?;
+            upload_eig_eval_to_owner(eval, &handle, options.vector_output, &[])
         }
         other => {
             ensure_exact_eig_integer_boundary(&other, "A")?;
@@ -519,11 +272,6 @@ async fn evaluate_gpu(
     options: EigOptions,
     require_left: bool,
 ) -> BuiltinResult<Option<EigEval>> {
-    if runmat_accelerate_api::handle_precision(handle)
-        == Some(runmat_accelerate_api::ProviderPrecision::F32)
-    {
-        return Ok(None);
-    }
     if options.vector_output {
         return Ok(None);
     }
@@ -537,21 +285,28 @@ async fn evaluate_gpu(
     let Some(order) = eig_gpu_order(handle) else {
         return Ok(None);
     };
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
     match provider.eig(handle, require_left).await {
         Ok(result) => {
             if valid_provider_eig_result(&result, provider, handle, order, require_left) {
-                Ok(Some(EigEval::from_provider(result)))
+                Ok(Some(EigEval::from_provider(result, handle)?))
             } else {
-                free_provider_eig_result_unique(&result, provider, handle);
-                Ok(None)
+                Err(reject_provider_eig_result(
+                    result,
+                    eig_internal_error("eig: provider returned invalid factor outputs"),
+                ))
             }
         }
-        Err(_) => Ok(None),
+        Err(error) if error.is_unsupported() => Ok(None),
+        Err(source) => Err(crate::runtime_error::with_provider_execution_source(
+            eig_internal_error(source.to_string()),
+            source,
+        )),
     }
 }
 
 fn eig_gpu_order(handle: &GpuTensorHandle) -> Option<usize> {
-    match handle.shape.as_slice() {
+    match handle.shape() {
         [rows, cols] if rows == cols => Some(*rows),
         _ => None,
     }
@@ -560,8 +315,7 @@ fn eig_gpu_order(handle: &GpuTensorHandle) -> Option<usize> {
 fn resolved_actual_eig_owner(
     handle: &GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
-    runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
+    gpu_helpers::exact_provider_for_handle(handle)
 }
 
 fn eig_result_handles(result: &runmat_accelerate_api::ProviderEigResult) -> Vec<&GpuTensorHandle> {
@@ -573,7 +327,7 @@ fn eig_result_handles(result: &runmat_accelerate_api::ProviderEigResult) -> Vec<
 }
 
 fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.shares_allocation_with(rhs)
 }
 
 fn valid_provider_eig_result(
@@ -586,11 +340,12 @@ fn valid_provider_eig_result(
     if require_left && result.left.is_none() {
         return false;
     }
-    let expected_precision =
-        runmat_accelerate_api::handle_precision(input).unwrap_or_else(|| provider.precision());
+    let Some(expected_precision) = runmat_accelerate_api::handle_precision(input) else {
+        return false;
+    };
     let expected_class = match expected_precision {
-        runmat_accelerate_api::ProviderPrecision::F32 => "single",
-        runmat_accelerate_api::ProviderPrecision::F64 => "double",
+        runmat_accelerate_api::ProviderPrecision::F32 => runmat_types::standard::SINGLE,
+        runmat_accelerate_api::ProviderPrecision::F64 => runmat_types::standard::DOUBLE,
     };
     let expected_shapes = [vec![order, 1], vec![order, order], vec![order, order]];
     let mut identities = HashSet::new();
@@ -601,18 +356,20 @@ fn valid_provider_eig_result(
     ) {
         let storage = runmat_accelerate_api::handle_storage(handle);
         if gpu_handles_alias(handle, input)
-            || !identities.insert((handle.device_id, handle.buffer_id))
-            || handle.device_id != input.device_id
-            || handle.shape != *expected_shape
-            || resolved_actual_eig_owner(handle).is_none_or(|owner| !std::ptr::eq(owner, provider))
+            || !identities.insert((handle.device_id(), handle.buffer_id()))
+            || handle.device_id() != input.device_id()
+            || handle.shape() != *expected_shape
+            || runmat_accelerate_api::handle_is_transposed(handle)
+            || resolved_actual_eig_owner(handle)
+                .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
             || !matches!(
                 storage,
                 runmat_accelerate_api::GpuTensorStorage::Real
                     | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
             )
             || runmat_accelerate_api::handle_precision(handle) != Some(expected_precision)
-            || runmat_accelerate_api::handle_class_name(handle)
-                .is_some_and(|class_name| !class_name.eq_ignore_ascii_case(expected_class))
+            || runmat_accelerate_api::handle_class_identity(handle)
+                .is_some_and(|class_identity| !class_identity.is(expected_class))
             || runmat_accelerate_api::handle_integer_type(handle).is_some()
             || runmat_accelerate_api::handle_is_logical(handle)
         {
@@ -622,20 +379,17 @@ fn valid_provider_eig_result(
     true
 }
 
-fn free_provider_eig_result_unique(
-    result: &runmat_accelerate_api::ProviderEigResult,
-    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    input: &GpuTensorHandle,
-) {
-    let mut freed = HashSet::new();
-    for handle in eig_result_handles(result) {
-        let identity = (handle.device_id, handle.buffer_id);
-        if gpu_handles_alias(handle, input) || !freed.insert(identity) {
-            continue;
-        }
-        let owner = resolved_actual_eig_owner(handle).unwrap_or(invoked_provider);
-        let _ = owner.free(handle);
+fn reject_provider_eig_result(
+    result: runmat_accelerate_api::ProviderEigResult,
+    mut error: RuntimeError,
+) -> RuntimeError {
+    for handle in [result.eigenvalues, result.diagonal, result.right]
+        .into_iter()
+        .chain(result.left)
+    {
+        error = gpu_helpers::reject_gpu_output(handle, error);
     }
+    error
 }
 
 async fn evaluate_host(
@@ -654,11 +408,13 @@ async fn evaluate_generalized(
     options: EigOptions,
     require_left: bool,
 ) -> BuiltinResult<EigEval> {
-    let gpu_source = match (&a_value, &b_value) {
-        (Value::GpuTensor(handle), _) => Some(handle.clone()),
-        (_, Value::GpuTensor(handle)) => Some(handle.clone()),
-        _ => None,
-    };
+    let gpu_sources = [&a_value, &b_value]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     let a_value = gather_eig_coefficient(a_value).await?;
     let b_value = gather_eig_coefficient(b_value).await?;
     ensure_exact_eig_integer_boundary(&a_value, "A")?;
@@ -670,20 +426,25 @@ async fn evaluate_generalized(
         compute_generalized_eigen(a, b, options, require_left)?,
         precision,
     )?;
-    match gpu_source {
-        Some(source) => upload_eig_eval_to_owner(eval, &source),
+    match gpu_sources.first() {
+        Some(source) => upload_eig_eval_to_owner(eval, source, options.vector_output, &gpu_sources),
         None => Ok(eval),
     }
 }
 
 async fn gather_eig_coefficient(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map(Value::Tensor)
-            .map_err(with_eig_context),
+        Value::GpuTensor(handle) => gather_eig_resident_value(&handle).await,
         other => Ok(other),
     }
+}
+
+async fn gather_eig_resident_value(handle: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let owner = gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| eig_internal_error("eig: no exact owner for resident input"))?;
+    gpu_helpers::download_value_preserving_residency_async(owner, handle)
+        .await
+        .map_err(with_eig_context)
 }
 
 fn ensure_eig_coefficient_extension_enabled(value: &Value) -> BuiltinResult<()> {
@@ -795,65 +556,42 @@ fn cast_eig_eval_precision(eval: EigEval, precision: NumericDType) -> BuiltinRes
 
 fn cast_eig_value_to_single(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => Tensor::from_f32(
-            tensor
-                .materialize_f64()
-                .into_iter()
-                .map(|value| value as f32)
-                .collect(),
-            tensor.shape,
-        )
-        .map(Value::Tensor)
-        .map_err(|err| eig_internal_error(format!("eig: {err}"))),
-        Value::ComplexTensor(tensor) => ComplexTensor::from_f32(
-            tensor
-                .materialize_f64()
-                .into_iter()
-                .map(|(real, imag)| (real as f32, imag as f32))
-                .collect(),
-            tensor.shape,
-        )
-        .map(Value::ComplexTensor)
-        .map_err(|err| eig_internal_error(format!("eig: {err}"))),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape().to_vec();
+            Tensor::from_f32(
+                tensor
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|value| value as f32)
+                    .collect(),
+                shape,
+            )
+            .map(Value::Tensor)
+            .map_err(|err| eig_internal_error(format!("eig: {err}")))
+        }
+        Value::ComplexTensor(tensor) => {
+            let (storage, shape) = tensor.into_complex_storage_and_shape();
+            ComplexTensor::from_f32(
+                storage
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|(real, imag)| (real as f32, imag as f32))
+                    .collect(),
+                shape,
+            )
+            .map(Value::ComplexTensor)
+            .map_err(|err| eig_internal_error(format!("eig: {err}")))
+        }
         Value::Num(number) => Tensor::from_f32(vec![number as f32], vec![1, 1])
             .map(Value::Tensor)
             .map_err(|err| eig_internal_error(format!("eig: {err}"))),
+        Value::Complex(real, imaginary) => {
+            ComplexTensor::from_f32(vec![(real as f32, imaginary as f32)], vec![1, 1])
+                .map(Value::ComplexTensor)
+                .map_err(|err| eig_internal_error(format!("eig: {err}")))
+        }
         other => Ok(other),
     }
-}
-
-fn upload_eig_eval_to_owner(eval: EigEval, source: &GpuTensorHandle) -> BuiltinResult<EigEval> {
-    let provider = runmat_accelerate_api::provider_for_handle(source)
-        .ok_or_else(|| eig_internal_error("eig: source GPU provider is unavailable"))?;
-    Ok(EigEval {
-        eigenvalues: upload_eig_value(provider, eval.eigenvalues)?,
-        diagonal_matrix: upload_eig_value(provider, eval.diagonal_matrix)?,
-        diagonal_output: upload_eig_value(provider, eval.diagonal_output)?,
-        right: upload_eig_value(provider, eval.right)?,
-        left: eval
-            .left
-            .map(|value| upload_eig_value(provider, value))
-            .transpose()?,
-    })
-}
-
-fn upload_eig_value(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    value: Value,
-) -> BuiltinResult<Value> {
-    let handle = match value {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|err| eig_internal_error(format!("eig: {err}")))?,
-        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)?,
-        Value::Num(number) => {
-            let tensor = Tensor::new(vec![number], vec![1, 1])
-                .map_err(|err| eig_internal_error(format!("eig: {err}")))?;
-            gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| eig_internal_error(format!("eig: {err}")))?
-        }
-        other => return Ok(other),
-    };
-    Ok(gpu_helpers::resident_gpu_value(handle))
 }
 
 fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {
@@ -861,14 +599,15 @@ fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {
     let mut b = None;
     for (idx, arg) in args.iter().enumerate() {
         if let Some(text) = option_text(arg)? {
-            match text.trim().to_ascii_lowercase().as_str() {
-                "balance" => opts.balance = true,
-                "nobalance" => opts.balance = false,
-                "vector" => opts.vector_output = true,
-                "matrix" => opts.vector_output = false,
-                other => {
+            match FactorOption::parse(&text) {
+                Some(FactorOption::Balance) => opts.balance = true,
+                Some(FactorOption::NoBalance) => opts.balance = false,
+                Some(FactorOption::Vector) => opts.vector_output = true,
+                Some(FactorOption::Matrix) => opts.vector_output = false,
+                _ => {
                     return Err(eig_invalid_argument(format!(
-                        "eig: unknown option '{other}'"
+                        "eig: unknown option '{}'",
+                        text.trim().to_ascii_lowercase()
                     )));
                 }
             }
@@ -1350,12 +1089,18 @@ async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex6
             Complex64::new(if b { 1.0 } else { 0.0 }, 0.0),
         )),
         Value::Complex(re, im) => Ok(DMatrix::from_element(1, 1, Complex64::new(re, im))),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(with_eig_context)?;
-            tensor_to_matrix(&tensor)
-        }
+        Value::GpuTensor(handle) => match gather_eig_resident_value(&handle).await? {
+            Value::Tensor(tensor) => tensor_to_matrix(&tensor),
+            Value::ComplexTensor(tensor) => complex_tensor_to_matrix(&tensor),
+            Value::LogicalArray(logical) => {
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|error| eig_internal_error(format!("eig: {error}")))?;
+                tensor_to_matrix(&tensor)
+            }
+            other => Err(eig_internal_error(format!(
+                "eig: exact-owner download returned unexpected value {other:?}"
+            ))),
+        },
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(eig_invalid_input(
             "eig: input must be numeric or logical; convert character data with double() first",
         )),
@@ -1366,7 +1111,7 @@ async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex6
 }
 
 fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(eig_invalid_input("eig: input must be 2-D"));
     }
     let rows = tensor.rows();
@@ -1380,11 +1125,11 @@ fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
 }
 
 fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(eig_invalid_input("eig: input must be 2-D"));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     let mut data = Vec::with_capacity(tensor.materialize_f64().len());
     for &(re, im) in &tensor.materialize_f64() {
         data.push(Complex64::new(re, im));
@@ -1476,7 +1221,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::{builtin_catalog_entry_by_name, ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage};
 
     fn error_message(err: RuntimeError) -> String {
@@ -1566,7 +1311,10 @@ pub(crate) mod tests {
             ));
 
             let mut wrong_shape = valid.clone();
-            wrong_shape.eigenvalues.shape = vec![1, 2];
+            wrong_shape.eigenvalues = wrong_shape
+                .eigenvalues
+                .with_view(runmat_accelerate_api::GpuTensorView::contiguous(vec![1, 2]))
+                .unwrap();
             assert!(!valid_provider_eig_result(
                 &wrong_shape,
                 provider,
@@ -1575,19 +1323,35 @@ pub(crate) mod tests {
                 true
             ));
 
-            runmat_accelerate_api::set_handle_logical(&right, true);
+            let mut wrong_class = valid.clone();
+            wrong_class.right = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 0, 1],
+                    shape: &[2, 2],
+                })
+                .unwrap();
             assert!(!valid_provider_eig_result(
-                &valid, provider, &input, 2, true
+                &wrong_class,
+                provider,
+                &input,
+                2,
+                true
             ));
-            runmat_accelerate_api::set_handle_logical(&right, false);
-
-            runmat_accelerate_api::set_handle_class_name(&right, "uint8");
+            wrong_class.right = provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::U8(&[1, 0, 0, 1]),
+                    shape: &[2, 2],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .unwrap();
             assert!(!valid_provider_eig_result(
-                &valid, provider, &input, 2, true
+                &wrong_class,
+                provider,
+                &input,
+                2,
+                true
             ));
-            runmat_accelerate_api::set_handle_class_name(&right, "double");
             assert!(valid_provider_eig_result(&valid, provider, &input, 2, true));
-            runmat_accelerate_api::clear_handle_class_name(&right);
 
             let alias = upload(&[3.0, 4.0], &[2, 1]);
             let cleanup = ProviderEigResult {
@@ -1596,13 +1360,13 @@ pub(crate) mod tests {
                 right: alias.clone(),
                 left: None,
             };
-            free_provider_eig_result_unique(&cleanup, provider, &input);
+            let error = reject_provider_eig_result(cleanup, eig_internal_error("invalid output"));
+            assert!(error.message().contains("invalid output"));
             assert!(block_on(provider.download(&input)).is_ok());
-            assert!(block_on(provider.download(&alias)).is_err());
-
-            for handle in [&eigenvalues, &diagonal, &right, &left, &input] {
-                provider.free(handle).ok();
-            }
+            assert!(
+                block_on(provider.download(&alias)).is_ok(),
+                "rejecting result references cannot retire another retained owner"
+            );
         });
     }
 
@@ -1678,16 +1442,14 @@ pub(crate) mod tests {
 
     #[test]
     fn eig_classifies_resident_integer_coefficients_before_provider_access() {
-        let handle = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_300_042,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::U16,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::U16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = evaluate(Value::GpuTensor(handle.clone()), &[], false)
             .expect_err("resident integer A must gate before provider access");
@@ -1711,7 +1473,8 @@ pub(crate) mod tests {
             panic!("expected real single vectors");
         };
         assert_eq!(vectors.numeric_dtype(), NumericDType::F32);
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("registered eig");
+        let builtin =
+            builtin_catalog_entry_by_name(BUILTIN_NAME).expect("registered eig catalog entry");
         assert_eq!(builtin.extensions, &EIG_EXTENSIONS);
         assert_eq!(builtin.integer_capabilities.len(), 2);
     }
@@ -1766,9 +1529,11 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     fn assert_tensor_close(a: &Tensor, b: &Tensor, tol: f64) {
         assert_eq!(
-            a.shape, b.shape,
+            a.shape(),
+            b.shape(),
             "shape mismatch: {:?} vs {:?}",
-            a.shape, b.shape
+            a.shape(),
+            b.shape()
         );
         for (idx, (lhs, rhs)) in a
             .materialize_f64()
@@ -1874,7 +1639,7 @@ pub(crate) mod tests {
             evaluate(Value::Tensor(tensor), &[Value::from("vector")], false).expect("evaluate");
         match eval.diagonal() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), [2, 1]);
             }
             other => panic!("expected vector second output, got {other:?}"),
         }
@@ -1889,13 +1654,13 @@ pub(crate) mod tests {
         let eval =
             evaluate(Value::Tensor(tensor), &[Value::from("vector")], true).expect("evaluate");
         match eval.diagonal() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [2, 1]),
             other => panic!("expected vector second output, got {other:?}"),
         }
         let left = eval.left().expect("left eigenvectors");
         match left {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
-            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![2, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [2, 2]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape(), [2, 2]),
             other => panic!("unexpected type for left eigenvectors: {other:?}"),
         }
     }
@@ -1984,8 +1749,8 @@ pub(crate) mod tests {
         )
         .expect("evaluate");
         match eval.diagonal() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
-            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![2, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [2, 1]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape(), [2, 1]),
             other => panic!("expected vector second output, got {other:?}"),
         }
         let _ = matrix_from_value(eval.diagonal_matrix());
@@ -2022,13 +1787,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 1.0, 0.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[Value::from("vector")], false)
                 .expect("evaluate");
             match eval.diagonal() {
-                Value::GpuTensor(handle) => assert_eq!(handle.shape, vec![2, 1]),
+                Value::GpuTensor(handle) => assert_eq!(handle.shape(), &[2, 1]),
                 other => panic!("unexpected eigenvalue output: {other:?}"),
             }
             assert!(matches!(eval.right(), Value::GpuTensor(_)));
@@ -2042,7 +1807,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -2096,7 +1861,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![4.0, 2.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
 
@@ -2152,12 +1917,34 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let eval = evaluate(Value::GpuTensor(handle), &[Value::from("nobalance")], false)
             .expect("evaluate");
         assert!(matches!(eval.eigenvalues(), Value::GpuTensor(_)));
+
+        let complex = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).unwrap();
+        let source = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+        let eval = evaluate(Value::GpuTensor(source), &[], false).expect("resident complex eig");
+        let Value::GpuTensor(eigenvalues) = eval.eigenvalues() else {
+            panic!("complex eig did not restore resident eigenvalues");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&eigenvalues),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered = block_on(gpu_helpers::download_value_preserving_residency_async(
+            provider,
+            &eigenvalues,
+        ))
+        .unwrap();
+        let Value::ComplexTensor(gathered) = gathered else {
+            panic!("complex eig lost complex eigenvalue storage");
+        };
+        let (re, im) = gathered.materialize_f64()[0];
+        assert!((re - 2.0).abs() < 1e-5);
+        assert!((im - 1.0).abs() < 1e-5);
     }
 
     fn eig_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

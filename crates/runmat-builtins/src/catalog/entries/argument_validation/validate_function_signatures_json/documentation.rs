@@ -1,0 +1,36 @@
+use crate::*;
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+ authority: BuiltinDocumentationAuthority::Catalog, title: Some("validateFunctionSignaturesJSON"), slug: Some("validateFunctionSignaturesJSON"),
+ summary: "Validate the JSON syntax of function-signature metadata text.", description: "`validateFunctionSignaturesJSON(S)` accepts text containing JSON and throws if any payload is not syntactically valid JSON. This JSON-payload signature is a RunMat language extension; the compatibility target's filename-based and no-input forms are not yet implemented.", keywords: &["validateFunctionSignaturesJSON", "argument validation", "arguments block", "MATLAB compatibility"],
+ related: &[], sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["Accepts string scalars/arrays, character row vectors, and compatible cell arrays of text.",
+"Parses each text payload as JSON and throws a structured RunMat error on syntax errors.",
+"Returns no user-facing value when validation passes and suppresses automatic output.",
+"Numeric values, including native integer values, are rejected before provider or metadata access."] },
+BuiltinDocumentationSection { heading: "Residency and provider behavior", paragraphs: &["This validator runs on host text. Numeric and provider-resident values are rejected before provider or metadata access."] },
+BuiltinDocumentationSection { heading: "Execution contract", paragraphs: &["The runtime binding is portable across interpreter, native/JIT/AOT and WASM routes. Metadata and text checks do not upload or gather operands. Invalid output counts and controls reject before provider payload access.",
+"This validator has zero public outputs. A statement validates JSON syntax; explicitly assigning a result is an error. It is not an arguments-block validator. An internal ABI return carrier is not a public output.",
+"The operation has no callbacks, filesystem, randomness, workspace mutation or foreign-runtime calls. Distributed values are inspected only as opaque handles, never materialized or validated partition-by-partition."] },
+BuiltinDocumentationSection { heading: "Compatibility limitation", paragraphs: &["JSON-payload validation is explicitly gated as a RunMat-only extension. MATLAB filename-based and no-input forms remain unsupported; parsing JSON does not validate the complete function-signature schema."] }],
+ examples: &[BuiltinExample {
+ id: "example-1", title: "Validate JSON syntax for signature metadata", program: "validateFunctionSignaturesJSON('{\"functions\":[]}'); passed = true;",
+ display_output: Some("No output when the JSON payload parses successfully."), compatibility: BuiltinExampleCompatibility::RunMat,
+ harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+ requirements: BuiltinExampleRequirements::NONE,
+ verification: BuiltinExampleVerification::Assertions { source: "assert(passed); failed = false; try; validateFunctionSignaturesJSON('{'); catch; failed = true; end; assert(failed);" },
+}], example_exemption: None,
+ faqs: &[BuiltinDocumentationFaq { question: "Does this validate the full MATLAB signature schema?", answer: "No. RunMat currently validates JSON syntax only; full signature-schema semantic validation is not implemented." }],
+ links: &[BuiltinDocumentationLink { label: "`arguments` blocks", target: BuiltinDocumentationLinkTarget::Documentation("../language/arguments") },
+BuiltinDocumentationLink { label: "MATLAB Language Extensions", target: BuiltinDocumentationLinkTarget::Documentation("/docs/runtime/getting-started/language-extensions") }],
+ media: &[],
+ evidence: BuiltinDocumentationEvidence {
+  implementation: &[BuiltinDocumentationLink {
+   label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("crates/runmat-runtime/src/builtins/common/validation/validate_function_signatures_json.rs"),
+  }],
+  verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Validator domain tests", location: "builtins::common::validation::tests" }],
+  notes: &["Retained unit reference: crates/runmat-runtime/src/builtins/common/validation.rs validates valid and invalid JSON payloads",
+"Retained integration reference: Registered as a callable compatibility builtin; not an arguments-block validator.",
+   "Legacy GPU/fusion declarations are reconciled into typed placement; no device kernel or payload preparation is claimed. Exact-source integrated runtime, native and documentation execution remains required.",
+  ],
+ },
+ introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

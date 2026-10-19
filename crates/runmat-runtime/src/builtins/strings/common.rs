@@ -2,6 +2,38 @@
 use runmat_value::CharArray;
 
 use runmat_value::Value;
+
+pub(crate) fn is_multirow_char_array(value: &Value) -> bool {
+    matches!(value, Value::CharArray(array) if array.rows > 1)
+}
+
+pub(crate) fn cell_contains_string(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|value| {
+            matches!(value, Value::String(_) | Value::StringArray(_)) || cell_contains_string(value)
+        }),
+        _ => false,
+    }
+}
+
+/// Whether an otherwise valid text cell uses RunMat's string-scalar cell extension.
+/// Invalid elements remain for the caller's cell-element validator to diagnose.
+pub(crate) fn cell_has_valid_string_scalar(value: &Value) -> bool {
+    let Value::Cell(cell) = value else {
+        return false;
+    };
+    let mut has_string = false;
+    for element in &cell.data {
+        match element {
+            Value::String(_) => has_string = true,
+            Value::StringArray(array) if array.data.len() == 1 => has_string = true,
+            Value::CharArray(chars) if chars.rows <= 1 => {}
+            _ => return false,
+        }
+    }
+    has_string
+}
+
 /// Canonical display for missing string scalars in MATLAB-compatible output.
 const MISSING_SENTINEL: &str = "<missing>";
 
@@ -63,7 +95,12 @@ pub(crate) fn contains_numeric_or_resident_text_input(value: &Value) -> bool {
         | Value::ComplexTensor(_)
         | Value::Symbolic(_)
         | Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_resident_text_input),
+        Value::Cell(_)
+        | Value::Struct(_)
+        | Value::StructArray(_)
+        | Value::Object(_)
+        | Value::Closure(_)
+        | Value::OutputList(_) => contains_resident_text_input(value),
         _ => false,
     }
 }
@@ -74,6 +111,7 @@ pub(crate) fn contains_resident_text_input(value: &Value) -> bool {
         Value::GpuTensor(_) => true,
         Value::Cell(cell) => cell.data.iter().any(contains_resident_text_input),
         Value::Struct(value) => value.fields.values().any(contains_resident_text_input),
+        Value::StructArray(array) => array.any_value(contains_resident_text_input),
         Value::Object(value) => value.properties.values().any(contains_resident_text_input),
         Value::Closure(value) => value.captures.iter().any(contains_resident_text_input),
         Value::OutputList(values) => values.iter().any(contains_resident_text_input),
@@ -133,5 +171,46 @@ pub(crate) mod tests {
         assert!(!contains_numeric_or_resident_text_input(&Value::String(
             "text".into()
         )));
+    }
+
+    #[test]
+    fn text_admission_detects_residency_nested_in_typed_struct_arrays() {
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let resident = Value::GpuTensor(allocation.handle.clone());
+        let mut direct_struct = runmat_value::StructValue::new();
+        direct_struct.insert("payload", resident.clone());
+        assert!(contains_numeric_or_resident_text_input(&Value::Struct(
+            direct_struct
+        )));
+        let mut object = runmat_value::ObjectInstance::new("TextFixture".to_string());
+        object
+            .properties
+            .insert("payload".to_string(), resident.clone());
+        assert!(contains_numeric_or_resident_text_input(&Value::Object(
+            object
+        )));
+        let mut first = runmat_value::StructValue::new();
+        first.insert("payload", resident);
+        let mut second = runmat_value::StructValue::new();
+        second.insert("payload", Value::String("host".into()));
+        let array = runmat_value::StructArray::new(vec![first, second], vec![2, 1]).unwrap();
+        let value = Value::StructArray(array);
+        assert!(contains_resident_text_input(&value));
+        assert!(contains_numeric_or_resident_text_input(&value));
+        drop(value);
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

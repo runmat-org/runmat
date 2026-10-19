@@ -2,7 +2,11 @@ use crate::builtins::common::tensor::tensor_element_len;
 use crate::indexing::selectors::IndexScalar;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
-use runmat_value::{CellArray, NumericScalar, StructValue, Tensor, Value};
+use runmat_value::{CellArray, NumericScalar, Tensor, Value};
+
+mod selection;
+
+use selection::{expand_cell_subscripts, linear_index_from_subscripts, row_major_pos_from_linear};
 
 const CELL_END_PLUS_TAG_MASK: u64 = 0xffff_ffff_0000_0000;
 const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
@@ -59,7 +63,7 @@ fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
         ),
         Value::Int(i) => IndexScalar::from_int(i),
         Value::Tensor(t)
-            if tensor_element_len(t) == 1 && t.shape.iter().product::<usize>() == 1 =>
+            if tensor_element_len(t) == 1 && t.shape().iter().product::<usize>() == 1 =>
         {
             index_scalar_from_numeric(
                 t.numeric_value_at(0)
@@ -89,7 +93,7 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
                 return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
             }
         }
-        Value::Tensor(t) if t.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
+        Value::Tensor(t) if t.len() == 1 && t.shape().iter().product::<usize>() == 1 => {
             let value = t
                 .numeric_value_at(0)
                 .expect("validated scalar numeric tensor storage");
@@ -110,6 +114,10 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
 
 fn parse_cell_index_values_for_assignment(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     match value {
+        // An empty numeric selector has zero brace-assignment destinations.
+        // The prepared-output cardinality owner already reports zero for it;
+        // do not misroute it through scalar index conversion.
+        Value::Tensor(t) if t.is_empty() => Ok(Vec::new()),
         Value::Tensor(t) if tensor_element_len(t) > 1 => (0..t.len())
             .map(|index| {
                 parse_positive_cell_index(index_scalar_from_numeric(
@@ -157,25 +165,30 @@ fn resolve_cell_end_relative_index(value: f64, len: usize) -> Result<Option<usiz
 }
 
 fn is_empty_tensor(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.is_empty() || t.rows == 0 || t.cols == 0)
-}
-
-fn row_major_pos_from_linear(ca: &CellArray, idx: usize) -> Result<usize, RuntimeError> {
-    if idx == 0 || idx > ca.data.len() {
-        return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
-    }
-    if ca.rows <= 1 || ca.cols <= 1 {
-        return Ok(idx - 1);
-    }
-    let zero = idx - 1;
-    let row = zero % ca.rows;
-    let col = zero / ca.rows;
-    Ok(row * ca.cols + col)
+    let Value::Tensor(tensor) = value else {
+        return false;
+    };
+    let (rows, cols) = match tensor.shape() {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    };
+    tensor.is_empty() || rows == 0 || cols == 0
 }
 
 pub fn create_cell_2d(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, RuntimeError> {
     crate::make_cell_with_shape(values, vec![rows, cols])
         .map_err(|e| map_cell_shape_error("cell creation error", e))
+}
+
+/// Return the MATLAB-visible extent used by one selector in a cell indexing
+/// expression. The final selector collapses any remaining trailing dimensions.
+pub fn cell_selector_extent(
+    cell: &CellArray,
+    selector_count: usize,
+    position: usize,
+) -> Result<usize, RuntimeError> {
+    selection::cell_selector_extent(cell, selector_count, position)
 }
 
 pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, RuntimeError> {
@@ -184,21 +197,14 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
             let i = indices[0];
             Ok(ca.data[row_major_pos_from_linear(ca, i)?].clone())
         }
-        2 => {
-            let r = indices[0];
-            let c = indices[1];
-            if r == 0 || r > ca.rows || c == 0 || c > ca.cols {
-                return Err(mex(
-                    "CellSubscriptOutOfBounds",
-                    "Cell subscript out of bounds",
-                ));
-            }
-            Ok(ca.data[(r - 1) * ca.cols + (c - 1)].clone())
-        }
-        _ => Err(mex(
+        0 => Err(mex(
             "UnsupportedCellIndexCount",
             "Unsupported number of cell indices",
         )),
+        _ => {
+            let linear = linear_index_from_subscripts(ca, indices)?;
+            Ok(ca.data[row_major_pos_from_linear(ca, linear)?].clone())
+        }
     }
 }
 
@@ -251,70 +257,6 @@ pub fn gather_cell_paren_linear_indices(
     ))
 }
 
-pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeError> {
-    if ca.data.len() == 1 {
-        return Ok(match &ca.data[0] {
-            Value::Struct(st) => st.fields.get(field).cloned().unwrap_or(Value::Num(0.0)),
-            other => other.clone(),
-        });
-    }
-
-    let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
-    for value in &ca.data {
-        match value {
-            Value::Struct(st) => out.push(st.fields.get(field).cloned().unwrap_or(Value::Num(0.0))),
-            other => out.push(other.clone()),
-        }
-    }
-    let cell = CellArray::new(out, ca.rows, ca.cols)
-        .map_err(|e| map_cell_shape_error("cell field gather", e))?;
-    Ok(Value::Cell(cell))
-}
-
-pub fn assign_cell_member<OnWrite>(
-    mut ca: CellArray,
-    field: String,
-    rhs: Value,
-    mut on_write: OnWrite,
-) -> Result<Value, RuntimeError>
-where
-    OnWrite: FnMut(&Value, &Value),
-{
-    let rhs_cell = if let Value::Cell(rc) = &rhs {
-        if rc.rows != ca.rows || rc.cols != ca.cols {
-            return Err(mex(
-                "CellMemberRhsShapeMismatch",
-                "field assignment cell RHS shape mismatch",
-            ));
-        }
-        Some(rc)
-    } else {
-        None
-    };
-
-    for i in 0..ca.data.len() {
-        let rv = if let Some(rc) = rhs_cell {
-            rc.data[i].clone()
-        } else {
-            rhs.clone()
-        };
-        match &mut ca.data[i] {
-            Value::Struct(st) => {
-                if let Some(oldv) = st.fields.get(&field) {
-                    on_write(oldv, &rv);
-                }
-                st.fields.insert(field.clone(), rv);
-            }
-            other => {
-                let mut st = StructValue::new();
-                st.fields.insert(field.clone(), rv);
-                *other = Value::Struct(st);
-            }
-        }
-    }
-    Ok(Value::Cell(ca))
-}
-
 pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {
     fn is_colon_selector(value: &Value) -> bool {
         matches!(value, Value::String(text) if text == ":")
@@ -339,7 +281,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 Ok(vec![index_cell_value(ca, &[idx])?])
             }
             Value::Tensor(t) => {
-                if tensor_element_len(t) == 1 && t.shape.iter().product::<usize>() == 1 {
+                if tensor_element_len(t) == 1 && t.shape().iter().product::<usize>() == 1 {
                     let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
@@ -355,33 +297,8 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
             }
             _ => Err(mex("CellIndexType", "Unsupported cell index type")),
         },
-        2 => {
-            let row_colon = is_colon_selector(&indices[0]);
-            let col_colon = is_colon_selector(&indices[1]);
-            if row_colon && col_colon {
-                return expand_all_cell_values(ca);
-            }
-            if row_colon {
-                let c = parse_cell_index_value_for_len(&indices[1], ca.cols)?;
-                let mut values = Vec::with_capacity(ca.rows);
-                for r in 1..=ca.rows {
-                    values.push(index_cell_value(ca, &[r, c])?);
-                }
-                return Ok(values);
-            }
-            if col_colon {
-                let r = parse_cell_index_value_for_len(&indices[0], ca.rows)?;
-                let mut values = Vec::with_capacity(ca.cols);
-                for c in 1..=ca.cols {
-                    values.push(index_cell_value(ca, &[r, c])?);
-                }
-                return Ok(values);
-            }
-            let r = parse_cell_index_value_for_len(&indices[0], ca.rows)?;
-            let c = parse_cell_index_value_for_len(&indices[1], ca.cols)?;
-            Ok(vec![index_cell_value(ca, &[r, c])?])
-        }
-        _ => Err(mex("CellIndexType", "Unsupported cell index type")),
+        0 => Err(mex("CellIndexType", "Unsupported cell index type")),
+        _ => expand_cell_subscripts(ca, indices),
     }
 }
 
@@ -475,10 +392,19 @@ where
             ca.data[lin] = rhs;
             Ok(Value::Cell(ca))
         }
-        _ => Err(mex(
+        0 => Err(mex(
             "UnsupportedCellIndexCount",
             "Unsupported number of cell indices",
         )),
+        _ => {
+            let linear = linear_index_from_subscripts(&ca, indices)?;
+            let position = row_major_pos_from_linear(&ca, linear)?;
+            if let Some(old_value) = ca.data.get(position) {
+                on_write(old_value, &rhs);
+            }
+            ca.data[position] = rhs;
+            Ok(Value::Cell(ca))
+        }
     }
 }
 
@@ -697,11 +623,15 @@ fn assign_cell_paren_from_cell(
             }
             (i - 1) * ca.cols + (j - 1)
         }
-        _ => {
+        0 => {
             return Err(mex(
                 "UnsupportedCellIndexCount",
                 "Unsupported number of cell indices",
             ))
+        }
+        _ => {
+            let linear = linear_index_from_subscripts(&ca, indices)?;
+            row_major_pos_from_linear(&ca, linear)?
         }
     };
     if let Some(oldv) = ca.data.get(lin) {
@@ -713,27 +643,31 @@ fn assign_cell_paren_from_cell(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        assign_cell_member, expand_cell_indices, map_cell_shape_error,
-        resolve_cell_assignment_positions,
-    };
-    use runmat_value::{CellArray, IntegerStorage, StructValue, Tensor, Value};
+    use super::{expand_cell_indices, map_cell_shape_error, resolve_cell_assignment_positions};
+    use runmat_value::{CellArray, IntegerStorage, Tensor, Value};
 
-    #[test]
-    fn assign_cell_member_rejects_shape_mismatch_cell_rhs() {
-        let base = CellArray::new(
-            vec![
-                Value::Struct(StructValue::new()),
-                Value::Struct(StructValue::new()),
-            ],
-            1,
-            2,
-        )
-        .expect("base cell");
-        let rhs = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("rhs cell");
-        let err = assign_cell_member(base, "field".to_string(), Value::Cell(rhs), |_old, _new| {})
-            .expect_err("shape mismatch should fail");
-        assert_eq!(err.identifier(), Some("RunMat:CellMemberRhsShapeMismatch"));
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn cell_index_and_deletion_preserve_rank_boundaries() {
+        let cell = || CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).unwrap();
+        for shape in [vec![], vec![1]] {
+            let index = Value::Tensor(Tensor::new(vec![2.0], shape).unwrap());
+            assert_eq!(
+                expand_cell_indices(&cell(), &[index]).unwrap(),
+                vec![Value::Num(20.0)]
+            );
+        }
+        let scalar_rhs = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        let Value::Cell(result) =
+            super::assign_cell_paren_with_policy(cell(), &[1], &scalar_rhs, true).unwrap()
+        else {
+            panic!("expected cell after deletion");
+        };
+        assert_eq!(result.data, vec![Value::Num(20.0)]);
+        let vector_rhs = Value::Tensor(Tensor::new(vec![7.0], vec![1]).unwrap());
+        let error =
+            super::assign_cell_paren_with_policy(cell(), &[1], &vector_rhs, true).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:DeletionRequiresEmptyRhs"));
     }
 
     #[test]
@@ -775,6 +709,40 @@ mod tests {
         let err = expand_cell_indices(&cell, &[Value::Tensor(tensor)])
             .expect_err("fractional tensor index should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
+    }
+
+    #[test]
+    fn empty_typed_numeric_brace_assignment_selectors_have_zero_positions() {
+        let cell = CellArray::new(vec![Value::Num(10.0)], 1, 1).expect("cell");
+        let mut selectors = vec![
+            Value::Tensor(Tensor::new(Vec::new(), vec![1, 0]).expect("empty double")),
+            Value::Tensor(Tensor::from_f32(Vec::new(), vec![1, 0]).expect("empty single")),
+        ];
+        for storage in [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ] {
+            selectors.push(Value::Tensor(
+                Tensor::new_integer(storage, vec![1, 0]).expect("empty integer"),
+            ));
+        }
+        for selector in selectors {
+            let positions = resolve_cell_assignment_positions(&cell, &[selector])
+                .expect("empty numeric selector has zero destinations");
+            assert!(positions.is_empty());
+            let unchanged =
+                super::assign_cell_value_multi(cell.clone(), &positions, &[], |_, _| {
+                    panic!("zero-output assignment must not write a cell element")
+                })
+                .expect("zero-output assignment is a no-op");
+            assert_eq!(unchanged, Value::Cell(cell.clone()));
+        }
     }
 
     #[test]

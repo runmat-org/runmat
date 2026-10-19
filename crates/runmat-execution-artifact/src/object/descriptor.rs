@@ -15,6 +15,8 @@ pub enum ObjectNamespace {
     DetailedEvent,
     Log,
     Checkpoint,
+    ForeignArtifact,
+    ForeignPolicy,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -120,7 +122,8 @@ impl ObjectDescriptor {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LogicalObject {
     pub descriptor: ObjectDescriptor,
     pub bytes: Vec<u8>,
@@ -150,7 +153,7 @@ impl LogicalObject {
     }
 }
 
-fn validate_logical_name(name: &str) -> ArtifactResult<()> {
+pub(crate) fn validate_logical_name(name: &str) -> ArtifactResult<()> {
     if name.is_empty()
         || name.len() > 4096
         || !name.is_ascii()

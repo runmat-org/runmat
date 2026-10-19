@@ -16,7 +16,7 @@ use runmat_test_runner::schedule::RetryPolicy;
 use runmat_test_runner::worker::{RunSubmission, WorkerBackend};
 use runmat_test_runner::{CoordinatedRun, Coordinator, CoordinatorConfig};
 use runmat_test_runner_execution::{ExecutionBackendConfig, ExecutionWorkerBackend};
-use runmat_test_runner_native::artifact::FilesystemArtifactStore;
+use runmat_test_runner_native::artifact::{export_reports, FilesystemArtifactStore};
 use runmat_test_runner_native::host::{NativeCancellation, NativeClock};
 use runmat_test_runner_native::telemetry::NativeTelemetry;
 use runmat_test_runner_native::{
@@ -30,8 +30,8 @@ use super::discovery::prepare;
 use super::exit::TestCommandError;
 use super::remote::{RemoteTestBackend, RemoteTestBackendConfig};
 
-pub async fn execute(args: TestArgs, cli: &Cli, _runtime: &RunMatRuntimeConfig) -> Result<()> {
-    match execute_inner(args, cli).await {
+pub async fn execute(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
+    match execute_inner(args, cli, runtime).await {
         Ok(()) => Ok(()),
         Err(error) if error.downcast_ref::<TestCommandError>().is_some() => Err(error),
         Err(error) => {
@@ -41,13 +41,14 @@ pub async fn execute(args: TestArgs, cli: &Cli, _runtime: &RunMatRuntimeConfig) 
     }
 }
 
-async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
+async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig) -> Result<()> {
     let prepared = prepare(&args, cli).await?;
     let mut session = runmat_core::RunMatSession::with_options(!cli.no_jit, false)
         .context("failed to initialize test discovery session")?;
     if let Some(project) = prepared.project_handoff.clone() {
         session
             .install_project_handoff(project)
+            .await
             .context("failed to install frozen project for test discovery")?;
     }
     let prepared_run = session
@@ -177,6 +178,15 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             .project_handoff
             .clone()
             .context("remote tests require a project manifest with an exact frozen graph")?;
+        let foreign_artifacts = crate::commands::package::prepare_foreign_artifacts(
+            &project_handoff.project,
+            runtime,
+            false,
+        )
+        .context("failed to prepare project foreign artifacts for remote tests")?;
+        let foreign_policy =
+            runmat_core::foreign_artifacts::capture_foreign_policy_object(&runtime.foreign)
+                .map_err(anyhow::Error::msg)?;
         let backend = RemoteTestBackend::new(RemoteTestBackendConfig {
             project: args.project,
             cluster: cluster.clone(),
@@ -184,6 +194,10 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
             trust_identity,
             max_workers: jobs,
             project_handoff,
+            interop: foreign_artifacts.interop,
+            foreign_policy,
+            foreign_artifacts: foreign_artifacts.objects,
+            foreign_artifact_closures: foreign_artifacts.closures,
         })
         .map_err(|error| anyhow::anyhow!("failed to configure remote tests: {error}"))?;
         run_coordinator(
@@ -311,8 +325,9 @@ async fn execute_inner(args: TestArgs, cli: &Cli) -> Result<()> {
     } else {
         prepared.project_root.join(&args.report_dir)
     };
-    let store = FilesystemArtifactStore::new(report_root);
+    let store = FilesystemArtifactStore::new(report_root.as_path());
     let manifest = persist_reports(&store, &run.result.run_id, &run.reports).await?;
+    export_reports(&report_root, &run.reports).await?;
     if run.result.state.is_success() {
         if run
             .reports
@@ -439,9 +454,14 @@ fn reporters(args: &TestArgs, configured: &[ProjectTestReport]) -> ReporterFanou
         args.reports.clone()
     };
     let mut reporters = ReporterFanout::default();
+    let mut selected = Vec::new();
     for format in requested {
+        if selected.contains(&format) {
+            continue;
+        }
+        selected.push(format);
         match format {
-            TestReportArg::Human => reporters.push(HumanReporter::default()),
+            TestReportArg::Human => reporters.push(HumanReporter),
             TestReportArg::Json => reporters.push(JsonReporter::default()),
             TestReportArg::Junit => reporters.push(JunitReporter),
             TestReportArg::Tap => reporters.push(TapReporter),

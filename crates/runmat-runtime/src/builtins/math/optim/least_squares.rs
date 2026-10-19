@@ -5,14 +5,35 @@ use std::pin::Pin;
 
 use nalgebra::{DMatrix, DVector};
 
-use crate::builtins::math::optim::common::optim_error;
+use crate::builtins::math::optim::common::{optim_error, ScalarCooperation};
 use crate::BuiltinResult;
+
+mod traversal;
+pub(crate) use traversal::{bound_gradient, jacobian_value, residual_norm_inf};
+use traversal::{first_order_optimality, max_abs_difference, norm2_squared};
 
 pub(crate) type ResidualFuture<'a> = Pin<Box<dyn Future<Output = BuiltinResult<Vec<f64>>> + 'a>>;
 const MAX_LEAST_SQUARES_WORK_ELEMENTS: usize = 50_000_000;
 
 pub(crate) trait LeastSquaresEvaluator {
     fn residual<'a>(&'a mut self, x: &'a [f64]) -> ResidualFuture<'a>;
+    fn cooperation(&mut self) -> Option<&mut ScalarCooperation> {
+        None
+    }
+}
+
+async fn checkpoint<E: LeastSquaresEvaluator>(
+    evaluator: &mut E,
+    elements: usize,
+) -> BuiltinResult<()> {
+    if let Some(cooperation) = evaluator.cooperation() {
+        cooperation
+            .completed(u64::try_from(elements).map_err(|_| {
+                optim_error("optim", "cooperation work count exceeds supported range")
+            })?)
+            .await?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +164,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
     bounds.validate(name, n)?;
     bounds.project(&mut x);
 
+    checkpoint(evaluator, 0).await?;
     let mut residual = evaluator.residual(&x).await?;
     if residual.is_empty() {
         return Err(optim_error(
@@ -159,7 +181,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
     let mut last_optimality = f64::INFINITY;
     let mut last_step_size = 0.0;
 
-    if residual_norm_inf(&residual) <= options.tol_fun {
+    if residual_norm_inf(&residual, evaluator.cooperation()).await? <= options.tol_fun {
         let jacobian = finite_difference_jacobian(
             name,
             evaluator,
@@ -169,10 +191,9 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
             &mut func_count,
             options.max_fun_evals,
         )
-        .await
-        .map(|jacobian| jacobian.values)
-        .unwrap_or_else(|_| vec![0.0; jacobian_len]);
-        let optimality = first_order_optimality(&jacobian, &residual, n);
+        .await?
+        .values;
+        let optimality = first_order_optimality(&jacobian, &residual, n, evaluator).await?;
         return final_result(
             name,
             evaluator,
@@ -192,9 +213,11 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
     }
 
     for iter in 0..options.max_iter {
+        checkpoint(evaluator, x.len()).await?;
         iterations = iter + 1;
         if func_count >= options.max_fun_evals {
-            return Ok(result(
+            return result(
+                evaluator,
                 x,
                 residual,
                 last_jacobian,
@@ -204,7 +227,8 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 last_optimality,
                 last_step_size,
                 "Exceeded maximum function evaluations.",
-            ));
+            )
+            .await;
         }
 
         let jacobian_eval = finite_difference_jacobian(
@@ -218,11 +242,12 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
         )
         .await?;
         let jacobian = jacobian_eval.values;
-        let optimality = first_order_optimality(&jacobian, &residual, n);
+        let optimality = first_order_optimality(&jacobian, &residual, n, evaluator).await?;
         last_jacobian = jacobian.clone();
         last_optimality = optimality;
         if jacobian_eval.exhausted_budget {
-            return Ok(result(
+            return result(
+                evaluator,
                 x,
                 residual,
                 jacobian,
@@ -232,10 +257,12 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 optimality,
                 last_step_size,
                 "Exceeded maximum function evaluations.",
-            ));
+            )
+            .await;
         }
         if optimality <= options.tol_fun {
-            return Ok(result(
+            return result(
+                evaluator,
                 x,
                 residual,
                 jacobian,
@@ -245,18 +272,20 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 optimality,
                 last_step_size,
                 "Local minimum found. First-order optimality is within tolerance.",
-            ));
+            )
+            .await;
         }
 
         let j = DMatrix::from_row_slice(m, n, &jacobian);
         let f = DVector::from_column_slice(&residual);
         let gradient = j.transpose() * &f;
-        let current_norm = norm2_squared(&residual);
+        let current_norm = norm2_squared(&residual, evaluator).await?;
         let mut accepted = false;
 
         for _ in 0..12 {
             if func_count >= options.max_fun_evals {
-                return Ok(result(
+                return result(
+                    evaluator,
                     x,
                     residual,
                     jacobian,
@@ -266,11 +295,15 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                     optimality,
                     last_step_size,
                     "Exceeded maximum function evaluations.",
-                ));
+                )
+                .await;
             }
+            checkpoint(evaluator, 0).await?;
             let normal = j.transpose() * &j + DMatrix::<f64>::identity(n, n) * lambda;
             let rhs = -&gradient;
-            let Some(delta) = normal.lu().solve(&rhs) else {
+            let delta = normal.lu().solve(&rhs);
+            checkpoint(evaluator, jacobian_len).await?;
+            let Some(delta) = delta else {
                 lambda *= 10.0;
                 continue;
             };
@@ -281,7 +314,7 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 .map(|(xi, di)| xi + di)
                 .collect::<Vec<_>>();
             bounds.project(&mut trial);
-            let step_norm = max_abs_difference(&trial, &x);
+            let step_norm = max_abs_difference(&trial, &x, evaluator).await?;
             if step_norm == 0.0 {
                 lambda *= 10.0;
                 continue;
@@ -294,16 +327,16 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                     format!("{name}: function output size changed during iteration"),
                 ));
             }
-            let trial_norm = norm2_squared(&trial_residual);
+            let trial_norm = norm2_squared(&trial_residual, evaluator).await?;
             if trial_norm <= current_norm {
-                let x_norm = residual_norm_inf(&x);
+                let x_norm = residual_norm_inf(&x, evaluator.cooperation()).await?;
                 let improvement = current_norm - trial_norm;
                 x = trial;
                 residual = trial_residual;
                 last_step_size = step_norm;
                 lambda = (lambda * 0.3).max(1.0e-12);
                 accepted = true;
-                if residual_norm_inf(&residual) <= options.tol_fun {
+                if residual_norm_inf(&residual, evaluator.cooperation()).await? <= options.tol_fun {
                     return final_result(
                         name,
                         evaluator,
@@ -362,7 +395,8 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
 
             lambda *= 10.0;
             if func_count >= options.max_fun_evals {
-                return Ok(result(
+                return result(
+                    evaluator,
                     x,
                     residual,
                     last_jacobian,
@@ -372,12 +406,14 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                     optimality,
                     last_step_size,
                     "Exceeded maximum function evaluations.",
-                ));
+                )
+                .await;
             }
         }
 
         if !accepted {
-            return Ok(result(
+            return result(
+                evaluator,
                 x,
                 residual,
                 last_jacobian,
@@ -387,11 +423,13 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
                 last_optimality,
                 last_step_size,
                 "Iteration stalled before convergence.",
-            ));
+            )
+            .await;
         }
     }
 
-    Ok(result(
+    result(
+        evaluator,
         x,
         residual,
         last_jacobian,
@@ -401,7 +439,8 @@ pub(crate) async fn solve_least_squares<E: LeastSquaresEvaluator>(
         last_optimality,
         last_step_size,
         "Exceeded maximum iterations.",
-    ))
+    )
+    .await
 }
 
 struct FiniteDifferenceJacobian {
@@ -422,6 +461,7 @@ async fn finite_difference_jacobian<E: LeastSquaresEvaluator>(
     let n = x.len();
     let mut jacobian = vec![0.0; checked_least_squares_work(name, m, n)?];
     for col in 0..n {
+        checkpoint(evaluator, m).await?;
         if *func_count >= max_fun_evals {
             return Ok(FiniteDifferenceJacobian {
                 values: jacobian,
@@ -447,8 +487,12 @@ async fn finite_difference_jacobian<E: LeastSquaresEvaluator>(
                 format!("{name}: function output size changed during finite differencing"),
             ));
         }
-        for row in 0..m {
-            jacobian[row * n + col] = (next[row] - residual[row]) / actual_step;
+        for first in (0..m).step_by(4096) {
+            let end = m.min(first + 4096);
+            for row in first..end {
+                jacobian[row * n + col] = (next[row] - residual[row]) / actual_step;
+            }
+            checkpoint(evaluator, end - first).await?;
         }
     }
     Ok(FiniteDifferenceJacobian {
@@ -474,7 +518,8 @@ async fn final_result<E: LeastSquaresEvaluator>(
     message: &str,
 ) -> BuiltinResult<LeastSquaresResult> {
     if !options.final_jacobian || func_count.saturating_add(x.len()) > options.max_fun_evals {
-        return Ok(result(
+        return result(
+            evaluator,
             x,
             residual,
             fallback_jacobian,
@@ -484,7 +529,8 @@ async fn final_result<E: LeastSquaresEvaluator>(
             fallback_optimality,
             step_size,
             message,
-        ));
+        )
+        .await;
     }
 
     let mut final_func_count = func_count;
@@ -499,8 +545,9 @@ async fn final_result<E: LeastSquaresEvaluator>(
     )
     .await?;
     let jacobian = jacobian_eval.values;
-    let optimality = first_order_optimality(&jacobian, &residual, x.len());
-    Ok(result(
+    let optimality = first_order_optimality(&jacobian, &residual, x.len(), evaluator).await?;
+    result(
+        evaluator,
         x,
         residual,
         jacobian,
@@ -510,10 +557,12 @@ async fn final_result<E: LeastSquaresEvaluator>(
         optimality,
         step_size,
         message,
-    ))
+    )
+    .await
 }
 
-fn result(
+async fn result<E: LeastSquaresEvaluator>(
+    evaluator: &mut E,
     x: Vec<f64>,
     residual: Vec<f64>,
     jacobian: Vec<f64>,
@@ -523,9 +572,9 @@ fn result(
     first_order_optimality: f64,
     step_size: f64,
     message: &str,
-) -> LeastSquaresResult {
-    let resnorm = norm2_squared(&residual);
-    LeastSquaresResult {
+) -> BuiltinResult<LeastSquaresResult> {
+    let resnorm = norm2_squared(&residual, evaluator).await?;
+    Ok(LeastSquaresResult {
         variable_len: x.len(),
         residual_len: residual.len(),
         x,
@@ -538,36 +587,7 @@ fn result(
         first_order_optimality,
         step_size,
         message: message.to_string(),
-    }
-}
-
-fn first_order_optimality(jacobian: &[f64], residual: &[f64], n: usize) -> f64 {
-    let m = residual.len();
-    let mut max_value = 0.0_f64;
-    for col in 0..n {
-        let mut value = 0.0;
-        for row in 0..m {
-            value += jacobian[row * n + col] * residual[row];
-        }
-        max_value = max_value.max(value.abs());
-    }
-    max_value
-}
-
-fn norm2_squared(values: &[f64]) -> f64 {
-    values.iter().map(|value| value * value).sum()
-}
-
-fn residual_norm_inf(values: &[f64]) -> f64 {
-    values
-        .iter()
-        .fold(0.0_f64, |acc, value| acc.max(value.abs()))
-}
-
-fn max_abs_difference(lhs: &[f64], rhs: &[f64]) -> f64 {
-    lhs.iter()
-        .zip(rhs.iter())
-        .fold(0.0_f64, |acc, (a, b)| acc.max((a - b).abs()))
+    })
 }
 
 #[cfg(test)]
@@ -632,5 +652,41 @@ mod tests {
         assert_eq!(result.func_count, 2);
         assert_eq!(evaluator.calls, 2);
         assert_eq!(result.exitflag, 0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn already_zero_residual_does_not_hide_final_jacobian_callback_failure() {
+        struct FinalFailure {
+            calls: usize,
+        }
+        impl LeastSquaresEvaluator for FinalFailure {
+            fn residual<'a>(&'a mut self, _: &'a [f64]) -> ResidualFuture<'a> {
+                self.calls += 1;
+                let first = self.calls == 1;
+                Box::pin(async move {
+                    if first {
+                        Ok(vec![0.0])
+                    } else {
+                        Err(crate::build_runtime_error("original callback failure")
+                            .with_identifier("RunMat:test:OriginalCallback")
+                            .with_source(std::io::Error::other("original cause"))
+                            .build())
+                    }
+                })
+            }
+        }
+        let mut evaluator = FinalFailure { calls: 0 };
+        let error = block_on(solve_least_squares(
+            "fsolve",
+            &mut evaluator,
+            vec![0.0],
+            &LeastSquaresBounds::unbounded(1),
+            &options(10),
+        ))
+        .expect_err("not a synthetic zero Jacobian");
+        assert_eq!(error.identifier(), Some("RunMat:test:OriginalCallback"));
+        assert!(error.source.is_some());
+        assert_eq!(evaluator.calls, 2);
     }
 }

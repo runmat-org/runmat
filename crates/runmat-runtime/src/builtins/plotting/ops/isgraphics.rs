@@ -214,6 +214,7 @@ fn graphics_handle_matches_type(value: &Value, kind: &str) -> bool {
             PlotChildHandleState::Text(_) => kind == "text",
             PlotChildHandleState::TextScatter(_) => kind == "textscatter",
             PlotChildHandleState::WordCloud(_) => kind == "wordcloud",
+            PlotChildHandleState::ColorBar(_) => kind == "colorbar",
             PlotChildHandleState::StackedPlot(_) => kind == "stackedplot",
         },
         Err(_) => false,
@@ -222,7 +223,7 @@ fn graphics_handle_matches_type(value: &Value, kind: &str) -> bool {
 
 fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
     match value {
-        Value::GpuTensor(handle) => false_value(handle.shape.clone()),
+        Value::GpuTensor(handle) => false_value(handle.shape().to_vec()),
         Value::Int(integer) => {
             if !crate::compatibility::runmat_extensions_enabled() {
                 return Value::Bool(false);
@@ -240,7 +241,7 @@ fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
             .is_err()
             {
                 return Value::LogicalArray(
-                    LogicalArray::new(vec![0; tensor.len()], tensor.shape.clone())
+                    LogicalArray::new(vec![0; tensor.len()], tensor.shape().to_vec())
                         .expect("logical shape from tensor"),
                 );
             }
@@ -283,7 +284,7 @@ fn integer_handle_predicate(
         })
         .collect();
     Value::LogicalArray(
-        LogicalArray::new(data, tensor.shape.clone()).expect("logical shape from tensor"),
+        LogicalArray::new(data, tensor.shape().to_vec()).expect("logical shape from tensor"),
     )
 }
 
@@ -298,7 +299,7 @@ fn numeric_handle_predicate(
         .map(|&handle| u8::from(predicate(handle, builtin)))
         .collect();
     Value::LogicalArray(
-        LogicalArray::new(data, tensor.shape.clone()).expect("logical shape from tensor"),
+        LogicalArray::new(data, tensor.shape().to_vec()).expect("logical shape from tensor"),
     )
 }
 
@@ -334,6 +335,21 @@ mod tests {
                 assert_eq!(logical.data, vec![0, 0]);
             }
             other => panic!("expected logical array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn isgraphics_numeric_tensor_masks_keep_low_rank_shapes() {
+        for (data, shape) in [(vec![-1.0], Vec::new()), (vec![-1.0, -2.0], vec![2])] {
+            let input = runmat_value::Tensor::new(data.clone(), shape.clone()).unwrap();
+            let Value::LogicalArray(output) =
+                isgraphics_builtin(vec![Value::Tensor(input)]).unwrap()
+            else {
+                panic!("numeric tensor input must return a logical array")
+            };
+            assert_eq!(output.shape, shape);
+            assert_eq!(output.data, vec![0; data.len()]);
         }
     }
 

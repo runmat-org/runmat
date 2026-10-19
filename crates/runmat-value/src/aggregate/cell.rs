@@ -38,6 +38,23 @@ impl CellArray {
         })
     }
 
+    /// Append to a 1×N cell row while keeping its full shape and cached
+    /// dimensions in sync. Reject a malformed or non-row array unchanged.
+    pub fn push_row_element(&mut self, value: Value) -> Result<(), String> {
+        if self.shape != [1, self.data.len()] || self.rows != 1 || self.cols != self.data.len() {
+            return Err("Cell array is not a valid row vector".into());
+        }
+        let next_count = self
+            .data
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| "Cell row length exceeds platform limits".to_string())?;
+        self.data.push(value);
+        self.shape[1] = next_count;
+        self.cols = next_count;
+        Ok(())
+    }
+
     pub fn from_column_major(data: Vec<Value>, shape: Vec<usize>) -> Result<Self, String> {
         let normalized = match shape.as_slice() {
             [] => vec![0, 0],
@@ -62,12 +79,18 @@ impl CellArray {
             total_len(&normalized[2..])
                 .ok_or_else(|| "Cell page shape exceeds platform limits".to_string())?
         };
-        let mut row_major = Vec::with_capacity(data.len());
+        let mut source = data.into_iter().map(Some).collect::<Vec<_>>();
+        let mut row_major = Vec::with_capacity(source.len());
         for page in 0..pages {
             let page_offset = page * rows * cols;
             for row in 0..rows {
                 for col in 0..cols {
-                    row_major.push(data[page_offset + row + col * rows].clone());
+                    let index = page_offset + row + col * rows;
+                    let value = source
+                        .get_mut(index)
+                        .and_then(Option::take)
+                        .ok_or_else(|| "cell storage does not match its shape".to_string())?;
+                    row_major.push(value);
                 }
             }
         }
@@ -75,21 +98,42 @@ impl CellArray {
     }
 
     pub fn to_column_major(&self) -> Vec<Value> {
-        let pages = if self.shape.len() <= 2 {
-            1
-        } else {
-            self.shape[2..].iter().product()
-        };
-        let mut column_major = Vec::with_capacity(self.data.len());
-        for page in 0..pages {
-            let page_offset = page * self.rows * self.cols;
-            for col in 0..self.cols {
+        self.iter_column_major().cloned().collect()
+    }
+
+    /// Move values into MATLAB-visible linear order without cloning payloads.
+    pub fn into_column_major(self) -> Result<Vec<Value>, String> {
+        if self.data.is_empty() || self.rows <= 1 || self.cols <= 1 {
+            return Ok(self.data);
+        }
+        let page_len = self.rows * self.cols;
+        let mut source = self.data.into_iter().map(Some).collect::<Vec<_>>();
+        let mut ordered = Vec::with_capacity(source.len());
+        for page_offset in (0..source.len()).step_by(page_len) {
+            for column in 0..self.cols {
                 for row in 0..self.rows {
-                    column_major.push(self.data[page_offset + row * self.cols + col].clone());
+                    let index = page_offset + row * self.cols + column;
+                    let value = source
+                        .get_mut(index)
+                        .and_then(Option::take)
+                        .ok_or_else(|| "cell storage does not match its shape".to_string())?;
+                    ordered.push(value);
                 }
             }
         }
-        column_major
+        Ok(ordered)
+    }
+
+    /// Iterate in MATLAB-visible linear order without cloning cell payloads.
+    pub fn iter_column_major(&self) -> impl Iterator<Item = &Value> {
+        let page_len = self.rows * self.cols;
+        (0..self.data.len()).map(move |linear| {
+            let page = linear / page_len.max(1);
+            let within_page = linear % page_len.max(1);
+            let row = within_page % self.rows.max(1);
+            let col = within_page / self.rows.max(1);
+            &self.data[page * page_len + row * self.cols + col]
+        })
     }
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
@@ -144,5 +188,56 @@ impl fmt::Display for CellArray {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn borrowed_column_major_iteration_matches_owned_projection() {
+        let expected = vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ];
+        let array = CellArray::from_column_major(expected.clone(), vec![2, 2]).unwrap();
+        let borrowed = array.iter_column_major().cloned().collect::<Vec<_>>();
+        assert_eq!(borrowed, array.to_column_major());
+        assert_eq!(borrowed, expected);
+    }
+
+    #[test]
+    fn borrowed_column_major_iteration_handles_empty_shape() {
+        let array = CellArray::new(Vec::new(), 0, 0).unwrap();
+        assert_eq!(array.iter_column_major().count(), 0);
+    }
+
+    #[test]
+    fn row_append_updates_full_shape_and_rejects_malformed_storage() {
+        let mut row = CellArray::new(Vec::new(), 1, 0).unwrap();
+        row.push_row_element(Value::Num(1.0)).unwrap();
+        row.push_row_element(Value::Num(2.0)).unwrap();
+        assert_eq!(row.shape, [1, 2]);
+        assert_eq!((row.rows, row.cols), (1, 2));
+        assert_eq!(row.data, vec![Value::Num(1.0), Value::Num(2.0)]);
+
+        row.shape[1] = 1;
+        assert!(row.push_row_element(Value::Num(3.0)).is_err());
+        assert_eq!(row.data.len(), 2);
+    }
+
+    #[test]
+    fn owned_column_major_projection_moves_the_same_values() {
+        let expected = vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ];
+        let array = CellArray::from_column_major(expected.clone(), vec![2, 2]).unwrap();
+        assert_eq!(array.into_column_major().unwrap(), expected);
     }
 }

@@ -1,265 +1,17 @@
 use super::*;
+#[cfg(test)]
+use runmat_builtins::BuiltinIntegerInputAvailability;
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    GROUPSUMMARY_INTEGER_CONTROL_EXTENSION, GROUPSUMMARY_RESIDENT_INPUT_EXTENSION,
+    GRPSTATS_INTEGER_ALPHA_EXTENSION, GRPSTATS_INTEGER_DATA_EXTENSION,
+    GRPSTATS_INTEGER_SELECTOR_EXTENSION, GRPSTATS_RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericScalar};
 
-const GROUPSUMMARY_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "groupsummary-resident-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "groupsummary on interactive resident GPU data is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:GroupsummaryResidentInputExtension"),
-    };
-const GROUPSUMMARY_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "groupsummary-integer-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "groupsummary with a native-class integer name-value control is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:GroupsummaryIntegerControlExtension"),
-    };
-pub const GROUPSUMMARY_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    GROUPSUMMARY_RESIDENT_INPUT_EXTENSION,
-    GROUPSUMMARY_INTEGER_CONTROL_EXTENSION,
-];
-
-const GRPSTATS_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "grpstats-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "grpstats on interactive resident GPU data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GrpstatsResidentInputExtension"),
-};
-const GRPSTATS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "grpstats-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "grpstats with a native-class integer matrix X is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GrpstatsIntegerDataExtension"),
-};
-const GRPSTATS_INTEGER_ALPHA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "grpstats-integer-alpha",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "grpstats with a native-class integer Alpha value is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GrpstatsIntegerAlphaExtension"),
-};
-const GRPSTATS_INTEGER_SELECTOR_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "grpstats-integer-selector",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "grpstats with a native-class integer table selector is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:GrpstatsIntegerSelectorExtension"),
-    };
-pub const GRPSTATS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    GRPSTATS_RESIDENT_INPUT_EXTENSION,
-    GRPSTATS_INTEGER_DATA_EXTENSION,
-    GRPSTATS_INTEGER_ALPHA_EXTENSION,
-    GRPSTATS_INTEGER_SELECTOR_EXTENSION,
-];
-
-const PIVOT_INTEGER_GROUP_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer grouping or DataVariable table columns",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target permits numeric grouping and data variables. Group keys are compared exactly; summary results follow the selected Method contract.",
-    }];
-const PIVOT_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Columns, Rows, or DataVariable indices",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public variable-index selectors are exact one-based structural values; logical selectors remain a distinct documented form.",
-    }];
-const PIVOT_INTEGER_BIN_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ColumnsBinMethod or RowsBinMethod count/edges",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents positive-integer bin counts and numeric edge vectors; counts are structural and edges require exact ordering before summary computation.",
-    }];
-const PIVOT_INTEGER_BOOLEAN_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "IncludeTotals, IncludeMissingGroups, or IncludeEmptyGroups",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public controls admit numeric zero or one alongside logical values and are structural rather than aggregation data.",
-    }];
-pub const PIVOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "P = pivot(table_with_integer_group_or_data_variables,___)",
-        inputs: &PIVOT_INTEGER_GROUP_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Implemented grouping keys retain exact native values above flintmax; aggregation crosses only the selected method's explicit result domain.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "P = pivot(T,Columns=integer_indices,Rows=integer_indices,DataVariable=integer_index,___)",
-        inputs: &PIVOT_INTEGER_SELECTOR_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Implemented selector parsing reads native integer storage directly; unsupported portions of the newer name-value grammar remain general pivot surface gaps.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "P = pivot(T,ColumnsBinMethod=integer_bins,RowsBinMethod=integer_bins,___)",
-        inputs: &PIVOT_INTEGER_BIN_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The documented contract is recorded without treating unimplemented general binning syntax as an implicit integer-to-floating boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "P = pivot(T,IncludeTotals=integer_flag,IncludeMissingGroups=integer_flag,IncludeEmptyGroups=integer_flag,___)",
-        inputs: &PIVOT_INTEGER_BOOLEAN_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Only exact zero/one values are compatible; unsupported general options reject before aggregation.",
-    },
-];
-
-const GROUPSUMMARY_INTEGER_GROUP_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer grouping variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer table grouping variables are compared exactly and preserve class in the output table.",
-    }];
-const GROUPSUMMARY_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer data variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer table data variables are numeric and are valid data-variable selections; exact-class extrema and explicit floating statistics preserve the documented method contract.",
-    }];
-const GROUPSUMMARY_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "native-class integer bin count or boolean name-value control",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Native integer scalars in these structurally ambiguous control positions are accepted only in RunMat extension mode.",
-    }];
-pub const GROUPSUMMARY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "groupsummary(T_or_A,integer_groupvars,method,___)",
-        inputs: &GROUPSUMMARY_INTEGER_GROUP_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Table and array grouping is exact. Table grouping columns and array BG preserve class, while GroupCount/BC and summaries are function-specific.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "groupsummary(integer_A,groupvars,method) or table integer data variables",
-        inputs: &GROUPSUMMARY_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Documented integer array and table data uses exact native-class min and max plus explicit floating computation for mean, sum, median, and counts. One-group numeric-edge and scalar-count forms compare integers exactly; multi-group bin specifications, time bins, additional named methods, and function handles currently reject explicitly.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "groupsummary(T,groupvars,integer_numbins,method,___) or integer boolean controls",
-        inputs: &GROUPSUMMARY_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "This is an explicitly gated input-form extension; equivalent scalar-double and logical controls remain available in strict compatibility mode.",
-    },
-];
-
-const GRPSTATS_INTEGER_GROUP_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "group",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Statistics grouping variables explicitly admit signed and unsigned integer classes and are compared exactly.",
-    }];
-const GRPSTATS_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented matrix X datatype list excludes signed and unsigned integer data; RunMat admission is independently mode-gated.",
-    }];
-const GRPSTATS_INTEGER_TABLE_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer table data variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Table variables may be numeric, so selected native integer variables use the documented table form.",
-    }];
-pub const GRPSTATS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "stats = grpstats(X,integer_group,___)",
-        inputs: &GRPSTATS_INTEGER_GROUP_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer grouping keys remain exact, including above flintmax; summary output is governed by X and whichstats.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "stats = grpstats(integer_X,group,___)",
-        inputs: &GRPSTATS_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only integer matrix data crosses a checked binary64 boundary after its compatibility gate; values that cannot be represented exactly reject rather than silently rounding.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "tblstats = grpstats(tbl,groupvars,___) with integer DataVars",
-        inputs: &GRPSTATS_INTEGER_TABLE_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::FunctionSpecific,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Selected integer table variables are documented numeric data; extrema retain exact integer values while floating statistics enter their explicit computation domain.",
-    },
-];
-
 #[runtime_builtin(
     name = "grpstats",
-    category = "stats/summary",
-    summary = "Compute summary statistics organized by group.",
-    keywords = "grpstats,group,statistics,mean,std,confidence interval,table",
-    accel = "cpu",
-    descriptor(crate::builtins::table::GRPSTATS_DESCRIPTOR),
-    extensions(crate::builtins::table::builtins::analytics::GRPSTATS_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::table::builtins::analytics::GRPSTATS_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn grpstats_builtin(
@@ -280,12 +32,7 @@ pub(crate) async fn grpstats_builtin(
 
 #[runtime_builtin(
     name = "pivot",
-    category = "table",
-    summary = "Pivot or summarize table data by grouping variables.",
-    keywords = "pivot,table,reshape,groupsummary",
-    accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_VARIADIC_DESCRIPTOR),
-    integer_capabilities(crate::builtins::table::builtins::analytics::PIVOT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn pivot_builtin(
@@ -314,15 +61,7 @@ pub(crate) async fn pivot_builtin(
 
 #[runtime_builtin(
     name = "groupsummary",
-    category = "table",
-    summary = "Group table rows and compute summary statistics for data variables.",
-    keywords = "groupsummary,group,table,mean,sum,count,median,min,max",
-    accel = "cpu",
-    descriptor(crate::builtins::table::GROUPSUMMARY_DESCRIPTOR),
-    extensions(crate::builtins::table::builtins::analytics::GROUPSUMMARY_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::table::builtins::analytics::GROUPSUMMARY_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn groupsummary_builtin(
@@ -578,7 +317,7 @@ fn groupsummary_concat_columns(columns: Vec<Value>) -> BuiltinResult<Value> {
 fn groupsummary_multi_output(outputs: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count, outputs,
@@ -587,7 +326,7 @@ fn groupsummary_multi_output(outputs: Vec<Value>) -> BuiltinResult<Value> {
     Ok(outputs
         .into_iter()
         .next()
-        .unwrap_or(Value::OutputList(Vec::new())))
+        .unwrap_or(Value::output_list(Vec::new())))
 }
 
 fn value_is_native_integer(value: &Value) -> bool {
@@ -643,7 +382,7 @@ fn ensure_groupsummary_extensions(
 fn groupsummary_typed_integer_scalar(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.len() == 1 && tensor.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() == 1 && runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().all(|&dimension| dimension == 1) && runmat_accelerate_api::handle_integer_type(handle).is_some())
         || matches!(value, Value::Cell(cell) if cell.data.len() == 1 && groupsummary_typed_integer_scalar(&cell.data[0]))
 }
 
@@ -1208,6 +947,10 @@ fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> B
 #[cfg(test)]
 mod integer_compatibility_tests {
     use super::*;
+    use runmat_builtins::{
+        GROUPSUMMARY_EXTENSIONS, GROUPSUMMARY_INTEGER_CAPABILITIES, GRPSTATS_EXTENSIONS,
+        GRPSTATS_INTEGER_CAPABILITIES,
+    };
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
@@ -1241,13 +984,17 @@ mod integer_compatibility_tests {
     #[test]
     fn grouping_strict_mode_gates_resident_inputs_before_provider_access() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let handle = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let resident = Value::GpuTensor(handle.clone());
         let group_summary =
             ensure_groupsummary_extensions(&resident, &Value::from("G"), &Value::from("mean"), &[])
@@ -1262,7 +1009,10 @@ mod integer_compatibility_tests {
             grpstats.identifier(),
             GRPSTATS_RESIDENT_INPUT_EXTENSION.error_identifier
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop((resident, handle));
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
@@ -1396,7 +1146,7 @@ mod integer_compatibility_tests {
             Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1, base]), vec![3, 1])
                 .unwrap(),
         );
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = futures::executor::block_on(groupsummary_builtin(
             data,
             groups,
@@ -1439,7 +1189,7 @@ mod integer_compatibility_tests {
             )
             .unwrap(),
         );
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = futures::executor::block_on(groupsummary_builtin(
             data,
             groups,
@@ -1470,24 +1220,30 @@ mod integer_compatibility_tests {
 
     #[test]
     fn groupsummary_residency_gate_only_applies_to_explicit_handles() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 426,
-            descriptor: Default::default(),
-        };
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let automatic = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
         ensure_groupsummary_extensions(
-            &Value::GpuTensor(handle.clone()),
+            &Value::GpuTensor(automatic.clone()),
             &Value::from("G"),
             &Value::from("mean"),
             &[],
         )
         .expect("automatic residency remains transparent");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = automatic
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let error = ensure_groupsummary_extensions(
-            &Value::GpuTensor(handle.clone()),
+            &Value::GpuTensor(explicit.clone()),
             &Value::from("G"),
             &Value::from("mean"),
             &[],
@@ -1497,6 +1253,9 @@ mod integer_compatibility_tests {
             error.identifier(),
             GROUPSUMMARY_RESIDENT_INPUT_EXTENSION.error_identifier
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop((automatic, explicit));
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

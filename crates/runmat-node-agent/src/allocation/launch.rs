@@ -35,6 +35,7 @@ impl AllocationProcesses {
         sandbox: &Sandbox,
         server_url: &str,
         bootstrap: &WorkerBootstrapCredential,
+        host: &runmat_execution::host::ExecutionHostInventory,
     ) -> AgentResult<u32> {
         use base64::Engine as _;
 
@@ -51,9 +52,15 @@ impl AllocationProcesses {
             "RUNMAT_EXECUTION_WORKER_REMOTE".to_string(),
             "1".to_string(),
         );
-        if allocation.resources.accelerator_count > 0 {
+        if !allocation.resources.accelerators.is_empty() {
             command.environment.insert(
                 "RUNMAT_EXECUTION_ACCELERATOR_REQUIRED".to_string(),
+                "1".to_string(),
+            );
+        }
+        if bootstrap.ready_v1 {
+            command.environment.insert(
+                "RUNMAT_EXECUTION_WORKER_READY_V1".to_string(),
                 "1".to_string(),
             );
         }
@@ -97,7 +104,13 @@ impl AllocationProcesses {
             ),
             (
                 "RUNMAT_EXECUTION_WORKER_RESOURCES",
-                serde_json::to_string(&allocation.resources)?,
+                serde_json::to_string(
+                    &runmat_execution_transport_native::control::AllocatedResources {
+                        request: allocation.resources.clone(),
+                        accelerator_devices: allocation.accelerator_devices.clone(),
+                        host: host.clone(),
+                    },
+                )?,
             ),
             (
                 "RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE",
@@ -186,6 +199,12 @@ impl AllocationProcesses {
             "RUNMAT_EXECUTION_DRIVER_CREDENTIAL".to_string(),
             bootstrap.credential.clone(),
         );
+        if bootstrap.ready_v1 {
+            command.environment.insert(
+                "RUNMAT_EXECUTION_SERVER_READY_V1".to_string(),
+                "1".to_string(),
+            );
+        }
         command.environment.insert(
             "RUNMAT_EXECUTION_ENDPOINT_IDENTITY_FILE".to_string(),
             sandbox

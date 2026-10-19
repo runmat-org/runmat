@@ -112,7 +112,7 @@ pub(super) fn io_error(error: std::io::Error) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
 }
 
-pub(super) fn unix_millis() -> u64 {
+pub(crate) fn unix_millis() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

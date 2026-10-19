@@ -419,7 +419,10 @@ fn validate_reference(
     authorization_scope: &str,
 ) -> NativeExecutionResult<()> {
     ValuePayload::Object(Box::new(reference.clone()))
-        .validate(ValueLimits::default())
+        .validate_for_transport(
+            ValueLimits::default(),
+            runmat_execution::value::ValueTransportContext::Portable,
+        )
         .map_err(protocol)?;
     if reference.authorization_scope != authorization_scope
         || reference.encoded_length == 0
@@ -474,14 +477,14 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 #[cfg(test)]
 mod tests {
     use runmat_execution::identity::ValueId;
-    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use runmat_execution::value::ValueRefKind;
 
     use super::*;
 
     fn reference(bytes: &[u8]) -> ValueRef {
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: ValueId::derive(&[b"remote-object", bytes]),
             logical_digest: Digest::sha256(bytes),
             encoded_length: bytes.len() as u64,

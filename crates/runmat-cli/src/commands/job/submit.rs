@@ -17,7 +17,7 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, ProgramBuildRecipe, ProgramExecutionDescriptor,
     ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_server_client::execution::{endpoint_evidence, public_error, ExecutionArtifactUpload};
 use runmat_server_client::public_api::types;
@@ -97,18 +97,33 @@ pub async fn submit(
         runmat_core::program_environment(crate::diagnostics::parser_compat(config.language.compat)),
     )?;
     let mut session = create_session(false, false, config, "create remote compilation session")?;
-    session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))?;
-    let source_text = std::fs::read_to_string(&file)
-        .with_context(|| format!("read remote job source {}", file.display()))?;
+    session
+        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))
+        .await?;
     let unit = session
         .compile_executable_unit(
-            runmat_core::ExecutableSource::new("root", file.to_string_lossy(), source_text),
+            crate::commands::package::executable_source(Some(frozen), &file).await?,
             Some(revision.clone()),
         )
         .await?;
+    let python_required = unit.requires_python_runtime();
+    let foreign_artifacts =
+        crate::commands::package::prepare_foreign_artifacts(frozen, config, python_required)?;
+    let foreign_policy =
+        runmat_core::foreign_artifacts::capture_foreign_policy_object(&config.foreign)
+            .map_err(anyhow::Error::msg)?;
+    let interop = foreign_artifacts.interop.clone();
+    let foreign_accelerators = foreign_artifacts.accelerators.clone();
     let executable = unit
-        .portable_envelope_for(function.as_deref())
+        .portable_envelope_for_with_interop(function.as_deref(), interop.clone())
         .map_err(anyhow::Error::msg)?;
+    let accelerators = runmat_execution::resource::merge_accelerator_requirements(
+        runmat_execution::resource::accelerator_requirements_for_capabilities(
+            &executable.manifest.capabilities,
+        )?
+        .into_iter()
+        .chain(foreign_accelerators),
+    )?;
     let identity = &executable.manifest.identity;
     if identity.entrypoint_kind == runmat_execution::ExecutableEntrypointKind::Script
         && !args.is_empty()
@@ -119,7 +134,10 @@ pub async fn submit(
         runmat_execution::ExecutableEntrypointKind::Script => 0,
         runmat_execution::ExecutableEntrypointKind::Function => 1,
     };
-    let executable_function = usize::try_from(identity.entrypoint_function.0)
+    let callable_function = identity.entrypoint_function.ok_or_else(|| {
+        anyhow::anyhow!("declaration-only executables cannot be submitted as callable jobs")
+    })?;
+    let executable_function = usize::try_from(callable_function.0)
         .context("portable entrypoint identity exceeds this host")?;
     let executable_bytes = executable.canonical_bytes()?;
     let form = ExecutableForm::ExecutableUnitV4;
@@ -127,18 +145,31 @@ pub async fn submit(
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
         entrypoint: executable_function.to_string(),
-        outputs: OutputContract { requested_outputs },
+        outputs: OutputContract {
+            requested_outputs,
+            owned_work: None,
+        },
         execution_mode: "interpreter".into(),
-        target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v4"),
+        target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3"),
+        interop,
+        foreign_policy: Some(foreign_policy.descriptor.clone()),
+        accelerators,
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
         expected_artifact_id: None,
     };
-    let bundle = ExecutionBundleBuilder::native(frozen, revision.clone())?
+    let mut builder = ExecutionBundleBuilder::native(frozen, revision.clone())?
         .with_compiled_package_closure()
         .with_materialized_program(recipe, form, executable_bytes)
-        .build()?;
+        .with_foreign_policy_object(foreign_policy)?;
+    for object in foreign_artifacts.objects {
+        builder = builder.with_foreign_object(object)?;
+    }
+    for closure in foreign_artifacts.closures {
+        builder = builder.with_foreign_artifact_closure(closure)?;
+    }
+    let bundle = builder.build()?;
     let recipe = bundle
         .manifest
         .recipes
@@ -154,14 +185,21 @@ pub async fn submit(
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function: executable_function,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(
+                u32::try_from(executable_function)
+                    .context("compiled entrypoint exceeds the portable function identity range")?,
+            ),
+            None,
+        ),
         requested_outputs,
     })?;
     let inputs = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: args
             .into_iter()
             .map(|value| ValuePayload::Inline(Box::new(InlineValue::String(value))))
@@ -220,10 +258,27 @@ pub(crate) async fn submit_prepared(
     prepared: PreparedRemoteExecution,
     options: RemoteSubmissionOptions,
 ) -> Result<types::RunResponse> {
+    let program_descriptor: ProgramExecutionDescriptor =
+        serde_json::from_slice(&prepared.descriptor)
+            .context("decode prepared program descriptor")?;
+    program_descriptor
+        .validate()
+        .context("validate prepared program descriptor")?;
+    if options.workers == 0 && !program_descriptor.recipe.accelerators.is_empty() {
+        bail!("remote accelerator workloads require at least one worker");
+    }
+    let accelerators = runmat_execution::resource::merge_accelerator_requirements(
+        program_descriptor
+            .recipe
+            .accelerators
+            .clone()
+            .into_iter()
+            .chain(options.accelerator.clone()),
+    )?;
     let revision = prepared.revision.clone();
     let bundle_archive_size = prepared.bundle_archive.len();
     let mut prepared = Some(prepared);
-    submit_scoped(
+    submit_scoped_with_accelerators(
         revision,
         bundle_archive_size,
         move |_| {
@@ -232,6 +287,7 @@ pub(crate) async fn submit_prepared(
                 .context("remote execution content was prepared more than once")
         },
         options,
+        accelerators,
     )
     .await
 }
@@ -248,22 +304,36 @@ pub(crate) async fn submit_scoped<F>(
 where
     F: FnOnce(&str) -> Result<PreparedRemoteExecution>,
 {
-    if let Some(accelerator) = &options.accelerator {
+    let accelerators = options.accelerator.clone().into_iter().collect();
+    submit_scoped_with_accelerators(revision, bundle_archive_size, prepare, options, accelerators)
+        .await
+}
+
+async fn submit_scoped_with_accelerators<F>(
+    revision: ProgramRevision,
+    bundle_archive_size: usize,
+    prepare: F,
+    options: RemoteSubmissionOptions,
+    accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
+) -> Result<types::RunResponse>
+where
+    F: FnOnce(&str) -> Result<PreparedRemoteExecution>,
+{
+    for accelerator in &accelerators {
         accelerator.validate().map_err(anyhow::Error::msg)?;
     }
-    let accelerator_count = options
-        .accelerator
-        .as_ref()
-        .map(|request| i32::from(request.count))
-        .unwrap_or(0);
-    let accelerator_memory_bytes = options
-        .accelerator
-        .as_ref()
-        .map(|request| {
-            i64::try_from(request.memory_bytes_each).context("accelerator memory exceeds API range")
-        })
-        .transpose()?
-        .unwrap_or(0);
+    let digest_accelerators = accelerators.clone();
+    let accelerator_bodies = accelerators
+        .into_iter()
+        .map(runmat_server_client::execution::accelerator_request_to_api)
+        .collect::<Result<Vec<_>>>()?;
+    // Explicit accelerator placement runs on the driver when the job has no workers;
+    // otherwise accelerator work is placed on the workers.
+    let (driver_accelerators, worker_accelerators) = if options.workers == 0 {
+        (accelerator_bodies, Vec::new())
+    } else {
+        (Vec::new(), accelerator_bodies)
+    };
     let (client, server_url, project_id) = super::client(options.project).await?;
     let recovery_recipient = client
         .api()
@@ -286,7 +356,7 @@ where
         &options.cluster,
         &options.queue,
         options.workers,
-        options.accelerator.as_ref(),
+        &digest_accelerators,
         recovery_fingerprint.as_deref(),
     );
     let run = client
@@ -315,12 +385,7 @@ where
                     cpu_millicores: 1_000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerator_count,
-                    accelerator_memory_bytes,
-                    accelerator_class: options
-                        .accelerator
-                        .as_ref()
-                        .map(|request| request.class.clone()),
+                    accelerators: driver_accelerators,
                     maximum_wall_millis: 60 * 60 * 1_000,
                 },
                 worker_count: Some(
@@ -330,12 +395,7 @@ where
                     cpu_millicores: 1_000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerator_count,
-                    accelerator_memory_bytes,
-                    accelerator_class: options
-                        .accelerator
-                        .as_ref()
-                        .map(|request| request.class.clone()),
+                    accelerators: worker_accelerators,
                     maximum_wall_millis: 60 * 60 * 1_000,
                 }),
             },
@@ -437,6 +497,7 @@ where
     }
     let inputs = ProgramExecutionInputs {
         schema_version: prepared.inputs.schema_version,
+        context: prepared.inputs.context,
         arguments: prepared.inputs.arguments,
         objects: object_locations,
     };
@@ -638,7 +699,7 @@ fn request_digest(
     cluster: &str,
     queue: &str,
     workers: u32,
-    accelerator: Option<&runmat_execution::resource::AcceleratorRequest>,
+    accelerators: &[runmat_execution::resource::AcceleratorRequest],
     recovery_recipient_fingerprint: Option<&str>,
 ) -> String {
     let mut digest = Sha256::new();
@@ -648,11 +709,11 @@ fn request_digest(
     digest.update(cluster.as_bytes());
     digest.update(queue.as_bytes());
     digest.update(workers.to_be_bytes());
-    if let Some(accelerator) = accelerator {
+    for accelerator in accelerators {
         digest.update(b"\0accelerator\0");
-        digest.update(accelerator.class.as_bytes());
-        digest.update(accelerator.count.to_be_bytes());
-        digest.update(accelerator.memory_bytes_each.to_be_bytes());
+        digest.update(
+            serde_json::to_vec(accelerator).expect("accelerator requests serialize canonically"),
+        );
     }
     if let Some(fingerprint) = recovery_recipient_fingerprint {
         digest.update(b"\0recovery-recipient\0");

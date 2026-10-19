@@ -1,8 +1,9 @@
 //! MATLAB-compatible `string.empty` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRING_EMPTY_ERROR_INTERNAL, STRING_EMPTY_ERROR_INVALID_SIZE,
+    STRING_EMPTY_ERROR_LIKE_DUPLICATE, STRING_EMPTY_ERROR_LIKE_MISSING,
+    STRING_EMPTY_ERROR_NOT_EMPTY_SHAPE,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{StringArray, Value};
@@ -13,140 +14,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const LABEL: &str = "string.empty";
-
-const STRING_EMPTY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Empty string array with at least one zero dimension.",
-}];
-
-const STRING_EMPTY_INPUT_SZ: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sz",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Size vector or scalar.",
-}];
-
-const STRING_EMPTY_INPUT_DIMS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "n...",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional dimensions.",
-    },
-];
-
-const STRING_EMPTY_INPUT_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "dims...",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional explicit dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Literal option keyword \"like\".",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype supplying trailing dimensions.",
-    },
-];
-
-const STRING_EMPTY_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "S = string.empty()",
-        inputs: &[],
-        outputs: &STRING_EMPTY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = string.empty(sz)",
-        inputs: &STRING_EMPTY_INPUT_SZ,
-        outputs: &STRING_EMPTY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = string.empty(m, n...)",
-        inputs: &STRING_EMPTY_INPUT_DIMS,
-        outputs: &STRING_EMPTY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = string.empty(___, \"like\", p)",
-        inputs: &STRING_EMPTY_INPUT_LIKE,
-        outputs: &STRING_EMPTY_OUTPUT,
-    },
-];
-
-const STRING_EMPTY_ERROR_INVALID_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRING_EMPTY.INVALID_SIZE",
-    identifier: Some("RunMat:string.empty:InvalidSize"),
-    when: "Size inputs are not valid numeric dimensions or vectors.",
-    message: "string.empty: size inputs must be numeric scalars or size vectors",
-};
-
-const STRING_EMPTY_ERROR_LIKE_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRING_EMPTY.LIKE_MISSING_PROTOTYPE",
-    identifier: Some("RunMat:string.empty:LikeMissingPrototype"),
-    when: "\"like\" keyword is present without a prototype.",
-    message: "string.empty: expected prototype after 'like'",
-};
-
-const STRING_EMPTY_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRING_EMPTY.LIKE_DUPLICATE",
-    identifier: Some("RunMat:string.empty:LikeDuplicate"),
-    when: "Multiple \"like\" specifications are supplied.",
-    message: "string.empty: multiple 'like' prototypes are not supported",
-};
-
-const STRING_EMPTY_ERROR_NOT_EMPTY_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRING_EMPTY.NONEMPTY_SHAPE",
-    identifier: Some("RunMat:string.empty:NonEmptyShape"),
-    when: "Parsed dimensions do not produce an empty array shape.",
-    message: "string.empty: at least one dimension must be zero",
-};
-
-const STRING_EMPTY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRING_EMPTY.INTERNAL",
-    identifier: Some("RunMat:string.empty:InternalError"),
-    when: "Internal empty string-array construction failed.",
-    message: "string.empty: internal error",
-};
-
-const STRING_EMPTY_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    STRING_EMPTY_ERROR_INVALID_SIZE,
-    STRING_EMPTY_ERROR_LIKE_MISSING,
-    STRING_EMPTY_ERROR_LIKE_DUPLICATE,
-    STRING_EMPTY_ERROR_NOT_EMPTY_SHAPE,
-    STRING_EMPTY_ERROR_INTERNAL,
-];
-
-pub const STRING_EMPTY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRING_EMPTY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &STRING_EMPTY_ERRORS,
-};
 
 fn string_empty_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     string_empty_error_with_message(error.message, error)
@@ -180,7 +50,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Host-only constructor that returns a new empty string array without contacting GPU providers.",
+    notes: "Host-only constructor; resident size arguments or prototypes gather through their owning provider before constructing the empty string array.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -198,12 +68,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "string.empty",
-    category = "strings/core",
-    summary = "Construct empty string arrays with MATLAB-compatible dimension semantics.",
-    keywords = "string.empty,empty,string array,preallocate",
-    accel = "none",
-    type_resolver(string_array_type),
-    descriptor(crate::builtins::strings::core::string_empty::STRING_EMPTY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::string_empty"
 )]
 async fn string_empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -312,11 +177,11 @@ fn prototype_dims(proto: &Value) -> Vec<usize> {
     match proto {
         Value::StringArray(sa) => sa.shape.clone(),
         Value::CharArray(ca) => ca.shape.clone(),
-        Value::Tensor(t) => t.shape.clone(),
-        Value::ComplexTensor(t) => t.shape.clone(),
-        Value::LogicalArray(l) => l.shape.clone(),
+        Value::Tensor(t) => t.shape().to_vec(),
+        Value::ComplexTensor(t) => t.shape().to_vec(),
+        Value::LogicalArray(l) => l.shape.to_vec(),
         Value::Cell(cell) => cell.shape.clone(),
-        Value::GpuTensor(handle) => handle.shape.clone(),
+        Value::GpuTensor(handle) => handle.shape().to_vec(),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => vec![1, 1],
         Value::String(_) => vec![1, 1],
         _ => vec![1, 1],
@@ -328,11 +193,43 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{StringArray, Tensor, Value};
+    use runmat_value::{ComplexTensor, IntValue, StringArray, Tensor, Value};
 
     fn string_empty_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::string_empty_builtin(rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn like_low_rank_numeric_prototypes_preserve_empty_shape_projection() {
+        for (prototype, expected) in [
+            (
+                Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap()),
+                vec![0, 0],
+            ),
+            (
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+                vec![0, 2],
+            ),
+            (
+                Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 0.0)], Vec::new()).unwrap()),
+                vec![0, 0],
+            ),
+            (
+                Value::ComplexTensor(
+                    ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![2]).unwrap(),
+                ),
+                vec![0, 2],
+            ),
+        ] {
+            let output = string_empty_builtin(vec![Value::from("like"), prototype])
+                .expect("low-rank prototype");
+            let Value::StringArray(output) = output else {
+                panic!("empty string array expected")
+            };
+            assert_eq!(output.shape, expected);
+            assert!(output.data.is_empty());
+        }
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -416,14 +313,6 @@ pub(crate) mod tests {
             Value::StringArray(sa) => assert_eq!(sa.shape, vec![0, 4, 0]),
             other => panic!("expected string array, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn string_empty_type_is_string_array() {
-        assert_eq!(
-            string_array_type(&[], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -539,7 +428,7 @@ pub(crate) mod tests {
                 Tensor::new((1..=6).map(|v| v as f64).collect::<Vec<_>>(), vec![2, 3]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -552,7 +441,7 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected string array, got {other:?}"),
             }
-            let _ = provider.free(&handle);
+            handle.release().expect("release fixture handle");
         });
     }
 
@@ -563,7 +452,7 @@ pub(crate) mod tests {
             let dims = Tensor::new(vec![0.0, 5.0, 3.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
                 data: &dims.materialize_f64(),
-                shape: &dims.shape,
+                shape: dims.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -575,7 +464,7 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected string array, got {other:?}"),
             }
-            let _ = provider.free(&handle);
+            handle.release().expect("release fixture handle");
         });
     }
 
@@ -589,5 +478,13 @@ pub(crate) mod tests {
             err.contains("matrix dimensions must be non-negative"),
             "unexpected error: {err}"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn negative_fixed_width_integer_dimension_is_rejected() {
+        let err = string_empty_builtin(vec![Value::Int(IntValue::I64(-3))])
+            .expect_err("negative integer dimension must be rejected");
+        assert_eq!(err.identifier(), Some("RunMat:string.empty:InvalidSize"));
     }
 }

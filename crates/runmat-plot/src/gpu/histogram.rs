@@ -1,594 +1,253 @@
-use std::sync::Arc;
+//! Exact numerical histogram counting, separate from f32 vertex publication.
+use crate::gpu::{shaders, tuning, GpuInputBuffer, ScalarType};
+use runmat_accelerate_api::{
+    ProviderExecutionError, ProviderExecutionResult, WgpuBufferOwner, WgpuBufferRef,
+    WgpuDeviceAccess,
+};
 use wgpu::util::DeviceExt;
 
-use crate::gpu::shaders;
-use crate::gpu::util::readback_f32;
-use crate::gpu::{tuning, ScalarType};
-
-#[derive(Clone)]
-pub struct HistogramGpuInputs {
-    pub samples: Arc<wgpu::Buffer>,
-    pub sample_count: u32,
-    pub scalar: ScalarType,
-    pub weights: HistogramGpuWeights,
-}
-
-#[derive(Clone)]
-pub enum HistogramGpuWeights {
-    Uniform { total_weight: f32 },
-    HostF32 { data: Vec<f32>, total_weight: f32 },
-    HostF64 { data: Vec<f64>, total_weight: f32 },
-    GpuF32 { buffer: Arc<wgpu::Buffer> },
-    GpuF64 { buffer: Arc<wgpu::Buffer> },
-}
-
-pub enum HistogramNormalizationMode {
-    Count,
-    Probability,
-    Pdf { bin_width: f32 },
-}
-
-pub struct HistogramGpuParams {
-    pub min_value: f32,
-    pub inv_bin_width: f32,
-    pub bin_count: u32,
-}
-
-pub struct HistogramGpuOutput {
-    pub values_buffer: Arc<wgpu::Buffer>,
-    pub total_weight: f32,
-}
+mod evidence;
+use evidence::HistogramError;
+pub use evidence::{ExactHistogramCounts, ExactHistogramEdges};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct HistogramUniforms {
-    min_value: f32,
-    inv_bin_width: f32,
     sample_count: u32,
     bin_count: u32,
-    accumulate_total: u32,
-    _pad: [u32; 3],
+    stride: u32,
+    _pad: u32,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct ConvertUniforms {
-    bin_count: u32,
-    _pad: [u32; 3],
-    scale: f32,
-    _pad2: [u32; 3],
-}
-
-struct MaterializedWeights {
-    mode: WeightMode,
-    buffer: Option<Arc<wgpu::Buffer>>,
-    total_hint: Option<f32>,
-    accumulate_total: bool,
-}
-
-struct HistogramPassInputs<'a> {
-    device: &'a Arc<wgpu::Device>,
-    queue: &'a Arc<wgpu::Queue>,
-    samples: &'a Arc<wgpu::Buffer>,
-    sample_count: u32,
-    sample_scalar: ScalarType,
-    params: &'a HistogramGpuParams,
-    counts_buffer: &'a Arc<wgpu::Buffer>,
-    total_weight_buffer: &'a Arc<wgpu::Buffer>,
-}
-
-struct HistogramBindGroupInputs<'a> {
-    device: &'a Arc<wgpu::Device>,
-    samples: &'a Arc<wgpu::Buffer>,
-    counts_buffer: &'a Arc<wgpu::Buffer>,
-    total_weight_buffer: &'a Arc<wgpu::Buffer>,
-    params: &'a HistogramGpuParams,
-    sample_count: u32,
-    accumulate_total: bool,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WeightMode {
-    Uniform,
-    F32,
-    F64,
-}
-
-pub async fn histogram_values_buffer(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
-    inputs: HistogramGpuInputs,
-    params: &HistogramGpuParams,
-    normalization: HistogramNormalizationMode,
-) -> Result<HistogramGpuOutput, String> {
-    if params.bin_count == 0 {
-        return Err("hist: bin count must be positive".to_string());
-    }
-
-    let bin_count_usize = params.bin_count as usize;
-    let zero_counts = vec![0u32; bin_count_usize];
-    let counts_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("histogram-counts"),
-            contents: bytemuck::cast_slice(&zero_counts),
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        }),
-    );
-
-    let total_weight_buffer = Arc::new(device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("histogram-total-weight"),
-            contents: bytemuck::cast_slice(&[0u32]),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::MAP_READ,
-        },
-    ));
-
-    let HistogramGpuInputs {
-        samples,
-        sample_count,
-        scalar,
-        weights,
-    } = inputs;
-    let materialized = materialize_weights(device, weights)?;
-
-    if sample_count > 0 {
-        let pass_inputs = HistogramPassInputs {
-            device,
-            queue,
-            samples: &samples,
-            sample_count,
-            sample_scalar: scalar,
-            params,
-            counts_buffer: &counts_buffer,
-            total_weight_buffer: &total_weight_buffer,
-        };
-        run_histogram_pass(&pass_inputs, &materialized)?;
-    }
-
-    let total_weight = if let Some(hint) = materialized.total_hint {
-        hint
+/// Count every sample once using the CPU owner's strict-upper-edge and clipped
+/// outlier/NaN-last policy. No weighted arithmetic or native F64 is claimed.
+pub async fn histogram_counts(
+    access: &WgpuDeviceAccess,
+    samples: WgpuBufferRef,
+    edges: &ExactHistogramEdges,
+) -> ProviderExecutionResult<ExactHistogramCounts> {
+    let handle = samples.owning_handle();
+    handle
+        .allocation_lease()
+        .validate_live()
+        .map_err(ProviderExecutionError::from_source)?;
+    let precision = runmat_accelerate_api::handle_precision(handle)
+        .ok_or_else(|| ProviderExecutionError::from_source(HistogramError::SourceExtent))?;
+    let elements = if handle.shape().contains(&0) {
+        Some(0)
     } else {
-        readback_f32(device, &total_weight_buffer)
-            .await
-            .map_err(|e| format!("hist: failed to read GPU weights total: {e}"))?
+        handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, dim| count.checked_mul(*dim))
     };
-
-    let normalization_scale = match normalization {
-        HistogramNormalizationMode::Count => 1.0,
-        HistogramNormalizationMode::Probability => {
-            if total_weight <= f32::EPSILON {
-                0.0
-            } else {
-                1.0 / total_weight
-            }
-        }
-        HistogramNormalizationMode::Pdf { bin_width } => {
-            if total_weight <= f32::EPSILON || bin_width <= f32::EPSILON {
-                0.0
-            } else {
-                1.0 / (total_weight * bin_width)
-            }
-        }
+    let element_size = match precision {
+        runmat_accelerate_api::ProviderPrecision::F32 => 4,
+        runmat_accelerate_api::ProviderPrecision::F64 => 8,
     };
-
-    let values_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("histogram-counts-f32"),
-        size: (bin_count_usize * std::mem::size_of::<f32>()) as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    }));
-
-    run_convert_pass(
-        device,
-        queue,
-        params.bin_count,
-        normalization_scale,
-        &counts_buffer,
-        &values_buffer,
-    )?;
-
-    Ok(HistogramGpuOutput {
-        values_buffer,
-        total_weight,
-    })
-}
-
-fn materialize_weights(
-    device: &Arc<wgpu::Device>,
-    weights: HistogramGpuWeights,
-) -> Result<MaterializedWeights, String> {
-    match weights {
-        HistogramGpuWeights::Uniform { total_weight } => Ok(MaterializedWeights {
-            mode: WeightMode::Uniform,
-            buffer: None,
-            total_hint: Some(total_weight),
-            accumulate_total: false,
-        }),
-        HistogramGpuWeights::HostF32 { data, total_weight } => {
-            let buffer = Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("histogram-weights-host-f32"),
-                    contents: bytemuck::cast_slice(&data),
-                    usage: wgpu::BufferUsages::STORAGE,
-                }),
-            );
-            Ok(MaterializedWeights {
-                mode: WeightMode::F32,
-                buffer: Some(buffer),
-                total_hint: Some(total_weight),
-                accumulate_total: false,
-            })
-        }
-        HistogramGpuWeights::HostF64 { data, total_weight } => {
-            let buffer = Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("histogram-weights-host-f64"),
-                    contents: bytemuck::cast_slice(&data),
-                    usage: wgpu::BufferUsages::STORAGE,
-                }),
-            );
-            Ok(MaterializedWeights {
-                mode: WeightMode::F64,
-                buffer: Some(buffer),
-                total_hint: Some(total_weight),
-                accumulate_total: false,
-            })
-        }
-        HistogramGpuWeights::GpuF32 { buffer } => Ok(MaterializedWeights {
-            mode: WeightMode::F32,
-            buffer: Some(buffer),
-            total_hint: None,
-            accumulate_total: true,
-        }),
-        HistogramGpuWeights::GpuF64 { buffer } => Ok(MaterializedWeights {
-            mode: WeightMode::F64,
-            buffer: Some(buffer),
-            total_hint: None,
-            accumulate_total: true,
-        }),
-    }
-}
-
-fn run_histogram_pass(
-    inputs: &HistogramPassInputs<'_>,
-    weights: &MaterializedWeights,
-) -> Result<(), String> {
-    let workgroup_size = tuning::effective_workgroup_size();
-    let shader = compile_counts_shader(
-        inputs.device,
-        workgroup_size,
-        inputs.sample_scalar,
-        weights.mode,
-    );
-
-    let bind_inputs = HistogramBindGroupInputs {
-        device: inputs.device,
-        samples: inputs.samples,
-        counts_buffer: inputs.counts_buffer,
-        total_weight_buffer: inputs.total_weight_buffer,
-        params: inputs.params,
-        sample_count: inputs.sample_count,
-        accumulate_total: weights.accumulate_total,
-    };
-
-    let (bind_group_layout, bind_group) = match weights.mode {
-        WeightMode::Uniform => build_uniform_bind_group(&bind_inputs),
-        WeightMode::F32 | WeightMode::F64 => build_weighted_bind_group(
-            &bind_inputs,
-            weights.buffer.as_ref().expect("weights buffer missing"),
-        ),
-    }?;
-
-    let pipeline_layout = inputs
-        .device
-        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("histogram-counts-pipeline-layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-    let pipeline = inputs.device.create_compute_pipeline(
-        &crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
-            label: Some("histogram-counts-pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "main",
-        },
-    );
-
-    let mut encoder = inputs
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("histogram-counts-encoder"),
-        });
+    if elements != Some(samples.len)
+        || samples.shape != handle.shape()
+        || samples.precision != precision
+        || samples.element_size != element_size
     {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("histogram-counts-pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, bind_group.as_ref(), &[]);
-        let workgroups = inputs.sample_count.div_ceil(workgroup_size);
-        pass.dispatch_workgroups(workgroups, 1, 1);
+        return Err(ProviderExecutionError::from_source(
+            HistogramError::SourceExtent,
+        ));
     }
-    inputs.queue.submit(Some(encoder.finish()));
-
-    Ok(())
-}
-
-fn build_uniform_bind_group(
-    inputs: &HistogramBindGroupInputs<'_>,
-) -> Result<(Arc<wgpu::BindGroupLayout>, Arc<wgpu::BindGroup>), String> {
-    let layout = Arc::new(inputs.device.create_bind_group_layout(
-        &wgpu::BindGroupLayoutDescriptor {
-            label: Some("hist-counts-layout-uniform"),
-            entries: &[
-                storage_read_entry(0),
-                storage_read_write_entry(1),
-                storage_read_write_entry(2),
-                uniform_entry(3),
-            ],
-        },
-    ));
-
-    let uniforms = HistogramUniforms {
-        min_value: inputs.params.min_value,
-        inv_bin_width: inputs.params.inv_bin_width,
-        sample_count: inputs.sample_count,
-        bin_count: inputs.params.bin_count,
-        accumulate_total: if inputs.accumulate_total { 1 } else { 0 },
-        _pad: [0; 3],
-    };
-    let uniform_buffer = inputs
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hist-counts-uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-
-    let bind_group = Arc::new(inputs.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("hist-counts-bind-group-uniform"),
-        layout: &layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: inputs.samples.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: inputs.counts_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: inputs.total_weight_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: uniform_buffer.as_entire_binding(),
-            },
-        ],
-    }));
-
-    Ok((layout, bind_group))
-}
-
-fn build_weighted_bind_group(
-    inputs: &HistogramBindGroupInputs<'_>,
-    weights_buffer: &Arc<wgpu::Buffer>,
-) -> Result<(Arc<wgpu::BindGroupLayout>, Arc<wgpu::BindGroup>), String> {
-    let layout = Arc::new(inputs.device.create_bind_group_layout(
-        &wgpu::BindGroupLayoutDescriptor {
-            label: Some("hist-counts-layout-weighted"),
-            entries: &[
-                storage_read_entry(0),
-                storage_read_entry(1),
-                storage_read_write_entry(2),
-                storage_read_write_entry(3),
-                uniform_entry(4),
-            ],
-        },
-    ));
-
-    let uniforms = HistogramUniforms {
-        min_value: inputs.params.min_value,
-        inv_bin_width: inputs.params.inv_bin_width,
-        sample_count: inputs.sample_count,
-        bin_count: inputs.params.bin_count,
-        accumulate_total: if inputs.accumulate_total { 1 } else { 0 },
-        _pad: [0; 3],
-    };
-    let uniform_buffer = inputs
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hist-counts-weighted-uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-
-    let bind_group = Arc::new(inputs.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("hist-counts-bind-group-weighted"),
-        layout: &layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: inputs.samples.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: weights_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: inputs.counts_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: inputs.total_weight_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: uniform_buffer.as_entire_binding(),
-            },
-        ],
-    }));
-
-    Ok((layout, bind_group))
-}
-
-fn storage_read_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: true },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
+    let count = u32::try_from(samples.len)
+        .map_err(|_| ProviderExecutionError::from_source(HistogramError::SampleRange))?;
+    let count_bytes = edges
+        .bin_count()
+        .checked_mul(4)
+        .ok_or_else(|| ProviderExecutionError::from_source(HistogramError::CountByteOverflow))?;
+    let edge_bytes = edges.storage_bytes();
+    let scalar =
+        ScalarType::from_is_f64(samples.precision == runmat_accelerate_api::ProviderPrecision::F64);
+    let input = GpuInputBuffer::from(samples);
+    if count == 0 {
+        // Authenticate the exact source allocation/device even though there is
+        // no numerical work. A zero-length storage binding or dispatch is not
+        // needed to establish the numerical evidence.
+        access
+            .with_shared(|emission| input.buffer(emission).map(|_| ()))
+            .map_err(ProviderExecutionError::from_source)?
+            .map_err(ProviderExecutionError::from_source)?;
+        return ExactHistogramCounts::admit(vec![0; edges.bin_count()], 0);
     }
-}
-
-fn storage_read_write_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
+    let allocated = std::cell::Cell::new(false);
+    let result = async {
+        let counts = access
+            .with_shared(|emission| -> ProviderExecutionResult<WgpuBufferOwner> {
+                let device = emission.device();
+                let source = input
+                    .buffer(emission)
+                    .map_err(ProviderExecutionError::from_source)?;
+                let limits = device.limits();
+                for bytes in [count_bytes, edge_bytes.len()] {
+                    if bytes as u64 > limits.max_buffer_size
+                        || bytes as u64 > u64::from(limits.max_storage_buffer_binding_size)
+                    {
+                        return Err(ProviderExecutionError::from_source(
+                            HistogramError::DeviceBufferLimit,
+                        ));
+                    }
+                }
+                let element_size = match scalar {
+                    ScalarType::F32 => 4,
+                    ScalarType::F64 => 8,
+                };
+                let required = u64::from(count).checked_mul(element_size).ok_or_else(|| {
+                    ProviderExecutionError::from_source(HistogramError::SourceByteOverflow)
+                })?;
+                if required > source.size()
+                    || required > u64::from(limits.max_storage_buffer_binding_size)
+                {
+                    return Err(ProviderExecutionError::from_source(
+                        HistogramError::SourceExtent,
+                    ));
+                }
+                if scalar == ScalarType::F64 && count > u32::MAX / 2 {
+                    return Err(ProviderExecutionError::from_source(
+                        HistogramError::SourceWordRange,
+                    ));
+                }
+                let workgroup = tuning::effective_workgroup_size()
+                    .min(limits.max_compute_workgroup_size_x)
+                    .min(limits.max_compute_invocations_per_workgroup)
+                    .max(1);
+                let groups = count
+                    .div_ceil(workgroup)
+                    .max(1)
+                    .min(limits.max_compute_workgroups_per_dimension);
+                let stride = groups.checked_mul(workgroup).ok_or_else(|| {
+                    ProviderExecutionError::from_source(HistogramError::DispatchOverflow)
+                })?;
+                if stride == 0 {
+                    return Err(ProviderExecutionError::from_source(
+                        HistogramError::NoWorkgroups,
+                    ));
+                }
+                // Allocation begins only after live source/geometry/limit admission.
+                allocated.set(true);
+                // WebGPU storage buffers are zero-initialized at creation. Do
+                // not make a second host zero allocation proportional to bins.
+                let counts = WgpuBufferOwner::new(device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("histogram-exact-u32-counts"),
+                    size: count_bytes as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                }));
+                let edge_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("histogram-binary64-edges"),
+                    contents: &edge_bytes,
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+                let params = HistogramUniforms {
+                    sample_count: count,
+                    bin_count: edges.bin_count_u32(),
+                    stride,
+                    _pad: 0,
+                };
+                let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("histogram-exact-params"),
+                    contents: bytemuck::bytes_of(&params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("histogram-exact-counts-shader"),
+                    source: wgpu::ShaderSource::Wgsl(
+                        shaders::histogram::source(scalar, workgroup).into(),
+                    ),
+                });
+                let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("histogram-exact-counts-pipeline"),
+                    layout: None,
+                    module: &shader,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                });
+                let layout = pipeline.get_bind_group_layout(0);
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("histogram-exact-counts-bindings"),
+                    layout: &layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: source,
+                                offset: 0,
+                                size: std::num::NonZeroU64::new(required),
+                            }),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: edge_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: counts.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: uniform.as_entire_binding(),
+                        },
+                    ],
+                });
+                let commands = emission.encode("histogram-exact-counts-encoder", |encoder| {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("histogram-exact-counts-pass"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&pipeline);
+                    pass.set_bind_group(0, &bind_group, &[]);
+                    pass.dispatch_workgroups(groups, 1, 1);
+                });
+                emission.queue().submit(Some(commands));
+                Ok(counts)
+            })
+            .map_err(ProviderExecutionError::from_source)??;
+        // Keep original export and numerical buffer alive across real progress,
+        // mapping, cancellation and cleanup. No permit survives the await.
+        let values = crate::gpu::util::copy_readback_u32_buffer(
+            access,
+            &GpuInputBuffer::from(counts),
+            edges.bin_count(),
+        )
+        .await
+        .map_err(ProviderExecutionError::from_source)?;
+        access
+            .with_shared(|emission| input.buffer(emission).map(|_| ()))
+            .map_err(ProviderExecutionError::from_source)?
+            .map_err(ProviderExecutionError::from_source)?;
+        ExactHistogramCounts::admit(values, count)
     }
-}
-
-fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    }
-}
-
-fn run_convert_pass(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
-    bin_count: u32,
-    normalization_scale: f32,
-    counts_buffer: &Arc<wgpu::Buffer>,
-    values_buffer: &Arc<wgpu::Buffer>,
-) -> Result<(), String> {
-    let workgroup_size = tuning::effective_workgroup_size();
-    let shader = compile_convert_shader(device, workgroup_size);
-
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("histogram-convert-bind-layout"),
-        entries: &[
-            storage_read_entry(0),
-            storage_read_write_entry(1),
-            uniform_entry(2),
-        ],
-    });
-
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("histogram-convert-pipeline-layout"),
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
-    });
-
-    let pipeline =
-        device.create_compute_pipeline(&crate::wgpu_compat::wgpu_compute_pipeline_descriptor! {
-            label: Some("histogram-convert-pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "main",
-        });
-
-    let uniforms = ConvertUniforms {
-        bin_count,
-        _pad: [0; 3],
-        scale: normalization_scale,
-        _pad2: [0; 3],
-    };
-    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("histogram-convert-uniforms"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("histogram-convert-bind-group"),
-        layout: &bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: counts_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: values_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: uniform_buffer.as_entire_binding(),
-            },
-        ],
-    });
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("histogram-convert-encoder"),
-    });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("histogram-convert-pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = bin_count.div_ceil(workgroup_size);
-        pass.dispatch_workgroups(workgroups, 1, 1);
-    }
-    queue.submit(Some(encoder.finish()));
-
-    Ok(())
-}
-
-fn compile_counts_shader(
-    device: &Arc<wgpu::Device>,
-    workgroup_size: u32,
-    scalar: ScalarType,
-    weight_mode: WeightMode,
-) -> wgpu::ShaderModule {
-    let template = match (scalar, weight_mode) {
-        (ScalarType::F32, WeightMode::Uniform) => shaders::histogram::counts::F32_UNIFORM,
-        (ScalarType::F32, WeightMode::F32) => shaders::histogram::counts::F32_WEIGHTS_F32,
-        (ScalarType::F32, WeightMode::F64) => shaders::histogram::counts::F32_WEIGHTS_F64,
-        (ScalarType::F64, WeightMode::Uniform) => shaders::histogram::counts::F64_UNIFORM,
-        (ScalarType::F64, WeightMode::F32) => shaders::histogram::counts::F64_WEIGHTS_F32,
-        (ScalarType::F64, WeightMode::F64) => shaders::histogram::counts::F64_WEIGHTS_F64,
-    };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("histogram-counts-shader"),
-        source: wgpu::ShaderSource::Wgsl(source.into()),
+    .await;
+    result.map_err(|error: ProviderExecutionError| {
+        if allocated.get() {
+            error.after_effect()
+        } else {
+            error
+        }
     })
 }
 
-fn compile_convert_shader(device: &Arc<wgpu::Device>, workgroup_size: u32) -> wgpu::ShaderModule {
-    let source = shaders::histogram::convert::TEMPLATE
-        .replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("histogram-convert-shader"),
-        source: wgpu::ShaderSource::Wgsl(source.into()),
-    })
+/// Deliberate rendering-only projection of already published f64 numerical
+/// values. This buffer is never reused as authoritative count evidence.
+pub fn histogram_render_values(
+    access: &WgpuDeviceAccess,
+    values: &[f64],
+) -> ProviderExecutionResult<WgpuBufferOwner> {
+    let rendering = values.iter().map(|value| *value as f32).collect::<Vec<_>>();
+    access
+        .with_shared(|emission| {
+            WgpuBufferOwner::new(emission.device().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("histogram-render-values-f32"),
+                    contents: bytemuck::cast_slice(&rendering),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ))
+        })
+        .map_err(ProviderExecutionError::from_source)
 }

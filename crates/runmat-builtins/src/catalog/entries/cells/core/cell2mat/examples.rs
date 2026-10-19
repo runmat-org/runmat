@@ -1,0 +1,27 @@
+use crate::{
+    BuiltinExample, BuiltinExampleCompatibility, BuiltinExampleHarness, BuiltinExampleVerification,
+};
+
+pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "asymmetric-nd-grid",
+        title: "Tile an N-D cell grid with unequal row and page extents",
+        program: "C = cell(2,1,2);\nC{1,1,1} = reshape(1:4,[1 2 2]);\nC{2,1,1} = reshape(5:12,[2 2 2]);\nC{1,1,2} = reshape(13:18,[1 2 3]);\nC{2,1,2} = reshape(19:30,[2 2 3]);\nA = cell2mat(C);",
+        display_output: Some("A has shape 3-by-2-by-5"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(size(A),[3 2 5]));\nassert(isequal(A(1,:,1:2),C{1,1,1}));\nassert(isequal(A(2:3,:,1:2),C{2,1,1}));\nassert(isequal(A(1,:,3:5),C{1,1,2}));\nassert(isequal(A(2:3,:,3:5),C{2,1,2}));",
+        },
+    },
+    BuiltinExample { id: "scalars", title: "Convert scalar cells", program: "C = {1, 2; 3, 4};\nA = cell2mat(C);", display_output: Some("A is [1 2; 3 4]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(A, [1 2; 3 4]));" } },
+    BuiltinExample { id: "blocks", title: "Concatenate rectangular blocks", program: "C = {[1 2], [3 4 5]; [6 7], [8 9 10]};\nA = cell2mat(C);", display_output: Some("A is a 2-by-5 matrix"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(A, [1 2 3 4 5; 6 7 8 9 10]));" } },
+    BuiltinExample { id: "logical", title: "Preserve logical storage", program: "C = {true(2,1), false(2,1)};\nA = cell2mat(C);", display_output: Some("A is a 2-by-2 logical array"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(islogical(A));\nassert(isequal(A, logical([1 0; 1 0])));" } },
+    BuiltinExample { id: "complex", title: "Concatenate complex blocks", program: "C = {1+2i, [3+4i 5+6i]};\nA = cell2mat(C);", display_output: Some("A contains three complex values"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(A, [1+2i 3+4i 5+6i]));" } },
+    BuiltinExample { id: "characters", title: "Join character rows", program: "C = {'foo', 'bar'; 'baz', 'qux'};\nA = cell2mat(C);", display_output: Some("A has rows 'foobar' and 'bazqux'"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(A, ['foobar'; 'bazqux']));" } },
+    BuiltinExample { id: "pages", title: "Tile N-dimensional blocks", program: "C = {ones(2,2,3), 2*ones(2,1,3)};\nA = cell2mat(C);", display_output: Some("A has shape 2-by-3-by-3"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(A), [2 3 3]));" } },
+    BuiltinExample { id: "empty", title: "Convert an empty cell grid", program: "C = {[], []; [], []};\nA = cell2mat(C);", display_output: Some("A is a 0-by-0 double array"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(A), [0 0]));\nassert(isa(A, 'double'));" } },
+    BuiltinExample { id: "exact-integer", title: "Preserve wide integer values", program: "C = {0x0020000000000001u64, 0xFFFFFFFFFFFFFFFFu64};\nA = cell2mat(C);", display_output: Some("A is an exact 1-by-2 uint64 array"), compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(A, 'uint64'));\nassert(A(1) == 0x0020000000000001u64);\nassert(A(2) == 0xFFFFFFFFFFFFFFFFu64);" } },
+];

@@ -73,7 +73,7 @@ impl ResourceRequest {
                 ));
             };
             if required.count > available.count
-                || required.memory_bytes_each > available.memory_bytes_each
+                || required.minimum_allocation_bytes > available.minimum_allocation_bytes
             {
                 return Err(ContractError::invalid(
                     "accelerator reservation",

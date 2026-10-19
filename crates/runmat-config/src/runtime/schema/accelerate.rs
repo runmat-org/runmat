@@ -1,6 +1,5 @@
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 use super::defaults::default_true;
 
@@ -75,7 +74,6 @@ pub struct AutoOffloadConfig {
     pub enabled: bool,
     #[serde(default = "default_true")]
     pub calibrate: bool,
-    pub profile_path: Option<PathBuf>,
     #[serde(default)]
     pub log_level: AutoOffloadLogLevel,
 }
@@ -98,9 +96,20 @@ impl Default for AutoOffloadConfig {
         Self {
             enabled: true,
             calibrate: true,
-            profile_path: None,
             log_level: AutoOffloadLogLevel::Trace,
         }
+    }
+}
+
+#[cfg(test)]
+mod retired_profile_tests {
+    use super::*;
+    #[test]
+    fn category_profile_path_is_no_longer_an_editable_planner_authority() {
+        assert!(
+            serde_json::from_str::<AutoOffloadConfig>(r#"{"profile_path":"profile.json"}"#)
+                .is_err()
+        );
     }
 }
 
@@ -151,7 +160,6 @@ mod runtime_conversions {
             AutoOffloadOptions {
                 enabled: cfg.enabled,
                 calibrate: cfg.calibrate,
-                profile_path: cfg.profile_path.clone(),
                 log_level: cfg.log_level.into(),
             }
         }

@@ -23,7 +23,7 @@ use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "zoom";
-const ZOOM_CLASS_NAME: &str = "matlab.graphics.interaction.internal.zoom";
+const ZOOM_CLASS_NAME: runmat_types::StaticClassIdentity = runmat_types::standard::ZOOM_CONTROL;
 
 const ZOOM_INTEGER_TARGET_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "zoom-integer-target-handle",
@@ -390,12 +390,14 @@ fn parse_option(option: &str) -> BuiltinResult<ZoomOption> {
 }
 
 fn zoom_object_from_snapshot(snapshot: ZoomStateSnapshot) -> BuiltinResult<Value> {
-    let mut object = ObjectInstance::new(ZOOM_CLASS_NAME.to_string());
+    let mut object = ObjectInstance::new(ZOOM_CLASS_NAME.to_string()).with_graphics_receiver(
+        super::state::mode_properties::receiver(snapshot.figure, BUILTIN_NAME)?,
+    );
     update_object_properties(&mut object, snapshot);
     let target =
         runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| internal(err.to_string()))?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: ZOOM_CLASS_NAME.to_string(),
+        class_name: ZOOM_CLASS_NAME.into(),
         target,
         valid: true,
     }))
@@ -483,10 +485,7 @@ fn snapshot_from_object(handle: &HandleRef) -> BuiltinResult<ZoomStateSnapshot> 
         if object.class_name != ZOOM_CLASS_NAME {
             return None;
         }
-        let figure = object
-            .properties
-            .get("FigureHandle")
-            .and_then(numeric_scalar)?;
+        let receiver = object.graphics_receiver()?.clone();
         let axes_index = object
             .properties
             .get("AxesIndex")
@@ -498,7 +497,7 @@ fn snapshot_from_object(handle: &HandleRef) -> BuiltinResult<ZoomStateSnapshot> 
                     None
                 }
             });
-        Some((FigureHandle::from(figure.round() as u32), axes_index))
+        Some((receiver, axes_index))
     })
     .map_err(|err| internal(err.to_string()))?
     .ok_or_else(|| invalid("invalid zoom object"))?;
@@ -568,23 +567,25 @@ pub fn get_zoom_object_property(
             }
             value
         }
-        Some(name) => match canonical_property(name).as_deref() {
-            Some("Enable") => {
+        Some(name) => match canonical_property(name) {
+            Some(ZoomProperty::Enable) => {
                 Value::String(if snapshot.mode.enabled { "on" } else { "off" }.into())
             }
-            Some("Motion") => Value::String(snapshot.mode.motion.as_str().into()),
-            Some("Direction") => Value::String(snapshot.mode.direction.as_str().into()),
-            Some("RightClickAction") => {
+            Some(ZoomProperty::Motion) => Value::String(snapshot.mode.motion.as_str().into()),
+            Some(ZoomProperty::Direction) => Value::String(snapshot.mode.direction.as_str().into()),
+            Some(ZoomProperty::RightClickAction) => {
                 Value::String(snapshot.mode.right_click_action.as_str().into())
             }
-            Some("ContextMenu") | Some("UIContextMenu") => {
+            Some(ZoomProperty::ContextMenu) | Some(ZoomProperty::UIContextMenu) => {
                 object_property_or_default(handle, name, Value::Num(0.0))?
             }
-            Some("ButtonDownFilter") | Some("ActionPreCallback") | Some("ActionPostCallback") => {
+            Some(ZoomProperty::ButtonDownFilter)
+            | Some(ZoomProperty::ActionPreCallback)
+            | Some(ZoomProperty::ActionPostCallback) => {
                 object_property_or_default(handle, name, Value::String(String::new()))?
             }
-            Some("FigureHandle") => Value::Num(snapshot.figure.as_u32() as f64),
-            Some("UseLegacyExplorationModes") => Value::String(
+            Some(ZoomProperty::FigureHandle) => Value::Num(snapshot.figure.as_u32() as f64),
+            Some(ZoomProperty::UseLegacyExplorationModes) => Value::String(
                 if snapshot.mode.use_legacy_exploration_modes {
                     "on"
                 } else {
@@ -603,7 +604,18 @@ fn object_property_or_default(
     name: &str,
     default: Value,
 ) -> BuiltinResult<Value> {
-    let key = canonical_property(name).unwrap_or_else(|| name.to_string());
+    if let Some(key) = canonical_property(name).and_then(ZoomProperty::persistent) {
+        return super::state::mode_properties::get(
+            &mode_receiver(handle)?,
+            key,
+            default,
+            BUILTIN_NAME,
+        );
+    }
+    let key = canonical_property(name)
+        .map(ZoomProperty::name)
+        .unwrap_or(name)
+        .to_string();
     runmat_gc::gc_with_value(&handle.target, |value| match value {
         Value::Object(object) => object.properties.get(&key).cloned().unwrap_or(default),
         _ => default,
@@ -611,7 +623,8 @@ fn object_property_or_default(
     .map_err(|err| internal(err.to_string()))
 }
 
-pub fn set_zoom_object_properties(
+pub(crate) fn set_zoom_object_properties_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: &Value,
     args: &[Value],
     _builtin: &'static str,
@@ -622,14 +635,14 @@ pub fn set_zoom_object_properties(
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(invalid("expected zoom property/value pairs"));
     }
-    let snapshot = snapshot_from_object(&handle)?;
+    snapshot_from_object(&handle)?;
     let mut idx = 0;
     while idx < args.len() {
-        let name = super::style::value_as_string(&args[idx])
-            .ok_or_else(|| invalid("zoom property names must be text"))?;
+        let name = super::properties::property_name_text(&args[idx], "set")
+            .map_err(|_| invalid("zoom property names must be scalar text"))?;
         let value = &args[idx + 1];
-        apply_zoom_property(snapshot.figure, &name, value)?;
-        write_object_property(&handle, &name, value.clone())?;
+        apply_zoom_property(mode_receiver(&handle)?, &name, value)?;
+        write_object_property(runtime, &handle, &name, value.clone())?;
         idx += 2;
     }
     let refreshed = snapshot_from_object(&handle)?;
@@ -642,8 +655,25 @@ pub fn set_zoom_object_properties(
     Ok(Some(()))
 }
 
-fn write_object_property(handle: &HandleRef, name: &str, value: Value) -> BuiltinResult<()> {
-    let key = canonical_property(name).unwrap_or_else(|| name.to_string());
+fn write_object_property(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: &HandleRef,
+    name: &str,
+    value: Value,
+) -> BuiltinResult<()> {
+    if let Some(key) = canonical_property(name).and_then(ZoomProperty::persistent) {
+        return super::state::mode_properties::set_in_context(
+            runtime,
+            &mode_receiver(handle)?,
+            key,
+            value,
+            BUILTIN_NAME,
+        );
+    }
+    let key = canonical_property(name)
+        .map(ZoomProperty::name)
+        .unwrap_or(name)
+        .to_string();
     runmat_gc::gc_with_value_mut(&handle.target, |target| {
         if let Value::Object(object) = target {
             object.properties.insert(key, value);
@@ -652,30 +682,38 @@ fn write_object_property(handle: &HandleRef, name: &str, value: Value) -> Builti
     .map_err(|err| internal(err.to_string()))
 }
 
-fn apply_zoom_property(figure: FigureHandle, name: &str, value: &Value) -> BuiltinResult<()> {
-    match canonical_property(name).as_deref() {
-        Some("Enable") => {
+fn apply_zoom_property(
+    figure: impl Into<super::state::FigureTarget>,
+    name: &str,
+    value: &Value,
+) -> BuiltinResult<()> {
+    match canonical_property(name) {
+        Some(ZoomProperty::Enable) => {
             let enabled = parse_on_off(value, "Enable")?;
             set_zoom_enabled_for_figure(figure, enabled).map_err(|err| invalid(err.to_string()))
         }
-        Some("Motion") => set_zoom_motion_for_figure(figure, parse_motion(value)?)
+        Some(ZoomProperty::Motion) => set_zoom_motion_for_figure(figure, parse_motion(value)?)
             .map_err(|err| invalid(err.to_string())),
-        Some("Direction") => set_zoom_direction_for_figure(figure, parse_direction(value)?)
-            .map_err(|err| invalid(err.to_string())),
-        Some("RightClickAction") => {
+        Some(ZoomProperty::Direction) => {
+            set_zoom_direction_for_figure(figure, parse_direction(value)?)
+                .map_err(|err| invalid(err.to_string()))
+        }
+        Some(ZoomProperty::RightClickAction) => {
             set_zoom_right_click_action_for_figure(figure, parse_right_click_action(value)?)
                 .map_err(|err| invalid(err.to_string()))
         }
-        Some("UseLegacyExplorationModes") => {
+        Some(ZoomProperty::UseLegacyExplorationModes) => {
             set_zoom_legacy_for_figure(figure, parse_on_off(value, "UseLegacyExplorationModes")?)
                 .map_err(|err| invalid(err.to_string()))
         }
-        Some("FigureHandle") | Some("AxesIndex") => Err(invalid(format!("{name} is read-only"))),
-        Some("ContextMenu")
-        | Some("UIContextMenu")
-        | Some("ButtonDownFilter")
-        | Some("ActionPreCallback")
-        | Some("ActionPostCallback") => Ok(()),
+        Some(ZoomProperty::FigureHandle) | Some(ZoomProperty::AxesIndex) => {
+            Err(invalid(format!("{name} is read-only")))
+        }
+        Some(ZoomProperty::ContextMenu)
+        | Some(ZoomProperty::UIContextMenu)
+        | Some(ZoomProperty::ButtonDownFilter)
+        | Some(ZoomProperty::ActionPreCallback)
+        | Some(ZoomProperty::ActionPostCallback) => Ok(()),
         _ => Err(invalid(format!("unsupported zoom property '{name}'"))),
     }
 }
@@ -720,22 +758,78 @@ fn parse_right_click_action(value: &Value) -> BuiltinResult<ZoomRightClickAction
     }
 }
 
-fn canonical_property(name: &str) -> Option<String> {
+#[derive(Clone, Copy)]
+enum ZoomProperty {
+    Enable,
+    Motion,
+    Direction,
+    RightClickAction,
+    ContextMenu,
+    UIContextMenu,
+    ButtonDownFilter,
+    ActionPreCallback,
+    ActionPostCallback,
+    FigureHandle,
+    AxesIndex,
+    UseLegacyExplorationModes,
+}
+impl ZoomProperty {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Enable => "Enable",
+            Self::Motion => "Motion",
+            Self::Direction => "Direction",
+            Self::RightClickAction => "RightClickAction",
+            Self::ContextMenu => "ContextMenu",
+            Self::UIContextMenu => "UIContextMenu",
+            Self::ButtonDownFilter => "ButtonDownFilter",
+            Self::ActionPreCallback => "ActionPreCallback",
+            Self::ActionPostCallback => "ActionPostCallback",
+            Self::FigureHandle => "FigureHandle",
+            Self::AxesIndex => "AxesIndex",
+            Self::UseLegacyExplorationModes => "UseLegacyExplorationModes",
+        }
+    }
+    fn persistent(self) -> Option<super::state::mode_properties::ModeProperty> {
+        use super::state::mode_properties::ModeProperty as Property;
+        use crate::context::GraphicsCallbackKind as Kind;
+        match self {
+            Self::ContextMenu => Some(Property::ZoomContextMenu),
+            Self::UIContextMenu => Some(Property::ZoomLegacyContextMenu),
+            Self::ButtonDownFilter => Some(Property::Callback(Kind::ZoomButtonDownFilter)),
+            Self::ActionPreCallback => Some(Property::Callback(Kind::ZoomActionPre)),
+            Self::ActionPostCallback => Some(Property::Callback(Kind::ZoomActionPost)),
+            _ => None,
+        }
+    }
+}
+fn canonical_property(name: &str) -> Option<ZoomProperty> {
     match name.trim().to_ascii_lowercase().as_str() {
-        "enable" => Some("Enable".into()),
-        "motion" => Some("Motion".into()),
-        "direction" => Some("Direction".into()),
-        "rightclickaction" => Some("RightClickAction".into()),
-        "contextmenu" => Some("ContextMenu".into()),
-        "uicontextmenu" => Some("UIContextMenu".into()),
-        "buttondownfilter" => Some("ButtonDownFilter".into()),
-        "actionprecallback" => Some("ActionPreCallback".into()),
-        "actionpostcallback" => Some("ActionPostCallback".into()),
-        "figurehandle" => Some("FigureHandle".into()),
-        "axesindex" => Some("AxesIndex".into()),
-        "uselegacyexplorationmodes" => Some("UseLegacyExplorationModes".into()),
+        "enable" => Some(ZoomProperty::Enable),
+        "motion" => Some(ZoomProperty::Motion),
+        "direction" => Some(ZoomProperty::Direction),
+        "rightclickaction" => Some(ZoomProperty::RightClickAction),
+        "contextmenu" => Some(ZoomProperty::ContextMenu),
+        "uicontextmenu" => Some(ZoomProperty::UIContextMenu),
+        "buttondownfilter" => Some(ZoomProperty::ButtonDownFilter),
+        "actionprecallback" => Some(ZoomProperty::ActionPreCallback),
+        "actionpostcallback" => Some(ZoomProperty::ActionPostCallback),
+        "figurehandle" => Some(ZoomProperty::FigureHandle),
+        "axesindex" => Some(ZoomProperty::AxesIndex),
+        "uselegacyexplorationmodes" => Some(ZoomProperty::UseLegacyExplorationModes),
         _ => None,
     }
+}
+
+fn mode_receiver(handle: &HandleRef) -> BuiltinResult<runmat_value::GraphicsReceiverRef> {
+    runmat_gc::gc_with_value(&handle.target, |value| match value {
+        Value::Object(object) if object.class_name == ZOOM_CLASS_NAME => {
+            object.graphics_receiver().cloned()
+        }
+        _ => None,
+    })
+    .map_err(|cause| internal(cause.to_string()))?
+    .ok_or_else(|| invalid("mode object has no exact Figure receiver"))
 }
 
 #[cfg(test)]
@@ -827,7 +921,7 @@ mod tests {
         let _guard = setup_plot_tests();
         crate::builtins::plotting::state::set_axis_limits(Some((0.0, 10.0)), Some((0.0, 20.0)));
 
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         zoom_builtin(vec![Value::Num(2.0)]).unwrap();
 
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -868,7 +962,7 @@ mod tests {
         .unwrap();
         let (figure, axes_index) =
             crate::builtins::plotting::state::decode_axes_handle(ax1).expect("axes handle");
-        crate::builtins::plotting::state::set_axis_limits_for_axes(
+        crate::builtins::plotting::state::set_axis_manual_limits_for_axes(
             figure,
             axes_index,
             Some((0.0, 10.0)),
@@ -877,7 +971,7 @@ mod tests {
         .unwrap();
         crate::builtins::plotting::state::select_axes_for_figure(figure, 1).unwrap();
 
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         zoom_builtin(vec![Value::Num(ax1), Value::Num(2.0)]).unwrap();
 
         assert_eq!(
@@ -910,7 +1004,7 @@ mod tests {
     fn typed_integer_single_argument_is_a_zoom_factor() {
         let _guard = setup_plot_tests();
         crate::builtins::plotting::state::set_axis_limits(Some((0.0, 10.0)), Some((0.0, 20.0)));
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         zoom_builtin(vec![Value::Int(IntValue::U8(2))]).expect("integer factor");
         let fig = clone_figure(current_figure_handle()).unwrap();
         let meta = fig.axes_metadata(0).unwrap();

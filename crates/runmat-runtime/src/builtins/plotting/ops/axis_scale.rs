@@ -2,8 +2,8 @@ use runmat_value::Value;
 
 use super::axis_ticks::TickAxis;
 use super::state::{
-    axes_metadata_snapshot, current_axes_state, decode_axes_handle, figure_handle_exists,
-    set_log_modes_for_axes, FigureHandle,
+    axes_metadata_snapshot, axes_metadata_snapshot_for_property, decode_axes_handle,
+    figure_handle_exists, set_log_modes_for_axes_for_property, FigureHandle,
 };
 use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor as tensor_utils;
@@ -33,16 +33,18 @@ impl AxisScaleMode {
 }
 
 pub fn axis_scale_builtin(
+    runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let (target, args) = split_optional_axes_target(builtin, args)?;
+    let (target, args) = prepare_scale_call(runtime, builtin, args)?;
     match args.as_slice() {
-        [] => query_scale(builtin, axis, target),
+        [] => query_scale(builtin, axis, &target.resolve(builtin)?),
         [value] => {
             let mode = scale_mode_from_value(value, builtin)?;
-            set_scale(builtin, axis, target, mode)?;
+            super::op_common::axes_output::validate_setter_output(builtin)?;
+            set_scale(builtin, axis, &target.resolve(builtin)?, mode)?;
             Ok(Value::String(mode.as_str().into()))
         }
         _ => Err(plotting_error(
@@ -63,6 +65,33 @@ pub fn scale_mode_from_value(value: &Value, builtin: &'static str) -> BuiltinRes
             format!("{builtin}: scale must be 'linear' or 'log'"),
         )),
     }
+}
+
+fn prepare_scale_call(
+    runtime: Option<&crate::context::RuntimeContext>,
+    builtin: &'static str,
+    args: Vec<Value>,
+) -> BuiltinResult<(
+    super::op_common::axes_target::PreparedAxesTarget,
+    Vec<Value>,
+)> {
+    use super::op_common::axes_target::{prepare_graphics_target, PreparedAxesTarget};
+    if let Some(first) = args
+        .first()
+        .filter(|value| matches!(value, Value::Object(_) | Value::HandleObject(_)))
+    {
+        if let Some(prepared) = prepare_graphics_target(runtime, builtin, first)? {
+            let target = prepared.into_axes(builtin)?;
+            return Ok((target, args.into_iter().skip(1).collect()));
+        }
+    }
+    // Preserve this family's stricter exact numeric-handle grammar/errors.
+    let (target, args) = split_optional_axes_target(builtin, args)?;
+    let target = target.map_or_else(
+        || PreparedAxesTarget::current(runtime),
+        |(handle, index)| PreparedAxesTarget::alias(runtime, handle, index),
+    );
+    Ok((target, args))
 }
 
 fn split_optional_axes_target(
@@ -137,13 +166,11 @@ fn numeric_scalar(value: &Value) -> Option<f64> {
 fn query_scale(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesScaleTarget,
+    target: &super::state::ResolvedAxesTarget,
 ) -> BuiltinResult<Value> {
-    let (handle, axes_index) = target.unwrap_or_else(|| {
-        let current = current_axes_state();
-        (current.handle, current.active_index)
-    });
-    let meta = axes_metadata_snapshot(handle, axes_index)
+    let (handle, axes_index) = target.coordinates();
+    let property = target.authority();
+    let meta = axes_metadata_snapshot_for_property(property, handle, axes_index)
         .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
     let is_log = match axis {
         TickAxis::X => meta.x_log,
@@ -155,20 +182,18 @@ fn query_scale(
 fn set_scale(
     builtin: &'static str,
     axis: TickAxis,
-    target: AxesScaleTarget,
+    target: &super::state::ResolvedAxesTarget,
     mode: AxisScaleMode,
 ) -> BuiltinResult<()> {
-    let (handle, axes_index) = target.unwrap_or_else(|| {
-        let current = current_axes_state();
-        (current.handle, current.active_index)
-    });
-    let meta = axes_metadata_snapshot(handle, axes_index)
+    let (handle, axes_index) = target.coordinates();
+    let property = target.authority();
+    let meta = axes_metadata_snapshot_for_property(property, handle, axes_index)
         .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
     let (x_log, y_log) = match axis {
         TickAxis::X => (mode.is_log(), meta.y_log),
         TickAxis::Y => (meta.x_log, mode.is_log()),
     };
-    set_log_modes_for_axes(handle, axes_index, x_log, y_log)
+    set_log_modes_for_axes_for_property(property, handle, axes_index, x_log, y_log)
         .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))
 }
 

@@ -14,8 +14,8 @@ pub mod source;
 pub mod state;
 
 pub use archive::{
-    normalize_link_for_entry, validate_archive, ArchiveEntryHeader, ArchiveEntryKind, ArchiveError,
-    ArchiveLimits, ValidatedArchive, ValidatedArchiveEntry,
+    normalize_link_for_entry, relative_link_target, validate_archive, ArchiveEntryHeader,
+    ArchiveEntryKind, ArchiveError, ArchiveLimits, ValidatedArchive, ValidatedArchiveEntry,
 };
 pub use backend::{
     BackendCommit, BackendSnapshot, CacheBackend, CacheClock, CacheTransaction, CommitOutcome,

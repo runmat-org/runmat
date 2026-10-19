@@ -1,6 +1,6 @@
 use crate::{
-    CapabilitySet, CollectiveId, DistributedValueId, LabCount, LabRank, OperatorKind,
-    ParallelRegionId, RegionValueId, SchemaValidationError, ValueFact,
+    CapabilitySet, CollectiveId, DistributedValueId, LabCount, OperatorKind, ParallelRegionId,
+    RegionValueId, SchemaValidationError, ValueFact, ValueKindFact,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -8,14 +8,69 @@ use std::collections::BTreeSet;
 mod spmd;
 pub use spmd::SpmdLabRequirement;
 
-pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 1;
+pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum ParallelIndexConstant {
+    Signed(i64),
+    Unsigned(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum ParallelSliceOffsetOperand {
+    Constant(ParallelIndexConstant),
+    Broadcast(RegionValueId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "operand")]
+pub enum ParallelSliceOffset {
+    None,
+    Add(ParallelSliceOffsetOperand),
+    Subtract(ParallelSliceOffsetOperand),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "dimension")]
+pub enum ParallelSliceAxis {
+    /// One-subscript MATLAB linear indexing, such as `value(index)`.
+    Linear,
+    /// Multisubscript indexing with the loop variable in this one-based
+    /// dimension, such as `value(:, index)`.
+    Dimension(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParallelSliceAccess {
+    pub axis: ParallelSliceAxis,
+    pub offset: ParallelSliceOffset,
+}
+
+impl ParallelSliceAccess {
+    pub const fn linear() -> Self {
+        Self {
+            axis: ParallelSliceAxis::Linear,
+            offset: ParallelSliceOffset::None,
+        }
+    }
+
+    pub const fn dimension(dimension: u32) -> Self {
+        Self {
+            axis: ParallelSliceAxis::Dimension(dimension),
+            offset: ParallelSliceOffset::None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParallelVariableRole {
     Loop,
     Broadcast,
-    Sliced { dimensions: Vec<u32> },
+    Sliced { access: ParallelSliceAccess },
     Reduction { operator: OperatorKind },
     Temporary,
     Private,
@@ -29,6 +84,41 @@ pub enum ParallelAccess {
     ReadWrite,
 }
 
+/// Static transfer knowledge, distinct from the required runtime capture check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParallelTransferability {
+    ProvenTransferable,
+    RequiresRuntimeValidation,
+    NonTransferable,
+}
+
+impl ParallelTransferability {
+    pub fn for_fact(fact: &ValueFact) -> Self {
+        match &fact.kind {
+            ValueKindFact::Never
+            | ValueKindFact::Void
+            | ValueKindFact::Object(_)
+            | ValueKindFact::ClassReference(_)
+            | ValueKindFact::Execution(_)
+            | ValueKindFact::Distributed(_)
+            | ValueKindFact::Composite(_)
+            | ValueKindFact::Foreign(_) => Self::NonTransferable,
+            ValueKindFact::Unknown
+            | ValueKindFact::Cell(_)
+            | ValueKindFact::Struct(_)
+            | ValueKindFact::Callable(_)
+            | ValueKindFact::OutputList(_)
+            | ValueKindFact::Exception(_)
+            | ValueKindFact::Symbolic => Self::RequiresRuntimeValidation,
+            ValueKindFact::Numeric(_)
+            | ValueKindFact::Logical
+            | ValueKindFact::Character
+            | ValueKindFact::String => Self::ProvenTransferable,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParallelVariableContract {
@@ -36,7 +126,7 @@ pub struct ParallelVariableContract {
     pub role: ParallelVariableRole,
     pub access: ParallelAccess,
     pub fact: ValueFact,
-    pub transferable: bool,
+    pub transferability: ParallelTransferability,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +145,7 @@ pub struct ParforContract {
     pub iterable: ValueFact,
     pub variables: Vec<ParallelVariableContract>,
     pub maximum_workers: Option<LabCount>,
+    pub effects: crate::EffectSet,
     pub capabilities: CapabilitySet,
     pub randomness: ParallelRandomnessPolicy,
 }
@@ -65,6 +156,8 @@ pub struct SpmdContract {
     pub id: ParallelRegionId,
     pub labs: SpmdLabRequirement,
     pub captures: Vec<ParallelVariableContract>,
+    pub outputs: Vec<ParallelVariableContract>,
+    pub effects: crate::EffectSet,
     pub capabilities: CapabilitySet,
 }
 
@@ -77,9 +170,66 @@ pub struct SpmdContract {
 )]
 pub enum DistributionScheme {
     Replicated,
-    Block { dimension: u32 },
-    Cyclic { dimension: u32 },
-    Custom { partitioner: String },
+    Block {
+        dimension: u32,
+    },
+    Cyclic {
+        dimension: u32,
+    },
+    OneDimensional {
+        dimension: u32,
+        partition: Vec<u64>,
+    },
+    TwoDimensionalBlockCyclic {
+        worker_grid: [u32; 2],
+        block_size: u64,
+        orientation: WorkerGridOrientation,
+    },
+    Custom {
+        partitioner: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerGridOrientation {
+    Row,
+    Column,
+}
+
+/// Compiler-visible construction policy for a distributed value.
+///
+/// This records what the source program asked the execution service to do. It
+/// deliberately does not pretend that a runtime codistributor is a statically
+/// known [`DistributionScheme`]. The admitted live handle records that exact
+/// scheme after the codistributor and pool have been validated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+pub enum DistributedConstruction {
+    /// RunMat's direct `distributed(value)` form with a compiler-selected
+    /// scheme.
+    Fixed { scheme: DistributionScheme },
+    /// `codistributed(value)` distributes an input available on every
+    /// participating execution context using the default codistributor.
+    ReplicatedInputDefault,
+    /// The two-argument compatible form. The validated runtime type of the
+    /// second operand selects a codistributor or a designated worker.
+    CodistributorOrDesignatedWorker,
+    /// A designated worker and codistributor are both explicit operands.
+    DesignatedWorkerWithCodistributor,
+    /// `codistributed.build` assembles one local contribution per worker.
+    LocalParts {
+        has_codistributor: bool,
+        validation: DistributedBuildValidation,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DistributedBuildValidation {
+    ValidateAcrossWorkers,
+    NoCommunication,
+    RuntimeOption,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,8 +237,12 @@ pub enum DistributionScheme {
 pub struct DistributedValueContract {
     pub id: DistributedValueId,
     pub value: ValueFact,
-    pub scheme: DistributionScheme,
-    pub owner_region: ParallelRegionId,
+    pub construction: DistributedConstruction,
+    pub owner: crate::DistributedOwner,
+    /// Compiler-owned synchronization identity for worker-scoped compatible
+    /// construction. Client construction and fixed RunMat distribution do not
+    /// allocate one.
+    pub coordination: Option<CollectiveId>,
     pub materializable: bool,
 }
 
@@ -97,50 +251,32 @@ pub struct DistributedValueContract {
 pub struct CollectiveContract {
     pub id: CollectiveId,
     pub operation: CollectiveOperation,
+    pub input: Option<ValueFact>,
+    pub output: Option<ValueFact>,
+    pub root: Option<ValueFact>,
+    pub source: Option<ValueFact>,
+    pub destination: Option<ValueFact>,
+    pub tag: Option<ValueFact>,
+    pub dimension: Option<ValueFact>,
+    pub reducer: Option<ValueFact>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CollectiveOperation {
     Barrier,
-    Broadcast {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        root: LabRank,
-    },
-    Gather {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        root: LabRank,
-    },
-    Scatter {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        root: LabRank,
-    },
-    AllGather {
-        input: DistributedValueId,
-        output: DistributedValueId,
-    },
-    Reduce {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        root: LabRank,
-        operator: OperatorKind,
-    },
-    AllReduce {
-        input: DistributedValueId,
-        output: DistributedValueId,
-        operator: OperatorKind,
-    },
-    Send {
-        input: DistributedValueId,
-        peer: LabRank,
-    },
-    Receive {
-        output: DistributedValueId,
-        peer: LabRank,
-    },
+    Broadcast,
+    Gather,
+    Scatter,
+    AllGather,
+    Reduce { operator: OperatorKind },
+    AllReduce { operator: OperatorKind },
+    Cat,
+    FunctionalReduce,
+    Send,
+    Receive { requested_outputs: u8 },
+    SendReceive,
+    Probe,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -243,9 +379,11 @@ impl ParallelManifest {
                 region.id,
                 &region.captures,
             )?;
+            validate_variables("parallel.spmd_regions.outputs", region.id, &region.outputs)?;
             if region
                 .captures
                 .iter()
+                .chain(&region.outputs)
                 .any(|variable| matches!(&variable.role, ParallelVariableRole::Loop))
             {
                 return Err(SchemaValidationError::new(
@@ -254,46 +392,101 @@ impl ParallelManifest {
                 ));
             }
         }
-        let distributed_ids = self
-            .distributed_values
-            .iter()
-            .map(|value| value.id)
-            .collect::<BTreeSet<_>>();
         for distributed in &self.distributed_values {
-            if !region_ids.contains(&distributed.owner_region)
-                || distributed.id.function != distributed.owner_region.0.function
-            {
+            let owner_valid = match distributed.owner {
+                crate::DistributedOwner::Client(function) => function == distributed.id.function,
+                crate::DistributedOwner::Region(region) => {
+                    region_ids.contains(&region) && region.0.function == distributed.id.function
+                }
+            };
+            if !owner_valid {
                 return Err(SchemaValidationError::new(
-                    "parallel.distributed_values.owner_region",
-                    "owner must name a declared parallel region in the same function",
+                    "parallel.distributed_values.owner",
+                    "owner must name the same client function or a declared parallel region in that function",
                 ));
             }
-            if let DistributionScheme::Custom { partitioner } = &distributed.scheme {
+            let worker_scoped =
+                matches!(
+                    distributed.construction,
+                    DistributedConstruction::ReplicatedInputDefault
+                        | DistributedConstruction::CodistributorOrDesignatedWorker
+                        | DistributedConstruction::DesignatedWorkerWithCodistributor
+                        | DistributedConstruction::LocalParts { .. }
+                ) && matches!(distributed.owner, crate::DistributedOwner::Region(_));
+            match (worker_scoped, distributed.coordination) {
+                (true, Some(coordination)) if matches!(distributed.owner, crate::DistributedOwner::Region(region) if coordination.region == region) =>
+                    {}
+                (true, _) => {
+                    return Err(SchemaValidationError::new(
+                        "parallel.distributed_values.coordination",
+                        "worker-scoped construction requires a compiler-owned coordination identity in its owner region",
+                    ));
+                }
+                (false, None) => {}
+                (false, Some(_)) => {
+                    return Err(SchemaValidationError::new(
+                        "parallel.distributed_values.coordination",
+                        "client or fixed construction cannot carry a worker coordination identity",
+                    ));
+                }
+            }
+            let fixed_scheme = match &distributed.construction {
+                DistributedConstruction::Fixed { scheme } => Some(scheme),
+                DistributedConstruction::ReplicatedInputDefault
+                | DistributedConstruction::CodistributorOrDesignatedWorker
+                | DistributedConstruction::DesignatedWorkerWithCodistributor
+                | DistributedConstruction::LocalParts { .. } => None,
+            };
+            if let Some(DistributionScheme::Custom { partitioner }) = fixed_scheme {
                 super::schema::validate_token(
                     "parallel.distributed_values.partitioner",
                     partitioner,
                     256,
                 )?;
             }
+            if matches!(
+                fixed_scheme,
+                Some(
+                    DistributionScheme::Block { dimension: 0 }
+                        | DistributionScheme::Cyclic { dimension: 0 }
+                        | DistributionScheme::OneDimensional { dimension: 0, .. }
+                )
+            ) {
+                return Err(SchemaValidationError::new(
+                    "parallel.distributed_values.scheme",
+                    "distribution dimensions use one-based nonzero identities",
+                ));
+            }
+            match fixed_scheme {
+                Some(DistributionScheme::OneDimensional { partition, .. })
+                    if partition.is_empty() =>
+                {
+                    return Err(SchemaValidationError::new(
+                        "parallel.distributed_values.scheme",
+                        "one-dimensional distributions require partition lengths",
+                    ));
+                }
+                Some(DistributionScheme::TwoDimensionalBlockCyclic {
+                    worker_grid,
+                    block_size,
+                    ..
+                }) if worker_grid.contains(&0) || *block_size == 0 => {
+                    return Err(SchemaValidationError::new(
+                        "parallel.distributed_values.scheme",
+                        "two-dimensional block-cyclic distributions require a positive worker grid and block size",
+                    ));
+                }
+                _ => {}
+            }
         }
         for collective in &self.collectives {
-            if !region_ids.contains(&collective.id.region) {
+            if !spmd_ids.contains(&collective.id.region) {
                 return Err(SchemaValidationError::new(
                     "parallel.collectives.region",
-                    "collective must belong to a declared parallel region",
+                    "collective must belong to a declared SPMD region",
                 ));
             }
-            if collective
-                .operation
-                .values()
-                .iter()
-                .any(|value| !distributed_ids.contains(value))
-            {
-                return Err(SchemaValidationError::new(
-                    "parallel.collectives.values",
-                    "collective inputs and outputs must name declared distributed values",
-                ));
-            }
+            collective.validate()?;
         }
         Ok(())
     }
@@ -321,31 +514,105 @@ fn validate_variables(
         ));
     }
     for variable in variables {
-        if let ParallelVariableRole::Sliced { dimensions } = &variable.role {
-            if dimensions.is_empty() || dimensions.windows(2).any(|pair| pair[0] >= pair[1]) {
+        if variable.transferability != ParallelTransferability::for_fact(&variable.fact) {
+            return Err(SchemaValidationError::new(
+                path,
+                "transferability must match the classified value fact",
+            ));
+        }
+        if let ParallelVariableRole::Sliced { access } = &variable.role {
+            if matches!(access.axis, ParallelSliceAxis::Dimension(0)) {
                 return Err(SchemaValidationError::new(
                     path,
-                    "sliced dimensions must be sorted, unique, and non-empty",
+                    "sliced dimensions use one-based nonzero identities",
                 ));
+            }
+            let offset_value = match access.offset {
+                ParallelSliceOffset::Add(ParallelSliceOffsetOperand::Broadcast(value))
+                | ParallelSliceOffset::Subtract(ParallelSliceOffsetOperand::Broadcast(value)) => {
+                    Some(value)
+                }
+                _ => None,
+            };
+            if let Some(offset_value) = offset_value {
+                if offset_value.function != region.0.function
+                    || !variables.iter().any(|value| {
+                        value.value == offset_value
+                            && matches!(value.role, ParallelVariableRole::Broadcast)
+                    })
+                {
+                    return Err(SchemaValidationError::new(
+                        path,
+                        "sliced offsets must name a broadcast from the same region function",
+                    ));
+                }
             }
         }
     }
     Ok(())
 }
 
-impl CollectiveOperation {
-    fn values(&self) -> Vec<DistributedValueId> {
-        match self {
-            Self::Barrier => Vec::new(),
-            Self::Broadcast { input, output, .. }
-            | Self::Gather { input, output, .. }
-            | Self::Scatter { input, output, .. }
-            | Self::AllGather { input, output }
-            | Self::Reduce { input, output, .. }
-            | Self::AllReduce { input, output, .. } => vec![*input, *output],
-            Self::Send { input, .. } => vec![*input],
-            Self::Receive { output, .. } => vec![*output],
+impl CollectiveContract {
+    fn validate(&self) -> Result<(), SchemaValidationError> {
+        let actual = (
+            self.input.is_some(),
+            self.output.is_some(),
+            self.root.is_some(),
+            self.source.is_some(),
+            self.destination.is_some(),
+            self.dimension.is_some(),
+            self.reducer.is_some(),
+        );
+        let expected = match self.operation {
+            CollectiveOperation::Barrier => (false, false, false, false, false, false, false),
+            CollectiveOperation::Broadcast => {
+                (self.input.is_some(), true, true, false, false, false, false)
+            }
+            CollectiveOperation::Gather
+            | CollectiveOperation::Scatter
+            | CollectiveOperation::Reduce { .. } => (true, true, true, false, false, false, false),
+            CollectiveOperation::AllGather | CollectiveOperation::AllReduce { .. } => {
+                (true, true, false, false, false, false, false)
+            }
+            CollectiveOperation::Cat => {
+                (true, true, self.root.is_some(), false, false, true, false)
+            }
+            CollectiveOperation::FunctionalReduce => {
+                (true, true, self.root.is_some(), false, false, false, true)
+            }
+            CollectiveOperation::Send => (true, false, false, false, true, false, false),
+            CollectiveOperation::Receive { .. } | CollectiveOperation::Probe => (
+                false,
+                true,
+                false,
+                self.source.is_some(),
+                false,
+                false,
+                false,
+            ),
+            CollectiveOperation::SendReceive => (true, true, false, true, true, false, false),
+        };
+        if actual != expected {
+            return Err(SchemaValidationError::new(
+                "parallel.collectives",
+                "collective operand facts do not match the operation contract",
+            ));
         }
+        if self.tag.is_some()
+            && !matches!(
+                self.operation,
+                CollectiveOperation::Send
+                    | CollectiveOperation::Receive { .. }
+                    | CollectiveOperation::SendReceive
+                    | CollectiveOperation::Probe
+            )
+        {
+            return Err(SchemaValidationError::new(
+                "parallel.collectives.tag",
+                "only point-to-point operations may declare a tag operand",
+            ));
+        }
+        Ok(())
     }
 }
 

@@ -602,13 +602,9 @@ fn load_op_maps_unsupported_format_error_code() {
 
 #[test]
 fn load_op_maps_cancelled_import_error_code() {
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    };
-
-    let cancelled = Arc::new(AtomicBool::new(true));
-    let _guard = crate::interrupt::replace_interrupt(Some(Arc::clone(&cancelled)));
+    let cancelled = runmat_execution::cancellation::CancellationSource::new();
+    cancelled.cancel(runmat_execution::CancellationReason::User);
+    let _guard = crate::interrupt::replace_interrupt(Some(cancelled.token()));
     let error = geometry_load_op(
         "/cancelled.stl",
         TRIANGLE_STL.as_bytes(),
@@ -618,7 +614,6 @@ fn load_op_maps_cancelled_import_error_code() {
 
     assert_eq!(error.error_code, "RM.GEOMETRY.LOAD.CANCELLED");
     assert_eq!(error.error_type, OperationErrorType::Cancelled);
-    cancelled.store(false, Ordering::Relaxed);
 }
 
 #[test]
@@ -1017,7 +1012,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
         regions: vec![
             Region {
                 region_id: "face_000001".to_string(),
-                name: "Face 1".to_string(),
+                name: "Face 1".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
@@ -1031,14 +1026,14 @@ fn asset_summary_reports_semantic_cad_region_status() {
             },
             Region {
                 region_id: "cad_label_0_1_1".to_string(),
-                name: "Bracket".to_string(),
+                name: "Bracket".into(),
                 tag: Some("cad_body".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: None,
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:1".to_string(),
-                        name: "Bracket".to_string(),
+                        name: "Bracket".into(),
                         kind: CadSemanticKind::Body,
                     }),
                     owner_path: Vec::new(),
@@ -1070,7 +1065,7 @@ fn asset_summary_reports_semantic_cad_region_status() {
 fn geometry_preview_preserves_assembly_ownership_and_xray_styling() {
     let owner = CadLabelRef {
         label_entry: "0:1".to_string(),
-        name: "Bracket".to_string(),
+        name: "Bracket".into(),
         kind: CadSemanticKind::Body,
     };
     let asset = GeometryAsset {
@@ -1113,14 +1108,14 @@ fn geometry_preview_preserves_assembly_ownership_and_xray_styling() {
         regions: vec![
             Region {
                 region_id: "face_000001".to_string(),
-                name: "Face 1".to_string(),
+                name: "Face 1".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(0),
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:face:1".to_string(),
-                        name: "Face 1".to_string(),
+                        name: "Face 1".into(),
                         kind: CadSemanticKind::Face,
                     }),
                     owner_path: vec![owner.clone()],
@@ -1131,14 +1126,14 @@ fn geometry_preview_preserves_assembly_ownership_and_xray_styling() {
             },
             Region {
                 region_id: "face_000002".to_string(),
-                name: "Face 2".to_string(),
+                name: "Face 2".into(),
                 tag: Some("occt_face".to_string()),
                 cad_ownership: Some(CadRegionOwnership {
                     face_id: Some(1),
                     curve_id: None,
                     label: Some(CadLabelRef {
                         label_entry: "0:1:face:2".to_string(),
-                        name: "Face 2".to_string(),
+                        name: "Face 2".into(),
                         kind: CadSemanticKind::Face,
                     }),
                     owner_path: vec![owner.clone()],

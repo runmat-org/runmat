@@ -773,17 +773,13 @@ fn visibility_checkbox(
     let size = egui::vec2(14.0 * scale, 14.0 * scale);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let stroke = egui::Stroke::new(1.0_f32, theme.checkbox_border);
-    #[cfg(target_arch = "wasm32")]
     ui.painter().rect(
         rect,
         scaled_corner_radius(PANEL_CORNER_RADIUS * scale),
         theme.checkbox_bg,
         stroke,
-        egui::StrokeKind::Inside,
+        super::OUTLINE_STROKE_KIND,
     );
-    #[cfg(not(target_arch = "wasm32"))]
-    ui.painter()
-        .rect(rect, PANEL_CORNER_RADIUS * scale, theme.checkbox_bg, stroke);
     match state {
         VisibilityState::Visible => {
             let p0 = egui::pos2(rect.left() + 3.0 * scale, rect.center().y);
@@ -975,7 +971,6 @@ fn strip_height(scale: f32) -> f32 {
     STRIP_HEIGHT * scale
 }
 
-#[cfg(target_arch = "wasm32")]
 fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
     egui::Frame::NONE
         .fill(theme.panel_bg)
@@ -984,16 +979,6 @@ fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
         .inner_margin(scaled_margin_same(10.0 * scale))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn panel_frame(theme: &CadOverlayTheme, scale: f32) -> egui::Frame {
-    egui::Frame::none()
-        .fill(theme.panel_bg)
-        .stroke(egui::Stroke::new(1.0_f32, theme.panel_border))
-        .rounding(scaled_corner_radius(PANEL_CORNER_RADIUS * scale))
-        .inner_margin(scaled_margin_same(10.0 * scale))
-}
-
-#[cfg(target_arch = "wasm32")]
 fn allocate_ui_at_rect_compat(
     ui: &mut egui::Ui,
     rect: egui::Rect,
@@ -1002,43 +987,16 @@ fn allocate_ui_at_rect_compat(
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), add_contents);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn allocate_ui_at_rect_compat(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    ui.allocate_ui_at_rect(rect, add_contents);
-}
-
-#[cfg(target_arch = "wasm32")]
 fn scroll_area_id(scroll_area: egui::ScrollArea, id: &'static str) -> egui::ScrollArea {
     scroll_area.id_salt(id)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn scroll_area_id(scroll_area: egui::ScrollArea, id: &'static str) -> egui::ScrollArea {
-    scroll_area.id_source(id)
-}
-
-#[cfg(target_arch = "wasm32")]
 fn scaled_corner_radius(radius: f32) -> egui::CornerRadius {
     egui::CornerRadius::same(radius.round().clamp(0.0, u8::MAX as f32) as u8)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn scaled_corner_radius(radius: f32) -> egui::Rounding {
-    egui::Rounding::same(radius)
-}
-
-#[cfg(target_arch = "wasm32")]
 fn scaled_margin_same(margin: f32) -> egui::Margin {
     egui::Margin::same(margin.round().clamp(i8::MIN as f32, i8::MAX as f32) as i8)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn scaled_margin_same(margin: f32) -> egui::Margin {
-    egui::Margin::same(margin)
 }
 
 fn panel_header(

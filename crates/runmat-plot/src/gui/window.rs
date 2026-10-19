@@ -53,6 +53,24 @@ pub struct PlotWindow<'window> {
     pub active_drag_axes: Option<usize>,
     /// Optional signal that lets external callers request window shutdown.
     pub close_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub(super) presentation_count: PresentationCount,
+}
+
+/// Read-only count of frames submitted to the surface for presentation.
+/// This is not a GPU completion or display-timing receipt.
+#[cfg(feature = "gui")]
+#[derive(Clone, Debug, Default)]
+pub struct PresentationCount(std::sync::Arc<std::sync::atomic::AtomicU64>);
+
+#[cfg(feature = "gui")]
+impl PresentationCount {
+    pub fn get(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(super) fn record(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 // The implementation is in window_impl.rs in the same directory

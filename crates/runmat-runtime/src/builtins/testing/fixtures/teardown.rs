@@ -4,8 +4,7 @@ use crate::{build_runtime_error, BuiltinResult};
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.addTeardown",
-    category = "testing/fixtures",
-    summary = "Register a callback that runs when the active test scope is torn down.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::fixtures::teardown"
 )]
 fn add_teardown(receiver: Value, callback: Value, arguments: Vec<Value>) -> BuiltinResult<Value> {
@@ -22,11 +21,16 @@ fn add_teardown(receiver: Value, callback: Value, arguments: Vec<Value>) -> Buil
 fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => object.class_name.as_str(),
-        Value::HandleObject(handle) => handle.class_name.as_str(),
-        _ => "",
+        Value::Object(object) => Some(&object.class_name),
+        Value::HandleObject(handle) => Some(&handle.class_name),
+        _ => None,
     };
-    if crate::class_registry::is_class_or_subclass(class_name, crate::testing::TEST_CASE_CLASS) {
+    if class_name.is_some_and(|identity| {
+        crate::class_registry::is_class_or_subclass(
+            identity,
+            &crate::testing::TEST_CASE_CLASS.owned(),
+        )
+    }) {
         Ok(())
     } else {
         Err(

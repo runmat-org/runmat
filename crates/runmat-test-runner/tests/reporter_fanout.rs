@@ -29,7 +29,7 @@ fn every_report_is_well_formed_after_an_infrastructure_failure() {
     let mut reporters = ReporterFanout::default();
     let observed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     reporters.push_observer(CountingObserver(observed.clone()));
-    reporters.push(HumanReporter::default());
+    reporters.push(HumanReporter);
     reporters.push(JsonReporter::default());
     reporters.push(JunitReporter);
     reporters.push(TapReporter);
@@ -45,13 +45,22 @@ fn every_report_is_well_formed_after_an_infrastructure_failure() {
     .unwrap();
 
     assert_eq!(run.reports.len(), 4);
-    serde_json::from_slice::<serde_json::Value>(&run.reports[1].bytes).unwrap();
+    let human = String::from_utf8(run.reports[0].bytes.clone()).unwrap();
+    assert!(human.contains("tests/sample.m: crashes"));
+    let json: serde_json::Value = serde_json::from_slice(&run.reports[1].bytes).unwrap();
+    assert_eq!(json["schema_version"], 2);
+    assert_eq!(
+        json["result"]["tests"][0]["report_identity"]["display_name"],
+        "crashes"
+    );
     let junit = String::from_utf8(run.reports[2].bytes.clone()).unwrap();
     assert!(junit.starts_with("<?xml"));
+    assert!(junit.contains("<testcase name=\"crashes\" classname=\"suite\""));
     assert!(junit.ends_with("</testsuite>\n"));
     let tap = String::from_utf8(run.reports[3].bytes.clone()).unwrap();
     assert!(tap.starts_with("TAP version 13\n"));
     assert!(tap.contains("\n1..1\n"));
+    assert!(tap.contains("tests/sample.m: crashes"));
     assert_eq!(
         observed.load(std::sync::atomic::Ordering::Relaxed),
         run.events.len()

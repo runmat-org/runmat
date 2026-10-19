@@ -1,12 +1,61 @@
 use minicbor::{Decoder, Encoder};
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
-use super::Digest;
+use super::{Digest, DigestStream};
 use crate::{schema::PROGRAM_REVISION_SCHEMA_V1, ContractError};
 
 const MAX_CONTRIBUTIONS: usize = 32;
 const MAX_CONTRIBUTION_NAME_BYTES: usize = 96;
-const MAX_MODE_BYTES: usize = 32;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub enum LanguageCompatibilityMode {
+    #[serde(rename = "runmat")]
+    RunMat,
+    #[serde(rename = "matlab")]
+    Matlab,
+    #[serde(rename = "strict")]
+    Strict,
+}
+
+impl LanguageCompatibilityMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RunMat => "runmat",
+            Self::Matlab => "matlab",
+            Self::Strict => "strict",
+        }
+    }
+}
+
+impl AsRef<str> for LanguageCompatibilityMode {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Display for LanguageCompatibilityMode {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for LanguageCompatibilityMode {
+    type Err = ContractError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "runmat" => Ok(Self::RunMat),
+            "matlab" => Ok(Self::Matlab),
+            "strict" => Ok(Self::Strict),
+            _ => Err(ContractError::invalid(
+                "language compatibility mode",
+                format!("unsupported mode `{value}`"),
+            )),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(try_from = "DomainContributionWire")]
@@ -57,7 +106,7 @@ pub struct ProgramEnvironment {
     pub compiler_schema: u32,
     pub runtime_fingerprint: Digest,
     pub catalog_fingerprint: Digest,
-    pub compatibility_mode: String,
+    pub compatibility_mode: LanguageCompatibilityMode,
 }
 
 #[derive(Deserialize)]
@@ -67,7 +116,7 @@ struct ProgramEnvironmentWire {
     compiler_schema: u32,
     runtime_fingerprint: Digest,
     catalog_fingerprint: Digest,
-    compatibility_mode: String,
+    compatibility_mode: LanguageCompatibilityMode,
 }
 
 impl TryFrom<ProgramEnvironmentWire> for ProgramEnvironment {
@@ -90,14 +139,14 @@ impl ProgramEnvironment {
         compiler_schema: u32,
         runtime_fingerprint: Digest,
         catalog_fingerprint: Digest,
-        compatibility_mode: impl Into<String>,
+        compatibility_mode: impl AsRef<str>,
     ) -> Result<Self, ContractError> {
         let environment = Self {
             semantic_schema,
             compiler_schema,
             runtime_fingerprint,
             catalog_fingerprint,
-            compatibility_mode: compatibility_mode.into(),
+            compatibility_mode: compatibility_mode.as_ref().parse()?,
         };
         environment.validate()?;
         Ok(environment)
@@ -110,11 +159,28 @@ impl ProgramEnvironment {
                 "semantic and compiler schemas must be non-zero",
             ));
         }
-        validate_token(
-            "compatibility mode",
-            &self.compatibility_mode,
-            MAX_MODE_BYTES,
-        )
+        Ok(())
+    }
+
+    /// Reject executable products compiled for a different source-language or
+    /// compiler contract before any nested program payload is decoded.
+    pub fn validate_current_compiler(&self) -> Result<(), ContractError> {
+        self.validate()?;
+        let expected_semantic = crate::schema::PROGRAM_SEMANTIC_SCHEMA_V2;
+        let expected_compiler = crate::schema::PROGRAM_COMPILER_SCHEMA_V2;
+        if self.semantic_schema != expected_semantic || self.compiler_schema != expected_compiler {
+            return Err(ContractError::invalid(
+                "program environment compiler compatibility",
+                format!(
+                    "semantic schema actual {} expected {}; compiler schema actual {} expected {}",
+                    self.semantic_schema,
+                    expected_semantic,
+                    self.compiler_schema,
+                    expected_compiler
+                ),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -128,7 +194,7 @@ pub struct ProgramRevision {
     compiler_schema: u32,
     runtime_fingerprint: Digest,
     catalog_fingerprint: Digest,
-    compatibility_mode: String,
+    compatibility_mode: LanguageCompatibilityMode,
     domain_contributions: Vec<DomainContribution>,
 }
 
@@ -199,8 +265,12 @@ impl ProgramRevision {
             compiler_schema: self.compiler_schema,
             runtime_fingerprint: self.runtime_fingerprint,
             catalog_fingerprint: self.catalog_fingerprint,
-            compatibility_mode: self.compatibility_mode.clone(),
+            compatibility_mode: self.compatibility_mode,
         }
+    }
+
+    pub fn validate_current_compiler(&self) -> Result<(), ContractError> {
+        self.environment().validate_current_compiler()
     }
 
     pub fn semantic_schema(&self) -> u32 {
@@ -219,8 +289,8 @@ impl ProgramRevision {
         &self.catalog_fingerprint
     }
 
-    pub fn compatibility_mode(&self) -> &str {
-        &self.compatibility_mode
+    pub fn compatibility_mode(&self) -> LanguageCompatibilityMode {
+        self.compatibility_mode
     }
 
     pub fn domain_contributions(&self) -> &[DomainContribution] {
@@ -240,11 +310,6 @@ impl ProgramRevision {
                 "semantic and compiler schemas must be non-zero",
             ));
         }
-        validate_token(
-            "compatibility mode",
-            &self.compatibility_mode,
-            MAX_MODE_BYTES,
-        )?;
         if self.domain_contributions.len() > MAX_CONTRIBUTIONS {
             return Err(ContractError::Limit {
                 field: "domain contributions",
@@ -272,7 +337,16 @@ impl ProgramRevision {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ContractError> {
         self.validate()?;
         let mut bytes = Vec::new();
-        let mut encoder = Encoder::new(&mut bytes);
+        self.write_canonical(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn write_canonical<W>(&self, target: &mut W) -> Result<(), ContractError>
+    where
+        W: minicbor::encode::Write,
+        W::Error: std::fmt::Display,
+    {
+        let mut encoder = Encoder::new(target);
         encoder
             .map(9)
             .and_then(|encoder| encoder.u8(0))
@@ -290,7 +364,7 @@ impl ProgramRevision {
             .and_then(|encoder| encoder.u8(6))
             .and_then(|encoder| encoder.bytes(self.catalog_fingerprint.bytes()))
             .and_then(|encoder| encoder.u8(7))
-            .and_then(|encoder| encoder.str(&self.compatibility_mode))
+            .and_then(|encoder| encoder.str(self.compatibility_mode.as_str()))
             .and_then(|encoder| encoder.u8(8))
             .and_then(|encoder| encoder.array(self.domain_contributions.len() as u64))
             .map_err(|error| ContractError::invalid("program revision", error.to_string()))?;
@@ -301,7 +375,7 @@ impl ProgramRevision {
                 .and_then(|encoder| encoder.bytes(contribution.digest.bytes()))
                 .map_err(|error| ContractError::invalid("program revision", error.to_string()))?;
         }
-        Ok(bytes)
+        Ok(())
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ContractError> {
@@ -322,7 +396,7 @@ impl ProgramRevision {
         require_key(&mut decoder, 6)?;
         let catalog_fingerprint = decode_digest(&mut decoder)?;
         require_key(&mut decoder, 7)?;
-        let compatibility_mode = decoder.str().map_err(decode_error)?.to_owned();
+        let compatibility_mode = decoder.str().map_err(decode_error)?.parse()?;
         require_key(&mut decoder, 8)?;
         let contribution_count =
             require_bounded_len(decoder.array(), MAX_CONTRIBUTIONS, "domain contributions")?;
@@ -353,9 +427,11 @@ impl ProgramRevision {
     }
 
     pub fn identity_digest(&self) -> Result<Digest, ContractError> {
-        let mut framed = b"runmat-program-revision-v1\0".to_vec();
-        framed.extend(self.canonical_bytes()?);
-        Ok(Digest::sha256(framed))
+        self.validate()?;
+        let mut framed = DigestStream::new();
+        framed.update(b"runmat-program-revision-v1\0");
+        self.write_canonical(&mut framed)?;
+        Ok(framed.finish())
     }
 
     pub fn canonical_identity(&self) -> String {
@@ -434,7 +510,7 @@ struct ProgramRevisionWire {
     compiler_schema: u32,
     runtime_fingerprint: Digest,
     catalog_fingerprint: Digest,
-    compatibility_mode: String,
+    compatibility_mode: LanguageCompatibilityMode,
     domain_contributions: Vec<DomainContribution>,
 }
 
@@ -476,4 +552,36 @@ fn validate_token(field: &'static str, value: &str, max_bytes: usize) -> Result<
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    fn environment(semantic: u32, compiler: u32) -> ProgramEnvironment {
+        ProgramEnvironment::new(
+            semantic,
+            compiler,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "runmat",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn current_compiler_admission_rejects_each_stale_axis() {
+        assert!(environment(
+            crate::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            crate::schema::PROGRAM_COMPILER_SCHEMA_V2,
+        )
+        .validate_current_compiler()
+        .is_ok());
+        assert!(environment(1, crate::schema::PROGRAM_COMPILER_SCHEMA_V2)
+            .validate_current_compiler()
+            .is_err());
+        assert!(environment(crate::schema::PROGRAM_SEMANTIC_SCHEMA_V2, 1)
+            .validate_current_compiler()
+            .is_err());
+    }
 }

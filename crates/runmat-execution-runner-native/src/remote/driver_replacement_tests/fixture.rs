@@ -539,6 +539,7 @@ pub(super) async fn run_worker(
         session_id: session_id(RUN_ID, &allocation_id),
         run_key,
         limits: FrameLimits::default(),
+        ready_v1: false,
     };
     if let Some(attempt) = held_attempt {
         super::super::worker_entry::run_remote_meshing_worker_relay_with_held_attempt(

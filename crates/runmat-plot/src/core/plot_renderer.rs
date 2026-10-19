@@ -28,6 +28,11 @@ use std::sync::OnceLock;
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
+#[path = "plot_renderer/figure_camera_fit.rs"]
+mod figure_camera_fit;
+#[path = "plot_renderer/y_direction.rs"]
+mod y_direction;
+use figure_camera_fit::FigureCameraFitState;
 
 fn indexed_draw_ranges(
     draw_calls: &[crate::core::DrawCall],
@@ -48,9 +53,9 @@ fn indexed_draw_ranges(
 #[derive(Clone, Debug)]
 struct CachedSceneBuffers {
     vertex_signature: (usize, usize),
-    vertex_buffer: Arc<wgpu::Buffer>,
+    vertex_buffer: runmat_accelerate_api::WgpuBufferOwner,
     index_signature: Option<(usize, usize)>,
-    index_buffer: Option<Arc<wgpu::Buffer>>,
+    index_buffer: Option<runmat_accelerate_api::WgpuBufferOwner>,
 }
 
 #[cfg(feature = "egui-overlay")]
@@ -71,6 +76,7 @@ struct AxesViewContract {
 
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContractEntry {
+    y_direction: crate::plots::figure::YDirection,
     has_3d_content: bool,
     axes_kind: AxesKind,
     x_limits: Option<(f64, f64)>,
@@ -84,8 +90,6 @@ struct AxesViewContractEntry {
     view_revision: u64,
 }
 
-const PATCH_3D_ABS_EPSILON: f32 = 1e-9;
-const PATCH_3D_REL_EPSILON: f32 = 1e-6;
 const MAX_2D_GRID_LINES_PER_AXIS: usize = 4096;
 
 fn render_item_diagnostics_enabled() -> bool {
@@ -173,6 +177,8 @@ pub struct PlotRenderer {
 
     /// If false, do not auto-fit camera when the figure updates (user has interacted).
     camera_auto_fit: bool,
+    /// Automatically fitted Figure cameras follow viewport size until user or host control.
+    figure_camera_fit: Vec<FigureCameraFitState>,
     /// Per-axes 2D camera ownership. True means the user has interacted and automatic 2D refits
     /// should not overwrite the camera during ordinary figure updates.
     axes_2d_camera_user_controlled: Vec<bool>,
@@ -263,7 +269,10 @@ impl PlotRenderer {
     /// On wasm the canvas is often created at a tiny size and resized shortly after; some
     /// CPU-generated geometry (like thick 2D lines) depends on viewport pixels, so we rebuild
     /// the scene when the surface extent changes.
-    pub fn on_surface_config_updated(&mut self) {
+    pub fn on_surface_config_updated(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) {
         let current = (
             self.wgpu_renderer.surface_config.width.max(1),
             self.wgpu_renderer.surface_config.height.max(1),
@@ -276,14 +285,18 @@ impl PlotRenderer {
             return;
         };
         // Rebuild scene using the updated surface extent.
-        self.set_figure(figure);
+        self.set_figure(emission, figure);
     }
 
     fn prepare_buffers_for_render_data(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         node_id: u64,
         render_data: &crate::core::RenderData,
-    ) -> Option<(Arc<wgpu::Buffer>, Option<Arc<wgpu::Buffer>>)> {
+    ) -> Option<(
+        runmat_accelerate_api::WgpuBufferOwner,
+        Option<runmat_accelerate_api::WgpuBufferOwner>,
+    )> {
         let mut cache = self.scene_buffer_cache.borrow_mut();
         let vertex_signature = (
             render_data.vertices.as_ptr() as usize,
@@ -302,13 +315,16 @@ impl PlotRenderer {
             }
         }
 
-        let vertex_buffer = self
-            .wgpu_renderer
-            .vertex_buffer_from_sources(render_data.gpu_vertices.as_ref(), &render_data.vertices)?;
-        let index_buffer = render_data
-            .indices
-            .as_ref()
-            .map(|indices| Arc::new(self.wgpu_renderer.create_index_buffer(indices)));
+        let vertex_buffer = self.wgpu_renderer.vertex_buffer_from_sources(
+            emission,
+            render_data.gpu_vertices.as_ref(),
+            &render_data.vertices,
+        )?;
+        let index_buffer = render_data.indices.as_ref().map(|indices| {
+            runmat_accelerate_api::WgpuBufferOwner::new(
+                self.wgpu_renderer.create_index_buffer(emission, indices),
+            )
+        });
 
         cache.insert(
             node_id,
@@ -333,11 +349,11 @@ impl PlotRenderer {
 
     /// Create a new plot renderer
     pub async fn new(
-        device: Arc<wgpu::Device>,
-        queue: Arc<wgpu::Queue>,
+        access: runmat_accelerate_api::WgpuDeviceAccess,
         surface_config: wgpu::SurfaceConfiguration,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let wgpu_renderer = WgpuRenderer::new(device, queue, surface_config).await;
+        let wgpu_renderer =
+            access.with_shared(|emission| WgpuRenderer::new(emission, surface_config))?;
         let scene = Scene::new();
         let theme = crate::styling::PlotThemeConfig::default();
 
@@ -383,35 +399,11 @@ impl PlotRenderer {
             last_axes_view_bounds: None,
             last_axes_view_contract: None,
             camera_auto_fit: true,
+            figure_camera_fit: vec![FigureCameraFitState::Inactive],
             axes_2d_camera_user_controlled: vec![false],
             axes_applied_view_revisions: vec![None],
             scene_buffer_cache: RefCell::new(HashMap::new()),
         })
-    }
-
-    fn plot_element_is_3d(plot: &crate::plots::figure::PlotElement) -> bool {
-        match plot {
-            crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
-            crate::plots::figure::PlotElement::Mesh(_) => true,
-            crate::plots::figure::PlotElement::Patch(patch) => {
-                if patch.force_3d() {
-                    return true;
-                }
-
-                let mut max_xy = 0.0_f32;
-                let mut max_z = 0.0_f32;
-                for point in patch.vertices() {
-                    max_xy = max_xy.max(point.x.abs().max(point.y.abs()));
-                    max_z = max_z.max(point.z.abs());
-                }
-
-                max_z > PATCH_3D_ABS_EPSILON.max(max_xy * PATCH_3D_REL_EPSILON)
-            }
-            crate::plots::figure::PlotElement::Line3(_) => true,
-            crate::plots::figure::PlotElement::Scatter3(_) => true,
-            crate::plots::figure::PlotElement::Contour(contour) => contour.is_3d(),
-            _ => false,
-        }
     }
 
     pub fn axes_has_3d_content(&self, axes_index: usize) -> bool {
@@ -427,7 +419,7 @@ impl PlotRenderer {
                     .plots()
                     .zip(figure.plot_axes_indices().iter().copied())
                     .any(|(plot, plot_axes_index)| {
-                        plot_axes_index == axes_index && Self::plot_element_is_3d(plot)
+                        plot_axes_index == axes_index && plot.is_3d_content()
                     })
             })
             .unwrap_or(false)
@@ -441,7 +433,7 @@ impl PlotRenderer {
             .plots()
             .zip(figure.plot_axes_indices().iter().copied())
         {
-            if axes_index < axes_count && Self::plot_element_is_3d(plot) {
+            if axes_index < axes_count && plot.is_3d_content() {
                 has_3d_content[axes_index] = true;
             }
         }
@@ -449,6 +441,7 @@ impl PlotRenderer {
             .map(|axes_index| {
                 let meta = figure.axes_metadata(axes_index);
                 AxesViewContractEntry {
+                    y_direction: meta.map(|m| m.y_direction).unwrap_or_default(),
                     has_3d_content: has_3d_content[axes_index],
                     axes_kind: meta.map(|m| m.axes_kind).unwrap_or(AxesKind::Cartesian),
                     x_limits: meta.and_then(|m| m.x_limits),
@@ -472,6 +465,69 @@ impl PlotRenderer {
             log::debug!(target: "runmat_plot", "camera_auto_fit disabled (user interaction)");
         }
         self.camera_auto_fit = false;
+        self.figure_camera_fit.fill(FigureCameraFitState::Inactive);
+    }
+
+    /// An explicit camera override owns its view; an initial Figure fit must not replace it.
+    pub fn cancel_figure_viewport_fit(&mut self, axes_index: usize) {
+        if let Some(state) = self.figure_camera_fit.get_mut(axes_index) {
+            *state = FigureCameraFitState::Inactive;
+        }
+    }
+
+    pub fn fit_pending_figure_camera_for_viewport(
+        &mut self,
+        axes_index: usize,
+        viewport: (u32, u32),
+    ) {
+        if !self
+            .figure_camera_fit
+            .get(axes_index)
+            .copied()
+            .unwrap_or_default()
+            .pending_for(viewport)
+            || !self.axes_has_3d_content(axes_index)
+        {
+            return;
+        }
+        let Some(bounds) = self.display_bounds_3d_for_axes(axes_index) else {
+            return;
+        };
+        if let Some(camera) = self.axes_cameras.get_mut(axes_index) {
+            if camera.fit_figure_perspective_bounds(bounds.min, bounds.max, viewport) {
+                if let Some(state) = self.figure_camera_fit.get_mut(axes_index) {
+                    state.fitted(viewport);
+                }
+            }
+        }
+    }
+
+    pub fn fit_pending_figure_cameras_for_viewports(&mut self, viewports: &[(u32, u32)]) {
+        for (axes_index, viewport) in viewports.iter().copied().enumerate() {
+            self.fit_pending_figure_camera_for_viewport(axes_index, viewport);
+        }
+    }
+
+    /// Non-overlay Figure rendering uses the same per-axes tile extents as scene drawing.
+    pub fn fit_pending_figure_cameras_for_surface(&mut self, width: u32, height: u32) {
+        let viewports = self.compute_axes_viewports_px(width.max(1), height.max(1));
+        for (axes_index, (_, _, tile_width, tile_height)) in viewports.into_iter().enumerate() {
+            self.fit_pending_figure_camera_for_viewport(axes_index, (tile_width, tile_height));
+        }
+    }
+
+    fn arm_figure_camera_fits(&mut self) {
+        self.figure_camera_fit
+            .resize(self.axes_cameras.len(), FigureCameraFitState::Inactive);
+        for axes_index in 0..self.axes_cameras.len() {
+            self.figure_camera_fit[axes_index] = if self.axes_has_3d_content(axes_index) {
+                FigureCameraFitState::Auto {
+                    last_viewport: None,
+                }
+            } else {
+                FigureCameraFitState::Inactive
+            };
+        }
     }
 
     pub fn note_axes_camera_interaction(&mut self, axes_index: usize) {
@@ -517,7 +573,11 @@ impl PlotRenderer {
     }
 
     /// Set the figure to render
-    pub fn set_figure(&mut self, figure: Figure) {
+    pub fn set_figure(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        figure: Figure,
+    ) {
         self.last_geometry_scene_key = None;
         self.last_geometry_scene = None;
         self.geometry_overlay = None;
@@ -586,7 +646,7 @@ impl PlotRenderer {
             }
         }
 
-        self.add_figure_to_scene(figure);
+        self.add_figure_to_scene(emission, figure);
 
         // Mark for update
         self.needs_update = true;
@@ -607,6 +667,11 @@ impl PlotRenderer {
             self.camera_auto_fit = false;
         }
         self.apply_stored_axes_views();
+        self.figure_camera_fit
+            .resize(num_axes, FigureCameraFitState::Inactive);
+        if fit_applied {
+            self.arm_figure_camera_fits();
+        }
     }
 
     /// Set a chunked geometry scene to render.
@@ -626,6 +691,7 @@ impl PlotRenderer {
         geometry_scene: GeometryScene,
         mut presentation: GeometryScenePresentation,
     ) {
+        self.figure_camera_fit.fill(FigureCameraFitState::Inactive);
         let cache_key = geometry_scene.cache_key();
         let same_scene_identity = self
             .last_geometry_scene_key
@@ -729,12 +795,17 @@ impl PlotRenderer {
     }
 
     /// Add a figure to the current scene
-    fn add_figure_to_scene(&mut self, figure: Figure) {
-        self.add_figure_to_scene_with_axes_plot_sizes(figure, None);
+    fn add_figure_to_scene(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        figure: Figure,
+    ) {
+        self.add_figure_to_scene_with_axes_plot_sizes(emission, figure, None);
     }
 
     fn add_figure_to_scene_with_axes_plot_sizes(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         mut figure: Figure,
         axes_plot_sizes_px: Option<&[(u32, u32)]>,
     ) {
@@ -752,10 +823,7 @@ impl PlotRenderer {
             self.wgpu_renderer.surface_config.height.max(1),
         );
         self.last_scene_viewport_px = Some(viewport_px);
-        let gpu = crate::core::GpuPackContext {
-            device: &self.wgpu_renderer.device,
-            queue: &self.wgpu_renderer.queue,
-        };
+        let gpu = crate::core::GpuPackContext { emission };
         let axes_count = figure.axes_count();
         let view_bounds = self.axes_view_bounds_for_count(axes_count);
         let viewport_hint = if axes_plot_sizes_px.is_some() || rows.max(1) * cols.max(1) <= 1 {
@@ -801,6 +869,7 @@ impl PlotRenderer {
 
     pub fn ensure_scene_viewport_dependent_geometry_for_axes(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         axes_plot_sizes_px: &[(u32, u32)],
     ) {
         let mut normalized: Vec<(u32, u32)> = axes_plot_sizes_px
@@ -844,7 +913,7 @@ impl PlotRenderer {
         }
         self.scene.clear();
         self.scene_buffer_cache.borrow_mut().clear();
-        self.add_figure_to_scene_with_axes_plot_sizes(figure, Some(&normalized));
+        self.add_figure_to_scene_with_axes_plot_sizes(emission, figure, Some(&normalized));
         log::debug!(
             target: "runmat_plot.viewport_rebuild",
             "rebuilt viewport-dependent scene geometry axes_count={} viewport_sizes={:?}",
@@ -1047,33 +1116,14 @@ impl PlotRenderer {
             .and_then(|fig| fig.axes_metadata(axes_index))
         {
             if meta.x_log {
-                (x_min, x_max) = Self::positive_log_bounds(x_min, x_max);
+                (x_min, x_max) = crate::plots::figure::positive_log_bounds(x_min, x_max);
             }
             if meta.y_log {
-                (y_min, y_max) = Self::positive_log_bounds(y_min, y_max);
+                (y_min, y_max) = crate::plots::figure::positive_log_bounds(y_min, y_max);
             }
         }
 
         Some((x_min, x_max, y_min, y_max))
-    }
-
-    fn positive_log_bounds(lo: f64, hi: f64) -> (f64, f64) {
-        if lo.is_finite() && hi.is_finite() && lo > 0.0 && hi > 0.0 && lo != hi {
-            return (lo, hi);
-        }
-        let upper = if hi.is_finite() && hi > 0.0 {
-            hi
-        } else if lo.is_finite() && lo > 0.0 {
-            lo
-        } else {
-            1.0
-        };
-        let lower = (upper / 1000.0).max(f64::MIN_POSITIVE);
-        if lower < upper {
-            (lower, upper)
-        } else {
-            (upper * 0.1, upper * 10.0)
-        }
     }
 
     fn apply_3d_display_limits_to_bounds(
@@ -1081,27 +1131,10 @@ impl PlotRenderer {
         figure: Option<&Figure>,
         axes_index: usize,
     ) -> BoundingBox {
-        let Some(meta) = figure.and_then(|fig| fig.axes_metadata(axes_index)) else {
-            return bounds;
-        };
-        let mut min = bounds.min;
-        let mut max = bounds.max;
-        if let Some((lo, hi)) = meta.x_limits {
-            min.x = lo as f32;
-            max.x = hi as f32;
-        }
-        if let Some((lo, hi)) = meta.y_limits {
-            min.y = lo as f32;
-            max.y = hi as f32;
-        }
-        if let Some((lo, hi)) = meta.z_limits {
-            min.z = lo as f32;
-            max.z = hi as f32;
-        }
-        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
-            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
-        }
-        BoundingBox { min, max }
+        crate::plots::figure::display_bounds_3d(
+            bounds,
+            figure.and_then(|fig| fig.axes_metadata(axes_index)),
+        )
     }
 
     fn bounds_are_finite(bounds: BoundingBox) -> bool {
@@ -1163,10 +1196,6 @@ impl PlotRenderer {
         }
         let axis = |extent: f32| if extent > largest * 1.0e-6 { 1.0 / extent } else { 1.0 / largest };
         Vec3::new(axis(size.x), axis(size.y), axis(size.z))
-    }
-
-    fn axes_model_matrix(&self, _axes_index: usize) -> Mat4 {
-        Mat4::IDENTITY
     }
 
     fn fit_cameras_to_axes_data(&mut self) -> bool {
@@ -1329,6 +1358,9 @@ impl PlotRenderer {
         } else {
             self.fit_camera_to_data()
         };
+        if self.last_figure.is_some() {
+            self.arm_figure_camera_fits();
+        }
         self.clear_all_axes_camera_interaction();
         self.camera_auto_fit = false;
         self.needs_update = true;
@@ -1380,6 +1412,9 @@ impl PlotRenderer {
             }
         }
 
+        if self.last_figure.is_some() {
+            self.arm_figure_camera_fits();
+        }
         self.clear_all_axes_camera_interaction();
         self.camera_auto_fit = false;
         self.needs_update = true;
@@ -1478,6 +1513,7 @@ impl PlotRenderer {
     /// Render the current scene to a specific viewport within a texture/surface
     pub fn render_to_viewport(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         _viewport: (f32, f32, f32, f32), // (x, y, width, height) in framebuffer coordinates
@@ -1494,11 +1530,12 @@ impl PlotRenderer {
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
                 if let Some(vertex_buffer) = self.wgpu_renderer.vertex_buffer_from_sources(
+                    emission,
                     render_data.gpu_vertices.as_ref(),
                     &render_data.vertices,
                 ) {
                     self.wgpu_renderer
-                        .ensure_pipeline(render_data.pipeline_type);
+                        .ensure_pipeline(emission, render_data.pipeline_type);
 
                     log::trace!(
                         target: "runmat_plot",
@@ -1521,29 +1558,27 @@ impl PlotRenderer {
         let mut cam = self.camera().clone();
         let view_proj_matrix = cam.view_proj_matrix();
 
+        let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
-            .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
+            .update_uniforms(emission, view_proj_matrix, model_matrix);
 
         // Create render pass (respect MSAA)
         let use_msaa = self.wgpu_renderer.msaa_sample_count > 1;
         let msaa_view_opt = if use_msaa {
-            let tex = self
-                .wgpu_renderer
-                .device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some("runmat_msaa_color_camera"),
-                    size: wgpu::Extent3d {
-                        width: self.wgpu_renderer.surface_config.width,
-                        height: self.wgpu_renderer.surface_config.height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: self.wgpu_renderer.msaa_sample_count,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: self.wgpu_renderer.surface_config.format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    view_formats: &[],
-                });
+            let tex = emission.device().create_texture(&wgpu::TextureDescriptor {
+                label: Some("runmat_msaa_color_camera"),
+                size: wgpu::Extent3d {
+                    width: self.wgpu_renderer.surface_config.width,
+                    height: self.wgpu_renderer.surface_config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: self.wgpu_renderer.msaa_sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.wgpu_renderer.surface_config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
             Some(tex.create_view(&wgpu::TextureViewDescriptor::default()))
         } else {
             None
@@ -1584,18 +1619,25 @@ impl PlotRenderer {
         let ndc_right = ((vx + vw) / sw) * 2.0 - 1.0;
         let ndc_top = 1.0 - (vy / sh) * 2.0;
         let ndc_bottom = 1.0 - ((vy + vh) / sh) * 2.0;
+        let direction = self.overlay_y_direction_for_axes(0);
+        let (ndc_bottom, ndc_top) = (
+            direction.orient(ndc_bottom, ndc_bottom, ndc_top),
+            direction.orient(ndc_top, ndc_bottom, ndc_top),
+        );
 
         // data_bounds passed in from caller: (x_min, y_min, x_max, y_max)
         let (x_min, y_min, x_max, y_max) = (0.0_f64, 0.0_f64, 1.0_f64, 1.0_f64);
-        self.wgpu_renderer
-            .update_direct_uniforms(DirectUniforms::new(
+        self.wgpu_renderer.update_direct_uniforms(
+            emission,
+            DirectUniforms::new(
                 [x_min as f32, y_min as f32],
                 [x_max as f32, y_max as f32],
                 [ndc_left, ndc_bottom],
                 [ndc_right, ndc_top],
                 [sw, sh],
                 [0, 0],
-            ));
+            ),
+        );
 
         // Continue with specific pipelines below (implementation omitted here)
         drop(render_pass);
@@ -1620,6 +1662,7 @@ impl PlotRenderer {
     /// Render the current scene to a texture/surface
     pub fn render(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target: RenderTarget<'_>,
         config: &PlotRenderConfig,
@@ -1635,7 +1678,7 @@ impl PlotRenderer {
         let view_proj_matrix = cam.view_proj_matrix();
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
-            .update_uniforms(view_proj_matrix, model_matrix);
+            .update_uniforms(emission, view_proj_matrix, model_matrix);
 
         // Collect all render data and create vertex buffers first (outside render pass)
         let mut render_items = Vec::new();
@@ -1645,10 +1688,10 @@ impl PlotRenderer {
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
                 if let Some((vertex_buffer, index_buffer)) =
-                    self.prepare_buffers_for_render_data(node.id, render_data)
+                    self.prepare_buffers_for_render_data(emission, node.id, render_data)
                 {
                     self.wgpu_renderer
-                        .ensure_pipeline(render_data.pipeline_type);
+                        .ensure_pipeline(emission, render_data.pipeline_type);
                     render_items.push((render_data, vertex_buffer, index_buffer));
 
                     total_vertices += render_data.vertex_count();
@@ -1667,7 +1710,7 @@ impl PlotRenderer {
         });
         if has_textured_items {
             // Ensure image pipeline once to avoid mutable borrow during pass.
-            self.wgpu_renderer.ensure_image_pipeline();
+            self.wgpu_renderer.ensure_image_pipeline(emission);
             let mut inferred_bounds: Option<(f64, f64, f64, f64)> = None;
             for (render_data, _, _) in &render_items {
                 let Some(bounds) = render_data.bounds.as_ref() else {
@@ -1708,15 +1751,18 @@ impl PlotRenderer {
                 config.width,
                 config.height
             );
-            self.wgpu_renderer
-                .update_direct_uniforms(DirectUniforms::new(
+            let (ndc_y_min, ndc_y_max) = self.overlay_y_direction_for_axes(0).ndc_endpoints();
+            self.wgpu_renderer.update_direct_uniforms(
+                emission,
+                DirectUniforms::new(
                     [x_min as f32, y_min as f32],
                     [x_max as f32, y_max as f32],
-                    [-1.0, -1.0],
-                    [1.0, 1.0],
+                    [-1.0, ndc_y_min],
+                    [1.0, ndc_y_max],
                     [config.width as f32, config.height as f32],
                     [0, 0],
-                ));
+                ),
+            );
         }
         for (render_data, _vb, _ib) in &render_items {
             if render_data.pipeline_type == crate::core::PipelineType::Textured {
@@ -1728,7 +1774,7 @@ impl PlotRenderer {
                 {
                     let (_tex, _view, img_bg) = self
                         .wgpu_renderer
-                        .create_image_texture_and_bind_group(*width, *height, data);
+                        .create_image_texture_and_bind_group(emission, *width, *height, data);
                     image_bind_groups.push(Some(img_bg));
                 } else {
                     image_bind_groups.push(None);
@@ -1751,7 +1797,9 @@ impl PlotRenderer {
                     marker_shape: render_data.material.metallic as u32,
                     _pad: [0.0, 0.0],
                 };
-                let (_buf, bg) = self.wgpu_renderer.create_point_style_bind_group(style);
+                let (_buf, bg) = self
+                    .wgpu_renderer
+                    .create_point_style_bind_group(emission, style);
                 point_style_bind_groups.push(Some(bg));
             } else {
                 point_style_bind_groups.push(None);
@@ -1769,20 +1817,20 @@ impl PlotRenderer {
                 let expanded = self
                     .wgpu_renderer
                     .create_direct_point_vertices(&render_data.vertices, 0.0);
-                let buffer = self.wgpu_renderer.create_vertex_buffer(&expanded);
+                let buffer = self.wgpu_renderer.create_vertex_buffer(emission, &expanded);
                 point_buffers.push(Some((buffer, expanded.len())));
             } else {
                 point_buffers.push(None);
             }
         }
-        self.wgpu_renderer.update_marker_screen_uniforms([
-            config.width.max(1) as f32,
-            config.height.max(1) as f32,
-        ]);
+        self.wgpu_renderer.update_marker_screen_uniforms(
+            emission,
+            [config.width.max(1) as f32, config.height.max(1) as f32],
+        );
 
         // Create render pass
         {
-            let depth_view = self.wgpu_renderer.ensure_depth_view();
+            let depth_view = self.wgpu_renderer.ensure_depth_view(emission);
             let use_msaa = self.wgpu_renderer.msaa_sample_count > 1;
             let mut cached_msaa_view: Option<Arc<wgpu::TextureView>> = None;
 
@@ -1790,7 +1838,7 @@ impl PlotRenderer {
                 if let Some(explicit_resolve_target) = target.resolve_target {
                     (target.view, Some(explicit_resolve_target))
                 } else {
-                    cached_msaa_view = Some(self.wgpu_renderer.ensure_msaa_color_view());
+                    cached_msaa_view = Some(self.wgpu_renderer.ensure_msaa_color_view(emission));
                     (
                         cached_msaa_view
                             .as_ref()
@@ -1990,6 +2038,7 @@ impl PlotRenderer {
     /// For subplot grids, it renders each axes into a deterministic tiled viewport layout.
     pub fn render_scene_to_target(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         config: &PlotRenderConfig,
@@ -2005,9 +2054,13 @@ impl PlotRenderer {
             config.width,
             config.height
         );
-        if axes_count <= 1 && !self.axes_position_explicit_for_axes(0) {
+        if axes_count <= 1
+            && !self.axes_position_explicit_for_axes(0)
+            && self.axes_grid_cell_for_axes(0).is_none()
+        {
             log::debug!("runmat-plot: renderer.scene_to_target.branch_single_axes");
             return self.render(
+                emission,
                 encoder,
                 RenderTarget {
                     view: target_view,
@@ -2023,6 +2076,7 @@ impl PlotRenderer {
             viewports.len()
         );
         self.render_axes_to_viewports(
+            emission,
             encoder,
             target_view,
             &viewports,
@@ -2040,102 +2094,17 @@ impl PlotRenderer {
         })
     }
 
-    fn compute_tiled_viewports(
-        total_width: u32,
-        total_height: u32,
-        rows: usize,
-        cols: usize,
-    ) -> Vec<(u32, u32, u32, u32)> {
-        if rows == 0 || cols == 0 {
-            return vec![(0, 0, total_width.max(1), total_height.max(1))];
-        }
-        let rows_u32 = rows as u32;
-        let cols_u32 = cols as u32;
-        let cell_w = (total_width / cols_u32).max(1);
-        let cell_h = (total_height / rows_u32).max(1);
-        let mut out = Vec::with_capacity(rows * cols);
-        for r in 0..rows_u32 {
-            for c in 0..cols_u32 {
-                let x = c * cell_w;
-                let y = r * cell_h;
-                let mut w = cell_w;
-                let mut h = cell_h;
-                if c + 1 == cols_u32 {
-                    w = total_width.saturating_sub(x).max(1);
-                }
-                if r + 1 == rows_u32 {
-                    h = total_height.saturating_sub(y).max(1);
-                }
-                out.push((x, y, w, h));
-            }
-        }
-        out
-    }
-
     pub fn compute_axes_viewports_px(
         &self,
         total_width: u32,
         total_height: u32,
     ) -> Vec<(u32, u32, u32, u32)> {
-        let total_width = total_width.max(1);
-        let total_height = total_height.max(1);
-        let (rows, cols) = self.figure_axes_grid();
-        let axes_count = self.figure_axes_count().max(1);
-        let full = (0, 0, total_width, total_height);
-        let mut viewports = if rows.saturating_mul(cols) > 1 {
-            Self::compute_tiled_viewports(total_width, total_height, rows, cols)
-        } else {
-            vec![full; axes_count]
-        };
-        if viewports.len() < axes_count {
-            let grid_len = viewports.len().max(1);
-            for axes_index in viewports.len()..axes_count {
-                let parent = self
-                    .overlay_parent_for_axes(axes_index)
-                    .unwrap_or(axes_index)
-                    .min(grid_len - 1);
-                viewports.push(viewports.get(parent).copied().unwrap_or(full));
-            }
-        }
-        viewports.truncate(axes_count);
-        for (axes_index, viewport) in viewports.iter_mut().enumerate() {
-            if let Some((position, units)) = self.overlay_position_for_axes(axes_index) {
-                *viewport =
-                    Self::axes_position_to_viewport_px(total_width, total_height, position, &units);
-            }
-        }
-        viewports
-    }
-
-    fn axes_position_to_viewport_px(
-        total_width: u32,
-        total_height: u32,
-        position: [f64; 4],
-        units: &str,
-    ) -> (u32, u32, u32, u32) {
-        let tw = f64::from(total_width.max(1));
-        let th = f64::from(total_height.max(1));
-        let (left, bottom, width, height) = if units.eq_ignore_ascii_case("normalized") {
-            (
-                position[0] * tw,
-                position[1] * th,
-                position[2] * tw,
-                position[3] * th,
-            )
-        } else {
-            (position[0], position[1], position[2], position[3])
-        };
-        let x = left.clamp(0.0, tw - 1.0);
-        let h = height.max(1.0).min(th);
-        let y = (th - bottom - h).clamp(0.0, th - 1.0);
-        let w = width.max(1.0).min(tw - x);
-        let h = h.min(th - y);
-        (
-            x.round() as u32,
-            y.round() as u32,
-            w.round().max(1.0) as u32,
-            h.round().max(1.0) as u32,
-        )
+        self.last_figure
+            .as_ref()
+            .map(|figure| {
+                crate::core::axes_layout::figure_viewports_px(figure, total_width, total_height)
+            })
+            .unwrap_or_else(|| vec![(0, 0, total_width.max(1), total_height.max(1))])
     }
 
     /// Render using the camera-based pipeline into a viewport region with a scissor rectangle.
@@ -2143,6 +2112,7 @@ impl PlotRenderer {
     #[allow(clippy::too_many_arguments)]
     pub fn render_camera_to_viewport(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         viewport_scissor: (u32, u32, u32, u32),
@@ -2163,7 +2133,7 @@ impl PlotRenderer {
         let use_msaa = config.msaa_samples.max(1) > 1;
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);
         let msaa_view_keepalive = if use_msaa {
-            Some(self.wgpu_renderer.ensure_msaa_color_view())
+            Some(self.wgpu_renderer.ensure_msaa_color_view(emission))
         } else {
             None
         };
@@ -2179,6 +2149,7 @@ impl PlotRenderer {
             }
         };
         self.render_camera_to_target_viewport(
+            emission,
             encoder,
             render_target,
             viewport_scissor,
@@ -2192,6 +2163,7 @@ impl PlotRenderer {
     #[allow(clippy::too_many_arguments)]
     fn render_camera_to_target_viewport(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target: RenderTarget<'_>,
         viewport_scissor: (u32, u32, u32, u32),
@@ -2209,7 +2181,7 @@ impl PlotRenderer {
         // Ensure a depth attachment exists for camera-based 3D rendering.
         // This is a no-op for pure 2D direct-mapped pipelines, but is required for correct
         // occlusion in 3D plots (surf/mesh/scatter3).
-        let depth_view = self.wgpu_renderer.ensure_depth_view();
+        let depth_view = self.wgpu_renderer.ensure_depth_view(emission);
 
         // Update standard uniforms from the provided camera
         let aspect_ratio = (config.width.max(1)) as f32 / (config.height.max(1)) as f32;
@@ -2240,8 +2212,12 @@ impl PlotRenderer {
         }
         let view_proj_matrix = cam.view_proj_matrix();
         let model_matrix = self.axes_model_matrix(axes_index);
-        self.wgpu_renderer
-            .update_uniforms_for_axes(axes_index, view_proj_matrix, model_matrix);
+        self.wgpu_renderer.update_uniforms_for_axes(
+            emission,
+            axes_index,
+            view_proj_matrix,
+            model_matrix,
+        );
         log::debug!(
             "runmat-plot: renderer.camera_to_target_viewport.uniforms_updated axes_index={}",
             axes_index
@@ -2342,9 +2318,11 @@ impl PlotRenderer {
                         render_data.gpu_vertices.is_some()
                     );
                 }
-                if let Some((vb, ib)) = self.prepare_buffers_for_render_data(node.id, render_data) {
+                if let Some((vb, ib)) =
+                    self.prepare_buffers_for_render_data(emission, node.id, render_data)
+                {
                     self.wgpu_renderer
-                        .ensure_pipeline(render_data.pipeline_type);
+                        .ensure_pipeline(emission, render_data.pipeline_type);
                     total_vertices += render_data.vertex_count();
                     if let Some(indices) = &render_data.indices {
                         total_triangles += indices.len() / 3;
@@ -2364,7 +2342,7 @@ impl PlotRenderer {
         // 3D helpers: a horizontal world grid and world-axis ticks. Keeping the
         // grid on XY gives it a stable meaning as the camera moves.
         if !is_2d && self.overlay_show_grid_for_axes(axes_index) {
-            let view_proj = view_proj_matrix;
+            let view_proj = view_proj_matrix * model_matrix;
             let inv_view_proj = view_proj.inverse();
             // The camera lives in axis-scaled space (3-D axes stretch to a cube); this helper is
             // built in data units, so read the camera's target and position back in data units.
@@ -2559,8 +2537,9 @@ impl PlotRenderer {
                 if !show_minor_grid {
                     minor_alpha = 0.0;
                 }
-                self.wgpu_renderer.ensure_grid_plane_pipeline();
+                self.wgpu_renderer.ensure_grid_plane_pipeline(emission);
                 self.wgpu_renderer.update_grid_uniforms_for_axes(
+                    emission,
                     axes_index,
                     crate::core::renderer::GridUniforms {
                         major_step: major_step as f32,
@@ -2583,8 +2562,12 @@ impl PlotRenderer {
                     Vertex::new(on_grid(min_x, max_y), Vec4::ONE),
                 ];
                 let quad_indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
-                let vb = self.wgpu_renderer.create_vertex_buffer(&quad_vertices);
-                let ib = self.wgpu_renderer.create_index_buffer(&quad_indices);
+                let vb = self
+                    .wgpu_renderer
+                    .create_vertex_buffer(emission, &quad_vertices);
+                let ib = self
+                    .wgpu_renderer
+                    .create_index_buffer(emission, &quad_indices);
                 grid_plane_buffers = Some((vb, ib));
             }
 
@@ -2670,9 +2653,9 @@ impl PlotRenderer {
                 if let Some(dc) = owned_render_data[idx].draw_calls.get_mut(0) {
                     dc.vertex_count = vcount;
                 }
-                let vb = Arc::new(
+                let vb = runmat_accelerate_api::WgpuBufferOwner::new(
                     self.wgpu_renderer
-                        .create_vertex_buffer(&owned_render_data[idx].vertices),
+                        .create_vertex_buffer(emission, &owned_render_data[idx].vertices),
                 );
                 // Draw helpers first (under data, depth-tested).
                 let rd_ref: &crate::core::RenderData = &owned_render_data[idx];
@@ -2694,7 +2677,7 @@ impl PlotRenderer {
                     .wgpu_renderer
                     // size_px=0.0 => use per-vertex normal.z sizes
                     .create_direct_point_vertices(&render_data.vertices, 0.0);
-                let buf = self.wgpu_renderer.create_vertex_buffer(&expanded);
+                let buf = self.wgpu_renderer.create_vertex_buffer(emission, &expanded);
                 point_buffers.push(Some((buf, expanded.len())));
             } else {
                 point_buffers.push(None);
@@ -2705,7 +2688,7 @@ impl PlotRenderer {
             render_data.pipeline_type == crate::core::PipelineType::Textured
         });
         if has_textured_items {
-            self.wgpu_renderer.ensure_image_pipeline();
+            self.wgpu_renderer.ensure_image_pipeline(emission);
         }
         let mut image_bind_groups: Vec<Option<wgpu::BindGroup>> =
             Vec::with_capacity(render_items.len());
@@ -2720,7 +2703,7 @@ impl PlotRenderer {
                 {
                     let (_t, _v, bg) = self
                         .wgpu_renderer
-                        .create_image_texture_and_bind_group(*width, *height, data);
+                        .create_image_texture_and_bind_group(emission, *width, *height, data);
                     image_bind_groups.push(Some(bg));
                 } else {
                     image_bind_groups.push(None);
@@ -2744,7 +2727,9 @@ impl PlotRenderer {
                     marker_shape: render_data.material.metallic as u32,
                     _pad: [0.0, 0.0],
                 };
-                let (_buf, bg) = self.wgpu_renderer.create_point_style_bind_group(style);
+                let (_buf, bg) = self
+                    .wgpu_renderer
+                    .create_point_style_bind_group(emission, style);
                 point_style_bind_groups.push(Some(bg));
             } else {
                 point_style_bind_groups.push(None);
@@ -2766,19 +2751,24 @@ impl PlotRenderer {
                     b = -radius;
                     t = radius;
                 }
+                // Reflect output coordinates after log mapping; limits stay ordered.
+                let (ndc_y_min, ndc_y_max) = self
+                    .overlay_y_direction_for_axes(axes_index)
+                    .ndc_endpoints();
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
+                    emission,
                     axes_index,
                     DirectUniforms::new(
                         [l as f32, b as f32],
                         [r as f32, t as f32],
-                        [-1.0, -1.0],
-                        [1.0, 1.0],
+                        [-1.0, ndc_y_min],
+                        [1.0, ndc_y_max],
                         [sw.max(1) as f32, sh.max(1) as f32],
                         log_flags,
                     ),
                 );
-                self.wgpu_renderer.ensure_direct_line_pipeline();
+                self.wgpu_renderer.ensure_direct_line_pipeline(emission);
 
                 let x_range = (r - l).max(1e-6);
                 let y_range = (t - b).max(1e-6);
@@ -2898,7 +2888,10 @@ impl PlotRenderer {
                     }
                 }
                 if !grid_vertices.is_empty() {
-                    grid_vb_opt = Some(self.wgpu_renderer.create_vertex_buffer(&grid_vertices));
+                    grid_vb_opt = Some(
+                        self.wgpu_renderer
+                            .create_vertex_buffer(emission, &grid_vertices),
+                    );
                 }
             }
         }
@@ -2920,33 +2913,38 @@ impl PlotRenderer {
         };
         if is_2d {
             if let Some((l, r, b, t)) = bounds_opt {
+                let (ndc_y_min, ndc_y_max) = self
+                    .overlay_y_direction_for_axes(axes_index)
+                    .ndc_endpoints();
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
+                    emission,
                     axes_index,
                     DirectUniforms::new(
                         [l as f32, b as f32],
                         [r as f32, t as f32],
-                        [-1.0, -1.0],
-                        [1.0, 1.0],
+                        [-1.0, ndc_y_min],
+                        [1.0, ndc_y_max],
                         [sw.max(1) as f32, sh.max(1) as f32],
                         log_flags,
                     ),
                 );
             }
-            self.wgpu_renderer.ensure_direct_triangle_pipeline();
-            self.wgpu_renderer.ensure_direct_line_pipeline();
-            self.wgpu_renderer.ensure_direct_point_pipeline();
+            self.wgpu_renderer.ensure_direct_triangle_pipeline(emission);
+            self.wgpu_renderer.ensure_direct_line_pipeline(emission);
+            self.wgpu_renderer.ensure_direct_point_pipeline(emission);
         } else {
             // 3D: ensure camera-based pipelines exist so surfaces rotate with the camera.
             self.wgpu_renderer
-                .ensure_pipeline(crate::core::PipelineType::Triangles);
+                .ensure_pipeline(emission, crate::core::PipelineType::Triangles);
             self.wgpu_renderer
-                .ensure_pipeline(crate::core::PipelineType::Lines);
+                .ensure_pipeline(emission, crate::core::PipelineType::Lines);
             self.wgpu_renderer
-                .ensure_pipeline(crate::core::PipelineType::LinesNoDepth);
+                .ensure_pipeline(emission, crate::core::PipelineType::LinesNoDepth);
             self.wgpu_renderer
-                .ensure_pipeline(crate::core::PipelineType::Points);
+                .ensure_pipeline(emission, crate::core::PipelineType::Points);
         }
         self.wgpu_renderer.update_marker_screen_uniforms_for_axes(
+            emission,
             axes_index,
             [sw.max(1) as f32, sh.max(1) as f32],
         );
@@ -3320,6 +3318,7 @@ impl PlotRenderer {
     /// `axes_viewports` is a vector of (x, y, w, h) in physical pixels, length equals rows*cols.
     pub fn render_axes_to_viewports(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         axes_viewports: &[(u32, u32, u32, u32)],
@@ -3347,7 +3346,7 @@ impl PlotRenderer {
             self.axes_cameras.push(Self::create_default_camera());
         }
         self.wgpu_renderer
-            .ensure_axes_uniform_capacity(axes_viewports.len().max(1));
+            .ensure_axes_uniform_capacity(emission, axes_viewports.len().max(1));
 
         // Pre-collect all node ids
         let all_ids: Vec<crate::core::scene::NodeId> = self
@@ -3373,7 +3372,7 @@ impl PlotRenderer {
 
         self.wgpu_renderer.ensure_msaa(msaa_samples.max(1));
         let shared_msaa_view = if self.wgpu_renderer.msaa_sample_count > 1 {
-            Some(self.wgpu_renderer.ensure_msaa_color_view())
+            Some(self.wgpu_renderer.ensure_msaa_color_view(emission))
         } else {
             None
         };
@@ -3446,6 +3445,7 @@ impl PlotRenderer {
                 }
             };
             let _ = self.render_camera_to_target_viewport(
+                emission,
                 encoder,
                 render_target,
                 *viewport,
@@ -4374,6 +4374,14 @@ impl PlotRenderer {
             .map(|m| m.position_explicit)
             .unwrap_or(false)
     }
+    fn axes_grid_cell_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Option<crate::plots::figure::AxesGridCell> {
+        self.last_figure
+            .as_ref()
+            .and_then(|figure| figure.axes_grid_cell(axes_index))
+    }
     pub fn overlay_position_for_axes(&self, axes_index: usize) -> Option<([f64; 4], String)> {
         self.last_figure
             .as_ref()
@@ -4588,22 +4596,6 @@ fn geometry_scene_view_preset_to_camera(preset: GeometrySceneViewPreset) -> Came
     }
 }
 
-fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
-    let aspect = Vec3::new(
-        ratio[0].abs().max(1.0e-12) as f32,
-        ratio[1].abs().max(1.0e-12) as f32,
-        ratio[2].abs().max(1.0e-12) as f32,
-    );
-    let center = (min + max) * 0.5;
-    let span = (max - min).abs().max(Vec3::splat(0.1));
-    let units = (span.x / aspect.x)
-        .max(span.y / aspect.y)
-        .max(span.z / aspect.z)
-        .max(0.1);
-    let next = aspect * units;
-    (center - next * 0.5, center + next * 0.5)
-}
-
 fn relative_luminance(color: Vec4) -> f32 {
     0.2126 * color.x + 0.7152 * color.y + 0.0722 * color.z
 }
@@ -4708,7 +4700,7 @@ mod tests {
             Vec3::new(0.0, 1.0e-4, 1.0e-8),
         ]);
 
-        assert!(PlotRenderer::plot_element_is_3d(&patch));
+        assert!(patch.is_3d_content());
     }
 
     #[test]
@@ -4719,7 +4711,7 @@ mod tests {
             Vec3::new(0.0, 1.0e6, 0.5),
         ]);
 
-        assert!(!PlotRenderer::plot_element_is_3d(&patch));
+        assert!(!patch.is_3d_content());
     }
 
     #[test]
@@ -4753,11 +4745,18 @@ mod tests {
         let figure = Figure::new();
         let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
 
-        let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
-
-        assert!(PlotRenderer::bounds_are_finite(display));
-        assert_eq!(display.min.z, 0.0);
-        assert_eq!(display.max.z, 0.0);
+        // Figure metadata applies its default tick-aligned axis limits. The
+        // metadata-free fallback instead supplies the minimum camera span.
+        for (figure, z_min, z_max) in [(Some(&figure), -0.6, 0.6), (None, -0.05, 0.05)] {
+            let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, figure, 0);
+            assert!(PlotRenderer::bounds_are_finite(display));
+            assert_eq!(display.min.z, z_min);
+            assert_eq!(display.max.z, z_max);
+            assert_eq!(display.min.x, bounds.min.x);
+            assert_eq!(display.max.x, bounds.max.x);
+            assert_eq!(display.min.y, bounds.min.y);
+            assert_eq!(display.max.y, bounds.max.y);
+        }
     }
 
     #[test]
@@ -4778,12 +4777,15 @@ mod tests {
 
     #[test]
     fn positive_log_bounds_preserve_valid_positive_range() {
-        assert_eq!(PlotRenderer::positive_log_bounds(1.0, 100.0), (1.0, 100.0));
+        assert_eq!(
+            crate::plots::figure::positive_log_bounds(1.0, 100.0),
+            (1.0, 100.0)
+        );
     }
 
     #[test]
     fn positive_log_bounds_recover_from_nonpositive_lower_bound() {
-        let (lo, hi) = PlotRenderer::positive_log_bounds(-10.0, 100.0);
+        let (lo, hi) = crate::plots::figure::positive_log_bounds(-10.0, 100.0);
 
         assert!(lo > 0.0);
         assert_eq!(hi, 100.0);

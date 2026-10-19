@@ -1,148 +1,29 @@
-//! Minimal MATLAB-compatible `optimset` options struct builder.
+//! Optimization option construction and resident-payload materialization.
 
+use crate::{build_runtime_error, BuiltinResult, RuntimeError, RuntimeErrorBuilder};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, OPTIMSET_ERROR_INVALID_ARGUMENT, OPTIMSET_ERROR_INVALID_INPUT,
+    OPTIMSET_INTEGER_OPTION_EXTENSION as INTEGER_OPTION_EXTENSION,
+    OPTIMSET_RESIDENT_OPTION_EXTENSION as RESIDENT_OPTION_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{StructValue, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::math::optim::common::{canonical_option_name, field_name};
-use crate::builtins::math::optim::type_resolvers::optim_options_type;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+mod admission;
 
 const NAME: &str = "optimset";
-
-const INTEGER_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "optimset-integer-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "optimset with native-class integer option payloads is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:OptimsetIntegerOptionExtension"),
-};
-const RESIDENT_OPTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "optimset-resident-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "optimset preserving explicit gpuArray option payloads is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:OptimsetResidentOptionExtension"),
-};
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [INTEGER_OPTION_EXTENSION, RESIDENT_OPTION_EXTENSION];
-
-const INTEGER_OPTION_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "option value",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Documented numeric optimset options use single or double; RunMat can preserve exact native integer payloads in its struct extension.",
-}];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor { form: "options = optimset(___, name, integer_value, ___)", inputs: &INTEGER_OPTION_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Typed integer payloads are gated and retained exactly in the RunMat options struct; automatic resident payloads gather while explicit resident preservation is separately gated." }];
-
-const OPTIMSET_OUTPUT_OPTIONS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Options struct for optimization solvers.",
-}];
-
-const OPTIMSET_INPUTS_PAIRS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option field name.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option value.",
-    },
-];
-
-const OPTIMSET_INPUTS_EXISTING_AND_PAIRS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "oldopts",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Existing options struct to update.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Option field name.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option value(s) and additional name/value pairs.",
-    },
-];
-
-const OPTIMSET_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "options = optimset()",
-        inputs: &[],
-        outputs: &OPTIMSET_OUTPUT_OPTIONS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "options = optimset(name, value, ...)",
-        inputs: &OPTIMSET_INPUTS_PAIRS,
-        outputs: &OPTIMSET_OUTPUT_OPTIONS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "options = optimset(oldopts, name, value, ...)",
-        inputs: &OPTIMSET_INPUTS_EXISTING_AND_PAIRS,
-        outputs: &OPTIMSET_OUTPUT_OPTIONS,
-    },
-];
-
-const OPTIMSET_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMSET.INVALID_ARGUMENT",
-    identifier: Some("RunMat:optimset:InvalidArgument"),
-    when: "Name/value argument grammar is invalid.",
-    message: "optimset: invalid argument",
-};
-
-const OPTIMSET_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OPTIMSET.INVALID_INPUT",
-    identifier: Some("RunMat:optimset:InvalidInput"),
-    when: "Option field names are not valid string scalars.",
-    message: "optimset: invalid input",
-};
-
-const OPTIMSET_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    OPTIMSET_ERROR_INVALID_ARGUMENT,
-    OPTIMSET_ERROR_INVALID_INPUT,
-];
-
-pub const OPTIMSET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OPTIMSET_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &OPTIMSET_ERRORS,
-};
 
 fn optimset_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
 ) -> RuntimeError {
+    optimset_error_builder(error, detail).build()
+}
+
+fn optimset_error_builder(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeErrorBuilder {
     let detail = detail.as_ref();
     let message = if detail.starts_with("optimset:") {
         detail.to_string()
@@ -153,94 +34,38 @@ fn optimset_error_with_detail(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    builder
 }
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::optim::optimset")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "optimset",
-    op_kind: GpuOpKind::Custom("options"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host metadata construction. Automatic resident option payloads gather transparently; explicitly resident payload preservation is a gated RunMat extension.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::optim::optimset")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "optimset",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Option struct construction is host metadata work and does not fuse.",
-};
 
 #[runtime_builtin(
     name = "optimset",
-    category = "math/optim",
-    summary = "Create or update optimization options structures.",
-    keywords = "optimset,options,TolX,TolFun,MaxIter,Display",
-    type_resolver(optim_options_type),
-    descriptor(crate::builtins::math::optim::optimset::OPTIMSET_DESCRIPTOR),
-    extensions(crate::builtins::math::optim::optimset::EXTENSIONS),
-    integer_capabilities(crate::builtins::math::optim::optimset::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::optim::optimset"
 )]
 async fn optimset_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_optimset_extensions(&rest)?;
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::OPTIMSET_DESCRIPTOR,
+        &OPTIMSET_ERROR_INVALID_ARGUMENT,
+        NAME,
+    )?;
+    // All names and pair grammar are admitted before any resident gather.
+    let steps = admission::admit(rest)?;
     let mut fields = StructValue::new();
-    let mut args = rest.into_iter();
-
-    if let Some(first) = args.next() {
-        match first {
-            Value::Struct(existing) => {
+    for step in steps {
+        match step {
+            admission::Step::Copy(existing) => {
                 for (name, value) in existing.fields {
                     fields.insert(name, prepare_optimset_payload(value).await?);
                 }
             }
-            other => {
-                let second = args.next().ok_or_else(|| {
-                    optimset_error_with_detail(
-                        &OPTIMSET_ERROR_INVALID_ARGUMENT,
-                        "expected option name/value pairs",
-                    )
-                })?;
-                let name = field_name(&other).map_err(|err| {
-                    optimset_error_with_detail(&OPTIMSET_ERROR_INVALID_INPUT, err.message())
-                })?;
+            admission::Step::Pair(name, value) => {
                 fields.insert(
-                    canonical_option_name(&name),
-                    prepare_optimset_payload(second).await?,
+                    name.into_public_name(),
+                    prepare_optimset_payload(value).await?,
                 );
             }
         }
     }
-
-    let remaining = args.collect::<Vec<_>>();
-    if remaining.len() % 2 != 0 {
-        return Err(optimset_error_with_detail(
-            &OPTIMSET_ERROR_INVALID_ARGUMENT,
-            "expected option name/value pairs",
-        ));
-    }
-    for pair in remaining.chunks(2) {
-        let name = field_name(&pair[0]).map_err(|err| {
-            optimset_error_with_detail(&OPTIMSET_ERROR_INVALID_INPUT, err.message())
-        })?;
-        fields.insert(
-            canonical_option_name(&name),
-            prepare_optimset_payload(pair[1].clone()).await?,
-        );
-    }
-
     Ok(Value::Struct(fields))
 }
 
@@ -278,10 +103,13 @@ async fn prepare_optimset_payload(value: Value) -> BuiltinResult<Value> {
     crate::dispatcher::gather_if_needed_async(&value)
         .await
         .map_err(|error| {
-            optimset_error_with_detail(
+            optimset_error_builder(
                 &OPTIMSET_ERROR_INVALID_INPUT,
                 format!("failed to gather option value: {error}"),
             )
+            .with_source(error)
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
         })
 }
 
@@ -291,6 +119,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::OPTIMSET_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
@@ -348,6 +177,46 @@ mod tests {
     }
 
     #[test]
+    fn optimset_rejects_all_names_and_grammar_before_resident_materialization() {
+        let _guard = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(
+            crate::context::physical_test_support::OwnedPhysicalProvider::new(),
+        ));
+        let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        // This existing fixture owns a live allocation but cannot download.
+        // A premature gather would replace the intended argument error.
+        let allocation = provider.allocate_f64(&[1, 1]);
+        let handle = allocation
+            .handle
+            .clone()
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
+        for bad_tail in [
+            vec![Value::from("Display")],
+            vec![Value::Num(1.0), Value::Bool(true)],
+        ] {
+            let odd = bad_tail.len() == 1;
+            let mut arguments = vec![Value::from("TolX"), Value::GpuTensor(handle.clone())];
+            arguments.extend(bad_tail);
+            let error = block_on(optimset_builtin(arguments)).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some(if odd {
+                    "RunMat:optimset:InvalidArgument"
+                } else {
+                    "RunMat:optimset:InvalidInput"
+                })
+            );
+            assert!(
+                error.source.is_none(),
+                "no provider failure may precede admission"
+            );
+            assert!(!error.message().contains("failed to gather"));
+            assert!(handle.allocation_lease().validate_live().is_ok());
+        }
+    }
+
+    #[test]
     fn optimset_strict_mode_rejects_integer_option_payload() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let value = Tensor::new_integer(IntegerStorage::I64(vec![17]), vec![1, 1]).unwrap();
@@ -399,8 +268,9 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("automatic upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
 
             let automatic_result = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
@@ -413,14 +283,17 @@ mod tests {
                     if matches!(options.fields.get("TolX"), Some(Value::Tensor(tensor)) if tensor.materialize_f64() == [3.5])
             ));
 
-            let explicit = provider
+            let explicit_input = provider
                 .upload(&HostTensorView {
                     data: &values,
                     shape: &shape,
                 })
                 .expect("explicit upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit_input
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
+            drop(explicit_input);
+            let physical = explicit.allocation_lease().downgrade();
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
@@ -441,7 +314,8 @@ mod tests {
                 })
                 .expect("mixed automatic upload");
             let mixed_automatic = mixed_automatic
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let explicit_result = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
                 Value::GpuTensor(explicit),
@@ -455,6 +329,186 @@ mod tests {
                     if matches!(options.fields.get("TolX"), Some(Value::GpuTensor(_)))
                         && matches!(options.fields.get("MaxFunEvals"), Some(Value::Tensor(tensor)) if tensor.materialize_f64() == [3.5])
             ));
+            assert!(
+                physical.acquire().is_some(),
+                "returned option owns explicit payload"
+            );
+            let retained = explicit_result.clone();
+            drop(explicit_result);
+            assert!(
+                physical.acquire().is_some(),
+                "cloned option retains physical ownership"
+            );
+            let Value::Struct(options) = &retained else {
+                unreachable!()
+            };
+            let Some(Value::GpuTensor(handle)) = options.fields.get("TolX") else {
+                unreachable!()
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(handle));
+            let payload = test_support::gather(Value::GpuTensor(handle.clone())).unwrap();
+            assert_eq!(payload.materialize_f64(), vec![3.5]);
+            drop(retained);
+            assert!(
+                physical.acquire().is_none(),
+                "final returned option releases its allocation"
+            );
+
+            // These are actual owned ObjectArray elements, nested through both
+            // a struct and cell. Compatibility and retention must traverse the
+            // same owned graph as gather, without following managed referents.
+            fn nested_objects(payload: Value) -> Value {
+                let mut object = runmat_value::ObjectInstance::new("OptimsetPayload");
+                object.properties.insert("payload".into(), payload);
+                let array = runmat_value::ObjectArray::from_objects(
+                    "OptimsetPayload",
+                    vec![object.clone(), object],
+                    vec![1, 2],
+                )
+                .expect("homogeneous value objects");
+                let mut structure = StructValue::new();
+                structure.insert("items", Value::ObjectArray(array));
+                Value::Cell(
+                    runmat_value::CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap(),
+                )
+            }
+            fn objects(payload: &Value) -> &runmat_value::ObjectArray {
+                let Value::Cell(cell) = payload else {
+                    panic!("outer cell")
+                };
+                let Value::Struct(structure) = &cell.data[0] else {
+                    panic!("nested struct")
+                };
+                let Value::ObjectArray(array) = &structure.fields["items"] else {
+                    panic!("object array")
+                };
+                assert_eq!(array.class_name().display_name(), "OptimsetPayload");
+                assert_eq!(array.shape(), &[1, 2]);
+                array
+            }
+            let upload = |intent| {
+                provider
+                    .upload(&HostTensorView {
+                        data: &values,
+                        shape: &shape,
+                    })
+                    .unwrap()
+                    .with_provenance(intent)
+                    .unwrap()
+            };
+            let explicit = upload(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let automatic = upload(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let explicit_lease = explicit.allocation_lease().downgrade();
+            let automatic_lease = automatic.allocation_lease().downgrade();
+            let mixed = nested_objects(Value::Cell(
+                runmat_value::CellArray::new(
+                    vec![
+                        Value::GpuTensor(explicit.clone()),
+                        Value::GpuTensor(automatic.clone()),
+                    ],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ));
+            let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(optimset_builtin(vec![
+                Value::from("FutureOption"),
+                mixed.clone(),
+            ]))
+            .expect_err("nested explicit ObjectArray value must be gated before gather");
+            assert_eq!(
+                error.identifier(),
+                RESIDENT_OPTION_EXTENSION.error_identifier
+            );
+            drop(strict);
+            let Value::Struct(result) = block_on(optimset_builtin(vec![
+                Value::from("FutureOption"),
+                mixed.clone(),
+            ]))
+            .unwrap() else {
+                panic!("options struct")
+            };
+            let stored = &result.fields["FutureOption"];
+            assert_eq!(stored, &mixed, "entire mixed payload is retained");
+            assert_eq!(objects(stored).len(), 2);
+            let mut handles = Vec::new();
+            crate::dispatcher::try_visit_gpu_handles(stored, &mut |handle| {
+                handles.push(handle.clone())
+            })
+            .unwrap();
+            assert_eq!(handles.len(), 4);
+            for pair in handles.chunks_exact(2) {
+                assert!(pair[0].shares_allocation_with(&explicit));
+                assert!(runmat_accelerate_api::handle_is_explicit(&pair[0]));
+                assert!(pair[1].shares_allocation_with(&automatic));
+                assert!(!runmat_accelerate_api::handle_is_explicit(&pair[1]));
+            }
+            drop(handles);
+            drop(mixed);
+            drop(explicit);
+            drop(automatic);
+            assert!(explicit_lease.acquire().is_some());
+            assert!(
+                automatic_lease.acquire().is_some(),
+                "retained automatic sibling owns its lease"
+            );
+            drop(result);
+            assert!(explicit_lease.acquire().is_none());
+            assert!(automatic_lease.acquire().is_none());
+
+            let automatic = nested_objects(Value::GpuTensor(upload(
+                runmat_accelerate_api::GpuHandleProvenance::Automatic,
+            )));
+            let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let Value::Struct(result) = block_on(optimset_builtin(vec![
+                Value::from("FutureOption"),
+                automatic,
+            ]))
+            .unwrap() else {
+                panic!("options struct")
+            };
+            for value in objects(&result.fields["FutureOption"]).data() {
+                let Value::Object(object) = value else {
+                    panic!("value object")
+                };
+                assert!(
+                    matches!(&object.properties["payload"], Value::Tensor(tensor) if tensor.materialize_f64() == values)
+                );
+            }
+            drop(strict);
+
+            let integer = nested_objects(Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+            ));
+            let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = block_on(optimset_builtin(vec![
+                Value::from("FutureOption"),
+                integer.clone(),
+            ]))
+            .expect_err("nested native ObjectArray property must be gated");
+            assert_eq!(
+                error.identifier(),
+                INTEGER_OPTION_EXTENSION.error_identifier
+            );
+            drop(strict);
+            let Value::Struct(result) =
+                block_on(optimset_builtin(vec![Value::from("FutureOption"), integer])).unwrap()
+            else {
+                panic!("options struct")
+            };
+            for value in objects(&result.fields["FutureOption"]).data() {
+                let Value::Object(object) = value else {
+                    panic!("value object")
+                };
+                let Value::Tensor(tensor) = &object.properties["payload"] else {
+                    panic!("integer tensor")
+                };
+                assert!(matches!(
+                    tensor.numeric_value_at(0),
+                    Some(runmat_value::NumericScalar::U64(u64::MAX))
+                ));
+            }
         });
     }
 }

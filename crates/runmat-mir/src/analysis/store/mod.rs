@@ -23,7 +23,10 @@ pub struct AnalysisStore {
     pub revision: AnalysisRevision,
     pub dependencies: Vec<AnalysisDependency>,
     pub program_points: Vec<ProgramPointFacts>,
+    #[serde(default)]
+    pub fusion_stage_contracts: Vec<super::FusionStageContract>,
     pub regions: Vec<RegionAnalysis>,
+    pub parallel: runmat_types::ParallelManifest,
     pub functions: Vec<FunctionAnalysis>,
     pub classes: Vec<ClassAnalysis>,
     pub diagnostics: Vec<MirDiagnostic>,
@@ -35,7 +38,9 @@ impl Default for AnalysisStore {
             revision: AnalysisRevision::current(),
             dependencies: Vec::new(),
             program_points: Vec::new(),
+            fusion_stage_contracts: Vec::new(),
             regions: Vec::new(),
+            parallel: runmat_types::ParallelManifest::empty(),
             functions: Vec::new(),
             classes: Vec::new(),
             diagnostics: Vec::new(),
@@ -44,11 +49,32 @@ impl Default for AnalysisStore {
 }
 
 impl AnalysisStore {
+    pub fn fusion_stage_at(
+        &self,
+        point: runmat_types::ProgramPointId,
+    ) -> Option<&super::FusionStageContract> {
+        self.fusion_stage_contracts
+            .binary_search_by_key(&point, |contract| contract.point)
+            .ok()
+            .map(|index| &self.fusion_stage_contracts[index])
+    }
+
     pub fn facts_at(&self, point: runmat_types::ProgramPointId) -> Option<&ProgramPointFacts> {
         self.program_points
             .binary_search_by_key(&point, |facts| facts.point)
             .ok()
             .map(|index| &self.program_points[index])
+    }
+
+    pub(crate) fn local_facts_at(
+        &self,
+        point: runmat_types::ProgramPointId,
+        local_count: usize,
+    ) -> Vec<Option<runmat_types::ValueFact>> {
+        self.facts_at(point).map_or_else(
+            || vec![None; local_count],
+            |facts| facts.local_fact_vector(local_count),
+        )
     }
 
     pub fn function(&self, function: runmat_types::ProgramFunctionId) -> Option<&FunctionAnalysis> {
@@ -80,4 +106,7 @@ pub(super) enum InitFact {
     Unassigned,
     MaybeAssigned,
     DefinitelyAssigned,
+    /// A dynamic workspace effect may have supplied this slot. Reading it
+    /// requires the executor's missing-binding check, not a static proof.
+    RuntimeWorkspaceLookup,
 }

@@ -114,12 +114,14 @@ pub async fn resolve_project(
             JsValue::from_str(&format!("project resolve request parse failed: {error}"))
         })?;
     let provider = JsPackageSourceProvider::new(provider)?;
-    crate::runtime::filesystem::install_js_fs_provider(&filesystem).map_err(|error| {
-        JsValue::from_str(&format!(
-            "filesystem provider installation failed: {}",
-            provider::shared::js_error(error)
-        ))
-    })?;
+    crate::runtime::filesystem::install_js_fs_provider(&filesystem)
+        .map(|_| ())
+        .map_err(|error| {
+            JsValue::from_str(&format!(
+                "filesystem provider installation failed: {}",
+                provider::shared::js_error(error)
+            ))
+        })?;
     let resolved = runmat_package::resolve_project_async(
         std::path::Path::new(&request.manifest_path),
         request.existing_lock.as_ref(),

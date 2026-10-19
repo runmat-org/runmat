@@ -373,7 +373,7 @@ fn is_supported_integer_property_route(property: &str) -> bool {
 }
 
 fn ensure_integer_property_exact_f64(value: &Value, property: &str) -> crate::BuiltinResult<()> {
-    let exact = crate::builtins::math::trigonometry::cos::integer_is_exact_f64;
+    let exact = crate::builtins::common::validation::integer_is_exact_f64;
     let valid = match value {
         Value::Int(value) => exact(value),
         Value::Tensor(tensor) => tensor
@@ -726,12 +726,16 @@ mod tests {
         let first = figure_builtin(Vec::new()).unwrap();
         let handles_before = figure_handles();
         assert!(figure_builtin(vec![Value::Bool(true)]).is_err());
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         assert!(figure_builtin(vec![resident]).is_err());
         assert_eq!(current_figure_handle().as_u32() as f64, first);
         assert_eq!(figure_handles(), handles_before);

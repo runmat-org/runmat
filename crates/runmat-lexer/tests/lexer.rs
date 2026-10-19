@@ -1,4 +1,4 @@
-use runmat_lexer::{tokenize, Token};
+use runmat_lexer::{tokenize, tokenize_detailed, Token};
 
 #[test]
 fn keywords() {
@@ -165,6 +165,82 @@ fn two_dots_are_two_dots_not_ellipsis() {
     let src = "1..3";
     let tokens = tokenize(src);
     assert_eq!(tokens, vec![Token::Float, Token::Dot, Token::Integer]);
+}
+
+#[test]
+fn adjacent_numeric_dot_operators_keep_their_own_spans() {
+    for (source, operator) in [
+        ("1./2", Token::DotSlash),
+        ("2.^3", Token::DotCaret),
+        ("1.*2", Token::DotStar),
+        ("1.\\2", Token::DotBackslash),
+    ] {
+        let tokens = tokenize_detailed(source);
+        assert_eq!(tokens.len(), 3, "{source}");
+        assert_eq!(
+            (
+                tokens[0].token.clone(),
+                tokens[0].lexeme.as_str(),
+                tokens[0].start,
+                tokens[0].end
+            ),
+            (Token::Integer, &source[..1], 0, 1),
+            "{source}"
+        );
+        assert_eq!(
+            (tokens[1].token.clone(), tokens[1].start, tokens[1].end),
+            (operator, 1, 3),
+            "{source}"
+        );
+        assert_eq!(
+            (tokens[2].token.clone(), tokens[2].start, tokens[2].end),
+            (Token::Integer, 3, 4),
+            "{source}"
+        );
+    }
+    assert_eq!(
+        tokenize("1.'"),
+        vec![Token::Integer, Token::Dot, Token::Transpose]
+    );
+    assert_eq!(
+        tokenize("1...\n2"),
+        vec![Token::Integer, Token::Ellipsis, Token::Integer]
+    );
+}
+
+#[test]
+fn trailing_decimal_and_exponent_forms_remain_float_literals() {
+    for (source, lexeme) in [
+        ("1.", "1."),
+        ("1.e3", "1.e3"),
+        ("1.d3", "1.e3"),
+        ("1.5d-2", "1.5e-2"),
+        ("1_0.", "10."),
+        (".25", ".25"),
+    ] {
+        let tokens = tokenize_detailed(source);
+        assert_eq!(tokens.len(), 1, "{source}");
+        assert_eq!(tokens[0].token, Token::Float, "{source}");
+        assert_eq!(tokens[0].lexeme, lexeme, "{source}");
+        assert_eq!(
+            (tokens[0].start, tokens[0].end),
+            (0, source.len()),
+            "{source}"
+        );
+    }
+    for (source, following) in [
+        ("1.:3", Token::Colon),
+        ("1.<2", Token::Less),
+        ("1.==2", Token::Equal),
+        ("1.~=2", Token::NotEqual),
+        ("1.&2", Token::And),
+        ("1.|2", Token::Or),
+    ] {
+        let tokens = tokenize_detailed(source);
+        assert_eq!(tokens[0].token, Token::Float, "{source}");
+        assert_eq!(tokens[0].lexeme, "1.", "{source}");
+        assert_eq!(tokens[1].token, following, "{source}");
+    }
 }
 
 #[test]

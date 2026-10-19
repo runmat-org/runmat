@@ -5,7 +5,7 @@ struct PendingTaskRegistration {
     task_id: TaskId,
     program: ProgramExecutionRequest,
     submission: TaskSubmission,
-    completion_receiver: oneshot::Receiver<CompletionResult>,
+    completion_receiver: oneshot::Receiver<(u64, CompletionResult)>,
     progress: Arc<super::super::pool_progress::RemoteProgressBuffer>,
 }
 
@@ -36,23 +36,7 @@ impl RemotePoolDriver {
             .lock()
             .expect("input inventory registry poisoned")
             .validate(submission.request.id, program)?;
-        program.validate().map_err(|error| {
-            NativeExecutionError::Protocol(format!("remote program request is invalid: {error}"))
-        })?;
-        let artifact_id =
-            runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]);
-        if submission.request.scope_id != self.scope_id
-            || submission.request.pool_id != self.pool_id
-            || submission.request.program_artifact_id != artifact_id
-            || submission.request.environment != program.environment
-            || submission.request.console != program.console
-            || submission.request.inputs != program.arguments
-            || submission.request.outputs.requested_outputs != program.requested_outputs
-        {
-            return Err(NativeExecutionError::Protocol(
-                "remote task differs from its exact program request".into(),
-            ));
-        }
+        self.validate_direct_task(submission, program)?;
         let existing = self
             .driver
             .lock()
@@ -70,9 +54,11 @@ impl RemotePoolDriver {
         if existing.submission.request.id != submission.request.id
             || existing.submission.request.scope_id != submission.request.scope_id
             || existing.submission.request.pool_id != submission.request.pool_id
-            || existing.submission.request.program_artifact_id
-                != submission.request.program_artifact_id
+            || existing.submission.request.executable != submission.request.executable
             || existing.submission.request.callable != submission.request.callable
+            || existing.submission.request.host != submission.request.host
+            || existing.submission.request.invocation_context
+                != submission.request.invocation_context
             || existing.submission.request.environment != submission.request.environment
             || existing.submission.request.console != submission.request.console
             || existing.submission.request.inputs != submission.request.inputs
@@ -108,7 +94,7 @@ impl RemotePoolDriver {
                 submission.request.id
             ))
         })?;
-        for reference in &committed.result_objects {
+        for reference in committed.result.result_objects() {
             if self.execution_object(reference)?.is_none() {
                 return Err(NativeExecutionError::Protocol(format!(
                     "committed remote task {} has an unavailable result object",
@@ -118,12 +104,50 @@ impl RemotePoolDriver {
         }
         Ok(Some(ExistingTask {
             task_id: submission.request.id,
-            committed: Some(AttemptSuccess {
-                outputs: committed.outputs,
-                result_objects: committed.result_objects,
-                resources: committed.resources,
-            }),
+            committed: Some(committed.result),
         }))
+    }
+
+    /// Direct V7 tasks run only against this pool's installed bundle and must
+    /// carry exactly the admitted program's identity, invocation and inputs.
+    fn validate_direct_task(
+        &self,
+        submission: &TaskSubmission,
+        program: &ProgramExecutionRequest,
+    ) -> NativeExecutionResult<()> {
+        if self.direct_bundle.is_none() {
+            return Err(NativeExecutionError::Configuration(
+                "direct request cannot use a graph-only remote pool".into(),
+            ));
+        }
+        program.validate().map_err(|error| {
+            NativeExecutionError::Protocol(format!("remote program request is invalid: {error}"))
+        })?;
+        program
+            .recipe
+            .validate_resource_request(&submission.request.resources)
+            .map_err(|error| {
+                NativeExecutionError::Protocol(format!(
+                    "remote scheduler resources do not satisfy the program: {error}"
+                ))
+            })?;
+        let artifact_id =
+            runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]);
+        if submission.request.scope_id != self.scope_id
+            || submission.request.pool_id != self.pool_id
+            || submission.request.program_artifact_id() != Some(artifact_id)
+            || submission.request.callable.program != program.callable
+            || submission.request.invocation_context != program.context
+            || submission.request.environment != program.environment
+            || submission.request.console != program.console
+            || submission.request.inputs != program.arguments
+            || submission.request.outputs.requested_outputs != program.requested_outputs
+        {
+            return Err(NativeExecutionError::Protocol(
+                "remote task differs from its exact program request".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Atomically admits a topologically ordered graph before dispatching any task.
@@ -198,30 +222,7 @@ impl RemotePoolDriver {
         let mut registrations = Vec::with_capacity(tasks.len());
         let mut completion_senders = Vec::with_capacity(tasks.len());
         for (program, submission) in tasks {
-            if submission.request.scope_id != self.scope_id
-                || submission.request.pool_id != self.pool_id
-            {
-                return Err(NativeExecutionError::Configuration(
-                    "remote task is outside this driver authority".into(),
-                ));
-            }
-            program.validate().map_err(|error| {
-                NativeExecutionError::Protocol(format!(
-                    "remote program request is invalid: {error}"
-                ))
-            })?;
-            let artifact_id =
-                runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]);
-            if submission.request.program_artifact_id != artifact_id
-                || submission.request.environment != program.environment
-                || submission.request.console != program.console
-                || submission.request.inputs != program.arguments
-                || submission.request.outputs.requested_outputs != program.requested_outputs
-            {
-                return Err(NativeExecutionError::Protocol(
-                    "remote task differs from its exact program request".into(),
-                ));
-            }
+            self.validate_direct_task(&submission, &program)?;
             let (sender, receiver) = oneshot::channel();
             let task_id = submission.request.id;
             registrations.push(PendingTaskRegistration {
@@ -267,7 +268,10 @@ impl RemotePoolDriver {
             )));
         }
         for registration in &registrations {
-            programs.insert(registration.task_id, registration.program.clone());
+            programs.insert(
+                registration.task_id,
+                Arc::new(WorkerProgramRequest::Direct(registration.program.clone())),
+            );
             progress_registry.insert(registration.task_id, Arc::clone(&registration.progress));
         }
         for (task_id, sender) in completion_senders {
@@ -306,5 +310,99 @@ impl RemotePoolDriver {
                 RemoteTaskCompletion::new(registration.completion_receiver, registration.progress)
             })
             .collect())
+    }
+
+    /// Admit one V10 Graph Program to a graph-only pool. Its signed staged
+    /// transfer is retained for retries; workers receive only its digest.
+    pub(in crate::remote) fn submit_graph_program(
+        self: &Arc<Self>,
+        submission: TaskSubmission,
+        graph: GraphExecutionRequest,
+        encoded_bytes: usize,
+        transfer: Option<SignedGraphTransfer>,
+    ) -> NativeExecutionResult<RemoteTaskCompletion> {
+        if self.direct_bundle.is_some() {
+            return Err(NativeExecutionError::Configuration(
+                "graph request cannot use a direct-bundle remote pool".into(),
+            ));
+        }
+        if submission.request.scope_id != self.scope_id
+            || submission.request.pool_id != self.pool_id
+        {
+            return Err(NativeExecutionError::Configuration(
+                "remote task is outside this driver authority".into(),
+            ));
+        }
+        graph.validate().map_err(|error| {
+            NativeExecutionError::Protocol(format!("remote graph request is invalid: {error}"))
+        })?;
+        graph
+            .recipe
+            .validate_resource_request(&submission.request.resources)
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let demand = graph
+            .input_allocation_floor_bytes(encoded_bytes)
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        if submission.request.resources.memory_bytes < demand
+            || !submission.request.inputs.is_empty()
+            || submission.request.outputs.requested_outputs != graph.requested_outputs
+            || submission.request.invocation_context != graph.context
+        {
+            return Err(NativeExecutionError::Protocol(
+                "remote graph workload does not match its resource or invocation admission".into(),
+            ));
+        }
+        let transfer = transfer.ok_or_else(|| {
+            NativeExecutionError::Protocol(
+                "remote Graph execution has no authenticated staged transfer".into(),
+            )
+        })?;
+        if transfer.program_length != encoded_bytes as u64 {
+            return Err(NativeExecutionError::Protocol(
+                "remote Graph allocation length differs from its staged Program".into(),
+            ));
+        }
+        let _admission = self.admission.lock().expect("remote admission poisoned");
+        let task_id = submission.request.id;
+        let (sender, receiver) = oneshot::channel();
+        let progress = Arc::new(super::super::pool_progress::RemoteProgressBuffer::default());
+        let mut programs = self
+            .programs
+            .lock()
+            .expect("remote program catalog poisoned");
+        let mut completions = self
+            .completions
+            .lock()
+            .expect("remote completion registry poisoned");
+        let mut progress_registry = self
+            .progress
+            .lock()
+            .expect("remote progress registry poisoned");
+        if programs.contains_key(&task_id)
+            || completions.contains_key(&task_id)
+            || progress_registry.contains_key(&task_id)
+        {
+            return Err(NativeExecutionError::Protocol(format!(
+                "remote task {task_id} already has registered execution state"
+            )));
+        }
+        let actions = self
+            .driver
+            .lock()
+            .expect("remote driver poisoned")
+            .handle(DriverCommand::Submit(Box::new(submission)))?;
+        programs.insert(task_id, Arc::new(WorkerProgramRequest::Graph(graph)));
+        self.graph_transfers
+            .lock()
+            .expect("remote Graph transfer registry poisoned")
+            .insert(task_id, Arc::new(transfer));
+        completions.insert(task_id, sender);
+        progress_registry.insert(task_id, Arc::clone(&progress));
+        drop(progress_registry);
+        drop(completions);
+        drop(programs);
+        self.dispatch(actions);
+        self.resolve_non_success_terminals();
+        Ok(RemoteTaskCompletion::new(receiver, progress))
     }
 }

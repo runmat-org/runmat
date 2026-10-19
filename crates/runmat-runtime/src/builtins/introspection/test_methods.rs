@@ -1,12 +1,12 @@
 //! Test-only class/method builtins used by semantic and VM pipeline tests.
 
-use crate::{
-    runtime_descriptor_error, runtime_descriptor_error_with_detail, OBJECT_INDEX_BRACE,
-    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
-};
+use crate::execution::RootedValue;
+use crate::{runtime_descriptor_error, runtime_descriptor_error_with_detail};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    OVERIDX_ERROR_RECEIVER_INVALID, OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
+    OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
 };
 use runmat_value::{ObjectInstance, StructValue, Value};
 
@@ -333,98 +333,41 @@ pub(crate) async fn pkgg_foo() -> crate::BuiltinResult<Value> {
     Ok(Value::Num(20.0))
 }
 
-const OVERIDX_SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Indexed value.",
-}];
-
-const OVERIDX_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "OverIdx object.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing payload.",
-    },
-];
-
-const OVERIDX_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.subsref(obj, kind, payload)",
-    inputs: &OVERIDX_SUBSREF_INPUTS,
-    outputs: &OVERIDX_SUBSREF_OUTPUT,
-}];
-
-const OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.SUBSREF_PAYLOAD_UNSUPPORTED",
-    identifier: Some("RunMat:OverIdxSubsrefPayloadUnsupported"),
-    when: "Indexing kind/payload combination is unsupported.",
-    message: "OverIdx.subsref: unsupported payload",
-};
-
-const OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.SUBSASGN_PAYLOAD_UNSUPPORTED",
-    identifier: Some("RunMat:OverIdxSubsasgnPayloadUnsupported"),
-    when: "Indexing assignment kind/payload combination is unsupported.",
-    message: "OverIdx.subsasgn: unsupported payload",
-};
-
-const OVERIDX_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.RECEIVER_INVALID",
-    identifier: Some("RunMat:OverIdxReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "OverIdx: receiver must be object",
-};
-
-const OVERIDX_SUBSREF_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
-    OVERIDX_ERROR_RECEIVER_INVALID,
-];
-
-pub const OVERIDX_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_SUBSREF_ERRORS,
-};
-
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.subsref",
-    descriptor(self::OVERIDX_SUBSREF_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_subsref(
     obj: Value,
-    kind: String,
-    payload: Value,
-) -> crate::BuiltinResult<Value> {
+    subscript: Value,
+) -> crate::BuiltinResult<RootedValue> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsref(obj, path, overidx_read_step, None).await
+}
+
+async fn overidx_read_step(
+    obj: Value,
+    step: crate::object::indexing::ObjectSubscript,
+) -> crate::BuiltinResult<RootedValue> {
+    let payload = step.selector_value()?;
     // Simple sentinel implementation: return different values for '.' vs '()'
-    match (obj, kind.as_str(), payload) {
-        (Value::Object(_), OBJECT_INDEX_PAREN, Value::Cell(_)) => Ok(Value::Num(99.0)),
-        (Value::Object(o), OBJECT_INDEX_BRACE, Value::Cell(_)) => {
+    let value = match (obj, step.kind(), payload) {
+        (Value::Object(_), crate::object::indexing::ObjectIndexKind::Paren, Value::Cell(_)) => {
+            Ok(Value::Num(99.0))
+        }
+        (Value::Object(o), crate::object::indexing::ObjectIndexKind::Brace, Value::Cell(_)) => {
             if let Some(v) = o.properties.get("lastCell") {
                 Ok(v.clone())
             } else {
                 Ok(Value::Num(0.0))
             }
         }
-        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::String(field)) => {
+        (
+            Value::Object(o),
+            crate::object::indexing::ObjectIndexKind::Member,
+            Value::String(field),
+        ) => {
             // If field exists, return it; otherwise sentinel 77
             if let Some(v) = o.properties.get(&field) {
                 Ok(v.clone())
@@ -432,7 +375,11 @@ pub(crate) async fn overidx_subsref(
                 Ok(Value::Num(77.0))
             }
         }
-        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::CharArray(ca)) => {
+        (
+            Value::Object(o),
+            crate::object::indexing::ObjectIndexKind::Member,
+            Value::CharArray(ca),
+        ) => {
             let field: String = ca.data.iter().collect();
             if let Some(v) = o.properties.get(&field) {
                 Ok(v.clone())
@@ -444,101 +391,79 @@ pub(crate) async fn overidx_subsref(
             "OverIdx.subsref",
             &OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
         )),
-    }
+    }?;
+    RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
-
-const OVERIDX_SUBSASGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated object.",
-}];
-
-const OVERIDX_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "OverIdx object.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing payload.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Assigned value.",
-    },
-];
-
-const OVERIDX_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = OverIdx.subsasgn(obj, kind, payload, rhs)",
-    inputs: &OVERIDX_SUBSASGN_INPUTS,
-    outputs: &OVERIDX_SUBSASGN_OUTPUT,
-}];
-
-const OVERIDX_SUBSASGN_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
-    OVERIDX_ERROR_RECEIVER_INVALID,
-];
-
-pub const OVERIDX_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_SUBSASGN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_SUBSASGN_ERRORS,
-};
 
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.subsasgn",
-    descriptor(self::OVERIDX_SUBSASGN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_subsasgn(
-    mut obj: Value,
-    kind: String,
-    payload: Value,
+    obj: Value,
+    subscript: Value,
     rhs: Value,
-) -> crate::BuiltinResult<Value> {
-    match (&mut obj, kind.as_str(), payload) {
-        (Value::Object(o), OBJECT_INDEX_PAREN, Value::Cell(_)) => {
+) -> crate::BuiltinResult<RootedValue> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsasgn(
+        obj,
+        path,
+        vec![rhs],
+        overidx_read_step,
+        |obj, step, mut values| async move {
+            let rhs = values.pop().ok_or_else(|| {
+                runtime_descriptor_error(
+                    "OverIdx.subsasgn",
+                    &OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
+                )
+            })?;
+            overidx_write_step(obj, step, rhs).await
+        },
+        None,
+    )
+    .await
+}
+
+async fn overidx_write_step(
+    mut obj: Value,
+    step: crate::object::indexing::ObjectSubscript,
+    rhs: Value,
+) -> crate::BuiltinResult<RootedValue> {
+    let payload = step.selector_value()?;
+    match (&mut obj, step.kind(), payload) {
+        (Value::Object(o), crate::object::indexing::ObjectIndexKind::Paren, Value::Cell(_)) => {
             // Store into 'last' property
             o.properties.insert("last".to_string(), rhs);
-            Ok(Value::Object(o.clone()))
+            Ok(())
         }
-        (Value::Object(o), OBJECT_INDEX_BRACE, Value::Cell(_)) => {
+        (Value::Object(o), crate::object::indexing::ObjectIndexKind::Brace, Value::Cell(_)) => {
             o.properties.insert("lastCell".to_string(), rhs);
-            Ok(Value::Object(o.clone()))
+            Ok(())
         }
-        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::String(field)) => {
+        (
+            Value::Object(o),
+            crate::object::indexing::ObjectIndexKind::Member,
+            Value::String(field),
+        ) => {
             o.properties.insert(field, rhs);
-            Ok(Value::Object(o.clone()))
+            Ok(())
         }
-        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::CharArray(ca)) => {
+        (
+            Value::Object(o),
+            crate::object::indexing::ObjectIndexKind::Member,
+            Value::CharArray(ca),
+        ) => {
             let field: String = ca.data.iter().collect();
             o.properties.insert(field, rhs);
-            Ok(Value::Object(o.clone()))
+            Ok(())
         }
         _ => Err(runtime_descriptor_error(
             "OverIdx.subsasgn",
             &OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
         )),
-    }
+    }?;
+    RootedValue::new(obj).map_err(|error| error.into_runtime_error())
 }
 
 const OVERIDX_NUM_ARGUMENTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -714,6 +639,35 @@ fn overidx_expect_object(
             "OverIdx",
             &OVERIDX_ERROR_RECEIVER_INVALID,
             format!("{method}: got {other:?}"),
+        )),
+    }
+}
+
+fn overidx_binary_operands(
+    lhs: Value,
+    rhs: Value,
+    method: &str,
+) -> crate::BuiltinResult<(f64, f64)> {
+    fn object_value(object: runmat_value::ObjectInstance) -> f64 {
+        match object.properties.get("k") {
+            Some(Value::Num(value)) => *value,
+            _ => 0.0,
+        }
+    }
+
+    match (lhs, rhs) {
+        (Value::Object(object), rhs) => {
+            let rhs: f64 = (&rhs).try_into()?;
+            Ok((object_value(object), rhs))
+        }
+        (lhs, Value::Object(object)) => {
+            let lhs: f64 = (&lhs).try_into()?;
+            Ok((lhs, object_value(object)))
+        }
+        (lhs, _) => Err(runtime_descriptor_error_with_detail(
+            "OverIdx",
+            &OVERIDX_ERROR_RECEIVER_INVALID,
+            format!("{method}: got {lhs:?}"),
         )),
     }
 }
@@ -950,14 +904,8 @@ pub const OVERIDX_XOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.plus")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k + r))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.plus")?;
+    Ok(Value::Num(lhs + rhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -966,14 +914,8 @@ pub(crate) async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.times")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k * r))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.times")?;
+    Ok(Value::Num(lhs * rhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -982,14 +924,8 @@ pub(crate) async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResul
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.mtimes")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k * r))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.mtimes")?;
+    Ok(Value::Num(lhs * rhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -998,14 +934,8 @@ pub(crate) async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResu
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.lt")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if k < r { 1.0 } else { 0.0 }))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.lt")?;
+    Ok(Value::Num(if lhs < rhs { 1.0 } else { 0.0 }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1014,14 +944,8 @@ pub(crate) async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<V
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.gt")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if k > r { 1.0 } else { 0.0 }))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.gt")?;
+    Ok(Value::Num(if lhs > rhs { 1.0 } else { 0.0 }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1030,14 +954,12 @@ pub(crate) async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<V
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_eq(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.eq")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.eq")?;
+    Ok(Value::Num(if (lhs - rhs).abs() < 1e-12 {
+        1.0
     } else {
         0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k - r).abs() < 1e-12 { 1.0 } else { 0.0 }))
+    }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1056,14 +978,8 @@ pub(crate) async fn overidx_uplus(obj: Value) -> crate::BuiltinResult<Value> {
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.rdivide")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k / r))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.rdivide")?;
+    Ok(Value::Num(lhs / rhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1081,14 +997,8 @@ pub(crate) async fn overidx_mrdivide(obj: Value, rhs: Value) -> crate::BuiltinRe
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.ldivide")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(r / k))
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.ldivide")?;
+    Ok(Value::Num(rhs / lhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1106,14 +1016,12 @@ pub(crate) async fn overidx_mldivide(obj: Value, rhs: Value) -> crate::BuiltinRe
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.and")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.and")?;
+    Ok(Value::Num(if (lhs != 0.0) && (rhs != 0.0) {
+        1.0
     } else {
         0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k != 0.0) && (r != 0.0) { 1.0 } else { 0.0 }))
+    }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1122,14 +1030,12 @@ pub(crate) async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.or")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.or")?;
+    Ok(Value::Num(if (lhs != 0.0) || (rhs != 0.0) {
+        1.0
     } else {
         0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k != 0.0) || (r != 0.0) { 1.0 } else { 0.0 }))
+    }))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -1138,14 +1044,74 @@ pub(crate) async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<V
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.xor")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    let a = k != 0.0;
-    let b = r != 0.0;
+    let (lhs, rhs) = overidx_binary_operands(obj, rhs, "OverIdx.xor")?;
+    let a = lhs != 0.0;
+    let b = rhs != 0.0;
     Ok(Value::Num(if a ^ b { 1.0 } else { 0.0 }))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod rooted_fixture_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    thread_local! {
+        static OBSERVED_HANDLE: RefCell<Option<runmat_gc::GcHandle>> = const { RefCell::new(None) };
+    }
+
+    #[test]
+    fn managed_property_survives_producer_root_retirement_until_fixture_result_drops() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("fixture payload".into()))
+                .expect("allocate managed test property");
+            let handle = initial.handle();
+            let mut object = ObjectInstance::new("OverIdx");
+            object.properties.insert(
+                "last".into(),
+                Value::HandleObject(runmat_value::HandleRef {
+                    class_name: "FixturePayload".into(),
+                    target: handle,
+                    valid: true,
+                }),
+            );
+            let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(
+                ".",
+                Value::String("last".into()),
+            )
+            .expect("member path");
+            let output =
+                futures::executor::block_on(overidx_subsref(Value::Object(object), subscript))
+                    .expect("fixture member read");
+            OBSERVED_HANDLE.with(|slot| *slot.borrow_mut() = Some(handle));
+            let seen = Arc::new(AtomicBool::new(false));
+            let observed = Arc::clone(&seen);
+            let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
+                OBSERVED_HANDLE.with(|slot| {
+                    let Some(handle) = *slot.borrow() else {
+                        return;
+                    };
+                    if event != runmat_gc::RootRetirement::Explicit(handle) {
+                        return;
+                    }
+                    runmat_gc::gc_collect_major().expect("collect at producer retirement");
+                    assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                    observed.store(true, Ordering::SeqCst);
+                });
+            }))
+            .expect("observe producer retirement");
+            initial.unroot().expect("retire producer root");
+            assert!(seen.load(Ordering::SeqCst));
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("fixture result retains property"),
+                Value::String("fixture payload".into())
+            );
+            drop(_observer);
+            OBSERVED_HANDLE.with(|slot| *slot.borrow_mut() = None);
+            drop(output);
+            runmat_gc::gc_collect_major().expect("collect after result drop");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
 }

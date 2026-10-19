@@ -2,18 +2,15 @@
 
 use regex::RegexBuilder;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, CONTAINS_ERROR_INTERNAL, CONTAINS_ERROR_INVALID_INPUT,
+    CONTAINS_ERROR_INVALID_OPTION, CONTAINS_ERROR_SHAPE_MISMATCH,
+    CONTAINS_NUMERIC_IGNORE_CASE_EXTENSION, CONTAINS_POSITIONAL_IGNORE_CASE_EXTENSION,
+    CONTAINS_TEXT_IGNORE_CASE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::common::spec::{BuiltinFusionSpec, ConstantStrategy, ShapeRequirements};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -21,222 +18,8 @@ use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, comp
 
 use super::text_utils::{logical_result, parse_ignore_case, TextCollection, TextElement};
 use crate::builtins::strings::core::compat::pattern_regex;
-use crate::builtins::strings::type_resolvers::logical_text_match_type;
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::search::contains")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "contains",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Text operation; not eligible for fusion and materialises host logical results.",
-};
 
 const BUILTIN_NAME: &str = "contains";
-
-const CONTAINS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical result indicating whether each text element contains the pattern.",
-}];
-
-const CONTAINS_INPUTS_BASE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-];
-
-const CONTAINS_INPUTS_IGNORE_CASE_POSITIONAL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "ignoreCase",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: Some("false"),
-        description: "Logical flag controlling case-sensitive matching.",
-    },
-];
-
-const CONTAINS_INPUTS_IGNORE_CASE_PAIR: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"IgnoreCase\""),
-        description: "Option name (`\"IgnoreCase\"`).",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option value for `\"IgnoreCase\"`.",
-    },
-];
-
-const CONTAINS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = contains(str, pat)",
-        inputs: &CONTAINS_INPUTS_BASE,
-        outputs: &CONTAINS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = contains(str, pat, ignoreCase)",
-        inputs: &CONTAINS_INPUTS_IGNORE_CASE_POSITIONAL,
-        outputs: &CONTAINS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = contains(str, pat, \"IgnoreCase\", value)",
-        inputs: &CONTAINS_INPUTS_IGNORE_CASE_PAIR,
-        outputs: &CONTAINS_OUTPUT,
-    },
-];
-
-const CONTAINS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONTAINS.INVALID_INPUT",
-    identifier: Some("RunMat:contains:InvalidInput"),
-    when: "Text or pattern input is not a supported text container.",
-    message: "contains: text and pattern inputs must be text values",
-};
-
-const CONTAINS_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONTAINS.INVALID_OPTION",
-    identifier: Some("RunMat:contains:InvalidOption"),
-    when: "IgnoreCase option arguments are invalid or malformed.",
-    message: "contains: invalid option arguments",
-};
-
-const CONTAINS_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONTAINS.SHAPE_MISMATCH",
-    identifier: Some("RunMat:contains:ShapeMismatch"),
-    when: "Text and pattern inputs are not broadcast-compatible.",
-    message: "contains: input sizes are not broadcast-compatible",
-};
-
-const CONTAINS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CONTAINS.INTERNAL",
-    identifier: Some("RunMat:contains:InternalError"),
-    when: "Internal logical result assembly failed.",
-    message: "contains: internal error",
-};
-
-const CONTAINS_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    CONTAINS_ERROR_INVALID_INPUT,
-    CONTAINS_ERROR_INVALID_OPTION,
-    CONTAINS_ERROR_SHAPE_MISMATCH,
-    CONTAINS_ERROR_INTERNAL,
-];
-
-pub const CONTAINS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CONTAINS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CONTAINS_ERRORS,
-};
-
-const CONTAINS_POSITIONAL_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "contains-positional-ignore-case",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "contains with a positional IgnoreCase flag is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ContainsPositionalIgnoreCaseExtension"),
-    };
-
-const CONTAINS_NUMERIC_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "contains-numeric-ignore-case",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "contains with a numeric IgnoreCase value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ContainsNumericIgnoreCaseExtension"),
-    };
-
-const CONTAINS_TEXT_IGNORE_CASE_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "contains-text-ignore-case",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "contains with a textual IgnoreCase value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ContainsTextIgnoreCaseExtension"),
-    };
-
-pub const CONTAINS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    CONTAINS_POSITIONAL_IGNORE_CASE_EXTENSION,
-    CONTAINS_NUMERIC_IGNORE_CASE_EXTENSION,
-    CONTAINS_TEXT_IGNORE_CASE_EXTENSION,
-];
-
-const CONTAINS_INTEGER_IGNORE_CASE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "IgnoreCase",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat mode accepts a scalar integer zero as false and any nonzero integer as true; MATLAB-compatible mode requires the documented logical name-value form.",
-    }];
-
-pub const CONTAINS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "tf = contains(str, pat, 'IgnoreCase', integer_value)",
-        inputs: &CONTAINS_INTEGER_IGNORE_CASE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Integer flags are a compatibility-gated RunMat convenience. Text matching remains host-only and returns logical output; numeric subject or pattern data is never treated as text.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "tf = contains(str, pat, integer_ignore_case)",
-        inputs: &CONTAINS_INTEGER_IGNORE_CASE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The positional integer flag requires both the positional and numeric RunMat extension gates. Zero is false and any nonzero exact integer is true; subject and pattern inputs remain text-only.",
-    },
-];
 
 fn contains_error_with_message(
     message: impl Into<String>,
@@ -255,16 +38,7 @@ fn remap_contains_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "contains",
-    category = "strings/search",
-    summary = "Test whether text inputs contain patterns.",
-    keywords = "contains,substring,text,ignorecase,search",
-    accel = "sink",
-    type_resolver(logical_text_match_type),
-    descriptor(crate::builtins::strings::search::contains::CONTAINS_DESCRIPTOR),
-    extensions(crate::builtins::strings::search::contains::CONTAINS_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::strings::search::contains::CONTAINS_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::search::contains"
 )]
 async fn contains_builtin(
@@ -442,7 +216,6 @@ fn evaluate_contains(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{
         CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor,
     };
@@ -654,6 +427,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_numeric_ignore_case_is_gated_in_matlab_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -703,6 +477,7 @@ pub(crate) mod tests {
             .contains("expected a value after 'IgnoreCase'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_validates_malformed_options_before_extension_gates() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -745,6 +520,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_distinguishes_positional_and_numeric_extension_gates() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -786,14 +562,34 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn contains_positional_ignore_case_is_admitted_in_runmat_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for (flag, expected) in [(true, true), (false, false)] {
+            let result = run_contains(
+                Value::String("RunMat".into()),
+                Value::String("run".into()),
+                vec![Value::Bool(flag)],
+            )
+            .expect("RunMat positional IgnoreCase");
+            assert_eq!(result, Value::Bool(expected));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_rejects_nested_resident_numeric_text_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).expect("cell"));
         for (text, pattern) in [
             (nested.clone(), Value::String("x".into())),
@@ -874,22 +670,12 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_accepts_pattern_object() {
         let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");
         let result =
             run_contains(Value::String("run42".into()), pattern, Vec::new()).expect("contains");
         assert_eq!(result, Value::Bool(true));
-    }
-
-    #[test]
-    fn contains_type_is_logical_match() {
-        assert_eq!(
-            logical_text_match_type(
-                &[Type::String, Type::String],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Bool
-        );
     }
 }

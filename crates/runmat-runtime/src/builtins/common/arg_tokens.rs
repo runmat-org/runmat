@@ -80,10 +80,10 @@ fn token_from_value(value: &Value) -> ArgToken {
         }
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
-                return token_from_integer_storage(storage, &tensor.shape);
+                return token_from_integer_storage(storage, tensor.shape());
             }
             let values = tensor::tensor_values_f64_cow(tensor);
-            token_from_tensor(values.as_ref(), &tensor.shape)
+            token_from_tensor(values.as_ref(), tensor.shape())
         }
         Value::LogicalArray(arr) => token_from_logical(&arr.data, &arr.shape),
         _ => ArgToken::Unknown,
@@ -234,6 +234,37 @@ mod tests {
                 ArgToken::Integer(IntValue::U64(9_007_199_254_740_993)),
                 ArgToken::Integer(IntValue::U64(u64::MAX)),
             ])]
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn tokens_from_values_preserves_low_rank_numeric_grammar() {
+        let integer_scalar = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), Vec::new())
+            .expect("rank-zero integer");
+        let integer_vector = Tensor::new_integer(
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            vec![2],
+        )
+        .expect("rank-one integers");
+        let real_scalar = Tensor::new(vec![1.25], Vec::new()).expect("rank-zero real");
+        let real_vector = Tensor::new(vec![1.25, -2.5], vec![2]).expect("rank-one reals");
+        assert_eq!(
+            tokens_from_values(&[
+                Value::Tensor(integer_scalar),
+                Value::Tensor(integer_vector),
+                Value::Tensor(real_scalar),
+                Value::Tensor(real_vector),
+            ]),
+            vec![
+                ArgToken::Integer(IntValue::U64(u64::MAX)),
+                ArgToken::Vector(vec![
+                    ArgToken::Integer(IntValue::U64(9_007_199_254_740_993)),
+                    ArgToken::Integer(IntValue::U64(u64::MAX)),
+                ]),
+                ArgToken::Number(1.25),
+                ArgToken::Vector(vec![ArgToken::Number(1.25), ArgToken::Number(-2.5)]),
+            ]
         );
     }
 }

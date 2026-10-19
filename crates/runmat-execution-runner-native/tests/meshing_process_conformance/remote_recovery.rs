@@ -117,11 +117,13 @@ async fn run_inner() {
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-recovery-worker-1"]),
         pool_id,
         resources: worker_inventory(),
+        host: worker_host_inventory(),
     };
     let second_worker = WorkerSpec {
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-recovery-worker-2"]),
         pool_id,
         resources: worker_inventory(),
+        host: worker_host_inventory(),
     };
     let (first_server, first_inner) = start_remote_worker(
         RUN_ID,
@@ -213,11 +215,12 @@ async fn run_inner() {
         .windows(2)
         .all(|pair| pair[0].sequence < pair[1].sequence));
     let success = completion.wait().await.unwrap();
-    let [ValuePayload::Object(remote_root)] = success.outputs.as_slice() else {
+    let (outputs, result_objects) = success.values().expect("ordinary task result");
+    let [ValuePayload::Object(remote_root)] = outputs else {
         panic!("retried remote meshing returned a non-object root")
     };
     let mut retry_store = TestStore::default();
-    for reference in &success.result_objects {
+    for reference in result_objects {
         retry_store.0.insert(
             reference.logical_digest,
             pool.execution_object(reference)
@@ -324,7 +327,7 @@ async fn start_remote_worker(
 
 fn execution_object_reference(authorization_scope: &str, bytes: &[u8]) -> ValueRef {
     ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"remote-meshing-prerequisite", bytes]),
         logical_digest: Digest::sha256(bytes),
         encoded_length: bytes.len() as u64,

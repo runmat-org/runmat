@@ -1,10 +1,9 @@
 //! MATLAB-compatible `lower` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, LOWER_ERROR_CELL_ELEMENT, LOWER_ERROR_INTERNAL,
+    LOWER_ERROR_INVALID_INPUT, LOWER_STRING_CELL_EXTENSION,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
 
@@ -13,7 +12,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, lowercase_preserving_missing};
+use crate::builtins::strings::common::{
+    cell_has_valid_string_scalar, char_row_to_string_slice, lowercase_preserving_missing,
+};
+#[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -31,7 +33,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Executes on the CPU; GPU-resident inputs are gathered to host memory before conversion.",
+        "Executes on host text; resident numeric inputs reject before provider access or gathering.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::lower")]
@@ -42,73 +44,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
+    notes: "Host text transformation; not eligible for fusion. Resident numeric inputs reject.",
 };
 
 const BUILTIN_NAME: &str = "lower";
-
-const LOWER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Lowercased text preserving input container kind and shape.",
-}];
-
-const LOWER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String/char/cell text input to transform.",
-}];
-
-const LOWER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = lower(str)",
-    inputs: &LOWER_INPUTS,
-    outputs: &LOWER_OUTPUT,
-}];
-
-const LOWER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOWER.INVALID_INPUT",
-    identifier: Some("RunMat:lower:InvalidInput"),
-    when: "Input is not a string array, character array, or cell array of text scalars.",
-    message:
-        "lower: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const LOWER_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOWER.CELL_ELEMENT",
-    identifier: Some("RunMat:lower:CellElement"),
-    when: "Cell array contains a non-text element or non-row char array element.",
-    message: "lower: cell array elements must be string scalars or character vectors",
-};
-
-const LOWER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOWER.INTERNAL",
-    identifier: Some("RunMat:lower:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "lower: internal error",
-};
-
-const LOWER_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    LOWER_ERROR_INVALID_INPUT,
-    LOWER_ERROR_CELL_ELEMENT,
-    LOWER_ERROR_INTERNAL,
-];
-
-pub const LOWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOWER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOWER_ERRORS,
-};
-
-pub const LOWER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "lower accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
-};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
@@ -131,18 +70,18 @@ fn lower_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "lower",
-    category = "strings/transform",
-    summary = "Convert strings, character arrays, and cell arrays of character vectors to lowercase.",
-    keywords = "lower,lowercase,strings,character array,text",
-    accel = "sink",
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::lower::LOWER_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::lower::LOWER_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
 async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
     if crate::dispatcher::value_contains_gpu(&value) {
         return Err(lower_error(&LOWER_ERROR_INVALID_INPUT));
+    }
+    if cell_has_valid_string_scalar(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOWER_STRING_CELL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
@@ -318,6 +257,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_char_array_unicode_expansion_extends_width() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let data: Vec<char> = vec!['İ', 'A'];
         let array = CharArray::new(data, 1, 2).unwrap();
         let result = run_lower(Value::CharArray(array)).expect("lower");
@@ -334,7 +274,16 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn lower_strict_latin1_character_mapping() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let result = run_lower(Value::CharArray(CharArray::new_row("ÉCOLE"))).unwrap();
+        assert_eq!(result, Value::CharArray(CharArray::new_row("école")));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn lower_cell_array_mixed_content() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("RUN")),
@@ -354,6 +303,42 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell array, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn lower_string_cell_is_mode_gated_before_gather() {
+        let cell = CellArray::new(vec![Value::String("DATA".into())], 1, 1).unwrap();
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = run_lower(Value::Cell(cell.clone())).expect_err("strict cellstr contract");
+            assert_eq!(
+                error.identifier(),
+                LOWER_STRING_CELL_EXTENSION.error_identifier
+            );
+            let scalar = StringArray::new(vec!["DATA".into()], vec![1, 1]).unwrap();
+            let wrapped = CellArray::new(vec![Value::StringArray(scalar)], 1, 1).unwrap();
+            let error = run_lower(Value::Cell(wrapped)).expect_err("scalar string-array cell");
+            assert_eq!(
+                error.identifier(),
+                LOWER_STRING_CELL_EXTENSION.error_identifier
+            );
+        }
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = run_lower(Value::Cell(cell)).expect("RunMat text cell extension");
+        let Value::Cell(result) = result else {
+            panic!("cell output")
+        };
+        assert_eq!(result.get(0, 0).unwrap(), Value::String("data".into()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn lower_invalid_mixed_cell_keeps_element_error() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let cell = CellArray::new(vec![Value::String("A".into()), Value::Num(1.0)], 1, 2).unwrap();
+        let error = run_lower(Value::Cell(cell)).expect_err("invalid cell element");
+        assert_eq!(error.identifier(), LOWER_ERROR_CELL_ELEMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -396,7 +381,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn lower_gpu_tensor_input_gathers_then_errors() {
+    fn lower_gpu_tensor_input_rejects_without_gathering() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -411,7 +396,16 @@ pub(crate) mod tests {
             .expect("upload");
         let err = run_lower(Value::GpuTensor(handle.clone())).unwrap_err();
         assert_eq!(err.to_string(), LOWER_ERROR_INVALID_INPUT.message);
-        provider.free(&handle).ok();
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("borrowed input remains live");
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().expect("release final fixture reference");
+        assert!(
+            physical.acquire().is_none(),
+            "physical lease must expire after final release"
+        );
     }
 
     #[test]

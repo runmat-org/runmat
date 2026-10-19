@@ -1,7 +1,7 @@
 use super::{RunmatConfigDocumentError, RunmatConfigFormat};
 use crate::desktop::DesktopConfig;
 use crate::runtime::{
-    AccelerateConfig, FeaConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
+    AccelerateConfig, FeaConfig, ForeignConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
     PlottingConfig, RunMatRuntimeConfig, TelemetryConfig,
 };
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,7 @@ pub(super) struct RuntimeSection {
     error_namespace: Option<String>,
     verbose: Option<bool>,
     language: Option<LanguageConfig>,
+    foreign: Option<ForeignConfig>,
     logging: Option<LoggingConfig>,
     telemetry: Option<TelemetryConfig>,
     jit: Option<JitConfig>,
@@ -40,6 +41,7 @@ impl From<&RunMatRuntimeConfig> for RuntimeSection {
             error_namespace: Some(value.runtime.error_namespace.clone()),
             verbose: Some(value.runtime.verbose),
             language: Some(value.language.clone()),
+            foreign: Some(value.foreign.clone()),
             logging: Some(value.logging.clone()),
             telemetry: Some(value.telemetry.clone()),
             jit: Some(value.jit.clone()),
@@ -65,6 +67,9 @@ impl RuntimeSection {
         }
         if let Some(value) = self.language {
             config.language = value;
+        }
+        if let Some(value) = self.foreign {
+            config.foreign = value;
         }
         if let Some(value) = self.logging {
             config.logging = value;

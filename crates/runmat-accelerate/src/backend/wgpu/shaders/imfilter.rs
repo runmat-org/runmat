@@ -1,4 +1,79 @@
-pub const IMFILTER_SHADER_F64: &str = r#"
+use std::borrow::Cow;
+
+/// I/O storage and arithmetic are separate facts of the admitted filter route.
+#[derive(Clone, Copy, Debug)]
+pub enum ImfilterShader {
+    Single,
+    SingleDouble,
+    Double,
+}
+
+impl ImfilterShader {
+    pub fn source(self) -> Cow<'static, str> {
+        match self {
+            Self::Single => Cow::Borrowed(IMFILTER_SHADER_F32),
+            Self::Double => Cow::Borrowed(IMFILTER_SHADER_F64),
+            Self::SingleDouble => Cow::Owned(
+                IMFILTER_SHADER_F64
+                    .replacen("data: array<f64>,", "data: array<f32>,", 1)
+                    .replace(
+                        "sample = Image.data[linear];",
+                        "sample = f64(Image.data[linear]);",
+                    )
+                    .replace(
+                        "Output.data[global_idx] = acc;",
+                        "Output.data[global_idx] = f32(acc);",
+                    ),
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod recipe_tests {
+    use super::ImfilterShader;
+    use crate::backend::wgpu::shaders::validation_tests::{validate_generated, RequiredCaps};
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn recipes_parse_and_validate_with_the_backend_naga_version() {
+        for recipe in [
+            ImfilterShader::Single,
+            ImfilterShader::SingleDouble,
+            ImfilterShader::Double,
+        ] {
+            let template = recipe.source();
+            let required = match recipe {
+                ImfilterShader::Single => RequiredCaps::None,
+                ImfilterShader::SingleDouble | ImfilterShader::Double => RequiredCaps::Float64,
+            };
+            for workgroup in [1, 64, 128] {
+                validate_generated(
+                    &format!("imfilter-{recipe:?}-wg{workgroup}"),
+                    &template,
+                    workgroup,
+                    8,
+                    required,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_recipe_changes_io_only_and_retains_double_arithmetic() {
+        let mixed = ImfilterShader::SingleDouble.source();
+        assert!(mixed.contains("struct Tensor {\n    data: array<f32>"));
+        assert!(mixed.contains("struct KernelValues {\n    data: array<f64>"));
+        assert!(mixed.contains("var acc: f64"));
+        assert!(mixed.contains("constant_value: f64"));
+        assert!(mixed.contains("sample = f64(Image.data[linear]);"));
+        assert!(mixed.contains("Output.data[global_idx] = f32(acc);"));
+        assert!(!ImfilterShader::Single.source().contains("f64"));
+        assert!(!ImfilterShader::Double.source().contains("f32"));
+    }
+}
+
+const IMFILTER_SHADER_F64: &str = r#"
 const MAX_RANK: u32 = 128u;
 
 struct Tensor {
@@ -176,7 +251,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
-pub const IMFILTER_SHADER_F32: &str = r#"
+const IMFILTER_SHADER_F32: &str = r#"
 const MAX_RANK: u32 = 128u;
 
 struct Tensor {

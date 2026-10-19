@@ -10,6 +10,7 @@ mod driver;
 mod driver_files;
 mod execution;
 mod filesystem;
+pub(crate) use filesystem::unix_millis;
 mod model;
 mod ownership;
 mod program_store;
@@ -23,11 +24,14 @@ mod tests;
 
 pub use client::LocalSupervisorClient;
 pub use config::LocalSupervisorConfig;
-pub use driver::{complete_batch_driver, execute_and_complete_program_batch, prepare_batch_driver};
+pub use driver::{
+    complete_batch_driver, complete_batch_driver_with_response, execute_and_complete_program_batch,
+    execute_graph_batch, prepare_batch_driver,
+};
 pub use model::{
     BatchDriverInvocation, BatchSubmission, DurableExecutionContext, DurableProgramAttempt,
-    JobAttachment, LocalJobRecord, LocalJobState, ProgramBatchExecution, ProgramBatchSubmission,
-    MIN_RETENTION_MILLIS,
+    GraphBatchSubmission, JobAttachment, LocalJobRecord, LocalJobState, LocalJobWorkloadKind,
+    ProgramBatchExecution, ProgramBatchSubmission, MIN_RETENTION_MILLIS,
 };
 pub use server::run_local_supervisor;
 pub use service::LocalSupervisor;

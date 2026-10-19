@@ -8,7 +8,6 @@ use runmat_value::{IntValue, IntegerStorage, NumericDType, Value};
 fn logical_truth(value: &Value) -> bool {
     match value {
         Value::Bool(value) => *value,
-        Value::Num(value) => *value != 0.0,
         other => panic!("expected logical value, got {other:?}"),
     }
 }
@@ -27,12 +26,107 @@ fn logical_operators_and_short_circuit() {
     let vars =
         execute_source("a = 0 && (1/0); b = 1 || (1/0); c = 0 & 5; d = 0 | 5; e = ~0; f = ~5;")
             .unwrap();
-    assert!(!logical_truth(&vars[0]));
-    assert!(logical_truth(&vars[1]));
+    assert_eq!(vars[0], Value::Bool(false));
+    assert_eq!(vars[1], Value::Bool(true));
     assert!(!logical_truth(&vars[2]));
     assert!(logical_truth(&vars[3]));
     assert!(logical_truth(&vars[4]));
     assert!(!logical_truth(&vars[5]));
+    for (expression, expected) in [
+        ("1 && 2", true),
+        ("1 && 0", false),
+        ("0 || 3", true),
+        ("0 || 0", false),
+        ("true && 2", true),
+        ("false || 3", true),
+    ] {
+        let values = execute_source(&format!("result = {expression};")).unwrap();
+        assert_eq!(values[0], Value::Bool(expected), "{expression}");
+    }
+}
+
+#[test]
+fn scalar_equality_operators_use_canonical_logical_and_complex_semantics() {
+    for (left, right, expected) in [
+        ("true", "true", true),
+        ("false", "true", false),
+        ("true", "1", true),
+        ("false", "0", true),
+        ("true", "uint64(9007199254740993)", false),
+        ("i*i", "-1", true),
+        ("j*j", "-1", true),
+        ("1+2i", "1+2i", true),
+        ("1+2i", "1+3i", false),
+        ("i", "1", false),
+        ("complex(1,0)", "true", true),
+        ("complex(NaN,0)", "complex(NaN,0)", false),
+    ] {
+        for (lhs, rhs) in [(left, right), (right, left)] {
+            let source = format!("a = {lhs}; b = {rhs}; operator_eq = a == b; builtin_eq = eq(a,b); operator_ne = a ~= b; builtin_ne = ne(a,b);");
+            let vars = execute_source(&source).unwrap_or_else(|error| panic!("{source}: {error}"));
+            assert_eq!(vars[2], Value::Bool(expected), "{source}");
+            assert_eq!(
+                vars[2], vars[3],
+                "eq operator/builtin representation parity: {source}"
+            );
+            assert_eq!(vars[4], Value::Bool(!expected), "{source}");
+            assert_eq!(
+                vars[4], vars[5],
+                "ne operator/builtin representation parity: {source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn equality_array_operator_values_match_builtin_without_losing_integer_precision() {
+    for (left, right, scalar_result, expected) in [
+        ("ones(1,1)", "ones(1,1)", true, &[1][..]),
+        ("[0 1]", "true", false, &[0, 1][..]),
+        ("logical([0 1])", "true", false, &[0, 1][..]),
+        ("complex([1 2],[0 1])", "1", false, &[1, 0][..]),
+        (
+            "[0x0020000000000001u64 0xFFFFFFFFFFFFFFFFu64]",
+            "[0x0020000000000000u64 0xFFFFFFFFFFFFFFFFu64]",
+            false,
+            &[0, 1][..],
+        ),
+        (
+            "[0x0020000000000001u64 0xFFFFFFFFFFFFFFFFu64]",
+            "[9007199254740992 18446744073709551616]",
+            false,
+            &[0, 0][..],
+        ),
+        ("single(0.1)", "double(0.1)", true, &[0][..]),
+        ("single(0.1)", "double(single(0.1))", true, &[1][..]),
+    ] {
+        for (lhs, rhs) in [(left, right), (right, left)] {
+            let source = format!("a = {lhs}; b = {rhs}; operator_eq = a == b; builtin_eq = eq(a,b); operator_ne = a ~= b; builtin_ne = ne(a,b); eq_agrees = isequal(operator_eq,builtin_eq); ne_agrees = isequal(operator_ne,builtin_ne);");
+            let vars = execute_source(&source).unwrap_or_else(|error| panic!("{source}: {error}"));
+            for index in 2..=5 {
+                if scalar_result {
+                    assert!(
+                        matches!(&vars[index], Value::Bool(_)),
+                        "expected scalar logical result at {index}: {source}: {:?}",
+                        vars[index]
+                    );
+                } else {
+                    assert!(
+                        matches!(&vars[index], Value::LogicalArray(_)),
+                        "expected logical array result at {index}: {source}: {:?}",
+                        vars[index]
+                    );
+                }
+            }
+            match &vars[2] {
+                Value::Bool(value) => assert_eq!(u8::from(*value), expected[0], "{source}"),
+                Value::LogicalArray(array) => assert_eq!(array.data, expected, "{source}"),
+                other => panic!("expected logical comparison: {source}: {other:?}"),
+            }
+            assert!(logical_truth(&vars[6]), "eq value parity: {source}");
+            assert!(logical_truth(&vars[7]), "ne value parity: {source}");
+        }
+    }
 }
 
 #[test]
@@ -206,14 +300,14 @@ fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() 
     assert!(matches!(
         &vars[7],
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 2]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![(1_u64 << 63) - 1, u64::MAX - 1]))
     ));
     assert!(matches!(
         &vars[10],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![
                         (1_u64 << 63) + 1,
@@ -227,7 +321,7 @@ fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() 
     assert!(matches!(
         &vars[11],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![
                         1_u64 << 63,
@@ -241,7 +335,7 @@ fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() 
     assert!(matches!(
         &vars[14],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::I64(vec![
                         i64::MIN,
@@ -255,14 +349,14 @@ fn integer_scalar_arithmetic_keeps_int64_and_uint64_exact_through_vm_dispatch() 
     assert!(matches!(
         &vars[15],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::I64(vec![-3, 3, -3, 3, 0, 0]))
     ));
     assert!(matches!(
         &vars[16],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::I64(vec![1, 3, -3, -1, -7, 7]))
     ));
@@ -325,8 +419,8 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![1, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![1, 2]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
                         &IntegerStorage::U64(vec![1, 1]),
@@ -346,7 +440,7 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I64(vec![i64::MIN]),
                     &IntegerStorage::I64(vec![7]),
@@ -362,7 +456,7 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     assert!(matches!(
         &vars[11],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808]),
                     &IntegerStorage::U64(vec![1, 1]),
@@ -377,8 +471,8 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     assert!(matches!(
         &vars[13],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![2, 1]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![2, 1]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
                         &IntegerStorage::U64(vec![1, 1]),
@@ -387,14 +481,14 @@ fn complex_integer_values_preserve_exact_components_through_vm_dispatch() {
     assert!(matches!(
         &vars[14],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 1]
+            if tensor.shape() == vec![2, 1]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]))
     ));
     assert!(matches!(
         &vars[15],
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 1, 1]
+            if tensor.shape() == vec![1, 1, 1]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![9_223_372_036_854_775_809]))
     ));
@@ -620,21 +714,40 @@ fn typed_complex_integer_signal_operations_are_rejected_before_f64_coercion() {
         ("sinc", "sinc(z(1, :))"),
         ("fir1 cutoff", "fir1(4, z(1, 1))"),
         ("buttord passband edge", "buttord(z(1, 1), 0.5, 3, 40)"),
-        ("zplane coefficients", "zplane(z(1, :), [1])"),
-        ("zplane SOS", "zplane(z)"),
     ];
 
-    for (name, operation) in operations {
+    let zplane_contract = &runmat_builtins::ZPLANE_ERROR_INVALID_ARGUMENT;
+    for (name, operation, contract) in operations
+        .into_iter()
+        .map(|(name, operation)| (name, operation, None))
+        .chain([
+            (
+                "zplane coefficients",
+                "zplane(z(1, :), [1])",
+                Some(zplane_contract),
+            ),
+            ("zplane SOS", "zplane([z z z])", Some(zplane_contract)),
+        ])
+    {
         let source = format!(
             "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = {operation};"
         );
         let err = execute_source(&source).expect_err(name);
-        assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ),
-            "{name} returned an unexpected error: {err}"
-        );
+        if let Some(contract) = contract {
+            assert_eq!(err.identifier(), contract.identifier, "{name}: {err}");
+            assert!(
+                err.message()
+                    .contains("typed complex integer input is not supported"),
+                "{name}: {err}"
+            );
+        } else {
+            assert!(
+                err.to_string().contains(
+                    "operations involving complex numbers with integer types are not supported"
+                ),
+                "{name} returned an unexpected error: {err}"
+            );
+        }
     }
 }
 
@@ -761,7 +874,7 @@ fn compiled_flip_and_gamma_family_extensions_obey_compatibility_mode() {
             value,
             Value::Tensor(tensor)
                 if tensor.numeric_dtype() == NumericDType::F64
-                    && tensor.shape == vec![1, 3]
+                    && tensor.shape() == vec![1, 3]
                     && tensor.integer_storage().is_none()
                     && tensor.materialize_f64().iter().zip([0.0, 0.0, 24.0_f64.ln()]).all(|(actual, expected)| (actual - expected).abs() < 1.0e-10)
         )));
@@ -791,7 +904,7 @@ fn cell_accepts_all_integer_size_classes_through_compiled_dispatch() {
         assert!(cell.data.iter().all(|value| matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.shape == vec![0, 0]
+                if tensor.shape() == vec![0, 0]
                     && tensor.numeric_dtype() == NumericDType::F64
                     && tensor.is_empty()
         )));
@@ -827,21 +940,61 @@ fn typed_complex_integer_gpuarray_preserves_exact_descriptor_metadata() {
 #[test]
 fn typed_complex_integer_analytic_operations_are_rejected_before_f64_coercion() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    for builtin in [
-        "abs", "angle", "exp", "expm1", "gamma", "log", "log10", "log1p", "log2", "sign", "sqrt",
-        "acos", "acosh", "asin", "asinh", "atan", "atanh", "cos", "cosd", "cosh", "cospi",
-        "deg2rad", "rad2deg", "sin", "sind", "sinh", "sinpi", "tan", "tand", "tanh",
+    for (builtin, expected_message) in [
+        ("abs", "typed complex integer input is not supported"),
+        ("angle", "expected single or double input"),
+        (
+            "exp",
+            "operations involving complex numbers with integer types are not supported",
+        ),
+        (
+            "expm1",
+            "operations involving complex numbers with integer types are not supported",
+        ),
+        ("gamma", "expected real single or double input"),
+        ("log", "typed complex integer input is not supported"),
+        ("log10", "typed complex integer input is not supported"),
+        ("log1p", "typed complex integer input is not supported"),
+        ("log2", "typed complex integer input is not supported"),
+        ("sign", "typed complex integer input is not supported"),
+        ("sqrt", "typed complex integer input is not supported"),
+        ("acos", "typed complex integer input is not supported"),
+        ("acosh", "typed complex integer input is not supported"),
+        ("asin", "typed complex integer input is not supported"),
+        ("asinh", "typed complex integer input is not supported"),
+        ("atan", "typed complex integer input is not supported"),
+        ("atanh", "typed complex integer input is not supported"),
+        ("cos", "typed complex integer input is not supported"),
+        ("cosd", "typed complex integer input is not supported"),
+        ("cosh", "typed complex integer input is not supported"),
+        ("cospi", "typed complex integer input is not supported"),
+        (
+            "deg2rad",
+            "operations involving complex numbers with integer types are not supported",
+        ),
+        (
+            "rad2deg",
+            "operations involving complex numbers with integer types are not supported",
+        ),
+        ("sin", "typed complex integer input is not supported"),
+        ("sind", "typed complex integer input is not supported"),
+        ("sinh", "typed complex integer input is not supported"),
+        ("sinpi", "typed complex integer input is not supported"),
+        ("tan", "typed complex integer input is not supported"),
+        ("tand", "typed complex integer input is not supported"),
+        ("tanh", "typed complex integer input is not supported"),
     ] {
         let source =
             format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {builtin}(z);");
         let err = execute_source(&source).expect_err(builtin);
+        let expected_identifier = format!("RunMat:{builtin}:InvalidInput");
+        assert_eq!(
+            err.identifier(),
+            Some(expected_identifier.as_str()),
+            "{builtin} returned an unexpected error identifier: {err}"
+        );
         assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ) || err
-                .to_string()
-                .contains("expected real single or double input")
-                || err.to_string().contains("expected single or double input"),
+            err.to_string().contains(expected_message),
             "{builtin} returned an unexpected error: {err}"
         );
     }
@@ -856,8 +1009,8 @@ fn find_preserves_typed_complex_integer_values_through_vm_dispatch() {
     assert!(matches!(
         &vars[3],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![2, 1]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![2, 1]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
                         &IntegerStorage::U64(vec![1, 2]),
@@ -883,20 +1036,11 @@ fn typed_complex_integer_relational_equality_preserves_exact_storage() {
     )
     .expect("typed complex integer equality should execute exactly");
 
-    assert!(matches!(
-        &vars[4],
-        Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0] && tensor.shape == vec![1, 1]
-    ));
-    assert!(matches!(
-        &vars[5],
-        Value::Tensor(tensor) if tensor.materialize_f64() == vec![0.0] && tensor.shape == vec![1, 1]
-    ));
+    assert_eq!(vars[4], Value::Bool(true));
+    assert_eq!(vars[5], Value::Bool(false));
     assert_eq!(vars[6], Value::Bool(true));
     assert_eq!(vars[7], Value::Bool(false));
-    assert!(matches!(
-        &vars[8],
-        Value::Tensor(tensor) if tensor.materialize_f64() == vec![0.0] && tensor.shape == vec![1, 1]
-    ));
+    assert_eq!(vars[8], Value::Bool(false));
     assert_eq!(vars[9], Value::Bool(true));
 }
 
@@ -922,7 +1066,7 @@ fn typed_complex_integer_arithmetic_reductions_are_rejected_before_f64_coercion(
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![1_u64 << 63]),
                     &IntegerStorage::U64(vec![1]),
@@ -998,7 +1142,7 @@ fn unique_preserves_every_integer_row_class_through_vm_dispatch() {
         assert!(matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.shape == vec![1, 2]
+                if tensor.shape() == vec![1, 2]
                     && tensor.integer_storage() == Some(expected_storage)
         ));
     }
@@ -1064,14 +1208,14 @@ fn typed_complex_integer_blkdiag_preserves_exact_components() {
     assert!(matches!(
         &vars[3],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 3]
+            if tensor.shape() == vec![3, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![u64::MAX, 0, 0, 1_u64 << 63, 0, 0, 0, 7, 8]))
     ));
     assert!(matches!(
         &vars[4],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 3]
+            if tensor.shape() == vec![3, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![5, 0, 0, 6, 0, 0, 0, 9, 10]))
     ));
@@ -1103,14 +1247,14 @@ fn typed_complex_integer_ndgrid_preserves_exact_components() {
     assert!(matches!(
         &vars[3],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63, u64::MAX, 1_u64 << 63]))
     ));
     assert!(matches!(
         &vars[4],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![5, 6, 5, 6]))
     ));
@@ -1127,14 +1271,14 @@ fn typed_complex_integer_meshgrid_preserves_exact_components() {
     assert!(matches!(
         &vars[3],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX, 1_u64 << 63, 1_u64 << 63]))
     ));
     assert!(matches!(
         &vars[4],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![5, 5, 6, 6]))
     ));
@@ -1150,7 +1294,7 @@ fn typed_complex_integer_perms_preserves_exact_components() {
     assert!(matches!(
         &vars[2],
         Value::Tensor(tensor)
-            if tensor.shape == vec![6, 3]
+            if tensor.shape() == vec![6, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![
                         7, 7, 1_u64 << 63, 1_u64 << 63, u64::MAX, u64::MAX,
@@ -1161,7 +1305,7 @@ fn typed_complex_integer_perms_preserves_exact_components() {
     assert!(matches!(
         &vars[3],
         Value::Tensor(tensor)
-            if tensor.shape == vec![6, 3]
+            if tensor.shape() == vec![6, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![
                         7, 7, 6, 6, 5, 5, 6, 5, 7, 5, 7, 6, 5, 6, 5, 7, 6, 7,
@@ -1180,14 +1324,14 @@ fn typed_complex_integer_toeplitz_preserves_exact_components() {
     assert!(matches!(
         &vars[3],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage()
                     == Some(&IntegerStorage::U64(vec![u64::MAX, 7, 1_u64 << 63, u64::MAX, 9, 1_u64 << 63]))
     ));
     assert!(matches!(
         &vars[4],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![5, 6, 8, 5, 10, 8]))
     ));
 
@@ -1217,10 +1361,10 @@ fn typed_complex_integer_num2cell_preserves_exact_components() {
     assert!(matches!(
         &vars[2],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![1, 1]
+            if tensor.shape() == vec![1, 1]
                 && tensor.integer_storage().as_ref().is_some_and(|storage|
-                    storage.real == IntegerStorage::U64(vec![1_u64 << 63])
-                        && storage.imag == IntegerStorage::U64(vec![6]))
+                    storage.real() == &IntegerStorage::U64(vec![1_u64 << 63])
+                        && storage.imag() == &IntegerStorage::U64(vec![6]))
     ));
     assert!(matches!(
         &vars[3],
@@ -1230,21 +1374,21 @@ fn typed_complex_integer_num2cell_preserves_exact_components() {
     assert!(matches!(
         &vars[7],
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 2]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
     ));
     assert!(matches!(
         &vars[6],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![1, 2]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage().as_ref().is_some_and(|storage|
-                    storage.real == IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
-                        && storage.imag == IntegerStorage::U64(vec![5, 6]))
+                    storage.real() == &IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
+                        && storage.imag() == &IntegerStorage::U64(vec![5, 6]))
     ));
     assert!(matches!(
         &vars[8],
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 2]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![5, 6]))
     ));
 }
@@ -1259,10 +1403,10 @@ fn typed_complex_integer_cell2mat_preserves_exact_components() {
     assert!(matches!(
         &vars[2],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![1, 2]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage().as_ref().is_some_and(|storage|
-                    storage.real == IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
-                        && storage.imag == IntegerStorage::U64(vec![5, 6]))
+                    storage.real() == &IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63])
+                        && storage.imag() == &IntegerStorage::U64(vec![5, 6]))
     ));
     assert!(matches!(
         &vars[3],
@@ -1286,10 +1430,10 @@ fn typed_complex_integer_mat2cell_preserves_exact_components() {
     assert!(matches!(
         &vars[2],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![1, 1]
+            if tensor.shape() == vec![1, 1]
                 && tensor.integer_storage().as_ref().is_some_and(|storage|
-                    storage.real == IntegerStorage::U64(vec![1_u64 << 63])
-                        && storage.imag == IntegerStorage::U64(vec![6]))
+                    storage.real() == &IntegerStorage::U64(vec![1_u64 << 63])
+                        && storage.imag() == &IntegerStorage::U64(vec![6]))
     ));
     assert!(matches!(
         &vars[3],
@@ -1379,7 +1523,7 @@ fn typed_complex_integer_truthiness_uses_exact_paired_storage() {
     assert!(matches!(
         &vars[7],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![9_223_372_036_854_775_808, 0]),
                     &IntegerStorage::U64(vec![0, 1]),
@@ -1397,7 +1541,7 @@ fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispat
     assert!(matches!(
         &vars[0],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![u64::MAX, u64::MAX, 9_223_372_036_854_775_808, 9_223_372_036_854_775_808]),
                     &IntegerStorage::U64(vec![7, 7, 8, 8]),
@@ -1417,7 +1561,7 @@ fn complex_integer_slice_assignment_preserves_exact_components_through_vm_dispat
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![u64::MAX, u64::MAX, 9_223_372_036_854_775_808, 9_223_372_036_854_775_808]),
                     &IntegerStorage::U64(vec![7, 7, 8, 8]),
@@ -1435,7 +1579,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[2],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 3, 4]),
                     &IntegerStorage::U64(vec![7, 8, 9, 10]),
@@ -1444,8 +1588,8 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[3],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![4, 4]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![4, 4]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![
                             9_223_372_036_854_775_808,
@@ -1471,8 +1615,8 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![2, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![2, 2]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 3, 4]),
                         &IntegerStorage::U64(vec![7, 8, 9, 10]),
@@ -1481,7 +1625,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[5],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![u64::MAX, 9_223_372_036_854_775_808, 4, 3]),
                     &IntegerStorage::U64(vec![8, 7, 10, 9]),
@@ -1490,7 +1634,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[6],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![3, 9_223_372_036_854_775_808, 4, u64::MAX]),
                     &IntegerStorage::U64(vec![9, 7, 10, 8]),
@@ -1499,7 +1643,7 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[7],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![4, 3, u64::MAX, 9_223_372_036_854_775_808]),
                     &IntegerStorage::U64(vec![10, 9, 8, 7]),
@@ -1508,8 +1652,8 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
     assert!(matches!(
         &vars[8],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![3, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![3, 2]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, u64::MAX, 3, 4, 4]),
                         &IntegerStorage::U64(vec![7, 8, 8, 9, 10, 10]),
@@ -1544,8 +1688,8 @@ fn complex_integer_shape_transforms_preserve_exact_components_through_vm_dispatc
         assert!(matches!(
             &vars[index],
             Value::ComplexTensor(tensor)
-                if tensor.shape == shape
-                    && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+                if tensor.shape() == shape
+                    && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                         == Some((&IntegerStorage::U64(real), &IntegerStorage::U64(imag)))
         ));
     }
@@ -1577,7 +1721,7 @@ fn complex_single_shape_transforms_preserve_native_storage_through_vm_dispatch()
         let vars = execute_source(&source)
             .unwrap_or_else(|error| panic!("native complex single {name} should execute: {error}"));
         let mut complex_results = 0;
-        for value in vars {
+        for value in vars.values() {
             if let Value::ComplexTensor(tensor) = value {
                 complex_results += 1;
                 assert_eq!(
@@ -1613,7 +1757,7 @@ fn every_real_integer_class_survives_the_full_shape_matrix_through_vm_dispatch()
         let vars = execute_source(&source)
             .unwrap_or_else(|error| panic!("{class} shape matrix should execute: {error}"));
         let mut integer_results = 0;
-        for value in vars {
+        for value in vars.values() {
             if let Value::Tensor(tensor) = value {
                 if tensor.integer_storage().is_some() {
                     integer_results += 1;
@@ -1657,7 +1801,7 @@ fn empty_complex_single_shape_transforms_preserve_native_storage_through_vm_disp
         let vars = execute_source(&source)
             .unwrap_or_else(|error| panic!("empty complex single {name} should execute: {error}"));
         let mut complex_results = 0;
-        for value in vars {
+        for value in vars.values() {
             if let Value::ComplexTensor(tensor) = value {
                 complex_results += 1;
                 assert_eq!(
@@ -1685,7 +1829,7 @@ fn complex_integer_nonconjugate_transpose_preserves_exact_components_through_vm_
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I8(vec![1, -128, 3, 4]),
                     &IntegerStorage::I8(vec![-128, 2, 3, 4]),
@@ -1694,7 +1838,7 @@ fn complex_integer_nonconjugate_transpose_preserves_exact_components_through_vm_
     assert!(matches!(
         &vars[3],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX]),
                     &IntegerStorage::U64(vec![0, 0]),
@@ -1738,7 +1882,7 @@ fn transpose_operators_reject_nd_arrays_but_accept_trailing_singletons() {
         assert!(matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 2, 1]
+                if tensor.shape() == vec![2, 2, 1]
                     && tensor.integer_storage() == Some(&IntegerStorage::I8(vec![1, 2, 3, 4]))
         ));
     }
@@ -1755,7 +1899,7 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
     assert!(matches!(
         &vars[2],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real().clone(), storage.imag().clone()))
                 == Some((
                     IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 1, 2]),
                     IntegerStorage::U64(vec![7, 8, 3, 4]),
@@ -1764,8 +1908,8 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
     assert!(matches!(
         &vars[3],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![2, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+            if tensor.shape() == vec![2, 2]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real().clone(), storage.imag().clone()))
                     == Some((
                         IntegerStorage::U64(vec![9_223_372_036_854_775_808, 1, u64::MAX, 2]),
                         IntegerStorage::U64(vec![7, 3, 8, 4]),
@@ -1774,7 +1918,7 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real().clone(), storage.imag().clone()))
                 == Some((
                     IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 9, 10]),
                     IntegerStorage::U64(vec![7, 8, 0, 0]),
@@ -1783,7 +1927,7 @@ fn complex_integer_concatenation_preserves_exact_components_through_vm_dispatch(
     assert!(matches!(
         &vars[5],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (storage.real.clone(), storage.imag.clone()))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real().clone(), storage.imag().clone()))
                 == Some((
                     IntegerStorage::U64(vec![9_223_372_036_854_775_808, u64::MAX, 1, 2]),
                     IntegerStorage::U64(vec![7, 8, 3, 4]),
@@ -1874,12 +2018,12 @@ fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dis
         let Value::ComplexTensor(tensor) = value else {
             panic!("integer cast must preserve complex tensor storage: {value:?}");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), vec![1, 2]);
         assert_eq!(
             tensor
                 .integer_storage()
                 .as_ref()
-                .map(|storage| (&storage.real, &storage.imag)),
+                .map(|storage| (storage.real(), storage.imag())),
             Some((&real, &imag))
         );
     }
@@ -1890,7 +2034,7 @@ fn integer_casts_preserve_complex_storage_for_every_integer_class_through_vm_dis
     assert!(matches!(
         &vars[11],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I64(vec![i64::MAX, i64::MAX]),
                     &IntegerStorage::I64(vec![1, 2]),
@@ -1908,7 +2052,7 @@ fn conj_preserves_typed_complex_storage_through_vm_dispatch() {
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I8(vec![1, -2]),
                     &IntegerStorage::I8(vec![-3, i8::MAX]),
@@ -1917,7 +2061,7 @@ fn conj_preserves_typed_complex_storage_through_vm_dispatch() {
     assert!(matches!(
         &vars[3],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
                     &IntegerStorage::U64(vec![0, 0]),
@@ -1926,7 +2070,7 @@ fn conj_preserves_typed_complex_storage_through_vm_dispatch() {
     assert!(matches!(
         &vars[4],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U16(vec![7]),
                     &IntegerStorage::U16(vec![0]),
@@ -1950,8 +2094,8 @@ fn typed_complex_integer_deletion_preserves_paired_exact_storage_through_vm_disp
     assert!(matches!(
         &vars[0],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![1, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![1, 2]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]),
                         &IntegerStorage::U64(vec![7, 9]),
@@ -1960,8 +2104,8 @@ fn typed_complex_integer_deletion_preserves_paired_exact_storage_through_vm_disp
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![1, 2]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![1, 2]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::I16(vec![1, 3]),
                         &IntegerStorage::I16(vec![-1, -3]),
@@ -1979,8 +2123,8 @@ fn typed_complex_integer_scalar_assignment_preserves_paired_exact_storage_throug
     assert!(matches!(
         &vars[0],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![1, 3]
-                && tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.shape() == vec![1, 3]
+                && tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                     == Some((
                         &IntegerStorage::U64(vec![1_u64 << 63, u64::MAX, 4]),
                         &IntegerStorage::U64(vec![7, 3, 5]),
@@ -1989,7 +2133,7 @@ fn typed_complex_integer_scalar_assignment_preserves_paired_exact_storage_throug
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::I8(vec![1, i8::MIN, 2, 4]),
                     &IntegerStorage::I8(vec![-1, i8::MAX, -2, -4]),
@@ -2007,7 +2151,7 @@ fn indexed_assignment_does_not_demote_last_zeroed_complex_integer_component() {
     assert!(matches!(
         &vars[0],
         Value::ComplexTensor(tensor)
-            if tensor.integer_storage().as_ref().map(|storage| (&storage.real, &storage.imag))
+            if tensor.integer_storage().as_ref().map(|storage| (storage.real(), storage.imag()))
                 == Some((
                     &IntegerStorage::U16(vec![9, 2]),
                     &IntegerStorage::U16(vec![0, 0]),
@@ -2046,13 +2190,13 @@ fn full_densifies_sparse_storage_through_vm_dispatch() {
     assert!(matches!(
         &vars[1],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64() == vec![10.0, 0.0, 30.0, 0.0, 20.0, 0.0]
     ));
     assert!(matches!(
         &vars[2],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.materialize_f64() == vec![1.0, 0.0, 0.0, 2.0]
     ));
     assert!(!logical_truth(&vars[3]));
@@ -2084,11 +2228,11 @@ fn sparse_slice_indexing_preserves_sparse_outputs() {
     .unwrap();
     assert!(matches!(
         &vars[1],
-        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![10.0, 0.0, 30.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![3, 1] && tensor.materialize_f64() == vec![10.0, 0.0, 30.0]
     ));
     assert!(matches!(
         &vars[2],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 3] && tensor.materialize_f64() == vec![0.0, 0.0, 23.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![1, 3] && tensor.materialize_f64() == vec![0.0, 0.0, 23.0]
     ));
     assert!(matches!(
         &vars[3],
@@ -2101,29 +2245,30 @@ fn sparse_slice_indexing_preserves_sparse_outputs() {
     ));
     assert!(matches!(
         &vars[4],
-        Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![10.0, 0.0, 0.0, 23.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.materialize_f64() == vec![10.0, 0.0, 0.0, 23.0]
     ));
     assert!(logical_truth(&vars[5]));
     assert!(matches!(
         &vars[6],
         Value::Tensor(tensor)
-            if tensor.shape == vec![9, 1]
+            if tensor.shape() == vec![9, 1]
                 && tensor.materialize_f64() == vec![10.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 23.0, 0.0]
     ));
     assert!(logical_truth(&vars[7]));
     assert!(matches!(
         &vars[8],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 2] && tensor.materialize_f64() == vec![10.0, 23.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![1, 2] && tensor.materialize_f64() == vec![10.0, 23.0]
     ));
     assert!(logical_truth(&vars[9]));
     assert!(matches!(
         &vars[10],
-        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![30.0, 0.0, 10.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![3, 1] && tensor.materialize_f64() == vec![30.0, 0.0, 10.0]
     ));
     assert!(matches!(
         &vars[11],
         Value::Tensor(tensor)
-            if tensor.shape == vec![9, 1]
+            if tensor.shape() == vec![1, 9]
+                && tensor.numeric_dtype() == NumericDType::F64
                 && tensor.materialize_f64() == vec![10.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 23.0, 0.0]
     ));
     assert!(logical_truth(&vars[12]));
@@ -2167,7 +2312,7 @@ fn sparse_integer_script_surface_is_runmat_mode_only() {
 fn typed_sparse_slice_indexing_preserves_uint64_storage() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
-        "s = sparse([1 3 2], [1 1 3], uint64([1 9223372036854775808 4]), 3, 3); a = s(3,1); z = s(2,1); lin = s(:); pick = s([1 3 8]); sub = s([3 1], [1 3]); empty = s([],1);",
+        "s = sparse([1 3 2], [1 1 3], uint64([1 9223372036854775808 4]), 3, 3); a = s(3,1); z = s(2,1); lin = s(:); pick = s([1 3 8]); sub = s([3 1], [1 3]); empty = s([],1); range = s(1:end); dense_range = full(range);",
     )
     .unwrap();
 
@@ -2217,6 +2362,31 @@ fn typed_sparse_slice_indexing_preserves_uint64_storage() {
             if sparse.shape() == vec![0, 1]
                 && sparse.integer_storage() == Some(&IntegerStorage::U64(vec![]))
     ));
+    assert!(matches!(
+        &vars[7],
+        Value::SparseTensor(sparse)
+            if sparse.shape() == vec![1, 9]
+                && sparse.row_indices == vec![0, 0, 0]
+                && sparse.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 4]))
+    ));
+    assert!(matches!(
+        &vars[8],
+        Value::Tensor(tensor)
+            if tensor.shape() == vec![1, 9]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![
+                        1,
+                        0,
+                        9_223_372_036_854_775_808,
+                        0,
+                        0,
+                        0,
+                        0,
+                        4,
+                        0,
+                    ]))
+    ));
 }
 
 #[test]
@@ -2228,11 +2398,11 @@ fn typed_sparse_find_preserves_exact_values_and_directional_order() {
     .expect("execute typed sparse find");
     assert!(matches!(
         &vars[1],
-        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![2.0, 1.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![2, 1] && tensor.materialize_f64() == vec![2.0, 1.0]
     ));
     assert!(matches!(
         &vars[2],
-        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![1.0, 2.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![2, 1] && tensor.materialize_f64() == vec![1.0, 2.0]
     ));
     assert!(matches!(
         &vars[3],
@@ -2274,21 +2444,21 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     .expect("execute sparse structural deletion");
     assert!(matches!(
         &deleted[1],
-        Value::Tensor(tensor) if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![0.0, 2.0, 0.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![3, 1] && tensor.materialize_f64() == vec![0.0, 2.0, 0.0]
     ));
     assert!(matches!(
         &deleted[2],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.materialize_f64() == vec![2.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![1, 1] && tensor.materialize_f64() == vec![2.0]
     ));
     assert!(matches!(
         &deleted[4],
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 2]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808]))
     ));
     assert!(matches!(
         &deleted[6],
-        Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![1.0, 3.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![2, 1] && tensor.materialize_f64() == vec![1.0, 3.0]
     ));
 
     let deletion_err = execute_source("s = sparse([1], [1], [5], 2, 2); s(1,1) = [];").unwrap_err();
@@ -2303,7 +2473,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     .expect("execute expression-backed sparse row deletion");
     assert!(matches!(
         &expression_deleted[2],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.materialize_f64() == vec![2.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![1, 1] && tensor.materialize_f64() == vec![2.0]
     ));
 
     let all_deleted =
@@ -2323,25 +2493,25 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     assert!(matches!(
         &grown[1],
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 4]
+            if tensor.shape() == vec![1, 4]
                 && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![1, 0, 0, 9_223_372_036_854_775_808]))
     ));
     assert!(matches!(
         &grown[2],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 6]
+            if tensor.shape() == vec![3, 6]
                 && tensor.integer_storage().is_some()
                 && tensor.integer_storage().and_then(|storage| storage.value_at(17)) == Some(IntValue::U64(7))
     ));
     assert!(matches!(
         &grown[4],
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 5]
+            if tensor.shape() == vec![1, 5]
                 && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![0, 0, 0, 0, 9]))
     ));
     assert!(matches!(
         &grown[6],
-        Value::Tensor(tensor) if tensor.shape == vec![1, 4] && tensor.materialize_f64() == vec![1.0, 0.0, 0.0, 0.0]
+        Value::Tensor(tensor) if tensor.shape() == vec![1, 4] && tensor.materialize_f64() == vec![1.0, 0.0, 0.0, 0.0]
     ));
 
     let selector_grown = execute_source(
@@ -2351,7 +2521,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     assert!(matches!(
         &selector_grown[1],
         Value::Tensor(tensor)
-            if tensor.shape == vec![4, 5]
+            if tensor.shape() == vec![4, 5]
                 && tensor.integer_storage().and_then(|storage| storage.value_at(18))
                     == Some(IntValue::U64(9_223_372_036_854_775_808))
                 && tensor.integer_storage().and_then(|storage| storage.value_at(0))
@@ -2362,7 +2532,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     assert!(matches!(
         &selector_grown[4],
         Value::Tensor(tensor)
-            if tensor.shape == vec![6, 8]
+            if tensor.shape() == vec![6, 8]
                 && tensor.integer_storage().and_then(|storage| storage.value_at(34))
                     == Some(IntValue::U64(9))
                 && tensor.integer_storage().and_then(|storage| storage.value_at(47))
@@ -2373,7 +2543,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     assert!(matches!(
         &selector_grown[6],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 4]
+            if tensor.shape() == vec![2, 4]
                 && tensor.integer_storage().and_then(|storage| storage.value_at(6))
                     == Some(IntValue::U64(9_223_372_036_854_775_808))
                 && tensor.integer_storage().and_then(|storage| storage.value_at(7))
@@ -2388,7 +2558,7 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
     assert!(matches!(
         &selector_grown[8],
         Value::Tensor(tensor)
-            if tensor.shape == vec![4, 5]
+            if tensor.shape() == vec![4, 5]
                 && tensor.integer_storage().and_then(|storage| storage.value_at(0))
                     == Some(IntValue::U64(1))
                 && tensor.integer_storage().and_then(|storage| storage.value_at(5))
@@ -2405,6 +2575,59 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
 }
 
 #[test]
+fn numeric_indexed_growth_uses_assignment_shape_for_loop_range_and_typed_matrix() {
+    let execute_output = |source: &str| {
+        let bytecode = test_helpers::compile_source(source).expect("compile indexed growth");
+        let output_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "out").then_some(*slot))
+            .expect("named output binding");
+        let values = test_helpers::interpret(&bytecode).expect("execute indexed growth");
+        (values, output_slot)
+    };
+    for (source, shape) in [
+        ("x = 1; x(1,2) = 7; out = x;", [1, 2]),
+        ("x = 1; x(2,1) = 7; out = x;", [2, 1]),
+    ] {
+        let (vars, output_slot) = execute_output(source);
+        assert!(
+            matches!(&vars[output_slot],
+            Value::Tensor(tensor) if tensor.shape() == shape && tensor.materialize_f64() == [1.0, 7.0]),
+            "{source}"
+        );
+    }
+
+    let aliased =
+        execute_source("a = [1 3; 2 4]; original = a; a(3,2) = 9; grown = a; old = original;")
+            .expect("matrix two-subscript growth must preserve source alias");
+    assert!(matches!(&aliased[2], Value::Tensor(tensor)
+        if tensor.shape() == [3, 2] && tensor.materialize_f64() == [1.0, 2.0, 0.0, 3.0, 4.0, 9.0]));
+    assert!(matches!(&aliased[3], Value::Tensor(tensor)
+        if tensor.shape() == [2, 2] && tensor.materialize_f64() == [1.0, 2.0, 3.0, 4.0]));
+    let deletion = execute_source("x = [1 2]; x(1,2) = [];")
+        .expect_err("two-subscript scalar deletion stays unsupported");
+    assert_eq!(deletion.identifier(), Some("RunMat:UnsupportedDeletion"));
+
+    let (looped, output_slot) = execute_output("for k = 1:3; g(k) = k^2; end; out = g;");
+    assert!(matches!(&looped[output_slot],
+        Value::Tensor(tensor) if tensor.shape() == [1, 3]
+            && tensor.numeric_dtype() == NumericDType::F64
+            && tensor.materialize_f64() == [1.0, 4.0, 9.0]));
+
+    let (ranged, output_slot) = execute_output("a = [1 2]; a(4:6) = [4 5 6]; out = a;");
+    assert!(matches!(&ranged[output_slot],
+        Value::Tensor(tensor) if tensor.shape() == [1, 6]
+            && tensor.materialize_f64() == [1.0, 2.0, 0.0, 4.0, 5.0, 6.0]));
+
+    let (matrix, output_slot) =
+        execute_output("a = uint64([1 9223372036854775808; 2 4]); a(3,2) = uint64(9); out = a;");
+    assert!(matches!(&matrix[output_slot],
+        Value::Tensor(tensor) if tensor.shape() == [3, 2]
+            && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![1, 2, 0, 9_223_372_036_854_775_808, 4, 9]))));
+}
+
+#[test]
 fn sparse_arithmetic_interops_with_dense_and_scalar_values() {
     let vars = execute_source(
         "s = sparse([1 3 2], [1 1 2], [10 30 20], 3, 2); t = sparse([3 1 2], [1 2 2], [5 7 -20], 3, 2); a = s + t; af = full(a); atf = issparse(a); b = s + 2; c = [1 2; 3 4; 5 6] - s; d = s .* [2 2; 3 3; 4 4]; df = full(d); dtf = issparse(d); e = 3 .* s; ef = full(e); etf = issparse(e);",
@@ -2413,33 +2636,33 @@ fn sparse_arithmetic_interops_with_dense_and_scalar_values() {
     assert!(matches!(
         &vars[3],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64() == vec![10.0, 0.0, 35.0, 7.0, 0.0, 0.0]
     ));
     assert!(logical_truth(&vars[4]));
     assert!(matches!(
         &vars[5],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64() == vec![12.0, 2.0, 32.0, 2.0, 22.0, 2.0]
     ));
     assert!(matches!(
         &vars[6],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64() == vec![-9.0, 3.0, -25.0, 2.0, -16.0, 6.0]
     ));
     assert!(matches!(
         &vars[8],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64() == vec![20.0, 0.0, 120.0, 0.0, 60.0, 0.0]
     ));
     assert!(logical_truth(&vars[9]));
     assert!(matches!(
         &vars[11],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64() == vec![30.0, 0.0, 90.0, 0.0, 60.0, 0.0]
     ));
     assert!(logical_truth(&vars[12]));
@@ -2454,7 +2677,7 @@ fn sparse_arithmetic_handles_sparse_scalar_and_complex_interop() {
     assert!(matches!(
         &vars[1],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64()[0] == (11.0, 2.0)
                 && tensor.materialize_f64()[1] == (1.0, 2.0)
                 && tensor.materialize_f64()[2] == (31.0, 2.0)
@@ -2462,7 +2685,7 @@ fn sparse_arithmetic_handles_sparse_scalar_and_complex_interop() {
     assert!(matches!(
         &vars[2],
         Value::ComplexTensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64()[0] == (10.0, -10.0)
                 && tensor.materialize_f64()[1] == (0.0, -0.0)
                 && tensor.materialize_f64()[2] == (30.0, -30.0)
@@ -2470,7 +2693,7 @@ fn sparse_arithmetic_handles_sparse_scalar_and_complex_interop() {
     assert!(matches!(
         &vars[4],
         Value::Tensor(tensor)
-            if tensor.shape == vec![3, 2]
+            if tensor.shape() == vec![3, 2]
                 && tensor.materialize_f64() == vec![12.0, 2.0, 32.0, 2.0, 22.0, 2.0]
     ));
     assert!(logical_truth(&vars[5]));
@@ -2625,13 +2848,13 @@ fn blackman_all_integer_length_classes_execute_through_compiled_dispatch() {
         assert!(matches!(
             &vars[1],
             Value::Tensor(tensor)
-                if tensor.shape == vec![5, 1]
+                if tensor.shape() == vec![5, 1]
                     && tensor.numeric_dtype() == runmat_value::NumericDType::F64
         ));
         assert!(matches!(
             &vars[2],
             Value::Tensor(tensor)
-                if tensor.shape == vec![5, 1]
+                if tensor.shape() == vec![5, 1]
                     && tensor.numeric_dtype() == runmat_value::NumericDType::F32
         ));
     }
@@ -2693,20 +2916,20 @@ fn shiftdim_is_registered_and_preserves_exact_integer_shapes_through_vm_dispatch
     assert!(matches!(
         &vars[1],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.integer_storage() == Some(&expected)
     ));
     assert!(matches!(
         &vars[3],
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.integer_storage() == Some(&expected)
     ));
     assert_eq!(vars[4], Value::Num(2.0));
     assert!(matches!(
         &vars[5],
         Value::Tensor(tensor)
-            if tensor.shape == vec![1, 1, 1, 2, 2]
+            if tensor.shape() == vec![1, 1, 1, 2, 2]
                 && tensor.integer_storage() == Some(&expected)
     ));
 }
@@ -2731,7 +2954,7 @@ fn shiftdim_preserves_all_integer_classes_through_vm_dispatch() {
         assert!(matches!(
             &vars[1],
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 2]
+                if tensor.shape() == vec![2, 2]
                     && tensor.integer_storage().is_some_and(|storage| storage.class_name() == expected_class)
         ));
         assert_eq!(vars[2], Value::String(expected_class.into()));

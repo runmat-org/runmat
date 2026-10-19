@@ -9,6 +9,69 @@ use crate::{gather_if_needed_async, value_contains_gpu, BuiltinResult};
 
 use super::plotting_error;
 
+/// Preserve the original runtime/provider cause after a completed preparation
+/// stage. This is not an availability classifier and cannot authorize replay.
+pub(crate) fn preparation_after_effect(
+    error: crate::RuntimeError,
+    name: &'static str,
+) -> crate::RuntimeError {
+    preparation_failure(error, name, true)
+}
+
+/// A required rendering stage cannot authorize host replay. Join known
+/// completed effects with the original typed provider disposition.
+pub(crate) fn preparation_failure(
+    error: crate::RuntimeError,
+    name: &'static str,
+    mut after_effect: bool,
+) -> crate::RuntimeError {
+    let mut cursor: &(dyn std::error::Error + 'static) = &error;
+    loop {
+        after_effect |= cursor
+            .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+            .is_some_and(runmat_accelerate_api::ProviderExecutionError::is_after_effect);
+        let Some(source) = cursor.source() else {
+            break;
+        };
+        cursor = source;
+    }
+    let source = runmat_accelerate_api::ProviderExecutionError::from_source(error);
+    crate::runtime_error::with_provider_execution_source(
+        plotting_error(name, format!("{name}: GPU preparation failed: {source}")),
+        if after_effect {
+            source.after_effect()
+        } else {
+            source.with_unproven_effects()
+        },
+    )
+}
+
+#[cfg(feature = "plot-core")]
+#[path = "gpu_exports.rs"]
+mod exports;
+#[cfg(feature = "plot-core")]
+pub(crate) use exports::GpuBufferExports;
+
+#[path = "gpu_bounds.rs"]
+mod bounds;
+pub(crate) use bounds::NumericBounds;
+
+pub(crate) async fn numeric_bounds_protecting(
+    handle: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
+    context: &'static str,
+) -> BuiltinResult<NumericBounds> {
+    bounds::numeric_bounds_protecting(handle, protected, context).await
+}
+
+pub(crate) async fn axis_bounds_protecting(
+    handle: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
+    context: &'static str,
+) -> BuiltinResult<(f32, f32)> {
+    bounds::axis_bounds_protecting(handle, protected, context).await
+}
+
 #[cfg(feature = "plot-core")]
 use glam::Vec3;
 #[cfg(feature = "plot-core")]
@@ -23,63 +86,70 @@ use runmat_plot::SharedWgpuContext;
 /// seed the shared context from the active acceleration provider.
 #[cfg(feature = "plot-core")]
 pub fn ensure_shared_wgpu_context(name: &'static str) -> BuiltinResult<SharedWgpuContext> {
-    super::context::ensure_context_from_provider()
-        .map_err(|err| plotting_error(name, format!("{name}: {}", err.message())))?;
+    super::context::ensure_context_from_provider().map_err(|err| {
+        super::plotting_error_with_source(name, format!("{name}: {}", err.message()), err)
+    })?;
     runmat_plot::shared_wgpu_context()
         .ok_or_else(|| plotting_error(name, format!("{name}: plotting GPU context unavailable")))
 }
 
-/// Compute the min/max bounds for a GPU tensor by delegating to the runtime
-/// `min`/`max` builtins. Results are returned as `f32` so they can flow directly
-/// into plotting bounding boxes.
+/// Optional rendering admission borrows the inputs' actual device authority,
+/// never a context cached from a different ambient provider.
+#[cfg(feature = "plot-core")]
+pub(crate) fn prepare_shared_wgpu_context(
+    inputs: &[&GpuTensorHandle],
+    name: &'static str,
+) -> BuiltinResult<Option<SharedWgpuContext>> {
+    let mut owner = None;
+    for input in inputs {
+        input.allocation_lease().validate_live().map_err(|source| {
+            crate::runtime_error::with_provider_execution_source(
+                plotting_error(name, format!("{name}: plotting input has retired")),
+                runmat_accelerate_api::ProviderExecutionError::from_source(source),
+            )
+        })?;
+        let current = runmat_accelerate_api::provider_for_handle(input).ok_or_else(|| {
+            preparation_failure(
+                plotting_error(name, format!("{name}: no provider owns plotting input")),
+                name,
+                false,
+            )
+        })?;
+        if let Some(previous) = owner {
+            if !runmat_accelerate_api::same_provider_instance(previous, current) {
+                return Ok(None);
+            }
+        } else {
+            owner = Some(current);
+        }
+    }
+    let Some(owner) = owner else {
+        return Ok(None);
+    };
+    let Some(runmat_accelerate_api::AccelContextHandle::Wgpu(context)) =
+        owner.export_context(runmat_accelerate_api::AccelContextKind::Plotting)
+    else {
+        return Ok(None);
+    };
+    super::context::install_wgpu_context(&context);
+    Ok(Some(SharedWgpuContext {
+        instance: context.instance,
+        access: context.access,
+        adapter: context.adapter,
+        adapter_info: context.adapter_info,
+        limits: context.limits,
+        features: context.features,
+    }))
+}
+
+/// Compute global bounds through the exact owner's reduction hooks. Temporary
+/// results are guarded across errors and suspension; coordinates stay borrowed.
+/// Results are returned as `f32` for plotting bounding boxes.
 pub async fn axis_bounds_async(
     handle: &GpuTensorHandle,
     context: &'static str,
 ) -> BuiltinResult<(f32, f32)> {
-    // IMPORTANT: `min(A)`/`max(A)` have MATLAB semantics (reduce along a dimension), which for
-    // matrices returns a vector (e.g. 1xN) and would trigger a small-but-unwanted download.
-    // For plotting bounds we always want the global extrema, so call the provider global
-    // reduction hooks directly when available.
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-        let min_handle = provider.reduce_min(handle).await.map_err(|err| {
-            plotting_error(context, format!("{context}: reduce_min failed: {err}"))
-        })?;
-        let max_handle = provider.reduce_max(handle).await.map_err(|err| {
-            plotting_error(context, format!("{context}: reduce_max failed: {err}"))
-        })?;
-
-        let min_scalar =
-            value_to_scalar_async(Value::GpuTensor(min_handle.clone()), context).await?;
-        let max_scalar =
-            value_to_scalar_async(Value::GpuTensor(max_handle.clone()), context).await?;
-
-        // These temporary scalar handles are purely intermediate; free them eagerly.
-        let _ = provider.free(&min_handle);
-        let _ = provider.free(&max_handle);
-
-        return Ok((min_scalar as f32, max_scalar as f32));
-    }
-
-    // Fallback: gather and compute on the host (should be rare; provider should exist for GPU tensors).
-    let tensor = gather_tensor_from_gpu_async(handle.clone(), context).await?;
-    let mut min_val = f64::INFINITY;
-    let mut max_val = f64::NEG_INFINITY;
-    for index in 0..tensor.len() {
-        let v = numeric_scalar_to_f64(
-            tensor
-                .numeric_value_at(index)
-                .expect("tensor storage length matches shape"),
-        );
-        if v.is_finite() {
-            min_val = min_val.min(v);
-            max_val = max_val.max(v);
-        }
-    }
-    if !min_val.is_finite() || !max_val.is_finite() {
-        min_val = 0.0;
-        max_val = 0.0;
-    }
-    Ok((min_val as f32, max_val as f32))
+    bounds::axis_bounds_protecting(handle, &[handle], context).await
 }
 
 pub fn axis_bounds(handle: &GpuTensorHandle, context: &'static str) -> BuiltinResult<(f32, f32)> {
@@ -138,38 +208,14 @@ pub async fn gpu_xy_bounds_async(
     y: &GpuTensorHandle,
     context: &'static str,
 ) -> BuiltinResult<BoundingBox> {
-    let (min_x, max_x) = axis_bounds_async(x, context).await?;
-    let (min_y, max_y) = axis_bounds_async(y, context).await?;
+    let protected = [x, y];
+    let (min_x, max_x) = bounds::axis_bounds_protecting(x, &protected, context).await?;
+    let (min_y, max_y) = bounds::axis_bounds_protecting(y, &protected, context)
+        .await
+        .map_err(|error| preparation_after_effect(error, context))?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, 0.0),
         Vec3::new(max_x, max_y, 0.0),
-    ))
-}
-
-#[cfg(feature = "plot-core")]
-pub fn gpu_xy_bounds(
-    x: &GpuTensorHandle,
-    y: &GpuTensorHandle,
-    context: &'static str,
-) -> BuiltinResult<BoundingBox> {
-    block_on(gpu_xy_bounds_async(x, y, context))
-}
-
-#[cfg(feature = "plot-core")]
-pub fn gpu_errorbar_bounds(
-    x: &GpuTensorHandle,
-    y: &GpuTensorHandle,
-    y_neg: &GpuTensorHandle,
-    y_pos: &GpuTensorHandle,
-    context: &'static str,
-) -> BuiltinResult<BoundingBox> {
-    let (min_x, max_x) = axis_bounds(x, context)?;
-    let (min_y, max_y) = axis_bounds(y, context)?;
-    let (_min_neg, max_neg) = axis_bounds(y_neg, context)?;
-    let (_min_pos, max_pos) = axis_bounds(y_pos, context)?;
-    Ok(BoundingBox::new(
-        Vec3::new(min_x, min_y - max_neg, 0.0),
-        Vec3::new(max_x, max_y + max_pos, 0.0),
     ))
 }
 
@@ -180,9 +226,14 @@ pub async fn gpu_xyz_bounds_async(
     z: &GpuTensorHandle,
     context: &'static str,
 ) -> BuiltinResult<BoundingBox> {
-    let (min_x, max_x) = axis_bounds_async(x, context).await?;
-    let (min_y, max_y) = axis_bounds_async(y, context).await?;
-    let (min_z, max_z) = axis_bounds_async(z, context).await?;
+    let protected = [x, y, z];
+    let (min_x, max_x) = bounds::axis_bounds_protecting(x, &protected, context).await?;
+    let (min_y, max_y) = bounds::axis_bounds_protecting(y, &protected, context)
+        .await
+        .map_err(|error| preparation_after_effect(error, context))?;
+    let (min_z, max_z) = bounds::axis_bounds_protecting(z, &protected, context)
+        .await
+        .map_err(|error| preparation_after_effect(error, context))?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),

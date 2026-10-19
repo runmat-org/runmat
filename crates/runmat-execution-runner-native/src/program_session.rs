@@ -141,11 +141,15 @@ impl NativeProgramSession {
                 .validate_for_portable_host()
                 .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
             if submission.request.environment != program.environment
+                || submission.request.console != program.console
                 || submission.request.inputs != program.arguments
                 || submission.request.outputs.requested_outputs != program.requested_outputs
+                || submission.request.invocation_context != program.context
+                || submission.request.callable.program != program.callable
             {
                 return Err(NativeExecutionError::Protocol(
-                    "native task inputs or outputs differ from its exact program request".into(),
+                    "native task inputs, outputs, or invocation context differ from its exact program request"
+                        .into(),
                 ));
             }
             if !matches!(
@@ -163,14 +167,7 @@ impl NativeProgramSession {
         let completions = self.driver.submit_tasks(
             tasks
                 .into_iter()
-                .map(|(program, submission)| {
-                    (
-                        submission,
-                        program.recipe,
-                        program.artifact,
-                        program.function,
-                    )
-                })
+                .map(|(program, submission)| (submission, program.recipe, program.artifact))
                 .collect(),
         )?;
         Ok(completions
@@ -212,14 +209,45 @@ pub struct NativeProgramTask {
     completion: Arc<TaskCompletion>,
 }
 
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum NativeProgramFailure {
+    #[error("execution failed: {0}")]
+    Execution(String),
+    #[error("execution infrastructure failed: {0}")]
+    Infrastructure(String),
+    #[error("execution worker was lost: {0}")]
+    WorkerLost(String),
+    #[error("execution was cancelled")]
+    Cancelled,
+    #[error("execution failed: {}", .0.message)]
+    Runtime(runmat_execution::ProgramRuntimeFailure),
+}
+
 impl NativeProgramTask {
     /// One immutable read of original execution and its separate durability outcome.
     pub fn try_completion(&self) -> Option<NativeProgramCompletion> {
         self.completion.try_native_completion()
     }
 
-    pub fn try_result(&self) -> Option<Result<AttemptSuccess, String>> {
-        self.completion.try_value()
+    pub fn try_result(&self) -> Option<Result<AttemptSuccess, NativeProgramFailure>> {
+        self.completion.try_value().map(|result| {
+            result.map_err(|failure| match failure {
+                crate::driver::TransferFailure::Execution(message) => {
+                    NativeProgramFailure::Execution(message)
+                }
+                crate::driver::TransferFailure::Infrastructure(message) => {
+                    NativeProgramFailure::Infrastructure(message)
+                }
+                crate::driver::TransferFailure::WorkerLost(message)
+                | crate::driver::TransferFailure::RetirementUnverified(message) => {
+                    NativeProgramFailure::WorkerLost(message)
+                }
+                crate::driver::TransferFailure::Cancelled => NativeProgramFailure::Cancelled,
+                crate::driver::TransferFailure::Runtime(failure) => {
+                    NativeProgramFailure::Runtime(*failure)
+                }
+            })
+        })
     }
 
     /// Complete original scheduler history, available atomically with terminal completion.
@@ -237,7 +265,9 @@ impl NativeProgramTask {
     /// Original scheduler verdict for inspection. This does not authorize result
     /// publication: `try_result` also requires durable checkpoint delivery.
     pub fn try_scheduler_result(&self) -> Option<Result<AttemptSuccess, String>> {
-        self.completion.try_scheduler_result()
+        self.completion
+            .try_scheduler_result()
+            .map(|result| result.map_err(|failure| failure.to_string()))
     }
 
     pub fn try_checkpoint_evidence(&self) -> Option<crate::NativeCheckpointEvidence> {

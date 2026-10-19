@@ -382,7 +382,7 @@ fn is_logical_truecolor_value(value: &Value) -> bool {
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_is_logical(handle)
                 && handle
-                    .shape
+                    .shape()
                     .get(2)
                     .is_some_and(|&channels| channels == 3 || channels == 4)
         }
@@ -392,12 +392,12 @@ fn is_logical_truecolor_value(value: &Value) -> bool {
 
 fn is_supported_four_channel_image(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) if tensor.shape.get(2) == Some(&4) => matches!(
+        Value::Tensor(tensor) if tensor.shape().get(2) == Some(&4) => matches!(
             tensor.numeric_dtype(),
             NumericDType::F64 | NumericDType::F32 | NumericDType::U8 | NumericDType::U16
         ),
         Value::GpuTensor(handle)
-            if handle.shape.get(2) == Some(&4)
+            if handle.shape().get(2) == Some(&4)
                 && !runmat_accelerate_api::handle_is_logical(handle) =>
         {
             matches!(
@@ -415,12 +415,12 @@ fn is_supported_four_channel_image(value: &Value) -> bool {
 fn is_truecolor_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor
-            .shape
+            .shape()
             .get(2)
             .copied()
             .is_some_and(|c| c == 3 || c == 4),
         Value::GpuTensor(handle) => handle
-            .shape
+            .shape()
             .get(2)
             .copied()
             .is_some_and(|c| c == 3 || c == 4),
@@ -517,8 +517,7 @@ async fn render_surface(
         "scaled",
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_imshow_internal(err));
@@ -623,9 +622,10 @@ fn default_image_y_axis(rows: usize) -> Vec<f64> {
 }
 
 fn truecolor_shape(tensor: &Tensor) -> crate::BuiltinResult<(usize, usize)> {
-    let rows = tensor.shape.first().copied().unwrap_or(tensor.rows);
-    let cols = tensor.shape.get(1).copied().unwrap_or(tensor.cols);
-    let channels = tensor.shape.get(2).copied().unwrap_or(1);
+    let shape = tensor.shape();
+    let rows = shape.first().copied().unwrap_or(0);
+    let cols = shape.get(1).or_else(|| shape.first()).copied().unwrap_or(0);
+    let channels = shape.get(2).copied().unwrap_or(1);
     if rows == 0 || cols == 0 || (channels != 3 && channels != 4) {
         return Err(imshow_error(
             "imshow: truecolor image data must be MxNx3 or MxNx4",
@@ -643,14 +643,15 @@ fn build_truecolor_image_surface(
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
 ) -> crate::BuiltinResult<SurfacePlot> {
-    let image_rows = tensor.shape.first().copied().unwrap_or(tensor.rows);
-    let image_cols = tensor.shape.get(1).copied().unwrap_or(tensor.cols);
+    let shape = tensor.shape();
+    let image_rows = shape.first().copied().unwrap_or(0);
+    let image_cols = shape.get(1).or_else(|| shape.first()).copied().unwrap_or(0);
     if x_axis.len() != image_cols || y_axis.len() != image_rows {
         return Err(imshow_error(
             "imshow: truecolor image axes must match image columns and rows",
         ));
     }
-    let channels = tensor.shape.get(2).copied().unwrap_or(3);
+    let channels = shape.get(2).copied().unwrap_or(3);
     let dtype = tensor.numeric_dtype();
     let scale = match dtype {
         NumericDType::U8 => 1.0f32 / 255.0,
@@ -1008,16 +1009,14 @@ mod tests {
 
     #[test]
     fn gpu_integer_grayscale_uses_underlying_class_display_range() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: 0,
-            buffer_id: u64::MAX - 155,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::I32,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 2],
+                runmat_accelerate_api::NumericElementType::I32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         assert_eq!(
             gpu_default_limits(&handle),
             (i32::MIN as f64, i32::MAX as f64)
@@ -1056,7 +1055,7 @@ mod tests {
             &[Value::Tensor(matrix(vec![1.0; 4], 2, 2))],
         ))
         .expect("imshow should be registered");
-        assert!(matches!(result, Value::Num(handle) if handle.is_finite()));
+        assert!(matches!(result.value(), Value::Num(handle) if handle.is_finite()));
     }
 
     #[test]
@@ -1214,12 +1213,14 @@ mod tests {
             assert!(futures::executor::block_on(imshow_builtin(vec![rgba()])).is_ok());
         }
 
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1, 4],
-            device_id: 0,
-            buffer_id: u64::MAX - 156,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1, 4],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = futures::executor::block_on(imshow_builtin(vec![Value::GpuTensor(handle)]))
             .expect_err("MATLAB mode rejects resident four-channel input before gather");
@@ -1231,17 +1232,13 @@ mod tests {
 
     #[test]
     fn imshow_rejects_resident_logical_truecolor_before_gather() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1, 3],
-            device_id: 0,
-            buffer_id: u64::MAX - 157,
-            descriptor: Default::default(),
-        };
-        runmat_accelerate_api::set_handle_logical(&handle, true);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_logical_zeroed(vec![1, 1, 3], runmat_accelerate_api::ProviderPrecision::F64)
+            .unwrap()
+            .handle;
         let error =
             futures::executor::block_on(imshow_builtin(vec![Value::GpuTensor(handle.clone())]))
                 .expect_err("logical truecolor is not numeric truecolor");
-        runmat_accelerate_api::clear_handle_logical(&handle);
         assert_eq!(error.identifier(), Some("RunMat:imshow:InvalidArgument"));
         assert!(error
             .message()

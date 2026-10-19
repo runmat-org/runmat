@@ -1132,6 +1132,10 @@ struct UploadTask {
 
 #[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        crate::FsPathNamespace::VirtualRooted
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/"))
     }

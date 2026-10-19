@@ -1,83 +1,79 @@
 use runmat_mir::{MirConstant, MirOperand, MirRvalue};
+use runmat_runtime::execution::RootedValueLease;
 use runmat_runtime::native::NativeValueRef;
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
+
+fn sequence_resolution_context(
+    sequence_use: runmat_types::SequenceUse,
+    count: usize,
+) -> runmat_runtime::sequence::SequenceResolutionContext {
+    match sequence_use {
+        runmat_types::SequenceUse::SelectDestinationCardinality => {
+            runmat_runtime::sequence::SequenceResolutionContext::destination_cardinality(count)
+        }
+        runmat_types::SequenceUse::SelectCurrentFunctionOutputs => {
+            runmat_runtime::sequence::SequenceResolutionContext::current_function_outputs(count)
+        }
+        _ => Default::default(),
+    }
+}
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "operand/sequence_read_tests.rs"]
+mod sequence_read_tests;
+
 pub(super) fn evaluate_rvalue(
     state: &mut HostState,
     value: &MirRvalue,
     requested_outputs: usize,
-    output_local: Option<runmat_native_codegen::NativeLocalId>,
+    _output_local: Option<runmat_native_codegen::NativeLocalId>,
 ) -> NativeExecutorResult<Vec<NativeValueRef>> {
-    if output_local.is_some_and(|local| state.function.index_expression(local).is_some()) {
-        // Context-dependent selector temporaries are recipes, not ordinary
-        // eager values. Evaluating them here would execute `end` calls with no
-        // base shape and replay their effects during the actual index site.
-        return Ok(vec![state.arena.insert(Value::Num(0.0))]);
-    }
     match value {
         MirRvalue::Use(operand) => evaluate_operand(state, operand).map(|value| vec![value]),
         MirRvalue::Unary(operator, operand) => {
-            let argument = materialize_operand(state, operand)?;
-            super::operator::evaluate(state, *operator, vec![argument]).map(|value| vec![value])
+            super::operator::evaluate(state, *operator, &[operand]).map(|value| vec![value])
         }
         MirRvalue::Binary(left, operator, right) => {
-            let left = materialize_operand(state, left)?;
-            let right = materialize_operand(state, right)?;
-            super::operator::evaluate(state, *operator, vec![left, right]).map(|value| vec![value])
+            super::operator::evaluate(state, *operator, &[left, right]).map(|value| vec![value])
         }
         MirRvalue::ShortCircuit {
             left,
             op,
             right_temps,
             right,
-        } => {
-            let left = materialize_operand(state, left)?;
-            let left_truth = logical_truth(state, &left, "short-circuit left operand")?;
-            let short_circuited = match op {
-                runmat_mir::MirShortCircuitOp::And => !left_truth,
-                runmat_mir::MirShortCircuitOp::Or => left_truth,
-            };
-            let result = if short_circuited {
-                left_truth
-            } else {
-                for statement in right_temps {
-                    execute_embedded_statement(state, &statement.kind)?;
-                }
-                let right = materialize_operand(state, right)?;
-                logical_truth(state, &right, "short-circuit right operand")?
-            };
-            Ok(vec![state.arena.insert(Value::Bool(result))])
-        }
+        } => super::short_circuit::evaluate(state, left, *op, right_temps, right),
         MirRvalue::Range { start, step, end } => {
             let mut arguments = vec![materialize_operand(state, start)?];
             if let Some(step) = step {
                 arguments.push(materialize_operand(state, step)?);
             }
             arguments.push(materialize_operand(state, end)?);
-            super::call::builtin(state, "colon", arguments, 1).map(|values| {
-                values
+            super::call::builtin(state, "colon", arguments, 1).and_then(|values| {
+                Ok(super::call_suspension::own_output_storage(values)?
                     .into_iter()
                     .map(|value| state.arena.insert(value))
-                    .collect()
+                    .collect())
             })
         }
-        MirRvalue::Call(call) => super::call::evaluate(state, call).map(|values| {
-            values
-                .into_iter()
-                .map(|value| state.arena.insert(value))
-                .collect()
-        }),
+        MirRvalue::Call(call) => {
+            super::call::evaluate(state, call, requested_outputs).and_then(|values| {
+                Ok(super::call_suspension::own_output_storage(values)?
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect())
+            })
+        }
         MirRvalue::Aggregate {
             kind,
-            rows,
-            cols,
+            row_lengths,
             elements,
-        } => super::aggregate::evaluate(state, kind, *rows, *cols, elements)
-            .map(|value| vec![state.arena.insert(value)]),
+        } => super::aggregate::evaluate(state, kind, row_lengths, elements)
+            .map(|reference| vec![reference]),
         MirRvalue::StructLiteral { fields } => {
             super::aggregate::structure(state, fields).map(|value| vec![state.arena.insert(value)])
         }
@@ -86,47 +82,124 @@ pub(super) fn evaluate_rvalue(
                 .map(|value| vec![state.arena.insert(value)])
         }
         MirRvalue::Index { base, indexing } => {
-            super::indexing::read(state, base, indexing, requested_outputs).map(|values| {
+            super::indexing::read(state, base, indexing, requested_outputs).and_then(|values| {
+                Ok(super::call_suspension::own_output_storage(values)?
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect())
+            })
+        }
+        MirRvalue::SubscriptChain(chain) => {
+            super::subscript_path::read(state, chain, requested_outputs).map(|values| {
                 values
                     .into_iter()
                     .map(|value| state.arena.insert(value))
                     .collect()
             })
         }
-        MirRvalue::Member { base, member } => {
-            let base = materialize_operand(state, base)?;
-            let value = super::sync::complete(
-                &state.runtime,
-                runmat_runtime::object::resolve::load_member(
-                    base,
-                    member.0.clone(),
-                    false,
-                    Some(&state.function.name),
-                ),
-                "member read",
-            )?;
-            Ok(vec![state.arena.insert(value)])
+        MirRvalue::Member {
+            base,
+            member,
+            sequence_use,
+        } => {
+            let stage = super::call_suspension::SequenceReadStage::Member {
+                selection: *sequence_use,
+                requested_outputs,
+            };
+            let values = if let Some(values) =
+                super::call_suspension::take_completed_sequence_read(state, stage)?
+            {
+                values
+            } else {
+                let base = materialize_operand(state, base)?;
+                let roots = RootedValueLease::for_values(std::iter::once(&base))
+                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+                let runtime = state.runtime.clone();
+                let name = state.function.name.clone();
+                let member = member.0.clone();
+                super::call_suspension::begin_sequence_read(
+                    state,
+                    stage,
+                    Box::pin(async move {
+                        let sequence =
+                            runmat_runtime::object::resolve::read_member_sequence_with_context(
+                                Some(&runtime),
+                                base,
+                                member,
+                                false,
+                                Some(&name),
+                            )
+                            .await?;
+                        drop(roots);
+                        Ok(sequence)
+                    }),
+                )?
+            };
+            values.with_owned_sequence(|sequence| {
+                let values = sequence.resolve(
+                    *sequence_use,
+                    sequence_resolution_context(*sequence_use, requested_outputs),
+                )?;
+                Ok(super::call_suspension::own_output_storage(values)?
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect())
+            })
         }
-        MirRvalue::DynamicMember { base, member } => {
-            let base = materialize_operand(state, base)?;
-            let member = materialize_operand(state, member)?;
-            let member = String::try_from(&member).map_err(|error| {
-                NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
-                    "DynamicFieldName",
-                    error,
-                ))
-            })?;
-            let value = super::sync::complete(
-                &state.runtime,
-                runmat_runtime::object::resolve::load_member_dynamic(
-                    base,
-                    member,
-                    false,
-                    Some(&state.function.name),
-                ),
-                "dynamic member read",
-            )?;
-            Ok(vec![state.arena.insert(value)])
+        MirRvalue::DynamicMember {
+            base,
+            member,
+            sequence_use,
+        } => {
+            let stage = super::call_suspension::SequenceReadStage::DynamicMember {
+                selection: *sequence_use,
+                requested_outputs,
+            };
+            let values = if let Some(values) =
+                super::call_suspension::take_completed_sequence_read(state, stage)?
+            {
+                values
+            } else {
+                let base = materialize_operand(state, base)?;
+                let member = materialize_operand(state, member)?;
+                let roots = RootedValueLease::for_values([&base, &member].into_iter())
+                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+                let member = String::try_from(&member).map_err(|error| {
+                    NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
+                        "DynamicFieldName",
+                        error,
+                    ))
+                })?;
+                let runtime = state.runtime.clone();
+                let name = state.function.name.clone();
+                super::call_suspension::begin_sequence_read(
+                    state,
+                    stage,
+                    Box::pin(async move {
+                        let sequence =
+                            runmat_runtime::object::resolve::read_member_sequence_with_context(
+                                Some(&runtime),
+                                base,
+                                member,
+                                false,
+                                Some(&name),
+                            )
+                            .await?;
+                        drop(roots);
+                        Ok(sequence)
+                    }),
+                )?
+            };
+            values.with_owned_sequence(|sequence| {
+                let values = sequence.resolve(
+                    *sequence_use,
+                    sequence_resolution_context(*sequence_use, requested_outputs),
+                )?;
+                Ok(super::call_suspension::own_output_storage(values)?
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect())
+            })
         }
         MirRvalue::WorkspaceFirstStaticProperty {
             workspace_name,
@@ -164,7 +237,32 @@ pub(super) fn evaluate_rvalue(
                 .join("."),
         ))]),
         MirRvalue::Colon => Ok(vec![state.arena.insert(Value::Num(0.0))]),
-        MirRvalue::End => Ok(vec![state.arena.insert(Value::Num(-0.0))]),
+        MirRvalue::End => {
+            if let Some((prepared, component, component_count)) =
+                state.subscript_end_receivers.last()
+            {
+                let prepared = prepared.clone();
+                let component = *component;
+                let component_count = *component_count;
+                let value = super::subscript_path::resolve_end(
+                    state,
+                    prepared,
+                    component,
+                    component_count,
+                )?;
+                return Ok(vec![state.arena.insert(value)]);
+            }
+            let extent = state
+                .contextual_index_extents
+                .last()
+                .copied()
+                .ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "verified Native IR evaluated end without an indexing context".into(),
+                    )
+                })?;
+            Ok(vec![state.arena.insert(Value::Num(extent as f64))])
+        }
         MirRvalue::Future {
             function,
             args,
@@ -178,37 +276,83 @@ pub(super) fn evaluate_rvalue(
             ..
         } => {
             let arguments = super::call::materialize_arguments(state, args)?;
-            runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
-                arguments.clone(),
-            ))?;
-            let function_identity =
-                runmat_types::ProgramFunctionId(u32::try_from(function.0).map_err(|_| {
-                    NativeExecutorError::Host("function identity exceeds portable contract".into())
-                })?);
-            let program = runmat_runtime::execution::capture_deferred_program(
-                &state.runtime,
-                function_identity,
-            )?;
+            runmat_runtime::execution::validate_spawn_captures(&arguments)?;
+            let mut invocation = runmat_runtime::execution::DeferredInvocation::callable(
+                runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                    runmat_types::CallableIdentity::BoundFunction(*function),
+                    arguments,
+                    requested_outputs.executor_carrier_count().ok_or_else(|| {
+                        NativeExecutorError::Host(
+                            "future output cardinality cannot be derived from an assignment destination"
+                                .into(),
+                        )
+                    })?,
+                    runmat_types::CallableFallbackPolicy::None,
+                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                ),
+            );
+            let program = if !state.runtime.execution().requires_program_capture() {
+                runmat_runtime::execution::DeferredProgram::Local
+            } else if let Some(selected) = state.runtime.selected_graph_program() {
+                let binding = state
+                    .runtime
+                    .selected_graph_function_binding(*function)
+                    .ok_or_else(|| {
+                        NativeExecutorError::Host(
+                            "native async callable has no exact selected definition and source graph"
+                                .into(),
+                        )
+                    })?;
+                let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) =
+                    &mut invocation
+                else {
+                    unreachable!("native future admission created a callable invocation")
+                };
+                descriptor.target =
+                    runmat_runtime::call::descriptor::CallableTarget::Bound(binding);
+                runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone())
+            } else {
+                if runmat_runtime::execution::value_codec::deferred_invocation_requires_graph(
+                    &invocation,
+                ) {
+                    return Err(NativeExecutorError::Host(
+                        "native async lexical capture requires selected V3 graph authority".into(),
+                    ));
+                }
+                let bytes = state.program_capture.clone().ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "native async execution is missing its exact program".into(),
+                    )
+                })?;
+                runmat_runtime::execution::DeferredProgram::InterpreterV2(std::sync::Arc::from(
+                    bytes,
+                ))
+            };
+            let program_revision = if matches!(
+                &program,
+                runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
+            ) {
+                None
+            } else {
+                state.runtime.program_revision().cloned()
+            };
             let future = state
                 .runtime
                 .execution()
                 .create_future(runmat_runtime::execution::DeferredCall {
+                    invocation,
+                    retry: runmat_execution::RetryPolicy::Never,
+                    environment: runmat_runtime::execution::capture_deferred_environment(
+                        &state.runtime,
+                    )?,
                     console: state
                         .runtime
                         .service_ports()
                         .host()
                         .and_then(|host| host.console_limits()),
-                    environment: runmat_runtime::execution::capture_deferred_environment(
-                        &state.runtime,
-                    )?,
-                    function: function.0,
-                    arguments,
-                    requested_outputs: requested_outputs.fixed_count(),
-                    program_revision: program
-                        .as_ref()
-                        .map(|capture| capture.revision.clone())
-                        .or_else(|| state.runtime.program_revision().cloned()),
-                    program: program.map(|capture| capture.bytes),
+                    program_revision,
+                    capabilities: native_function_capabilities(state, *function)?,
+                    program,
                 })
                 .map_err(execution_service_error)?;
             Ok(vec![state.arena.insert(Value::Future(future))])
@@ -235,50 +379,34 @@ pub(super) fn evaluate_rvalue(
     }
 }
 
+fn native_function_capabilities(
+    state: &super::state::HostState,
+    function: runmat_types::FunctionId,
+) -> NativeExecutorResult<runmat_types::CapabilitySet> {
+    let Some(function) = u32::try_from(function.0)
+        .ok()
+        .map(runmat_types::ProgramFunctionId)
+    else {
+        return Err(NativeExecutorError::Host(
+            "async function identity exceeds its portable representation".into(),
+        ));
+    };
+    state
+        .functions
+        .iter()
+        .find(|candidate| candidate.id == function)
+        .map(|function| function.capabilities.clone())
+        .ok_or_else(|| {
+            NativeExecutorError::Host(
+                "async callable is absent from the exact Native IR function set".into(),
+            )
+        })
+}
+
 fn execution_service_error(
     error: runmat_runtime::execution::ExecutionServiceError,
 ) -> NativeExecutorError {
     runmat_runtime::runtime_error::semantic_error("ExecutionService", error.to_string()).into()
-}
-
-fn execute_embedded_statement(
-    state: &mut HostState,
-    statement: &runmat_mir::MirStmtKind,
-) -> NativeExecutorResult<()> {
-    match statement {
-        runmat_mir::MirStmtKind::Assign {
-            place: runmat_mir::MirPlace::Local(local),
-            value,
-        } => {
-            let native_local = u32::try_from(local.0)
-                .map(runmat_native_codegen::NativeLocalId)
-                .map_err(|_| {
-                    NativeExecutorError::Host("embedded local exceeds native schema".into())
-                })?;
-            let mut values = evaluate_rvalue(state, value, 1, Some(native_local))?;
-            if values.len() != 1 {
-                return Err(NativeExecutorError::Host(
-                    "embedded short-circuit assignment did not produce one value".into(),
-                ));
-            }
-            state.set_local(local.0, values.remove(0))
-        }
-        runmat_mir::MirStmtKind::Expr(value) => {
-            let _ = evaluate_rvalue(state, value, 0, None)?;
-            Ok(())
-        }
-        other => Err(NativeExecutorError::Host(format!(
-            "verified short-circuit payload contains invalid statement {other:?}"
-        ))),
-    }
-}
-
-fn logical_truth(state: &HostState, value: &Value, label: &str) -> NativeExecutorResult<bool> {
-    super::sync::complete(
-        &state.runtime,
-        runmat_runtime::condition::logical_truth_from_value(value, label),
-        "logical truth evaluation",
-    )
 }
 
 pub(super) fn materialize_operand(
@@ -289,15 +417,26 @@ pub(super) fn materialize_operand(
     state.arena.get(reference).cloned()
 }
 
+pub(super) fn materialize_retained_operand(
+    state: &mut HostState,
+    operand: &MirOperand,
+) -> NativeExecutorResult<(NativeValueRef, Value)> {
+    let reference = if let Some(reference) = state.take_contextual_input() {
+        reference
+    } else {
+        let reference = evaluate_operand(state, operand)?;
+        state.retain_contextual_input(reference)?
+    };
+    Ok((reference, state.arena.get(reference)?.clone()))
+}
+
 pub(super) fn evaluate_operand(
     state: &mut HostState,
     operand: &MirOperand,
 ) -> NativeExecutorResult<NativeValueRef> {
     match operand {
         MirOperand::Local(local) => {
-            let value = state.locals.get(local.0).copied().ok_or_else(|| {
-                NativeExecutorError::Host(format!("local {} is out of bounds", local.0))
-            })?;
+            let value = state.local_reference(local.0)?;
             if value.is_null()
                 && u32::try_from(local.0)
                     .ok()
@@ -320,6 +459,14 @@ pub(super) fn evaluate_operand(
                         "invalid MIR numeric constant {text:?}: {error}"
                     ))
                 })?),
+                MirConstant::ImaginaryNumber(text) => Value::Complex(
+                    0.0,
+                    text.parse::<f64>().map_err(|error| {
+                        NativeExecutorError::Host(format!(
+                            "invalid MIR imaginary numeric constant {text:?}: {error}"
+                        ))
+                    })?,
+                ),
                 MirConstant::IntegerLiteral(value) => {
                     Value::Int(runmat_value::IntValue::from(value))
                 }
@@ -327,7 +474,11 @@ pub(super) fn evaluate_operand(
                     Value::CharArray(runmat_value::CharArray::new_row(&text.runtime_text()))
                 }
                 MirConstant::String(text) => Value::String(text.runtime_text()),
-                MirConstant::Symbol(symbol) => Value::String(symbol.0.clone()),
+                MirConstant::Symbol(symbol) => {
+                    runmat_runtime::builtin::builtin_constant_value(&symbol.0).ok_or_else(|| {
+                        NativeExecutorError::Host(format!("unknown MIR constant {}", symbol.0))
+                    })?
+                }
                 MirConstant::Bool(value) => Value::Bool(*value),
                 MirConstant::EmptyArray => Value::Tensor(
                     runmat_value::Tensor::new(Vec::new(), vec![0, 0])
@@ -337,8 +488,8 @@ pub(super) fn evaluate_operand(
             Ok(state.arena.insert(value))
         }
         MirOperand::FunctionHandle(identity) => {
-            if let runmat_hir::CallableIdentity::BoundFunction(function)
-            | runmat_hir::CallableIdentity::AnonymousFunction(function) = identity
+            if let runmat_types::CallableIdentity::BoundFunction(function)
+            | runmat_types::CallableIdentity::AnonymousFunction(function) = identity
             {
                 let function = u32::try_from(function.0)
                     .map(runmat_types::ProgramFunctionId)
@@ -349,17 +500,36 @@ pub(super) fn evaluate_operand(
                     })?;
                 if let Some(target) = state.program_function(function) {
                     let name = target.name.clone();
-                    let captures = state.lexical_captures(function)?.unwrap_or_default();
-                    let value = if captures.is_empty() {
-                        Value::BoundFunctionHandle {
+                    let source_role = target.source_role;
+                    let carries_environment = source_role
+                        == runmat_types::FunctionSourceRole::Nested
+                        || (source_role == runmat_types::FunctionSourceRole::Anonymous
+                            && target.lexical_bindings.iter().any(|binding| {
+                                binding.kind
+                                    == runmat_native_codegen::NativeLexicalBindingKind::Transit
+                            }));
+                    let captures = state.callable_capture_values(function)?;
+                    let value = if captures.is_empty()
+                        && source_role != runmat_types::FunctionSourceRole::Nested
+                    {
+                        Value::bound_function_handle(
                             name,
-                            function: function.0 as usize,
-                        }
+                            function.0 as usize,
+                            runmat_runtime::user_functions::bound_function_authority_for(
+                                function.0 as usize,
+                            ),
+                            source_role,
+                            runmat_runtime::user_functions::source_file_for(function.0 as usize),
+                        )
                     } else {
                         runmat_runtime::call::closures::semantic_closure_value(
                             runmat_types::FunctionId(function.0 as usize),
                             name,
-                            captures.into_iter().map(|capture| capture.value).collect(),
+                            captures,
+                            source_role,
+                            carries_environment
+                                .then(|| state.lexical_environment.clone())
+                                .flatten(),
                         )
                     };
                     return Ok(state.arena.insert(value));
@@ -367,7 +537,7 @@ pub(super) fn evaluate_operand(
             }
             identity
                 .display_name()
-                .map(Value::FunctionHandle)
+                .map(Value::function_handle)
                 .map(|value| state.arena.insert(value))
                 .ok_or_else(|| {
                     NativeExecutorError::Host(format!(

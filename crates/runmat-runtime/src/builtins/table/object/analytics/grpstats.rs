@@ -157,8 +157,8 @@ fn parse_grpstats_stat_list(value: &Value) -> BuiltinResult<Vec<GrpStat>> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name)
-        | Value::BoundFunctionHandle { name, .. } => Ok(vec![GrpStat::parse(name)?]),
+        | Value::MethodFunctionHandle(name) => Ok(vec![GrpStat::parse(name)?]),
+        Value::BoundFunctionHandle(handle) => Ok(vec![GrpStat::parse(&handle.name)?]),
         Value::Closure(_) => Err(invalid_argument(
             "grpstats: custom function-handle summary statistics are not supported yet",
         )),
@@ -357,7 +357,7 @@ fn summarize_integer_table_groups<'a>(
         let value = storage
             .value_at(row)
             .ok_or_else(|| invalid_index("grpstats: integer row out of bounds"))?;
-        if !crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+        if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
             return Err(invalid_argument(
                 "grpstats: integer table data must be exactly representable as double for floating summary statistics",
             ));
@@ -397,14 +397,14 @@ fn grpstats_matrix_impl(value: Value, group: Value, rest: Vec<Value>) -> Builtin
     }
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count != outputs.len() {
             return Err(invalid_argument(
                 "grpstats: number of outputs must match requested statistics",
             ));
         }
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     Ok(outputs
         .into_iter()
@@ -463,7 +463,7 @@ fn checked_tensor_values_f64(tensor: &Tensor, context: &str) -> BuiltinResult<Ve
             .exact_values()
             .into_iter()
             .map(|value| {
-                if crate::builtins::math::trigonometry::cos::integer_is_exact_f64(&value) {
+                if crate::builtins::common::validation::integer_is_exact_f64(&value) {
                     Ok(value.to_f64())
                 } else {
                     Err(invalid_argument(format!(

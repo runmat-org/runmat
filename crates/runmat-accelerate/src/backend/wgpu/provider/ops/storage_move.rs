@@ -1,0 +1,46 @@
+//! Bit-preserving storage moves use the allocation's physical element type,
+//! independently of the provider's arithmetic precision.
+use super::*;
+#[path = "storage_move/permutation.rs"]
+mod permutation;
+#[path = "storage_move/flip.rs"]
+mod flip;
+
+impl WgpuProvider {
+    pub(super) fn get_entry_for_bitwise_move(
+        &self,
+        handle: &GpuTensorHandle,
+        operation: &str,
+    ) -> Result<BufferEntry> {
+        let entry = self.get_entry_raw(handle)?;
+        ensure!(
+            handle.shape() == entry.shape
+                && handle.physical().element_type() == entry.element_type
+                && handle.physical().storage() == entry.storage,
+            "{operation}: storage move descriptor does not match allocation"
+        );
+        Ok(entry)
+    }
+
+    pub(super) fn register_storage_move_buffer(
+        &self,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
+        source: &BufferEntry,
+        shape: Vec<usize>,
+        len: usize,
+        allocated_bytes: u64,
+    ) -> Result<GpuTensorHandle> {
+        self.register_numeric_buffer_produced(
+            buffer,
+            NumericBufferRegistration {
+                shape,
+                len,
+                physical_element_type: source.element_type,
+                storage: source.storage,
+                allocated_bytes,
+                usage: BufferUsageClass::Generic,
+            },
+            source.logical,
+        )
+    }
+}

@@ -2,20 +2,15 @@
 //!
 //! The implementation mirrors the modern RunMat builtin blueprint with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
+use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_builtins::{ResolveContext, Type};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Value,
 };
 
+#[cfg(test)]
 use crate::builtins::array::type_resolvers::{
     is_scalar_type, logical_type_from_rank, rank_from_dims_args, tensor_type_from_rank,
 };
@@ -23,9 +18,8 @@ use crate::builtins::array::type_resolvers::{
 use crate::builtins::common::random_args::shape_from_value;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
-    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
-    ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionKernelTemplate,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 
@@ -55,19 +49,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::UniformBuffer,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
             let constant = ctx
                 .constants
                 .first()
                 .ok_or(crate::builtins::common::spec::FusionError::MissingInput(0))?;
-            Ok(constant.to_string())
-        },
+            writer.push(constant)
+        }),
     }),
     reduction: None,
     emits_nan: false,
     notes: "Fusion planner treats fill as a constant generator backed by a uniform parameter.",
 };
 
+#[cfg(test)]
 fn fill_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let Some((fill_value, rest)) = args.split_first() else {
         return Type::Unknown;
@@ -96,154 +91,14 @@ fn fill_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
-const FILL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Constant-valued output array.",
-}];
-
-const FILL_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    BuiltinErrorDescriptor {
-        code: "RM.CREATE_ARRAY.NON_SCALAR_VALUE",
-        identifier: None,
-        when: "The fill value is not scalar.",
-        message: "createArray: FillValue must be a scalar",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.CREATE_ARRAY.INVALID_FILL_VALUE_TYPE",
-        identifier: None,
-        when: "The fill value type is unsupported.",
-        message: "createArray: unsupported FillValue type",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.CREATE_ARRAY.LIKE_EXPECTED_PROTOTYPE",
-        identifier: None,
-        when: "The 'like' keyword is provided without a prototype argument.",
-        message: "createArray: Like requires a prototype",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.CREATE_ARRAY.MULTIPLE_LIKE",
-        identifier: None,
-        when: "The 'like' keyword is provided multiple times.",
-        message: "createArray: Like may be specified only once",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.CREATE_ARRAY.CLASS_CONFLICT",
-        identifier: None,
-        when: "A class keyword and a 'like' prototype are both provided.",
-        message: "createArray: classname and Like cannot be combined",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.CREATE_ARRAY.UNSUPPORTED_CLASS",
-        identifier: None,
-        when: "An unsupported output class is requested.",
-        message: "createArray: unsupported class",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.CREATE_ARRAY.UNRECOGNIZED_OPTION",
-        identifier: None,
-        when: "A trailing option string is not recognized.",
-        message: "createArray: unrecognized option",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.CREATE_ARRAY.INVALID_DIMS",
-        identifier: None,
-        when: "Dimension arguments fail numeric/shape parsing.",
-        message: "createArray: dimensions must be integer values",
-    },
-];
-
-const CREATE_ARRAY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "arguments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Dimensions, optional class name, and Like/FillValue name-value arguments.",
-}];
-const CREATE_ARRAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = createArray(sz1, ..., szN, classname?, Like=prototype?, FillValue=value?)",
-    inputs: &CREATE_ARRAY_INPUTS,
-    outputs: &FILL_OUTPUT,
-}];
-pub const CREATE_ARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CREATE_ARRAY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FILL_ERRORS,
-};
-
-const INTEGER_DIMS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "dimensions",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Every built-in integer class is accepted exactly as a structural size; negative dimensions normalize to zero.",
-}];
-const INTEGER_FILL_VALUE: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "FillValue",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "An integer FillValue preserves its class unless classname or Like requests documented assignment conversion.",
-}];
-const INTEGER_LIKE: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "Like",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "An integer prototype preserves exact class and device residency.",
-}];
-pub const CREATE_ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "X = createArray(integer_dimensions, ...)",
-        inputs: &INTEGER_DIMS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Dimensions are consumed exactly before allocation.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "X = createArray(..., FillValue=integer_value)",
-        inputs: &INTEGER_FILL_VALUE,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Without an override, output preserves FillValue class; documented assignment conversion applies for classname or Like. Integer GPU FillValue forms preserve native real or paired-complex storage.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "X = createArray(..., Like=integer_prototype)",
-        inputs: &INTEGER_LIKE,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer GPU prototypes preserve exact class, complexity, and residency.",
-    },
-];
-
 #[runtime_builtin(
     name = "createArray",
-    category = "array/creation",
-    summary = "Create an array of a specified class and value.",
-    keywords = "createArray,constant,array,gpu,like,FillValue",
-    accel = "array_construct",
-    type_resolver(fill_type),
-    descriptor(crate::builtins::array::creation::fill::CREATE_ARRAY_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::array::creation::fill::CREATE_ARRAY_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::fill"
 )]
 async fn create_array_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedFill::parse_create_array(args).await?;
-    build_output(parsed).map_err(Into::into)
+    build_output(parsed)
 }
 
 // Retained as a source-local regression harness for the constant-fill kernel
@@ -255,7 +110,7 @@ async fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         .map_err(|e| format!("createArray: {e}"))?;
     let scalar = FillScalar::from_value(&gathered_value)?;
     let parsed = ParsedFill::parse(scalar, rest).await?;
-    build_output(parsed).map_err(Into::into)
+    build_output(parsed)
 }
 
 struct ParsedFill {
@@ -320,11 +175,11 @@ impl FillScalar {
                         return Err("fill: fill value must be a scalar".to_string());
                     }
                     let re = storage
-                        .real
+                        .real()
                         .value_at(0)
                         .ok_or_else(|| "fill: fill value must be a scalar".to_string())?;
                     let im = storage
-                        .imag
+                        .imag()
                         .value_at(0)
                         .ok_or_else(|| "fill: fill value must be a scalar".to_string())?;
                     return Ok(FillScalar::ComplexInteger(re, im));
@@ -638,7 +493,7 @@ async fn create_array_dims(value: &Value) -> Result<Option<Vec<usize>>, String> 
     match value {
         Value::Num(value) if value.is_finite() && *value < 0.0 => Ok(Some(vec![0])),
         Value::Int(value) if value.try_to_i64().is_some_and(|value| value < 0) => Ok(Some(vec![0])),
-        Value::Tensor(tensor) if tensor.rows == 1 || tensor.len() == 1 => {
+        Value::Tensor(tensor) if matches!(tensor.shape(), [_] | [1, ..]) || tensor.len() == 1 => {
             if let Some(storage) = tensor.integer_storage() {
                 let dims = storage
                     .exact_values()
@@ -711,7 +566,7 @@ fn template_from_fill_value(value: &Value, fill: &FillScalar) -> OutputTemplate 
     }
 }
 
-fn build_output(parsed: ParsedFill) -> Result<Value, String> {
+fn build_output(parsed: ParsedFill) -> crate::BuiltinResult<Value> {
     let residency = parsed.residency;
     let output = match parsed.template {
         OutputTemplate::Double
@@ -746,7 +601,7 @@ fn build_output(parsed: ParsedFill) -> Result<Value, String> {
         OutputTemplate::Integer(storage) => {
             fill_integer_like(&parsed.fill, &parsed.shape, &storage)
         }
-        OutputTemplate::Like(proto) => fill_like(&parsed.fill, &parsed.shape, &proto),
+        OutputTemplate::Like(proto) => Ok(fill_like(&parsed.fill, &parsed.shape, &proto)?),
     }?;
     match residency {
         Some(owner) => upload_created_output(output, &parsed.shape, &owner),
@@ -758,62 +613,72 @@ fn upload_created_output(
     output: Value,
     shape: &[usize],
     owner: &GpuTensorHandle,
-) -> Result<Value, String> {
-    let provider = runmat_accelerate_api::provider_for_handle(owner).ok_or_else(|| {
-        "createArray: GPU FillValue has no registered owning provider".to_string()
-    })?;
+) -> crate::BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(owner)
+        .ok_or("createArray: GPU FillValue has no registered owning provider")?;
     let handle = match output {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?,
+        Value::Tensor(tensor) => {
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[owner])?
+        }
         Value::Num(value) => {
-            let tensor = Tensor::new(vec![value], shape.to_vec())
-                .map_err(|error| format!("createArray: {error}"))?;
-            gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?
+            let tensor = Tensor::new(vec![value], shape.to_vec())?;
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[owner])?
         }
         Value::Int(value) => {
-            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), shape.to_vec())
-                .map_err(|error| format!("createArray: {error}"))?;
-            gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), shape.to_vec())?;
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[owner])?
         }
         Value::LogicalArray(array) => {
-            let data = array
-                .data
-                .iter()
-                .map(|value| if *value == 0 { 0.0 } else { 1.0 })
-                .collect();
-            let tensor =
-                Tensor::new(data, array.shape).map_err(|error| format!("createArray: {error}"))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?;
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-            handle
+            upload_logical_fill_value(provider, &array.data, &array.shape, owner)?
         }
         Value::Bool(value) => {
-            let tensor = Tensor::new(vec![if value { 1.0 } else { 0.0 }], shape.to_vec())
-                .map_err(|error| format!("createArray: {error}"))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?;
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-            handle
+            upload_logical_fill_value(provider, &[u8::from(value)], shape, owner)?
         }
-        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
-            .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?,
+        Value::ComplexTensor(tensor) => {
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[owner])?
+        }
         Value::Complex(real, imag) => {
-            let tensor = ComplexTensor::new(vec![(real, imag)], shape.to_vec())
-                .map_err(|error| format!("createArray: {error}"))?;
-            gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?
+            let tensor = ComplexTensor::new(vec![(real, imag)], shape.to_vec())?;
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[owner])?
         }
         other => {
             return Err(format!(
                 "createArray: cannot preserve GPU FillValue residency for {other:?}"
-            ));
+            )
+            .into())
         }
     };
-    validate_like_gpu_owner(owner, &handle, shape, provider).map_err(|error| error.to_string())?;
-    Ok(Value::GpuTensor(handle))
+    if handle.shape() != shape
+        || handle.shares_allocation_with(owner)
+        || !gpu_helpers::exact_provider_for_handle(&handle)
+            .is_some_and(|actual| runmat_accelerate_api::same_provider_instance(actual, provider))
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            handle,
+            crate::RuntimeError::from("createArray: invalid uploaded output owner, shape or alias"),
+        ));
+    }
+    let handle = gpu_helpers::propagate_owned_output_provenance(handle, [owner])?;
+    gpu_helpers::resident_gpu_value(handle)
+}
+
+fn upload_logical_fill_value(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    data: &[u8],
+    shape: &[usize],
+    owner: &GpuTensorHandle,
+) -> crate::BuiltinResult<GpuTensorHandle> {
+    runmat_accelerate_api::upload_logical_protecting(
+        provider,
+        &runmat_accelerate_api::HostLogicalTensorView { data, shape },
+        &[owner],
+    )
+    .map_err(|cause| {
+        crate::build_runtime_error(format!("createArray: logical upload failed: {cause}"))
+            .with_builtin("createArray")
+            .with_source(cause)
+            .build()
+    })
 }
 
 fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorage> {
@@ -865,7 +730,7 @@ fn fill_complex_single(fill: &FillScalar, shape: &[usize]) -> Result<Value, Stri
     .map_err(|error| format!("createArray: {error}"))
 }
 
-fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value, String> {
+fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) if fill.is_complex() => fill_complex(fill, shape),
         Value::LogicalArray(_) | Value::Bool(_) => fill_logical(fill, shape),
@@ -877,7 +742,7 @@ fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value,
             None => fill_complex(fill, shape),
         },
         Value::Complex(_, _) => fill_complex(fill, shape),
-        Value::GpuTensor(handle) => fill_like_gpu(fill, shape, handle),
+        Value::GpuTensor(handle) => return fill_like_gpu(fill, shape, handle),
         Value::Tensor(tensor) => match tensor.integer_storage() {
             Some(storage) if fill.is_complex() => {
                 let prototype =
@@ -916,6 +781,7 @@ fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value,
             other
         )),
     }
+    .map_err(Into::into)
 }
 
 fn fill_integer_like(
@@ -936,26 +802,26 @@ fn fill_complex_integer_like(
 ) -> Result<Value, String> {
     let (real, imag) = match fill {
         FillScalar::Integer(value) => (
-            prototype.real.cast_exact_assignment(value),
-            prototype.imag.cast_f64_assignment(0.0),
+            prototype.real().cast_exact_assignment(value),
+            prototype.imag().cast_f64_assignment(0.0),
         ),
         FillScalar::Complex(real, imag) => (
-            prototype.real.cast_f64_assignment(*real),
-            prototype.imag.cast_f64_assignment(*imag),
+            prototype.real().cast_f64_assignment(*real),
+            prototype.imag().cast_f64_assignment(*imag),
         ),
         FillScalar::ComplexInteger(real, imag) => (
-            prototype.real.cast_exact_assignment(real),
-            prototype.imag.cast_exact_assignment(imag),
+            prototype.real().cast_exact_assignment(real),
+            prototype.imag().cast_exact_assignment(imag),
         ),
         _ => (
-            prototype.real.cast_f64_assignment(fill.as_real()?),
-            prototype.imag.cast_f64_assignment(0.0),
+            prototype.real().cast_f64_assignment(fill.as_real()?),
+            prototype.imag().cast_f64_assignment(0.0),
         ),
     };
     let count = tensor::element_count(shape);
     let storage = IntegerComplexStorage::new(
-        prototype.real.from_same_class_values(vec![real; count])?,
-        prototype.imag.from_same_class_values(vec![imag; count])?,
+        prototype.real().from_same_class_values(vec![real; count])?,
+        prototype.imag().from_same_class_values(vec![imag; count])?,
     )?;
     ComplexTensor::new_integer(storage, shape.to_vec())
         .map(Value::ComplexTensor)
@@ -966,109 +832,81 @@ fn fill_like_gpu(
     fill: &FillScalar,
     shape: &[usize],
     prototype: &GpuTensorHandle,
-) -> Result<Value, String> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        let active_owner = runmat_accelerate_api::provider()
-            .is_some_and(|provider| provider.device_id() == prototype.device_id);
-        if prototype.device_id != 0 && !active_owner {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
-    if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(prototype) {
-        let prototype_storage = integer_storage_prototype(integer_type);
-        if fill.is_complex()
-            || runmat_accelerate_api::handle_storage(prototype)
-                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-        {
-            let component = prototype_storage;
-            let complex_prototype =
-                IntegerComplexStorage::new(component.zeros_like(0), component.zeros_like(0))?;
-            let Value::ComplexTensor(tensor) =
-                fill_complex_integer_like(fill, shape, &complex_prototype)?
-            else {
-                unreachable!("complex integer fill produces a complex tensor")
-            };
-            let provider =
-                runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-                    "createArray: GPU Like prototype has no registered owning provider".to_string()
-                })?;
-            let uploaded = gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU Like upload failed: {error}"))?;
-            validate_like_gpu_owner(prototype, &uploaded, shape, provider)
-                .map_err(|error| error.to_string())?;
-            return Ok(Value::GpuTensor(uploaded));
-        }
-        let storage = exact_integer_fill_storage(fill, shape, &prototype_storage)?;
-        let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-            "createArray: GPU Like prototype has no registered owning provider".to_string()
-        })?;
-        let view = integer_tensor_view(&storage, shape);
-        return provider
-            .upload_integer(&view)
-            .and_then(|output| {
-                validate_like_gpu_owner(prototype, &output, shape, provider)?;
-                Ok(Value::GpuTensor(output))
-            })
-            .map_err(|e| {
-                format!("fill: provider cannot preserve native integer gpuArray output: {e}")
-            });
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-        "createArray: GPU Like prototype has no registered owning provider".to_string()
-    })?;
-    let prototype_is_complex = runmat_accelerate_api::handle_storage(prototype)
-        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-    if fill.is_complex() || prototype_is_complex {
-        let tensor = make_complex_tensor(fill, shape)?;
-        if let Ok(uploaded) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
-            validate_like_gpu_owner(prototype, &uploaded, shape, provider)
-                .map_err(|error| error.to_string())?;
-            return Ok(Value::GpuTensor(uploaded));
-        }
-        return Err(
-            "createArray: prototype owner could not upload complex GPU Like output".to_string(),
-        );
-    }
-    let value = fill.as_real()?;
-    let attempt = if prototype.shape == shape {
-        provider.fill_like(prototype, value)
+) -> crate::BuiltinResult<Value> {
+    use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+    let provider = gpu_helpers::exact_provider_for_handle(prototype)
+        .ok_or("createArray: GPU Like prototype has no registered owning provider")?;
+    let logical = prototype.view().is_logical() && !fill.is_complex();
+    let complex = !logical
+        && (fill.is_complex()
+            || prototype.physical().storage() == GpuTensorStorage::ComplexInterleaved);
+    let integer = if prototype.view().is_logical() {
+        None
     } else {
-        provider.fill(shape, value)
+        runmat_accelerate_api::handle_integer_type(prototype)
     };
-    if let Ok(gpu) = attempt {
-        if validate_like_gpu_owner(prototype, &gpu, shape, provider).is_ok() {
-            return Ok(Value::GpuTensor(gpu));
+    let precision = if prototype.view().is_logical() {
+        Some(ProviderPrecision::F64)
+    } else {
+        runmat_accelerate_api::handle_precision(prototype)
+    };
+    let attempt = if logical {
+        Some(provider.logical_fill(shape, fill.as_bool()))
+    } else if !complex && integer.is_none() && precision == Some(provider.precision()) {
+        let value = fill.as_real()?;
+        Some(if prototype.shape() == shape {
+            provider.fill_like(prototype, value)
+        } else {
+            provider.fill(shape, value)
+        })
+    } else {
+        None
+    };
+    if let Some(attempt) = attempt {
+        match attempt {
+            Ok(Some(output)) => {
+                let output = crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+                    "createArray", provider, output, shape, GpuTensorStorage::Real,
+                    if logical { None } else { precision }, None, logical, &[prototype],
+                )?;
+                let output = gpu_helpers::propagate_owned_output_provenance(output, [prototype])?;
+                return gpu_helpers::resident_gpu_value(output);
+            }
+            Ok(None) => {}
+            Err(cause) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    crate::build_runtime_error(format!(
+                        "createArray: provider fill failed: {cause}"
+                    ))
+                    .with_builtin("createArray")
+                    .build(),
+                    cause.with_unproven_effects(),
+                ))
+            }
         }
     }
-
-    let tensor = make_real_tensor_from_value(value, shape)?;
-    if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor) {
-        validate_like_gpu_owner(prototype, &uploaded, shape, provider)
-            .map_err(|error| error.to_string())?;
-        return Ok(Value::GpuTensor(uploaded));
-    }
-    Err("createArray: prototype owner could not upload GPU Like output".to_string())
-}
-
-fn validate_like_gpu_owner(
-    prototype: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    expected_shape: &[usize],
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) -> anyhow::Result<()> {
-    if output.device_id != prototype.device_id
-        || output.shape != expected_shape
-        || !runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-    {
-        let output_owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(provider);
-        let _ = output_owner.free(output);
-        anyhow::bail!("createArray: GPU Like output did not remain on the prototype owner/device");
-    }
-    Ok(())
+    let host = if logical {
+        fill_logical(fill, shape)?
+    } else if let Some(integer) = integer {
+        let storage = integer_storage_prototype(integer);
+        if complex {
+            let paired = IntegerComplexStorage::new(storage.zeros_like(0), storage.zeros_like(0))?;
+            fill_complex_integer_like(fill, shape, &paired)?
+        } else {
+            fill_integer_like(fill, shape, &storage)?
+        }
+    } else {
+        match (
+            complex,
+            precision.ok_or("createArray: floating prototype is missing precision")?,
+        ) {
+            (true, ProviderPrecision::F32) => fill_complex_single(fill, shape)?,
+            (true, ProviderPrecision::F64) => fill_complex(fill, shape)?,
+            (false, ProviderPrecision::F32) => fill_single(fill, shape)?,
+            (false, ProviderPrecision::F64) => fill_double(fill, shape)?,
+        }
+    };
+    upload_created_output(host, shape, prototype)
 }
 
 fn make_real_tensor(fill: &FillScalar, shape: &[usize]) -> Result<Tensor, String> {
@@ -1129,29 +967,78 @@ fn integer_storage_prototype(
     }
 }
 
-fn integer_tensor_view<'a>(
-    storage: &'a IntegerStorage,
-    shape: &'a [usize],
-) -> HostIntegerTensorView<'a> {
-    let data = match storage {
-        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-    };
-    HostIntegerTensorView { data, shape }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
+
+    #[test]
+    fn resident_single_like_complex_fill_keeps_single_components() {
+        test_support::with_test_provider(|provider| {
+            let host = Tensor::from_f32(vec![7.0], vec![1, 1]).unwrap();
+            let input = gpu_helpers::upload_tensor(provider, &host).unwrap();
+            let value = fill_like_gpu(&FillScalar::Complex(1.5, -2.25), &[2, 3], &input).unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident output")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                output.physical().element_type(),
+                runmat_accelerate_api::NumericElementType::F32
+            );
+            assert_eq!(
+                output.physical().storage(),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let Value::ComplexTensor(result) =
+                block_on(gpu_helpers::gather_value_async(&value)).unwrap()
+            else {
+                panic!("complex output")
+            };
+            assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
+            assert_eq!(result.shape(), &[2, 3]);
+            for index in 0..6 {
+                let number = tensor::complex_tensor_value_complex64(&result, index);
+                assert_eq!((number.re, number.im), (1.5, -2.25));
+            }
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(input))
+                    .unwrap()
+                    .as_f32_slice(),
+                Some(&[7.0][..])
+            );
+        });
+    }
+
+    #[test]
+    fn resident_logical_like_fill_uses_logical_producer() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let value = fill_like_gpu(&FillScalar::Real(2.0), &[2, 3], &input).unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident output")
+            };
+            assert!(output.view().is_logical());
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                test_support::gather(value).unwrap().materialize_f64(),
+                vec![1.0; 6]
+            );
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(input))
+                    .unwrap()
+                    .materialize_f64(),
+                vec![0.0]
+            );
+        });
+    }
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
@@ -1189,7 +1076,7 @@ pub(crate) mod tests {
         let result = block_on(fill_builtin(Value::Num(2.5), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), &[3, 3]);
                 assert!(t.materialize_f64().iter().all(|&x| (x - 2.5).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1203,7 +1090,7 @@ pub(crate) mod tests {
         let result = block_on(fill_builtin(Value::Num(-4.0), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 4]);
+                assert_eq!(t.shape(), &[2, 4]);
                 assert!(t.materialize_f64().iter().all(|&x| (x + 4.0).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1218,7 +1105,7 @@ pub(crate) mod tests {
             block_on(fill_builtin(Value::Num(10.0), vec![Value::Tensor(sz)])).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3, 4]);
+                assert_eq!(t.shape(), &[2, 3, 4]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -1285,7 +1172,7 @@ pub(crate) mod tests {
         .expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -1324,7 +1211,7 @@ pub(crate) mod tests {
             ))
             .expect("fill");
             let output = test_support::gather(result).expect("gather");
-            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.shape(), &[2, 2]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
 
@@ -1361,7 +1248,7 @@ pub(crate) mod tests {
             ))
             .expect("fill integer class");
             let output = test_support::gather(result).expect("gather");
-            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.shape(), &[2, 3]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
     }
@@ -1375,7 +1262,7 @@ pub(crate) mod tests {
         ))
         .expect("fill uint64");
         let output = test_support::gather(result).expect("gather");
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![wide, wide, wide]))
@@ -1398,7 +1285,7 @@ pub(crate) mod tests {
         ))
         .expect("exact uint64 fill");
         let output = test_support::gather(result).expect("gather");
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![wide, wide, wide]))
@@ -1453,9 +1340,12 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert_eq!(handle.shape, vec![2, 2]);
-            assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert_eq!(handle.shape(), vec![2, 2]);
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let downloaded = block_on(provider.download_integer(&handle))
                 .expect("download uint64 fill")
                 .data;
@@ -1510,8 +1400,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
                 output.clone(),
             )))
@@ -1520,10 +1413,10 @@ pub(crate) mod tests {
                 panic!("expected exact paired tensor");
             };
             let storage = gathered.integer_storage().expect("paired integer storage");
-            assert_eq!(storage.real, IntegerStorage::U64(vec![wide; 4]));
-            assert_eq!(storage.imag, IntegerStorage::U64(vec![u64::MAX; 4]));
-            provider.free(&prototype).expect("free prototype");
-            provider.free(&output).expect("free output");
+            assert_eq!(storage.real(), &IntegerStorage::U64(vec![wide; 4]));
+            assert_eq!(storage.imag(), &IntegerStorage::U64(vec![u64::MAX; 4]));
+            drop(prototype);
+            drop(output);
         });
     }
 
@@ -1537,7 +1430,7 @@ pub(crate) mod tests {
         .expect("fill");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -1564,7 +1457,7 @@ pub(crate) mod tests {
 
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), vec![(3.0, -2.0); 4]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -1591,7 +1484,7 @@ pub(crate) mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![(1.0, 1.0); 4]);
     }
 
@@ -1602,7 +1495,7 @@ pub(crate) mod tests {
         let result = block_on(fill_builtin(Value::Num(1.5), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
                 assert!(t.materialize_f64().iter().all(|&x| (x - 1.5).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1617,7 +1510,7 @@ pub(crate) mod tests {
         let result = block_on(fill_builtin(Value::Num(4.2), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t.materialize_f64().iter().all(|&x| (x - 4.2).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1670,7 +1563,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![
@@ -1682,7 +1575,7 @@ pub(crate) mod tests {
             let result = block_on(fill_builtin(Value::Num(0.5), args)).expect("fill");
             match result {
                 Value::GpuTensor(gpu) => {
-                    assert_eq!(gpu.shape, vec![2, 2]);
+                    assert_eq!(gpu.shape(), vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                     assert!(gathered
                         .materialize_f64()
@@ -1706,10 +1599,32 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 3]);
+        assert_eq!(tensor.shape(), &[2, 3]);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U64(vec![9_007_199_254_740_993; 6]))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn create_array_dims_preserves_rank_zero_and_rank_one_row_policy() {
+        let scalar = Tensor::new(vec![-2.0], vec![]).expect("rank-zero scalar");
+        assert_eq!(
+            block_on(create_array_dims(&Value::Tensor(scalar))).expect("scalar dimensions"),
+            Some(vec![0])
+        );
+
+        let rank_one = Tensor::new(vec![-2.0, 3.0], vec![2]).expect("rank-one vector");
+        assert_eq!(
+            block_on(create_array_dims(&Value::Tensor(rank_one))).expect("rank-one dimensions"),
+            Some(vec![0, 3])
+        );
+
+        let column = Tensor::new(vec![-2.0, 3.0], vec![2, 1]).expect("column vector");
+        assert_eq!(
+            block_on(create_array_dims(&Value::Tensor(column))).expect("column admission"),
+            None
         );
     }
 
@@ -1724,7 +1639,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected empty tensor");
         };
-        assert_eq!(tensor.shape, vec![0, 4]);
+        assert_eq!(tensor.shape(), &[0, 4]);
         assert_eq!(tensor.integer_storage(), Some(&IntegerStorage::U8(vec![])));
     }
 
@@ -1751,8 +1666,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(runmat_accelerate_api::IntegerElementType::U8)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let downloaded = block_on(provider.download_integer(&handle))
                 .expect("download uint8 output")
                 .data;
@@ -1782,8 +1700,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(runmat_accelerate_api::IntegerElementType::U8)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let downloaded = block_on(provider.download_integer(&handle))
                 .expect("download uint8 output")
                 .data;
@@ -1821,7 +1742,7 @@ pub(crate) mod tests {
             panic!("expected complex double tensor");
         };
         assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0); 4]);
     }
 
@@ -1862,8 +1783,8 @@ pub(crate) mod tests {
             panic!("expected complex integer tensor");
         };
         let storage = tensor.integer_storage().expect("complex integer storage");
-        assert_eq!(storage.real, IntegerStorage::U64(vec![wide; 4]));
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![u64::MAX; 4]));
+        assert_eq!(storage.real(), &IntegerStorage::U64(vec![wide; 4]));
+        assert_eq!(storage.imag(), &IntegerStorage::U64(vec![u64::MAX; 4]));
     }
 
     #[test]
@@ -1882,9 +1803,9 @@ pub(crate) mod tests {
             panic!("expected complex integer tensor");
         };
         let storage = tensor.integer_storage().expect("integer storage");
-        assert_eq!(tensor.shape, vec![2, 2]);
-        assert_eq!(storage.real, IntegerStorage::U64(vec![0; 4]));
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![0; 4]));
+        assert_eq!(tensor.shape(), &[2, 2]);
+        assert_eq!(storage.real(), &IntegerStorage::U64(vec![0; 4]));
+        assert_eq!(storage.imag(), &IntegerStorage::U64(vec![0; 4]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1918,7 +1839,10 @@ pub(crate) mod tests {
                     return;
                 }
             };
-        let prototype = provider.fill(&[1, 1], 0.0).expect("prototype allocation");
+        let prototype = provider
+            .fill(&[1, 1], 0.0)
+            .expect("prototype allocation")
+            .expect("admitted optional constructor");
         let args = vec![
             Value::Num(2.0),
             Value::Num(3.0),
@@ -1930,7 +1854,7 @@ pub(crate) mod tests {
         match result {
             Value::GpuTensor(handle) => {
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                assert_eq!(gathered.shape, vec![2, 3]);
+                assert_eq!(gathered.shape(), &[2, 3]);
                 for entry in gathered.materialize_f64() {
                     assert!((entry - target).abs() < 1e-12);
                 }

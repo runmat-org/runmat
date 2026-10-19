@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AccelerateConfig, FeaConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
+    AccelerateConfig, FeaConfig, ForeignConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig,
     PlottingConfig, RuntimeConfig, TelemetryConfig,
 };
 
@@ -18,6 +18,9 @@ pub struct RunMatRuntimeConfig {
     /// Language compatibility configuration
     #[serde(default)]
     pub language: LanguageConfig,
+    /// Foreign runtime and extension-host configuration
+    #[serde(default)]
+    pub foreign: ForeignConfig,
     /// Telemetry configuration
     #[serde(default)]
     pub telemetry: TelemetryConfig,

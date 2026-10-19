@@ -21,7 +21,15 @@ pub struct RemoteWorkerQuicRequest {
 }
 
 pub async fn run_remote_worker_quic(request: RemoteWorkerQuicRequest) -> NativeExecutionResult<()> {
-    run_remote_worker_quic_inner(request, None).await
+    run_remote_worker_quic_inner(request, None, false).await
+}
+
+/// Explicit V5-compatible QUIC opt-in for a caller that owns this pinned
+/// allocation session and its run key. Old callers remain silent on V5.
+pub async fn run_remote_worker_quic_ready_v1(
+    request: RemoteWorkerQuicRequest,
+) -> NativeExecutionResult<()> {
+    run_remote_worker_quic_inner(request, None, true).await
 }
 
 pub struct RemoteMeshingWorkerQuicRequest {
@@ -36,12 +44,13 @@ pub async fn run_remote_meshing_worker_quic(
     request.meshing_limits.validate()?;
     let meshing_host =
         super::worker_execution::RemoteMeshingHost::new(request.kernel, request.meshing_limits);
-    run_remote_worker_quic_inner(request.worker, Some(meshing_host)).await
+    run_remote_worker_quic_inner(request.worker, Some(meshing_host), false).await
 }
 
 async fn run_remote_worker_quic_inner(
     request: RemoteWorkerQuicRequest,
     meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
+    ready_v1: bool,
 ) -> NativeExecutionResult<()> {
     let RemoteWorkerQuicRequest {
         listener,
@@ -65,6 +74,7 @@ async fn run_remote_worker_quic_inner(
                 limits,
                 bundle_cache: None,
                 meshing_host,
+                ready_v1,
             },
         ))
         .await
@@ -79,6 +89,7 @@ pub struct RemoteWorkerRelayRequest<'a> {
     pub session_id: [u8; 16],
     pub run_key: RunKeyMaterial,
     pub limits: FrameLimits,
+    pub ready_v1: bool,
 }
 
 pub async fn run_remote_worker_relay(
@@ -141,6 +152,7 @@ async fn run_remote_worker_relay_cached_with_meshing(
         session_id,
         run_key,
         limits,
+        ready_v1,
     } = request;
     let connection = WebSocketRelayConnection::connect(url, headers, limits)
         .await
@@ -157,6 +169,7 @@ async fn run_remote_worker_relay_cached_with_meshing(
                 limits,
                 bundle_cache,
                 meshing_host,
+                ready_v1,
             },
         ))
         .await

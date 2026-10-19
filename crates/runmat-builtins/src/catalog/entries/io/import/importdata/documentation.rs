@@ -1,0 +1,80 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("importdata"),
+    slug: Some("importdata"),
+    summary: "Import numeric text data with optional headers.",
+    description: "`A = importdata(filename)` imports legacy numeric text files, returning either a numeric matrix or a structure containing imported data plus header metadata.",
+    keywords: &["importdata", "text", "csv", "delimited", "header", "numeric import", "instrument log"],
+    related: &["readmatrix", "readtable", "dlmread", "csvread"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Forms and results", paragraphs: &[
+            "The filename is scalar text. Optional delimiterIn and nonnegative integral headerlinesIn controls select text splitting and skipped header rows. One, two, or three outputs return A, delimiterOut, and headerlinesOut respectively. A statement without requested outputs still validates and reads the file.",
+            "Pure numeric text returns a double matrix. Header text returns a struct with data, textdata, and when inferable colheaders; leading labels may also produce rowheaders. Empty numeric fields become NaN. NaN, Inf, +Inf, and -Inf are recognized. Unsupported mixed data and inconsistent numeric row widths raise parse errors.",
+            "Without an explicit delimiter, nonempty lines are sampled for comma, tab, semicolon, pipe, or whitespace separation. A supplied delimiter is used as given; the escaped text spellings \\t, \\n, and \\r select the corresponding control characters.",
+        ] },
+        BuiltinDocumentationSection { heading: "Filesystem and execution", paragraphs: &[
+            "Text input is read through the installed filesystem provider. An absolute filename captures that provider directly; a relative filename also captures the working directory before the read. An opt-in filesystem resource lease is checked during the call. Returned tensors and structs reside on the host; no accelerator kernel or fusion route is used. Resident filename or controls are invalid and rejected before provider download or file access.",
+            "The read and parser cooperate with the current execution service for cancellation and CPU turns. This is not a finite whole-call memory guarantee: file bytes, decoded text, tokens, and result containers still need complete-call resource evidence when a finite host budget is enforced.",
+            "The current implementation imports UTF-8 text, not binary, image, audio, or MAT data. Use their dedicated import operations for those formats. A distributed worker needs its own accessible filesystem source; a filename is not a transferable file snapshot.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample {
+            id: "numeric", title: "Import a plain numeric text matrix",
+            program: "A = importdata('values.txt');\nA",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::NativeFilesystem,
+            fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "numeric" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "values.txt", content: BuiltinFixtureContent::Utf8("1 2 3\n4 5 6\n") }] }),
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(A), [2 3])); assert(isequal(A, [1 2 3; 4 5 6]));" },
+        },
+        BuiltinExample {
+            id: "csv-header", title: "Import CSV data with a header row",
+            program: "S = importdata('run.csv');\nS.colheaders\nS.data",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::NativeFilesystem,
+            fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "csv-header" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "run.csv", content: BuiltinFixtureContent::Utf8("time,value\n0,1.5\n1,2.5\n") }] }),
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(S.data, [0 1.5; 1 2.5])); assert(strcmp(S.colheaders{1}, 'time')); assert(strcmp(S.colheaders{2}, 'value'));" },
+        },
+        BuiltinExample {
+            id: "explicit-header", title: "Specify delimiter and header-line count",
+            program: "[S, delimiterOut, headerlinesOut] = importdata('log.dat', '|', 2);\nS.data\nheaderlinesOut",
+            display_output: None,
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::NativeFilesystem,
+            fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "explicit-header" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[BuiltinFilesystemEntry::File { relative_path: "log.dat", content: BuiltinFixtureContent::Utf8("# instrument log\nA|B\n10|20\n30|40\n") }] }),
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(S.data, [10 20; 30 40])); assert(strcmp(delimiterOut, '|')); assert(headerlinesOut == 2);" },
+        },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "When does importdata return a struct?", answer: "When header text, column headers, or row headers are present. Pure numeric files return a tensor." },
+        BuiltinDocumentationFaq { question: "How does delimiter detection work?", answer: "RunMat samples nonempty lines for comma, tab, semicolon, or pipe; otherwise it splits on whitespace." },
+        BuiltinDocumentationFaq { question: "Does this replace readmatrix?", answer: "No. This preserves legacy convenience behavior. Use readmatrix or readtable when you need explicit import options." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "readmatrix", target: BuiltinDocumentationLinkTarget::Builtin("readmatrix") },
+        BuiltinDocumentationLink { label: "readtable", target: BuiltinDocumentationLinkTarget::Builtin("readtable") },
+        BuiltinDocumentationLink { label: "dlmread", target: BuiltinDocumentationLinkTarget::Builtin("dlmread") },
+        BuiltinDocumentationLink { label: "csvread", target: BuiltinDocumentationLinkTarget::Builtin("csvread") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[
+            BuiltinDocumentationLink { label: "Import admission and filesystem owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata.rs") },
+            BuiltinDocumentationLink { label: "Captured provider, path, and resource lease", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata/input.rs") },
+            BuiltinDocumentationLink { label: "Execution-service cooperation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata/cooperation.rs") },
+            BuiltinDocumentationLink { label: "Text parser and result construction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata/text.rs") },
+        ],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Numeric, header, and output forms", location: "builtins::io::importdata::tests" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};

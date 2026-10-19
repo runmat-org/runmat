@@ -241,8 +241,7 @@ pub async fn plotyy_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         },
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
+        if !crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Err(map_internal(err));
         }
     }
@@ -300,7 +299,7 @@ async fn parse_plot_line(
 fn outputs(ax: Value, h1: Value, h2: Value) -> BuiltinResult<Value> {
     let values = vec![ax, h1, h2];
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(count) => {
             if count > 3 {
                 return Err(invalid("requested more than three outputs"));
@@ -315,9 +314,9 @@ fn selector_from_value(value: &Value) -> BuiltinResult<PlotSelector> {
     let text = match value {
         Value::String(text) => text.clone(),
         Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect::<String>(),
-        Value::FunctionHandle(name) => name.clone(),
-        Value::ExternalFunctionHandle(name) => name.clone(),
-        Value::MethodFunctionHandle(name) => name.clone(),
+        Value::FunctionHandle(name) => name.name().to_owned(),
+        Value::ExternalFunctionHandle(name) => name.name().to_owned(),
+        Value::MethodFunctionHandle(name) => name.name().to_owned(),
         _ => {
             return Err(invalid(
                 "plotting function must be a function handle or function name",
@@ -366,7 +365,7 @@ fn invalid(message: impl Into<String>) -> RuntimeError {
     builder.build()
 }
 
-fn map_internal(err: impl std::error::Error + Send + Sync + 'static) -> RuntimeError {
+fn map_internal(err: impl crate::runtime_error::RuntimeErrorSourceBound) -> RuntimeError {
     let mut builder = crate::build_runtime_error(format!("{}: {err}", ERROR_INTERNAL.message))
         .with_builtin(BUILTIN_NAME);
     if let Some(identifier) = ERROR_INTERNAL.identifier {
@@ -427,7 +426,7 @@ mod tests {
     #[test]
     fn plotyy_returns_three_outputs_when_requested() {
         let _guard = setup();
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let out = block_on(plotyy_builtin(vec![
             tensor(&[1.0, 2.0]),
             tensor(&[3.0, 4.0]),

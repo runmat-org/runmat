@@ -318,6 +318,7 @@ pub async fn build_execution_bundle(
     handoff.validate().map_err(js_error)?;
     let recipe: runmat_execution_artifact::ProgramBuildRecipe =
         serde_wasm_bindgen::from_value(recipe).map_err(js_error)?;
+    let executable_bytes = validate_interpreter_program_payload(&executable_bytes)?;
     let mut source_bytes = std::collections::BTreeMap::new();
     for path in handoff.project.access_paths.values() {
         source_bytes.insert(
@@ -341,7 +342,7 @@ pub async fn build_execution_bundle(
             .map_err(js_error)?
             .with_materialized_program(
                 recipe,
-                runmat_execution_artifact::ExecutableForm::InterpreterBytecodeV1,
+                runmat_execution_artifact::ExecutableForm::InterpreterBytecodeV2,
                 executable_bytes,
             )
             .build()
@@ -354,6 +355,11 @@ pub async fn build_execution_bundle(
     )
     .map_err(js_error)?;
     Ok(archive)
+}
+
+fn validate_interpreter_program_payload(bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let registry = runmat_vm::decode_interpreter_program_v2(bytes).map_err(js_error)?;
+    runmat_vm::encode_interpreter_program_v2(&registry).map_err(js_error)
 }
 
 /// Verify and materialize an exact execution bundle into the active browser
@@ -412,4 +418,28 @@ pub(super) fn browser_entropy() -> Result<[u8; 32], JsValue> {
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    use super::validate_interpreter_program_payload;
+
+    #[wasm_bindgen_test]
+    fn browser_bundle_admission_matches_interpreter_revision_contract() {
+        let current = include_bytes!(
+            "../../../runmat-vm/tests/fixtures/interpreter-program-current.artifact"
+        );
+        assert!(validate_interpreter_program_payload(current).is_ok());
+
+        let stale = include_bytes!(
+            "../../../runmat-vm/tests/fixtures/interpreter-program-registry-4.artifact"
+        );
+        let error = validate_interpreter_program_payload(stale).unwrap_err();
+        assert_eq!(
+            error.as_string().as_deref(),
+            Some("unsupported function registry schema revision: actual 4, expected 5")
+        );
+    }
 }

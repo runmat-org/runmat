@@ -1,3 +1,4 @@
+use crate::import::CancellationProbe;
 use sha2::Digest as _;
 use std::collections::BTreeMap;
 use std::sync::{
@@ -598,7 +599,7 @@ pub(crate) mod bridge {
 }
 
 static NEXT_CANCEL_TOKEN_ID: AtomicU64 = AtomicU64::new(1);
-type CancelTokenMap = BTreeMap<u64, runmat_execution::CancellationToken>;
+type CancelTokenMap = BTreeMap<u64, CancellationProbe>;
 static CANCEL_TOKENS: OnceLock<Mutex<CancelTokenMap>> = OnceLock::new();
 
 pub(crate) struct OcctCancelTokenRegistration {
@@ -606,7 +607,7 @@ pub(crate) struct OcctCancelTokenRegistration {
 }
 
 impl OcctCancelTokenRegistration {
-    pub(crate) fn new(flag: Option<runmat_execution::CancellationToken>) -> Self {
+    pub(crate) fn new(flag: Option<CancellationProbe>) -> Self {
         let Some(flag) = flag else {
             return Self { id: 0 };
         };
@@ -625,7 +626,9 @@ impl Drop for OcctCancelTokenRegistration {
         if self.id == 0 {
             return;
         }
-        lock_cancel_tokens(cancel_tokens()).remove(&self.id);
+        // Release the probe after the registry lock; its drop may run caller code.
+        let retired = lock_cancel_tokens(cancel_tokens()).remove(&self.id);
+        drop(retired);
     }
 }
 
@@ -633,10 +636,11 @@ fn occt_import_cancelled(cancel_token_id: u64) -> bool {
     if cancel_token_id == 0 {
         return false;
     }
-    let token = lock_cancel_tokens(cancel_tokens())
+    // Clone under the lock, then probe outside it: probes may re-enter the registry.
+    let probe = lock_cancel_tokens(cancel_tokens())
         .get(&cancel_token_id)
         .cloned();
-    token.map(|token| token.is_cancelled()).unwrap_or(false)
+    probe.is_some_and(|is_cancelled| is_cancelled())
 }
 
 fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8> {
@@ -667,3 +671,25 @@ fn lock_cancel_tokens(
 
 #[cfg(test)]
 mod control_tests;
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn probe_runs_outside_registry_lock_and_registration_drop_removes_it() {
+        let probe: CancellationProbe = Arc::new(|| {
+            drop(cancel_tokens().lock().unwrap());
+            true
+        });
+        let registration = OcctCancelTokenRegistration::new(Some(probe.clone()));
+        let id = registration.id();
+        assert_ne!(id, 0);
+        assert!(occt_import_cancelled(id));
+        assert_eq!(Arc::strong_count(&probe), 2);
+        drop(registration);
+        assert_eq!(Arc::strong_count(&probe), 1);
+        assert!(!occt_import_cancelled(id));
+    }
+}

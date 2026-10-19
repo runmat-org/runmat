@@ -1,8 +1,13 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
+#[path = "support/document_host.rs"]
+mod document_host;
+#[path = "support/captured_arguments.rs"]
+mod captured_arguments;
+
+use captured_arguments::is_expand_all_cell_contents;
 
 use runmat_accelerate::ShapeInfo;
-use runmat_runtime::indexing::EndExpr;
 use runmat_value::{IntegerStorage, Value};
 use runmat_vm::Instr;
 use std::convert::TryInto;
@@ -10,14 +15,69 @@ use std::path::Path;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
-fn execute_source(source: &str) -> Vec<Value> {
+fn execute_source(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
 }
 
-fn execute_source_result(source: &str) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
+fn execute_source_result(
+    source: &str,
+) -> Result<runmat_runtime::execution::RootedValues, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).map_err(Box::new)
+}
+
+#[test]
+fn character_array_slices_preserve_rows_columns_and_linear_order() {
+    let input = "chars = ['abcd'; 'wxyz']; row = chars(2,:); column = chars(:,3); linear = chars([1 4]); last = chars(end,:)";
+    let bytecode = compile_source(input).expect("compile character indexing");
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::IndexSlice(2, ..))));
+    let vars = interpret(&bytecode).expect("execute character indexing");
+    let has_char = |shape: &[usize], data: &[char]| {
+        vars.iter().any(|value| {
+            matches!(value, Value::CharArray(chars) if chars.shape() == shape && chars.data == data)
+        })
+    };
+    assert!(has_char(&[1, 4], &['w', 'x', 'y', 'z']));
+    assert!(has_char(&[2, 1], &['c', 'y']));
+    assert!(has_char(&[1, 2], &['a', 'x']));
+}
+
+#[test]
+fn linear_numeric_vector_indexing_preserves_vector_source_orientation() {
+    let source = "x = zeros(4,1); a = x(2:3); k = [2 3]; b = x(k); y = zeros(1,4); c = y([2;3]); x(2:3) = x(2:3) + [1;2]; ok = size(a,1)==2 && size(a,2)==1 && size(b,1)==2 && size(b,2)==1 && size(c,1)==1 && size(c,2)==2 && x(2)==1 && x(3)==2;";
+    let bytecode = compile_source(source).expect("compile vector orientation fixture");
+    let ok_slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, name)| (name == "ok").then_some(slot))
+        .expect("ok binding");
+    let vars = interpret(&bytecode).expect("execute vector orientation fixture");
+    assert!(
+        matches!(vars.get(ok_slot), Some(Value::Bool(true))),
+        "unexpected ok binding: {:?}",
+        vars.get(ok_slot)
+    );
+}
+
+#[test]
+fn real_numeric_tensor_rhs_assigns_into_complex_slice() {
+    let source = "w = complex(zeros(4,2)); w(2:3,1) = [5;6]; s = complex(single(zeros(2,1))); s(1:2) = single([3;4]); ok = real(w(2,1))==5 && real(w(3,1))==6 && imag(w(2,1))==0 && imag(w(3,1))==0 && real(s(1))==3 && real(s(2))==4 && imag(s(1))==0;";
+    let bytecode = compile_source(source).expect("compile complex RHS fixture");
+    let ok_slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(&slot, name)| (name == "ok").then_some(slot))
+        .expect("ok binding");
+    let vars = interpret(&bytecode).expect("execute complex RHS fixture");
+    assert!(
+        matches!(vars.get(ok_slot), Some(Value::Bool(true))),
+        "unexpected ok binding: {:?}",
+        vars.get(ok_slot)
+    );
 }
 
 fn matlab_single_quoted_path(path: &Path) -> String {
@@ -77,7 +137,7 @@ fn compiled_builtin_inherits_exact_integer_single_and_output_count_semantics() {
             matches!(
                 value,
                 Value::Tensor(tensor)
-                    if tensor.shape == vec![2, 1]
+                    if tensor.shape() == vec![2, 1]
                         && tensor.as_f64_slice().is_some()
                         && tensor.materialize_f64().iter().all(|entry| matches!(*entry, 1.0 | 2.0))
             )
@@ -140,11 +200,11 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.shape, vec![1, 4]);
+    assert_eq!(out.shape(), vec![1, 4]);
     assert!(out.materialize_f64()[0] > 0.0 && out.materialize_f64()[0] < 1.0);
     assert_eq!(out.materialize_f64()[1], 6.0);
     assert_eq!(out.materialize_f64()[2], 1.0);
@@ -166,7 +226,7 @@ fn rand_legacy_seed_forms_execute_from_source() {
     let result = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 2] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 2] => Some(tensor),
             _ => None,
         })
         .expect("expected result tensor");
@@ -189,12 +249,45 @@ fn opentoline_dispatches_editor_navigation_request() {
     let quoted = matlab_single_quoted_path(&path);
     let source = format!("opentoline('{quoted}', 2, 1); ok = 1;");
 
+    let (context, host) = document_host::context();
+    let _context = context.enter();
     let vars = execute_source(&source);
+    assert_eq!(
+        *host.requests.borrow(),
+        vec![runmat_runtime::context::HostDocumentRequest::Navigate {
+            path: std::fs::canonicalize(&path).expect("canonical file"),
+            location: runmat_runtime::context::HostTextLocation {
+                line: std::num::NonZeroUsize::new(2).unwrap(),
+                column: std::num::NonZeroUsize::new(1).unwrap(),
+                selection: runmat_runtime::context::HostTextSelection::Caret,
+            },
+        }]
+    );
     let _ = std::fs::remove_file(&path);
 
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(v) if *v == 1.0)));
+}
+
+#[test]
+fn opentoline_reports_missing_editor_host_instead_of_noop_success() {
+    let path = std::env::temp_dir().join(format!(
+        "runmat_opentoline_no_host_{}_{}.m",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::write(&path, "a = 1;\n").expect("write source");
+    let quoted = matlab_single_quoted_path(&path);
+    let error = execute_source_result(&format!("opentoline('{quoted}', 1);")).unwrap_err();
+    std::fs::remove_file(&path).expect("remove fixture source");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:host:DocumentInteractionUnavailable")
+    );
 }
 
 #[test]
@@ -215,7 +308,12 @@ fn opentoline_command_form_dispatches_text_line_and_column() {
     let source =
         format!("addpath('{quoted_dir}'); opentoline opentoline_command_form 2 1; ok = 1;");
 
+    let (context, host) = document_host::context();
+    let _context = context.enter();
     let vars = execute_source(&source);
+    assert!(matches!(host.requests.borrow().as_slice(), [
+        runmat_runtime::context::HostDocumentRequest::Navigate { location, .. }
+    ] if location.line.get() == 2 && location.column.get() == 1));
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);
 
@@ -236,7 +334,7 @@ fn nan_constant_and_constructor_coexist() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -255,7 +353,7 @@ fn inf_constant_and_constructor_coexist() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -278,7 +376,7 @@ fn hilbert_builtin_executes_for_fm_demod_shape() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -296,7 +394,7 @@ fn buttord_builtin_executes_for_butterworth_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -394,7 +492,7 @@ fn pwelch_builtin_executes_for_psd_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -418,7 +516,7 @@ fn periodogram_builtin_executes_for_psd_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -442,7 +540,7 @@ fn spectrogram_builtin_executes_for_stft_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 7] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 7] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -467,7 +565,7 @@ fn pulstran_rectpuls_builtin_executes_for_impulse_train_shape() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 6] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 6] => Some(tensor),
             _ => None,
         })
         .expect("expected pulse train summary tensor");
@@ -491,7 +589,7 @@ fn upsample_downsample_builtin_executes_for_discrete_signal_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 16] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 16] => Some(tensor),
             _ => None,
         })
         .expect("expected sample-rate summary tensor");
@@ -514,7 +612,7 @@ fn nanmax_builtin_executes_for_reduction_and_pairwise_workflows() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 8] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 8] => Some(tensor),
             _ => None,
         })
         .expect("expected nanmax summary tensor");
@@ -547,7 +645,7 @@ fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         Instr::CreateObjectLiteral { class_name, fields }
-            if class_name == "Point"
+            if class_name.is(runmat_types::StaticClassIdentity::new("Point"))
                 && fields == &vec!["x".to_string(), "y".to_string()]
     )));
 
@@ -555,7 +653,7 @@ fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
     let Value::Object(obj) = &vars[0] else {
         panic!("expected object value");
     };
-    assert_eq!(obj.class_name, "Point");
+    assert_eq!(obj.class_name.display_name(), "Point");
     assert!(matches!(obj.properties.get("x"), Some(Value::Num(v)) if *v == 1.0));
     assert!(matches!(obj.properties.get("y"), Some(Value::Num(v)) if *v == 2.0));
 }
@@ -622,7 +720,7 @@ fn array_construct_like_and_size_vector_inference() {
         let Value::Tensor(tensor_like) = &vars_like[1] else {
             panic!("expected tensor result for zeros('like', A)");
         };
-        assert_eq!(tensor_like.shape, vec![3, 4]);
+        assert_eq!(tensor_like.shape(), vec![3, 4]);
     }
 
     // zeros([5,6]) via size vector
@@ -647,7 +745,7 @@ fn array_construct_like_and_size_vector_inference() {
         let Value::Tensor(tensor_sz) = &vars_sz[1] else {
             panic!("expected tensor result for zeros(sz)");
         };
-        assert_eq!(tensor_sz.shape, vec![5, 6]);
+        assert_eq!(tensor_sz.shape(), vec![5, 6]);
     }
 }
 
@@ -724,7 +822,7 @@ fn scalar_value_index_assignment_executes() {
     match updated {
         Value::Num(n) => assert!((*n - 2.0).abs() < 1e-9),
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 1]);
+            assert_eq!(t.shape(), vec![1, 1]);
             assert_eq!(t.materialize_f64(), vec![2.0]);
         }
         other => panic!("expected scalar numeric assignment result, got {other:?}"),
@@ -746,8 +844,27 @@ fn undefined_root_index_assignment_uses_index_assignment_load_semantics() {
     let Value::Tensor(tensor) = updated else {
         panic!("expected tensor assignment result, got {updated:?}");
     };
-    assert_eq!(tensor.shape, vec![1, 1]);
+    assert_eq!(tensor.shape(), vec![1, 1]);
     assert_eq!(tensor.materialize_f64(), vec![7.0]);
+}
+
+#[test]
+fn undefined_brace_root_uses_cell_creation_without_reclassifying_assigned_numeric() {
+    let bytecode = compile_source("c{2} = 9; out = c;").unwrap();
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, runmat_vm::Instr::LoadVarForCellAssignment(_))));
+    let vars = test_helpers::interpret(&bytecode).unwrap();
+    let Value::Cell(cell) = vars.last().expect("assigned cell output") else {
+        panic!("undefined brace root did not become a cell");
+    };
+    assert_eq!(cell.get(0, 1).unwrap(), Value::Num(9.0));
+
+    let assigned = compile_source("c = 0; c{2} = 9;").unwrap();
+    let error =
+        test_helpers::interpret(&assigned).expect_err("assigned numeric is not an absent root");
+    assert_eq!(error.identifier(), Some("RunMat:CellAssignmentOnNonCell"));
 }
 
 #[test]
@@ -768,7 +885,7 @@ fn complex_literal_matrix_executes() {
     let vars = execute_source(input);
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), vec![1, 2]);
             assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -781,11 +898,24 @@ fn leading_dot_complex_literals_execute() {
     let vars = execute_source(input);
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), vec![1, 2]);
             assert_eq!(tensor.materialize_f64(), vec![(0.0, 0.1), (0.0, 0.005)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
     }
+}
+
+#[test]
+fn imaginary_numeric_suffix_ignores_shadowed_units() {
+    let vars = execute_source("i = 7; j = 9; a = 1i; b = 2j; c = 1e3i; d = .5e-2j; e = i; f = j; g = real(2i^2); h = imag(2j');");
+    assert!(matches!(&vars[2], Value::Complex(re, im) if *re == 0.0 && *im == 1.0));
+    assert!(matches!(&vars[3], Value::Complex(re, im) if *re == 0.0 && *im == 2.0));
+    assert!(matches!(&vars[4], Value::Complex(re, im) if *re == 0.0 && *im == 1000.0));
+    assert!(matches!(&vars[5], Value::Complex(re, im) if *re == 0.0 && *im == 0.005));
+    assert!(matches!(&vars[6], Value::Num(value) if *value == 7.0));
+    assert!(matches!(&vars[7], Value::Num(value) if *value == 9.0));
+    assert!(matches!(&vars[8], Value::Num(value) if (*value + 4.0).abs() < 1e-12));
+    assert!(matches!(&vars[9], Value::Num(value) if *value == -2.0));
 }
 
 #[test]
@@ -794,7 +924,7 @@ fn matrix_literal_with_leading_dot_entries_executes() {
     let vars = execute_source(input);
     match &vars[0] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), vec![1, 3]);
             assert_eq!(tensor.materialize_f64(), vec![1.0, 0.2, 0.3]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -807,7 +937,7 @@ fn elementwise_division_accepts_leading_dot_rhs() {
     let vars = execute_source(input);
     match &vars[1] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), vec![1, 3]);
             assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -830,7 +960,7 @@ fn chol_multiassign_reports_failure() {
     assert_eq!(p, 2.0);
     match &vars[1] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), vec![2, 2]);
         }
         other => panic!("expected chol factor tensor, got {other:?}"),
     }
@@ -842,7 +972,7 @@ fn uint16_cast_is_callable_in_vm() {
     let vars = execute_source(input);
     match &vars[0] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), vec![1, 3]);
             assert_eq!(tensor.materialize_f64(), vec![3.0, 0.0, u16::MAX as f64]);
         }
         other => panic!("expected tensor output, got {other:?}"),
@@ -891,15 +1021,18 @@ fn atan2_explicit_comma_list_argument_path_unpacks_before_call() {
     assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
 
     let bytecode = compile_source(input).expect("compile atan2 comma-list script");
-    let has_output_list_expansion = bytecode.instructions.iter().any(|instr| {
-        matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
+    let has_output_list_expansion =
+        bytecode
+            .instructions
+            .iter()
+            .enumerate()
+            .any(|(position, instr)| {
+                matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
             if name == "atan2"
                 && *out_count == 1
                 && specs.len() == 1
-                && specs[0].is_expand
-                && specs[0].expand_all
-                && specs[0].num_indices == 0)
-    });
+                && is_expand_all_cell_contents(&bytecode.instructions[..position], &specs[0], 0))
+            });
     assert!(
         has_output_list_expansion,
         "expected explicit CallBuiltinExpandMultiOutput(atan2) expansion in bytecode"
@@ -917,11 +1050,10 @@ fn atan2_compiled_dispatch_gates_integer_extension() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     let error = execute_source_result("y = atan2(uint64(18446744073709551615), 1);")
         .expect_err("integer atan2 must be gated");
-    assert!(
-        error
-            .to_string()
-            .contains("atan2 with typed-integer input is a RunMat extension"),
-        "unexpected error: {error}"
+    assert_eq!(
+        error.identifier.as_deref(),
+        runmat_builtins::ATAN2_INTEGER_INPUT_EXTENSION.error_identifier,
+        "integer input must report the canonical compatibility gate: {error}"
     );
 }
 
@@ -982,8 +1114,8 @@ fn fft_output_supports_end_arithmetic_range_indexing() {
         bytecode
             .instructions
             .iter()
-            .any(|ins| matches!(ins, Instr::IndexSliceExpr { .. })),
-        "expected IndexSliceExpr in semantic bytecode, got {:?}",
+            .any(|ins| matches!(ins, Instr::LoadContextualIndexEnd { component: 0 })),
+        "expected a contextual end selector in semantic bytecode, got {:?}",
         bytecode.instructions
     );
     let vars = interpret(&bytecode).expect("fft end-range indexing should execute");
@@ -1096,13 +1228,13 @@ fn fftshift_accepts_abs_of_fft2_complex_output() {
         Value::Tensor(tensor) => tensor,
         other => panic!("abs(fft2(A)) should produce a real tensor, got {other:?}"),
     };
-    assert_eq!(m.shape, vec![2, 2]);
+    assert_eq!(m.shape(), vec![2, 2]);
     assert_eq!(m.materialize_f64(), vec![10.0, 4.0, 2.0, 0.0]);
 
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 6] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 6] => Some(tensor),
             _ => None,
         })
         .expect("expected shape summary tensor");
@@ -1370,27 +1502,14 @@ fn object_range_end_assignment_accepts_rich_end_expression_payload() {
         ok = (r == 99);
     "#;
     let bytecode = compile_source(input).expect("compile object end-range assignment");
-    assert!(
-        bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::StoreSliceExpr {
-                    range_end_exprs,
-                    ..
-                } if matches!(
-                    range_end_exprs.as_slice(),
-                    [EndExpr::Sub(lhs, rhs)]
-                        if matches!(&**lhs, EndExpr::Mul(mul_lhs, mul_rhs)
-                            if matches!(&**mul_lhs, EndExpr::End)
-                                && matches!(&**mul_rhs, EndExpr::Const(v) if (*v - 1.0).abs() < 1e-12))
-                            && matches!(&**rhs, EndExpr::Div(div_lhs, div_rhs)
-                                if matches!(&**div_lhs, EndExpr::Const(v) if (*v - 1.0).abs() < 1e-12)
-                                    && matches!(&**div_rhs, EndExpr::Const(v) if (*v - 2.0).abs() < 1e-12))
-                )
-            )
-        }),
-        "expected StoreSliceExpr to preserve rich end arithmetic payload for object indexing"
-    );
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::StoreSlice(1, ..))));
     let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
@@ -1413,30 +1532,10 @@ fn runtime_variable_range_bound_slice_uses_live_value() {
         ok = (numel(a) == 6) && (min(a) < 0.100001) && (max(a) > 0.599999);
     "#;
     let bytecode = compile_source(input).expect("compile runtime range-bound slice");
-    assert!(
-        bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::IndexSliceExpr {
-                    range_end_exprs,
-                    ..
-                } if matches!(range_end_exprs.as_slice(), [EndExpr::Var(_)])
-            )
-        }),
-        "expected range end metadata to read the live bound variable"
-    );
-    assert!(
-        !bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::IndexSliceExpr {
-                    range_end_exprs,
-                    ..
-                } if matches!(range_end_exprs.as_slice(), [EndExpr::Const(v)] if *v == 0.0)
-            )
-        }),
-        "runtime range bound must not be frozen to its initial zero value"
-    );
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::IndexSlice(1, ..))));
     let vars = interpret(&bytecode).expect("execute runtime range-bound slice");
     assert!(
         vars.iter().any(|v| {
@@ -1455,18 +1554,10 @@ fn runtime_call_range_bound_slice_uses_live_value_when_static_analysis_is_unavai
         ok = (numel(b) == 4) && (b(4) == 40);
     "#;
     let bytecode = compile_source(input).expect("compile call-derived range-bound slice");
-    assert!(
-        bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::IndexSliceExpr {
-                    range_end_exprs,
-                    ..
-                } if matches!(range_end_exprs.as_slice(), [EndExpr::Var(_)])
-            )
-        }),
-        "expected unresolved call-derived range bound to read the live variable"
-    );
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::IndexSlice(1, ..))));
     let vars = interpret(&bytecode).expect("execute call-derived range-bound slice");
     assert!(
         vars.iter().any(|v| {

@@ -307,6 +307,7 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         PlotRenderOptions {
             axis_equal: true,
             grid: true,
+            ..Default::default()
         },
         move |figure, axes| {
             figure.set_axes_kind(axes, AxesKind::Polar);
@@ -350,8 +351,7 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         .map_err(|err| internal(format!("failed to update histogram display name: {err}")))?;
     }
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_internal(err));
@@ -606,7 +606,7 @@ fn normalize_theta_tensor(tensor: Tensor, histcounts_args: &[Value]) -> BuiltinR
     if !period.is_finite() || period <= 0.0 {
         return Err(invalid_argument("angular bin range must be positive"));
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let mut values = tensor_utils::tensor_into_values_f64(tensor);
     for value in &mut values {
         if value.is_finite() {
@@ -781,6 +781,17 @@ mod tests {
             numeric_vector(&Value::Tensor(edges), "BinEdges").expect("numeric vector"),
             vec![-3.0, 0.0, 3.0]
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn theta_normalization_preserves_low_rank_host_geometry() {
+        for (shape, samples) in [(Vec::new(), vec![0.0]), (vec![2], vec![0.0, 1.0])] {
+            let input = Tensor::new(samples.clone(), shape.clone()).expect("theta tensor");
+            let output = normalize_theta_tensor(input, &[]).expect("theta normalization");
+            assert_eq!(output.shape(), shape);
+            assert_eq!(output.materialize_f64(), samples);
+        }
     }
 
     #[test]

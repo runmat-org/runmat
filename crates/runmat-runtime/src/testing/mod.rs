@@ -1,14 +1,16 @@
 mod class_registry;
+mod constraint_equality;
 mod context;
 mod objects;
 mod services;
 
 pub use class_registry::ensure_testing_classes;
+pub(crate) use constraint_equality::constraint_values_equal;
 pub(crate) use context::ContextState;
 pub use context::{
-    active_test_context, install_test_context, install_test_context_in, record_runtime_teardown,
-    record_test_command, ActiveTestContext, RuntimeTeardownInvocation, TestContextGuard,
-    TestContextHandle,
+    active_test_context, ensure_runtime_teardown_available, install_test_context,
+    install_test_context_in, record_runtime_teardown, record_test_command, ActiveTestContext,
+    RuntimeTeardownInvocation, TestContextGuard, TestContextHandle,
 };
 pub use objects::{
     diagnostic_object, fixture_object, object_array_or_scalar, plugin_object, test_case_object,

@@ -29,7 +29,7 @@ impl JobStore {
             return Err(invalid("durable routing request identity is invalid"));
         }
         match request.workload {
-            PersistedWorkload::Script { .. } => Ok(None),
+            PersistedWorkload::Script { .. } | PersistedWorkload::Graph { .. } => Ok(None),
             PersistedWorkload::Program { submission } => {
                 submission.validate()?;
                 if submission.request_digest()? != request.request_digest {
@@ -49,7 +49,7 @@ impl JobStore {
     ) -> NativeExecutionResult<()> {
         let submission = self
             .program_submission(id)?
-            .ok_or_else(|| invalid("script job cannot receive a portable program assignment"))?;
+            .ok_or_else(|| invalid("script or graph job cannot receive a portable program assignment"))?;
         validate_assignment(assignment, &submission)?;
         immutable_json(
             &assignment_path(&self.job_dir(id), assignment.request.id),
@@ -136,20 +136,21 @@ impl JobStore {
         if let AttemptReport::Succeeded { result } = &completed.report.report {
             result.validate_against(assignment).map_err(invalid)?;
             let (outputs, objects) = match &completed.response {
-                crate::protocol::WorkerResponse::Success { value } => {
-                    (vec![value.clone()], Vec::new())
-                }
+                crate::protocol::WorkerResponse::Success { outputs } => (
+                    outputs.as_slice(),
+                    &[] as &[runmat_execution::value::ValueRef],
+                ),
                 crate::protocol::WorkerResponse::ExternalizedSuccess {
                     outputs,
                     result_objects,
-                } => (outputs.clone(), result_objects.clone()),
-                crate::protocol::WorkerResponse::Failure { .. } => {
+                } => (outputs.as_slice(), result_objects.as_slice()),
+                _ => {
                     return Err(invalid(
                         "successful provider report contradicts original response",
                     ))
                 }
             };
-            if result.outputs != outputs || result.result_objects != objects {
+            if result.values() != Some((outputs, objects)) {
                 return Err(invalid(
                     "durable provider result differs from the original response",
                 ));
@@ -157,6 +158,7 @@ impl JobStore {
         } else if !matches!(
             completed.response,
             crate::protocol::WorkerResponse::Failure { .. }
+                | crate::protocol::WorkerResponse::RuntimeFailure { .. }
         ) {
             return Err(invalid(
                 "unsuccessful provider report carries a successful response",

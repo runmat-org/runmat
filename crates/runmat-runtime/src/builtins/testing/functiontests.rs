@@ -1,23 +1,12 @@
 use std::collections::HashMap;
 
-use runmat_builtins::{ResolveContext, Type};
 use runmat_value::{CellArray, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 
-fn functiontests_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Object {
-        class_name: Some(crate::testing::TEST_SUITE_CLASS.into()),
-        shape: None,
-    }
-}
-
 #[runmat_macros::runtime_builtin(
     name = "functiontests",
-    category = "testing",
-    summary = "Create a TestSuite from local function handles.",
-    keywords = "functiontests,localfunctions,testing,suite",
-    type_resolver(functiontests_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::functiontests"
 )]
 fn functiontests_builtin(handles: Value) -> BuiltinResult<Value> {
@@ -76,7 +65,7 @@ fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
     let values = tests
         .into_iter()
         .map(|(name, handle)| {
-            let mut object = ObjectInstance::new(crate::testing::TEST_SUITE_CLASS.into());
+            let mut object = ObjectInstance::new(crate::testing::TEST_SUITE_CLASS);
             object
                 .properties
                 .insert("Name".into(), Value::String(format!("{suite_name}/{name}")));
@@ -112,8 +101,8 @@ fn handle_name(handle: &Value) -> Option<String> {
     match handle {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name) => Some(name.clone()),
-        Value::BoundFunctionHandle { name, .. } => Some(name.clone()),
+        | Value::MethodFunctionHandle(name) => Some(name.name().to_owned()),
+        Value::BoundFunctionHandle(handle) => Some(handle.name.clone()),
         Value::Closure(closure) => Some(closure.function_name.clone()),
         _ => None,
     }
@@ -140,9 +129,16 @@ mod tests {
             ("teardown", 5),
         ]
         .into_iter()
-        .map(|(name, function)| Value::BoundFunctionHandle {
-            name: name.into(),
-            function,
+        .map(|(name, function)| {
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: name.into(),
+                    function,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(function),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            ))
         })
         .collect();
         let input = Value::Cell(CellArray::new(handles, 1, 5).unwrap());
@@ -150,7 +146,7 @@ mod tests {
         let Value::ObjectArray(array) = value else {
             panic!("expected suite object array");
         };
-        assert_eq!(array.class_name(), crate::testing::TEST_SUITE_CLASS);
+        assert!(array.class_name().is(crate::testing::TEST_SUITE_CLASS));
         assert_eq!(array.shape(), &[1, 2]);
         for value in array.data() {
             let Value::Object(object) = value else {

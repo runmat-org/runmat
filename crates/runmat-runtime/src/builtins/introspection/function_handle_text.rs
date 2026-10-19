@@ -110,11 +110,11 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
     .ok_or_else(|| crate::runtime_descriptor_error("str2func", &STR2FUNC_ERROR_NAME_INVALID))?;
 
     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
-        Ok(Value::BoundFunctionHandle { name, function })
+        Ok(crate::user_functions::bound_function_handle(name, function))
     } else if crate::is_well_formed_qualified_name(&name) {
-        Ok(Value::ExternalFunctionHandle(name))
+        Ok(Value::external_function_handle(name))
     } else {
-        Ok(Value::FunctionHandle(name))
+        Ok(Value::function_handle(name))
     }
 }
 
@@ -179,9 +179,9 @@ pub(crate) fn dispatch_func2str(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name)
-        | Value::BoundFunctionHandle { name, .. } => Ok(Value::String(name)),
-        Value::Closure(closure) => Ok(Value::String(closure.function_name)),
+        | Value::MethodFunctionHandle(name) => Ok(Value::String(name.into_name())),
+        Value::BoundFunctionHandle(handle) => Ok(Value::String(handle.into_data().name)),
+        Value::Closure(closure) => Ok(Value::String(closure.into_data().function_name)),
         other => Err(crate::runtime_descriptor_error_with_detail(
             "func2str",
             &FUNC2STR_ERROR_HANDLE_TYPE_INVALID,
@@ -205,13 +205,17 @@ mod tests {
     use super::*;
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
-    fn unowned_resident_value() -> Value {
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        })
+    fn unregistered_resident_value() -> Value {
+        Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("valid unregistered resident fixture")
+                .handle,
+        )
     }
 
     #[test]
@@ -231,7 +235,7 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                     .expect("integer tensor"),
             ),
-            unowned_resident_value(),
+            unregistered_resident_value(),
         ] {
             let error = dispatch_str2func(value).expect_err("non-text must reject");
             assert_eq!(error.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
@@ -264,7 +268,7 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                     .expect("integer tensor"),
             ),
-            unowned_resident_value(),
+            unregistered_resident_value(),
         ]) {
             let error = dispatch_func2str(value).expect_err("non-handle rejection");
             assert_eq!(

@@ -64,7 +64,7 @@ async fn run_tests_inner(
     }
     for report in report_formats {
         match report {
-            BrowserReport::Human => reporters.push(HumanReporter::default()),
+            BrowserReport::Human => reporters.push(HumanReporter),
             BrowserReport::Json => reporters.push(JsonReporter::default()),
             BrowserReport::Junit => reporters.push(JunitReporter),
             BrowserReport::Tap => reporters.push(TapReporter),

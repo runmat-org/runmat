@@ -1,7 +1,11 @@
 //! Shared numerical helpers for probability distribution builtins.
 
-use crate::builtins::math::elementwise::erfcinv::erfcinv_scalar;
-use crate::builtins::math::elementwise::gammaln::gammaln_nonnegative_scalar;
+#[path = "distribution_math/discrete_quantiles.rs"]
+mod discrete_quantiles;
+pub(crate) use discrete_quantiles::{first_representable_discrete_quantile, poisson_inverse};
+
+use crate::builtins::math::elementwise::error_functions::erfcinv::erfcinv_scalar;
+use crate::builtins::math::elementwise::gamma_functions::gammaln::gammaln_nonnegative_scalar;
 
 const INV_SQRT_2PI: f64 = 0.398_942_280_401_432_7;
 const SQRT_2: f64 = std::f64::consts::SQRT_2;
@@ -130,7 +134,9 @@ pub(crate) fn student_t_inv(p: f64, nu: f64) -> f64 {
     student_t_inv_upper_tail(1.0 - p, nu)
 }
 
-fn student_t_inv_upper_tail(q: f64, nu: f64) -> f64 {
+/// Positive Student-t quantile from an upper-tail probability. Keeping the
+/// tail probability avoids rounding `1 - alpha/2` to one for small alpha.
+pub(crate) fn student_t_inv_upper_tail(q: f64, nu: f64) -> f64 {
     if q == 0.0 {
         return f64::INFINITY;
     }

@@ -8,9 +8,9 @@ use crate::core::{
     PipelineType, RenderData, Vertex,
 };
 use crate::gpu::line::LineGpuInputs;
-use crate::gpu::util::readback_scalar_buffer_f64;
+use crate::gpu::util::readback_scalar_buffer_f64_typed;
 use crate::plots::scatter::MarkerStyle as ScatterMarkerStyle;
-use crate::plots::NumericPlotData;
+use crate::plots::{NumericPlotData, PlotDataExportError};
 use glam::{Vec3, Vec4};
 use log::{trace, warn};
 use runmat_value::NumericStorage;
@@ -130,7 +130,15 @@ impl LinePlot {
     }
 
     pub async fn export_scene_xy_data(&self) -> Result<(Vec<f64>, Vec<f64>), String> {
-        if let Some((x, y)) = self.export_numeric_xy_data().await? {
+        self.export_scene_xy_data_typed()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_scene_xy_data_typed(
+        &self,
+    ) -> Result<(Vec<f64>, Vec<f64>), PlotDataExportError> {
+        if let Some((x, y)) = self.export_numeric_xy_data_typed().await? {
             return Ok((x.materialize_f64(), y.materialize_f64()));
         }
         Ok((Vec::new(), Vec::new()))
@@ -139,30 +147,40 @@ impl LinePlot {
     pub async fn export_numeric_xy_data(
         &self,
     ) -> Result<Option<(NumericPlotData, NumericPlotData)>, String> {
+        self.export_numeric_xy_data_typed()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn export_numeric_xy_data_typed(
+        &self,
+    ) -> Result<Option<(NumericPlotData, NumericPlotData)>, PlotDataExportError> {
         match (&self.source_x, &self.source_y) {
             (Some(x), Some(y)) if x.len() == y.len() => {
                 return Ok(Some((x.clone(), y.clone())));
             }
             (None, None) => {}
-            _ => return Err("line plot has partial CPU source data".to_string()),
+            _ => {
+                return Err(PlotDataExportError::SourceUnavailable(
+                    "line plot has partial CPU source data",
+                ))
+            }
         }
 
         if let Some(inputs) = &self.gpu_line_inputs {
-            let context = shared_wgpu_context().ok_or_else(|| {
-                "line plot has GPU source data but no shared WGPU context is installed".to_string()
-            })?;
+            let context = shared_wgpu_context().ok_or(PlotDataExportError::SourceUnavailable(
+                "line plot has GPU source data but no shared WGPU context is installed",
+            ))?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+            let x = readback_scalar_buffer_f64_typed(
+                &context.access,
                 &inputs.x_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+            let y = readback_scalar_buffer_f64_typed(
+                &context.access,
                 &inputs.y_buffer,
                 len,
                 inputs.scalar,
@@ -171,27 +189,31 @@ impl LinePlot {
             let shape = vec![1, len];
             let (x, y) = match inputs.scalar {
                 crate::gpu::ScalarType::F64 => (
-                    NumericPlotData::new(NumericStorage::F64(x), shape.clone())?,
-                    NumericPlotData::new(NumericStorage::F64(y), shape)?,
+                    NumericPlotData::new(NumericStorage::F64(x), shape.clone())
+                        .map_err(PlotDataExportError::InvalidSourceLayout)?,
+                    NumericPlotData::new(NumericStorage::F64(y), shape)
+                        .map_err(PlotDataExportError::InvalidSourceLayout)?,
                 ),
                 crate::gpu::ScalarType::F32 => (
                     NumericPlotData::new(
                         NumericStorage::F32(x.into_iter().map(|v| v as f32).collect()),
                         shape.clone(),
-                    )?,
+                    )
+                    .map_err(PlotDataExportError::InvalidSourceLayout)?,
                     NumericPlotData::new(
                         NumericStorage::F32(y.into_iter().map(|v| v as f32).collect()),
                         shape,
-                    )?,
+                    )
+                    .map_err(PlotDataExportError::InvalidSourceLayout)?,
                 ),
             };
             return Ok(Some((x, y)));
         }
 
         if self.gpu_vertices.is_some() {
-            return Err(
-                "line plot has GPU render vertices but no exportable source data".to_string(),
-            );
+            return Err(PlotDataExportError::SourceUnavailable(
+                "line plot has GPU render vertices but no exportable source data",
+            ));
         }
 
         Ok(None)
@@ -581,7 +603,8 @@ impl LinePlot {
 
     /// Get the bounding box of the data
     pub fn bounds(&mut self) -> BoundingBox {
-        if self.bounds.is_some() && self.source_x.is_none() && self.source_y.is_none() {
+        // Source replacement invalidates bounds; style/geometry dirtiness does not.
+        if self.bounds.is_some() {
             return self.bounds.unwrap_or_default();
         }
         if self.source_x.is_none() && self.source_y.is_none() {
@@ -684,9 +707,8 @@ impl LinePlot {
             line_style: self.line_style,
             marker_size: 1.0,
         };
-        let packed =
-            crate::gpu::line::pack_vertices_from_xy(gpu.device, gpu.queue, inputs, &params)
-                .map_err(|e| format!("gpu line packing failed: {e}"))?;
+        let packed = crate::gpu::line::pack_vertices_from_xy(gpu.emission, inputs, &params)
+            .map_err(|e| format!("gpu line packing failed: {e}"))?;
         trace!(
             target: "runmat_plot",
             "line-pack: complete max_vertices={} indirect_present={}",
@@ -896,6 +918,8 @@ impl LinePlot {
         stroke_width_px: f32,
         log_axes: (bool, bool),
     ) -> Vec<Vertex> {
+        #[cfg(test)]
+        VIEWPORT_TESSELLATIONS.with(|count| count.set(count.get() + 1));
         let (x_data, y_data) = self
             .host_xy_f64()
             .expect("validated line host source")
@@ -1100,6 +1124,24 @@ impl LinePlot {
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
             + self.gpu_vertex_count.unwrap_or(0) * std::mem::size_of::<Vertex>()
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        crate::plots::clone_budget::add(&mut total, self.handle_visibility.capacity())?;
+        for source in [&self.source_x, &self.source_y].into_iter().flatten() {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for vertices in [&self.vertices, &self.marker_vertices]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vertex>(vertices.capacity())?,
+            )?;
+        }
+        Some(total)
+    }
 }
 
 fn marker_style_code(kind: ScatterMarkerStyle) -> f32 {
@@ -1156,8 +1198,31 @@ pub mod matlab_compat {
 }
 
 #[cfg(test)]
+thread_local! {
+    static VIEWPORT_TESSELLATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_viewport_tessellations() -> usize {
+    VIEWPORT_TESSELLATIONS.with(|count| count.replace(0))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_data_bounds_survive_style_changes_but_not_source_replacement() {
+        let mut line = LinePlot::new(vec![0., 2.], vec![1., 3.]).unwrap();
+        let original = line.bounds();
+        line.set_line_width(8.);
+        assert_eq!(line.bounds().min, original.min);
+        assert_eq!(line.bounds().max, original.max);
+        line.update_data(vec![-5., 9.], vec![-2., 7.]).unwrap();
+        let updated = line.bounds();
+        assert_eq!(updated.min, Vec3::new(-5., -2., 0.));
+        assert_eq!(updated.max, Vec3::new(9., 7., 0.));
+    }
 
     #[test]
     fn test_line_plot_creation() {

@@ -1,39 +1,45 @@
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, StructValue, Value};
 
-use crate::{gather_if_needed_async, BuiltinResult};
+use crate::{BuiltinResult, RuntimeError};
 
-use super::{
-    any_type, deep_learning_error, gather_args, layer_names, layers_from_value, object,
-    string_array,
-};
+use super::{layer_names, layers_from_value, object, string_array};
+
+fn graph_error(function: &'static str, message: impl Into<String>) -> RuntimeError {
+    super::errors::descriptor_error(function, message, &runmat_builtins::GRAPH_INVALID_INPUT)
+}
 
 #[runtime_builtin(
     name = "layerGraph",
-    category = "deep_learning",
-    summary = "Create a layer graph compatibility object.",
-    keywords = "layerGraph,deep learning,network,layer graph",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::graph"
 )]
 pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args(args).await?;
-    let layers = if args.is_empty() {
-        Vec::new()
-    } else if args.len() == 1 {
-        layers_from_value(args[0].clone(), "layerGraph")?
-    } else {
-        return Err(deep_learning_error(
+    super::errors::admit_single_output("layerGraph", &runmat_builtins::GRAPH_INVALID_INPUT)?;
+    if args.len() > 1 {
+        return Err(graph_error(
             "layerGraph",
             "layerGraph: expected zero inputs or one layer collection",
+        ));
+    }
+    let layers = if args.is_empty() {
+        Vec::new()
+    } else if matches!(
+        args.first(),
+        Some(Value::Object(_) | Value::Cell(_) | Value::OutputList(_))
+    ) {
+        layers_from_value(args[0].clone(), "layerGraph")?
+    } else {
+        return Err(graph_error(
+            "layerGraph",
+            "layerGraph: layers must be a layer object or cell collection",
         ));
     };
     let names = layer_names(&layers, "layerGraph")?;
     let layer_count = layers.len();
     let layers_cell = CellArray::new(layers, layer_count, 1)
         .map(Value::Cell)
-        .map_err(|err| deep_learning_error("layerGraph", err))?;
+        .map_err(|err| graph_error("layerGraph", err))?;
     Ok(object(
         "nnet.cnn.LayerGraph",
         vec![
@@ -49,24 +55,28 @@ pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value
 
 #[runtime_builtin(
     name = "analyzeNetwork",
-    category = "deep_learning",
-    summary = "Analyze network/layer metadata without opening MATLAB's UI analyzer.",
-    keywords = "analyzeNetwork,deep learning,network,analyzer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::graph"
 )]
 pub(super) async fn analyze_network_builtin(network: Value) -> BuiltinResult<Value> {
-    let network = gather_if_needed_async(&network).await?;
+    super::errors::admit_single_output("analyzeNetwork", &runmat_builtins::GRAPH_INVALID_INPUT)?;
     let layers = match &network {
-        Value::Object(object) if object.class_name == "nnet.cnn.LayerGraph" => object
+        Value::Object(object) if object.class_name.is(super::LAYER_GRAPH_CLASS) => object
             .properties
             .get("Layers")
             .cloned()
             .map(|value| layers_from_value(value, "analyzeNetwork"))
             .transpose()?
             .unwrap_or_default(),
-        _ => layers_from_value(network.clone(), "analyzeNetwork")?,
+        Value::Object(_) | Value::Cell(_) | Value::OutputList(_) => {
+            layers_from_value(network.clone(), "analyzeNetwork")?
+        }
+        _ => {
+            return Err(graph_error(
+                "analyzeNetwork",
+                "analyzeNetwork: expected a layer graph, layer object, or cell collection",
+            ));
+        }
     };
     let names = layer_names(&layers, "analyzeNetwork")?;
     Ok(object(

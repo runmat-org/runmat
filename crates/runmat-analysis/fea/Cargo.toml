@@ -26,3 +26,4 @@ anyhow = { workspace = true }
 libc = "0.2"
 runmat-geometry-fixtures = { workspace = true }
 serde_json = { workspace = true }
+runmat-accelerate-api = { workspace = true, features = ["test-support"] }

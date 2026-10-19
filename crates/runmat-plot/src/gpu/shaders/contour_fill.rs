@@ -89,7 +89,12 @@ fn push_point(poly: ptr<function, Poly>, point: ScalarPoint) {
 
 fn interpolate_point(a: ScalarPoint, b: ScalarPoint, threshold: f32) -> ScalarPoint {
     let delta = b.value - a.value;
-    let t = if (abs(delta) <= 1e-6) { 0.5 } else { clamp((threshold - a.value) / delta, 0.0, 1.0) };
+    var t: f32;
+    if (abs(delta) <= 1e-6) {
+        t = 0.5;
+    } else {
+        t = clamp((threshold - a.value) / delta, 0.0, 1.0);
+    }
     return make_point(mix(a.pos, b.pos, t), threshold);
 }
 
@@ -298,7 +303,12 @@ fn push_point(poly: ptr<function, Poly>, point: ScalarPoint) {
 
 fn interpolate_point(a: ScalarPoint, b: ScalarPoint, threshold: f32) -> ScalarPoint {
     let delta = b.value - a.value;
-    let t = if (abs(delta) <= 1e-6) { 0.5 } else { clamp((threshold - a.value) / delta, 0.0, 1.0) };
+    var t: f32;
+    if (abs(delta) <= 1e-6) {
+        t = 0.5;
+    } else {
+        t = clamp((threshold - a.value) / delta, 0.0, 1.0);
+    }
     return make_point(mix(a.pos, b.pos, t), threshold);
 }
 

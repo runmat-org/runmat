@@ -4,17 +4,16 @@ use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone)]
 pub struct ErrorBarGpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
-    pub x_neg_buffer: Option<Arc<wgpu::Buffer>>,
-    pub x_pos_buffer: Option<Arc<wgpu::Buffer>>,
-    pub y_neg_buffer: Arc<wgpu::Buffer>,
-    pub y_pos_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
+    pub x_neg_buffer: Option<crate::gpu::GpuInputBuffer>,
+    pub x_pos_buffer: Option<crate::gpu::GpuInputBuffer>,
+    pub y_neg_buffer: crate::gpu::GpuInputBuffer,
+    pub y_pos_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
 }
@@ -37,11 +36,12 @@ struct ErrorBarUniforms {
 }
 
 pub fn pack_vertical_vertices(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &ErrorBarGpuInputs,
     params: &ErrorBarGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -75,15 +75,17 @@ pub fn pack_vertical_vertices(
         _ => 12u64,
     };
     let max_vertices = inputs.len as u64 * segments_per_point;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("errorbar-gpu-vertices"),
-        size: max_vertices * std::mem::size_of::<Vertex>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("errorbar-gpu-vertices"),
+            size: max_vertices * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let uniforms = ErrorBarUniforms {
         color: params.color.to_array(),
         count: inputs.len,
@@ -102,35 +104,67 @@ pub fn pack_vertical_vertices(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: inputs
                     .x_neg_buffer
                     .as_ref()
-                    .map(|b| b.as_entire_binding())
-                    .unwrap_or(inputs.x_buffer.as_entire_binding()),
+                    .map(|b| b.buffer(emission).map(|buffer| buffer.as_entire_binding()))
+                    .transpose()
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or(
+                        inputs
+                            .x_buffer
+                            .buffer(emission)
+                            .map_err(|error| error.to_string())?
+                            .as_entire_binding(),
+                    ),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: inputs
                     .x_pos_buffer
                     .as_ref()
-                    .map(|b| b.as_entire_binding())
-                    .unwrap_or(inputs.x_buffer.as_entire_binding()),
+                    .map(|b| b.buffer(emission).map(|buffer| buffer.as_entire_binding()))
+                    .transpose()
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or(
+                        inputs
+                            .x_buffer
+                            .buffer(emission)
+                            .map_err(|error| error.to_string())?
+                            .as_entire_binding(),
+                    ),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: inputs.y_neg_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_neg_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: inputs.y_pos_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_pos_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 6,
@@ -159,7 +193,7 @@ pub fn pack_vertical_vertices(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -167,7 +201,7 @@ fn compile_shader(
         ScalarType::F32 => shaders::errorbar::F32,
         ScalarType::F64 => shaders::errorbar::F64,
     };
-    let source = template.replace("{{WORKGROUP_SIZE}}", &workgroup_size.to_string());
+    let source = shaders::compute_source(template, workgroup_size);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("errorbar-pack-shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),

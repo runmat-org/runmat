@@ -1,12 +1,15 @@
+mod attempt_reply;
 mod bundle_cache;
 mod channel;
 mod checkpoint;
+mod collective;
 mod config;
 mod crypto;
 mod driver;
 pub(crate) mod exact_meshing;
 pub(crate) mod exact_structural_study;
 pub(crate) mod exact_structural_sweep;
+mod gang;
 pub(crate) mod input_materialization;
 mod object_transfer;
 mod pool;
@@ -20,7 +23,9 @@ mod pool_resources;
 mod pool_tasks;
 mod pool_values;
 mod pool_wait;
+mod program_staging;
 mod protocol;
+mod protocol_schema;
 mod quic_channel;
 mod recovery;
 mod relay_channel;
@@ -32,21 +37,24 @@ mod worker_bundle;
 mod worker_entry;
 mod worker_env;
 mod worker_execution;
+mod worker_graph_stage;
 mod worker_protocol;
 mod worker_server;
 
 pub use channel::{
-    RemoteAttempt, RemoteBundleReceipt, RemoteObjectReceipt, RemoteValueReceipt,
-    RemoteWorkerChannel,
+    RemoteAttempt, RemoteAttemptProgram, RemoteBundleReceipt, RemoteGraphProgramReceipt,
+    RemoteObjectReceipt, RemoteStagedGraphReference, RemoteValueReceipt, RemoteWorkerChannel,
 };
 pub use driver::run_remote_driver_from_env;
+pub use gang::{RemoteSpmdGangCompletion, RemoteSpmdGangProgram};
 pub use pool::{RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority};
 pub use pool_progress::RemoteTaskCompletion;
 pub use quic_channel::{QuicRemoteWorkerChannel, RemoteWorkerChannelConfig};
 pub use relay_channel::RelayRemoteWorkerChannel;
 pub use worker_entry::{
-    run_remote_meshing_worker_quic, run_remote_worker_quic, run_remote_worker_relay,
-    RemoteMeshingWorkerQuicRequest, RemoteWorkerQuicRequest, RemoteWorkerRelayRequest,
+    run_remote_meshing_worker_quic, run_remote_worker_quic, run_remote_worker_quic_ready_v1,
+    run_remote_worker_relay, RemoteMeshingWorkerQuicRequest, RemoteWorkerQuicRequest,
+    RemoteWorkerRelayRequest,
 };
 pub use worker_env::run_remote_worker_from_env;
 

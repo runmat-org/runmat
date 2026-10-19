@@ -114,7 +114,7 @@ async fn shared_results_survive_distinct_task_pending_owners_and_commits() {
                 result: accepted.clone(),
             },
         ));
-        assert_eq!(receiver.try_recv().unwrap().unwrap(), accepted);
+        assert_eq!(receiver.try_recv().unwrap().1.unwrap(), accepted);
         drop(second_lease);
         fixture
             .pool
@@ -160,7 +160,7 @@ async fn rejected_accounting_releases_downloaded_results_when_report_lease_drops
             &fixture.attempt,
             AttemptReport::Succeeded { result: rejected },
         ));
-        assert!(fixture.receiver.try_recv().unwrap().is_err());
+        assert!(fixture.receiver.try_recv().unwrap().1.is_err());
         drop(lease);
         assert!(fixture.pool.execution_object(&reference).unwrap().is_none());
     }
@@ -199,7 +199,7 @@ async fn failed_download_releases_its_reservation_before_a_valid_retry() {
 struct Fixture {
     pool: Arc<RemotePoolDriver>,
     attempt: AttemptRequest,
-    receiver: oneshot::Receiver<super::super::CompletionResult>,
+    receiver: oneshot::Receiver<(u64, super::super::CompletionResult)>,
 }
 
 async fn fixture() -> Fixture {
@@ -251,7 +251,10 @@ async fn fixture() -> Fixture {
     // or a timing window between scheduler commit and host waiter resolution.
     let (sender, receiver) = oneshot::channel();
     pool.completions.lock().unwrap().insert(task_id, sender);
-    pool.programs.lock().unwrap().insert(task_id, program);
+    pool.programs.lock().unwrap().insert(
+        task_id,
+        Arc::new(runmat_execution_artifact::WorkerProgramRequest::Direct(program)),
+    );
     Fixture {
         pool,
         attempt,
@@ -295,7 +298,7 @@ async fn rejected_success_accounting_never_reaches_the_waiter_as_success() {
             &fixture.attempt,
             AttemptReport::Succeeded { result },
         ));
-        assert!(fixture.receiver.try_recv().unwrap().is_err());
+        assert!(fixture.receiver.try_recv().unwrap().1.is_err());
         let snapshot = fixture.pool.snapshot();
         let task = &snapshot.tasks[&fixture.attempt.task_id];
         assert_eq!(task.state, TaskState::Failed);
@@ -340,7 +343,7 @@ async fn discarded_reports_resolve_only_the_persisted_commit_and_accounting() {
                 report.driver_fence -= 1;
             }
             fixture.pool.apply_report(report);
-            assert_eq!(fixture.receiver.try_recv().unwrap().unwrap(), accepted);
+            assert_eq!(fixture.receiver.try_recv().unwrap().1.unwrap(), accepted);
             assert_eq!(
                 fixture.pool.snapshot().tasks[&fixture.attempt.task_id].committed,
                 commit
@@ -400,7 +403,7 @@ async fn discarded_report_cannot_acknowledge_cancellation_of_a_live_attempt() {
             &fixture.attempt,
             acknowledgement,
         ));
-        assert!(fixture.receiver.try_recv().unwrap().is_err());
+        assert!(fixture.receiver.try_recv().unwrap().1.is_err());
         assert_eq!(
             fixture.pool.snapshot().tasks[&fixture.attempt.task_id].state,
             TaskState::Cancelled
@@ -463,13 +466,15 @@ async fn committed_objects_are_protected_before_discarding_another_attempts_resu
     // The scheduler has committed, but the adapter has not protected the catalog or
     // resolved its waiter. A discarded old attempt overlaps the committed object.
     let mut stale = accepted.clone();
-    stale.result_objects = references.clone();
+    if let AttemptSuccess::Values { result_objects, .. } = &mut stale {
+        *result_objects = references.clone();
+    }
     let mut report =
         BackendReport::for_request(&fixture.attempt, AttemptReport::Succeeded { result: stale });
     report.attempt_id = AttemptId::derive(&[b"discarded old attempt"]);
     fixture.pool.apply_report(report);
     drop(leases);
-    assert_eq!(fixture.receiver.try_recv().unwrap().unwrap(), accepted);
+    assert_eq!(fixture.receiver.try_recv().unwrap().1.unwrap(), accepted);
     assert!(fixture
         .pool
         .execution_object(&references[0])
@@ -515,7 +520,9 @@ async fn missing_committed_object_fails_closed_instead_of_using_stale_outputs() 
         .receiver
         .try_recv()
         .unwrap()
+        .1
         .unwrap_err()
+        .to_string()
         .contains("not downloaded"));
 }
 

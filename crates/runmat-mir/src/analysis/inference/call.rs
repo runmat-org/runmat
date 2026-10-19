@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use runmat_hir::{CallableIdentity, FunctionId};
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, LiteralContext,
-    LiteralValue, OutputSelection, ValueFact, ValueKindFact,
+    LiteralValue, OutputSelection, ValueFact, ValueKindFact, ValueSequenceFact,
 };
 
 use crate::analysis::dataflow;
-use crate::{MirCall, MirCallee, MirOperand};
+use crate::{MirCall, MirCallArg, MirCallee, MirOperand, MirSequenceLocalId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FunctionSummary {
@@ -21,16 +21,56 @@ pub(crate) struct FunctionSummary {
 pub(crate) fn infer_mir_call(
     call: &MirCall,
     facts: &[Option<ValueFact>],
+    sequences: &BTreeMap<MirSequenceLocalId, ValueSequenceFact>,
+    literals: &[LiteralValue],
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+    selection: OutputSelection,
+) -> CallInference {
+    let arguments = call
+        .args
+        .iter()
+        .flat_map(|argument| argument_facts(argument, facts, sequences, summaries))
+        .collect();
+    infer_mir_call_with_arguments(call, facts, arguments, literals, summaries, selection)
+}
+
+pub(crate) fn argument_facts(
+    argument: &MirCallArg,
+    facts: &[Option<ValueFact>],
+    sequences: &BTreeMap<MirSequenceLocalId, ValueSequenceFact>,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> Vec<ValueFact> {
+    match argument {
+        MirCallArg::CapturedSequence(id) => {
+            let sequence = sequences
+                .get(id)
+                .cloned()
+                .unwrap_or_else(ValueSequenceFact::dynamic);
+            if sequence.outputs.is_empty() && sequence.variadic {
+                vec![ValueFact::unknown(DynamicReason::RuntimeValue)]
+            } else {
+                sequence.outputs
+            }
+        }
+        MirCallArg::Single(operand)
+        | MirCallArg::Expansion(
+            crate::MirExpansionSource::ReturnedOutputs(operand)
+            | crate::MirExpansionSource::Member { base: operand, .. },
+        ) => vec![operand_fact(operand, facts, summaries)],
+        MirCallArg::Expansion(source) => vec![operand_fact(source.base(), facts, summaries)],
+    }
+}
+
+pub(crate) fn infer_mir_call_with_arguments(
+    call: &MirCall,
+    facts: &[Option<ValueFact>],
+    arguments: Vec<ValueFact>,
     literals: &[LiteralValue],
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     selection: OutputSelection,
 ) -> CallInference {
     let request = CallRequest {
-        arguments: call
-            .args
-            .iter()
-            .map(|argument| operand_fact(argument.operand(), facts, summaries))
-            .collect(),
+        arguments,
         literals: LiteralContext::new(literals.to_vec()),
         outputs: selection,
     };
@@ -56,6 +96,19 @@ pub(crate) fn infer_mir_call(
 
     if let Some(name) = static_name(call) {
         if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&name) {
+            if matches!(
+                entry.contract.maturity,
+                runmat_builtins::BuiltinContractMaturity::LegacyResolver
+            ) {
+                if let Some(mut inference) = super::infer_legacy_builtin(&name, &request) {
+                    inference.effects.0.extend(entry.contract.effect_set().0);
+                    inference
+                        .capabilities
+                        .0
+                        .extend(entry.contract.capability_set().0);
+                    return inference;
+                }
+            }
             return runmat_builtins::infer_catalog_call(entry, &request);
         }
         if let Some(inference) = super::infer_legacy_builtin(&name, &request) {
@@ -65,21 +118,7 @@ pub(crate) fn infer_mir_call(
 
     if let MirCallee::Dynamic(operand) = &call.callee {
         if let ValueKindFact::Callable(callable) = operand_fact(operand, facts, summaries).kind {
-            let output_count = callable.outputs.len();
-            return infer_call(
-                &CallContract {
-                    outputs: callable.outputs,
-                    variadic_output: (callable.variadic_outputs || !callable.outputs_complete)
-                        .then(|| Box::new(ValueFact::unknown(DynamicReason::RuntimeValue))),
-                    maximum_outputs: (callable.outputs_complete && !callable.variadic_outputs)
-                        .then_some(output_count),
-                    effects: Default::default(),
-                    capabilities: Default::default(),
-                    dynamic_reason: (!callable.outputs_complete || callable.variadic_outputs)
-                        .then_some(DynamicReason::RuntimeValue),
-                },
-                &request,
-            );
+            return runmat_builtins::infer_callable_call(&callable, &request);
         }
     }
 
@@ -102,8 +141,10 @@ fn bound_function(call: &MirCall) -> Option<FunctionId> {
 fn static_name(call: &MirCall) -> Option<String> {
     match &call.callee {
         MirCallee::Static(identity) => identity.display_name(),
-        MirCallee::SuperConstructor { super_class, .. } => Some(super_class.clone()),
-        MirCallee::SuperMethod { method, .. } => Some(method.clone()),
+        MirCallee::SuperConstructor { super_class, .. } => {
+            Some(super_class.display_name().to_owned())
+        }
+        MirCallee::SuperMethod { method, .. } => Some(method.display_name().to_owned()),
         MirCallee::Dynamic(_) => None,
     }
 }
@@ -127,6 +168,8 @@ fn operand_fact(
             };
             ValueFact::scalar(ValueKindFact::Callable(runmat_types::CallableFact {
                 identity: Some(identity.clone()),
+                capabilities: summary
+                    .map_or_else(Default::default, |summary| summary.capabilities.clone()),
                 parameters: Vec::new(),
                 parameters_complete: false,
                 outputs: summary.map_or_else(Vec::new, |summary| summary.outputs.clone()),

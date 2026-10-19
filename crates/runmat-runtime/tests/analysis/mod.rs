@@ -1,13 +1,10 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, GpuTensorHandle,
-    HostTensorOwned, HostTensorView, ThreadProviderGuard,
+    AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
+    HostTensorView, ThreadProviderGuard,
 };
 use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ProcedureStep};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};

@@ -19,7 +19,11 @@ use runmat_value::{
     Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::tensor_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+    type_resolvers::tensor_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::gpu_helpers;
@@ -379,14 +383,14 @@ async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let (sorted, indices) = eval.into_values();
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![sorted]));
+            return Ok(Value::output_list(vec![sorted]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![sorted, indices]));
+            return Ok(Value::output_list(vec![sorted, indices]));
         }
         return Err(sort_invalid_argument(
             "sort: too many output arguments; maximum is 2",
@@ -408,7 +412,7 @@ async fn sort_gpu(
     handle: GpuTensorHandle,
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = handle.shape.clone();
+    let shape = handle.shape().to_vec();
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
         .or_else(runmat_accelerate_api::provider);
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
@@ -485,14 +489,14 @@ fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluati
 fn sort_logical(logical: LogicalArray, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
     let shape = logical.shape;
     let evaluation = sort_real_tensor(
-        Tensor::new_integer(IntegerStorage::U8(logical.data), shape)
+        Tensor::new_integer(IntegerStorage::U8(logical.data.into_vec()), shape)
             .map_err(|e| sort_internal(format!("sort: {e}")))?,
         args,
     )?;
     let sorted = match evaluation.sorted {
         Value::Int(IntValue::U8(value)) => Value::Bool(value != 0),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let storage = tensor
                 .into_numeric_storage()
                 .map_err(|e| sort_internal(format!("sort: {e}")))?
@@ -536,47 +540,38 @@ fn upload_sort_value(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     value: Value,
 ) -> crate::BuiltinResult<Value> {
-    let upload_tensor = |tensor: Tensor, logical: bool| -> crate::BuiltinResult<Value> {
+    let upload_tensor = |tensor: Tensor| -> crate::BuiltinResult<Value> {
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|error| sort_internal(format!("sort: GPU upload failed: {error}")))?;
-        Ok(if logical {
-            gpu_helpers::logical_gpu_value(handle)
-        } else {
-            gpu_helpers::resident_gpu_value(handle)
-        })
+        gpu_helpers::resident_gpu_value(handle)
     };
     match value {
-        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Tensor(tensor) => upload_tensor(tensor),
         Value::Num(number) => upload_tensor(
             Tensor::new(vec![number], vec![1, 1])
                 .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            false,
         ),
         Value::Int(integer) => upload_tensor(
             Tensor::new_integer(IntegerStorage::from_scalar(integer), vec![1, 1])
                 .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            false,
         ),
-        Value::Bool(logical) => upload_tensor(
-            Tensor::new(vec![if logical { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            true,
-        ),
+        Value::Bool(logical) => {
+            super::support::upload_logical_output(provider, &[u8::from(logical)], &[1, 1], "sort")
+        }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(sort_internal)?;
-            upload_tensor(tensor, true)
+            super::support::upload_logical_output(provider, &logical.data, &logical.shape, "sort")
         }
         Value::Complex(real, imag) => {
             let tensor = ComplexTensor::new(vec![(real, imag)], vec![1, 1])
                 .map_err(|error| sort_internal(format!("sort: {error}")))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|error| sort_internal(format!("sort: {}", error.message())))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         Value::ComplexTensor(tensor) => {
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|error| sort_internal(format!("sort: {}", error.message())))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         other => Err(sort_internal(format!(
             "sort: cannot upload unexpected output {other:?}"
@@ -585,7 +580,7 @@ fn upload_sort_value(
 }
 
 fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
         return Err(sort_error(
@@ -725,8 +720,9 @@ fn sort_complex_tensor(
     tensor: ComplexTensor,
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = tensor.shape.clone();
-    let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
+    let dim = args
+        .dimension
+        .unwrap_or_else(|| default_dimension(tensor.shape()));
     if dim == 0 {
         return Err(sort_error(
             &SORT_ERROR_INVALID_DIMENSION,
@@ -734,8 +730,8 @@ fn sort_complex_tensor(
         ));
     }
 
-    let dim_len = dimension_length(&shape, dim);
-    let storage = tensor.into_complex_storage();
+    let dim_len = dimension_length(tensor.shape(), dim);
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
     if storage.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; storage.len()];
         let index_tensor =
@@ -790,10 +786,22 @@ fn complex_integer_sort_permutation(
                 buffer.push((k, source));
             }
             buffer.sort_by(|a, b| {
-                let a_real = storage.real.value_at(a.1).expect("validated complex index");
-                let a_imag = storage.imag.value_at(a.1).expect("validated complex index");
-                let b_real = storage.real.value_at(b.1).expect("validated complex index");
-                let b_imag = storage.imag.value_at(b.1).expect("validated complex index");
+                let a_real = storage
+                    .real()
+                    .value_at(a.1)
+                    .expect("validated complex index");
+                let a_imag = storage
+                    .imag()
+                    .value_at(a.1)
+                    .expect("validated complex index");
+                let b_real = storage
+                    .real()
+                    .value_at(b.1)
+                    .expect("validated complex index");
+                let b_imag = storage
+                    .imag()
+                    .value_at(b.1)
+                    .expect("validated complex index");
                 integer_order::compare_complex(
                     (&a_real, &a_imag),
                     (&b_real, &b_imag),
@@ -812,8 +820,8 @@ fn complex_integer_sort_permutation(
     (source_indices, indices)
 }
 
-fn complex_sort_permutation<T: SetFloat>(
-    values: &[(T, T)],
+fn complex_sort_permutation<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     shape: &[usize],
     dim: usize,
     args: &SortArgs,
@@ -830,7 +838,7 @@ fn complex_sort_permutation<T: SetFloat>(
             buffer.clear();
             for k in 0..dim_len {
                 let source = before + k * stride_before + after * stride_before * dim_len;
-                buffer.push((k, source, values[source]));
+                buffer.push((k, source, values.pair_at(source)));
             }
             buffer.sort_by(|a, b| compare_complex_values(a.2, b.2, args));
             for (position, (original_index, source, _)) in buffer.iter().enumerate() {
@@ -1315,7 +1323,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1527,7 +1535,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 5.0, 3.0, 6.0]);
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1547,7 +1555,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1587,7 +1595,7 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1725,8 +1733,12 @@ pub(crate) mod tests {
             panic!("expected complex single tensor");
         };
         assert_eq!(
-            sorted.as_f32_slice(),
-            Some(&[(1.0, 0.0), (0.0, 2.0), (3.0, 4.0)][..])
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.0, 0.0), (0.0, 2.0), (3.0, 4.0)])
         );
         let Value::Tensor(indices) = indices else {
             panic!("expected index tensor");
@@ -1743,7 +1755,14 @@ pub(crate) mod tests {
         let Value::ComplexTensor(sorted) = sorted else {
             panic!("expected complex single tensor");
         };
-        assert_eq!(sorted.as_f32_slice(), Some(&[(1.25, -2.5)][..]));
+        assert_eq!(
+            sorted.as_f32_slice().map(|values| values
+                .iter()
+                .copied()
+                .map(<(f32, f32)>::from)
+                .collect::<Vec<_>>()),
+            Some(vec![(1.25, -2.5)])
+        );
     }
 
     #[test]
@@ -2041,7 +2060,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sort_rejects_more_than_two_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = sort_builtin(
             Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![2, 1]).expect("input")),
             Vec::new(),
@@ -2059,7 +2078,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert!(t.materialize_f64().is_empty());
-                assert_eq!(t.shape, tensor.shape);
+                assert_eq!(t.shape(), tensor.shape());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2183,7 +2202,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate");
@@ -2218,12 +2237,11 @@ pub(crate) mod tests {
             );
 
             let logical = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[1.0, 0.0, 1.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1],
                     shape: &[3, 1],
                 })
                 .expect("upload logical");
-            runmat_accelerate_api::set_handle_logical(&logical, true);
             let (sorted, _) = evaluate(Value::GpuTensor(logical), &[])
                 .expect("logical GPU sort")
                 .into_values();
@@ -2249,7 +2267,7 @@ pub(crate) mod tests {
 
         let gpu_view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&gpu_view).expect("upload");

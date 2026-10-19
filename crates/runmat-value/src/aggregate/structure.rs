@@ -13,6 +13,12 @@ impl StructValue {
         }
     }
 
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            fields: IndexMap::with_capacity(capacity),
+        }
+    }
+
     /// Insert a field, preserving insertion order when the name is new.
     pub fn insert(&mut self, name: impl Into<String>, value: Value) -> Option<Value> {
         self.fields.insert(name.into(), value)

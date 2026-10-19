@@ -1,7 +1,7 @@
 use crate::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, CellFact, DynamicReason, FactInference,
-    FactJoin, IndexSelectorFact, InferenceDiagnostic, MutationContract, PlaceMutationKind,
-    ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    AssignmentCreationPolicy, AssignmentShapePolicy, DynamicReason, FactInference, FactJoin,
+    IndexSelectorFact, InferenceDiagnostic, MutationContract, PlaceMutationKind, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
 
 pub fn infer_mutation(
@@ -89,30 +89,60 @@ pub fn infer_index_mutation(
             return validation;
         }
     }
-    let mut output = if matches!(base.kind, ValueKindFact::Unknown)
-        && matches!(
-            contract.creation,
-            AssignmentCreationPolicy::CreateArrayByIndex
-        ) {
-        created_index_target(assigned, contract.kind)
-    } else {
-        base.clone()
-    };
-    if selectors.len() == 1 {
-        grow_linear_shape(&mut output.shape, &selectors[0]);
-    } else if let ShapeFact::Shaped { dims } = &mut output.shape {
-        for (dimension, selector) in selectors.iter().enumerate() {
-            let Some(index) = (match selector {
-                IndexSelectorFact::KnownOneBasedIndex(index) => Some(*index),
-                _ => None,
-            }) else {
-                continue;
-            };
-            if dimension >= dims.len() {
-                dims.resize(dimension + 1, crate::DimensionFact::Known(1));
-            }
-            if let crate::DimensionFact::Known(current) = &mut dims[dimension] {
-                *current = (*current).max(index);
+    // CreateArrayByIndex permits an absent target, but Unknown does not prove
+    // absence: it can also describe an existing value supplied at runtime.
+    // In particular, an absent numeric VM target starts as empty Double, not
+    // as an empty array with the RHS class.
+    let mut output = base.clone();
+    let (shape, shape_may_change) = written_shape(&output.shape, selectors);
+    output.shape = shape;
+    let domain_may_change = matches!(
+        (&base.kind, &assigned.kind),
+        (
+            ValueKindFact::Numeric(crate::NumericFact {
+                domain: crate::NumericDomain::Real,
+                ..
+            }),
+            ValueKindFact::Numeric(crate::NumericFact {
+                domain: crate::NumericDomain::Complex,
+                ..
+            }) | ValueKindFact::Unknown
+        )
+    );
+    let may_detach = !matches!(base.view, crate::ViewFact::Materialized)
+        || !matches!(base.alias, crate::AliasFact::Unique);
+    if shape_may_change || domain_may_change || may_detach {
+        // Growth can re-stride host storage or restore a new resident handle;
+        // complex promotion can allocate new storage even without growth.
+        // The old view/alias and physical-layout facts are not receipts for it.
+        output.layout = crate::LayoutFact::Unknown;
+        output.contiguity = crate::ContiguityFact::Unknown;
+        output.view = crate::ViewFact::Unknown;
+        output.alias = crate::AliasFact::Unknown;
+        if output.shape == ShapeFact::Unknown {
+            output.certainty = crate::CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
+        }
+    }
+    if let ValueKindFact::Numeric(base_numeric) = &base.kind {
+        if base_numeric.domain == crate::NumericDomain::Real {
+            match &assigned.kind {
+                ValueKindFact::Numeric(rhs) if rhs.domain == crate::NumericDomain::Complex => {
+                    if selectors_guarantee_nonempty(&base.shape, selectors) {
+                        output.kind = ValueKindFact::Numeric(crate::NumericFact {
+                            class: base_numeric.class,
+                            domain: crate::NumericDomain::Complex,
+                        });
+                    } else {
+                        output.kind = ValueKindFact::Unknown;
+                        output.certainty =
+                            crate::CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
+                    }
+                }
+                ValueKindFact::Unknown => {
+                    output.kind = ValueKindFact::Unknown;
+                    output.certainty = crate::CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
+                }
+                _ => {}
             }
         }
     }
@@ -151,26 +181,12 @@ pub fn infer_index_mutation(
             cell.elements_complete = false;
         }
     }
-    FactInference::exact(output)
-}
-
-fn created_index_target(assigned: &ValueFact, kind: PlaceMutationKind) -> ValueFact {
-    let shape = ShapeFact::from(vec![Some(0), Some(0)]);
-    if matches!(kind, PlaceMutationKind::CellAssign) {
-        return ValueFact::proven(
-            ValueKindFact::Cell(CellFact {
-                element: Box::new(assigned.clone()),
-                elements: Vec::new(),
-                elements_complete: true,
-            }),
-            shape,
-            StorageFact::Dense,
-        );
+    if matches!(base.kind, ValueKindFact::Numeric(_)) && output.storage == StorageFact::Scalar {
+        // Even an in-bounds scalar write publishes a Tensor, not a primitive
+        // numeric scalar. This also covers a shape-one result.
+        output.storage = StorageFact::Dense;
     }
-    let mut output = assigned.clone();
-    output.shape = shape;
-    output.storage = StorageFact::Dense;
-    output
+    FactInference::exact(output)
 }
 
 fn empty_cell_payload() -> ValueFact {
@@ -184,43 +200,146 @@ fn empty_cell_payload() -> ValueFact {
     )
 }
 
-fn grow_linear_shape(shape: &mut ShapeFact, selector: &IndexSelectorFact) {
-    let IndexSelectorFact::KnownOneBasedIndex(index) = selector else {
-        return;
+// Mirror the runtime assignment plan's *result* shape, including its collapsed
+// final subscript for N-D arrays. Unknown numeric selectors may grow: retaining
+// an old exact extent would make subsequent static resource facts unsound.
+fn written_shape(shape: &ShapeFact, selectors: &[IndexSelectorFact]) -> (ShapeFact, bool) {
+    if selectors.is_empty() {
+        return (ShapeFact::Unknown, true);
+    }
+    let Some(mut original) = exact_dimensions(shape) else {
+        let bounded = selectors.iter().all(definitely_bounded_without_extent);
+        return if bounded {
+            (shape.clone(), false)
+        } else {
+            (ShapeFact::Unknown, true)
+        };
     };
-    let ShapeFact::Shaped { dims } = shape else {
-        return;
+    if original.len() < 2 {
+        original.resize(2, 1);
+    }
+    let Some(effective) = effective_dimensions(&original, selectors.len()) else {
+        return (ShapeFact::Unknown, true);
     };
-    dims.resize(2, crate::DimensionFact::Known(1));
-    let known = dims
+    let mut planned = effective.clone();
+    for (dimension, selector) in selectors.iter().enumerate() {
+        match selector {
+            IndexSelectorFact::KnownOneBasedIndex(index) => {
+                planned[dimension] = planned[dimension].max(*index);
+            }
+            IndexSelectorFact::Colon => {}
+            IndexSelectorFact::End { offset } if *offset <= 0 => {}
+            IndexSelectorFact::End { offset } => {
+                let Ok(offset) = usize::try_from(*offset) else {
+                    return (ShapeFact::Unknown, true);
+                };
+                let Some(end) = effective[dimension].checked_add(offset) else {
+                    return (ShapeFact::Unknown, true);
+                };
+                planned[dimension] = end;
+            }
+            IndexSelectorFact::Logical(_) if effective[dimension] > 0 => {}
+            _ => return (ShapeFact::Unknown, true),
+        }
+    }
+    if planned == effective {
+        return (shape.clone(), false);
+    }
+    if selectors.len() == 1 {
+        let target = planned[0];
+        let mut result = original.clone();
+        let current = effective[0];
+        if current == 0 {
+            result = vec![1, target];
+        } else if result.iter().skip(2).all(|extent| *extent == 1) && result[0] == 1 {
+            result[1] = target;
+            result.truncate(2);
+        } else if result.iter().skip(1).all(|extent| *extent == 1) {
+            result[0] = target;
+            result.truncate(2);
+        } else {
+            let Some(leading) = result[..result.len() - 1]
+                .iter()
+                .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            else {
+                return (ShapeFact::Unknown, true);
+            };
+            *result.last_mut().expect("normalized shape") = target.div_ceil(leading.max(1));
+        }
+        return (known_shape(result), true);
+    }
+    if planned.len() < 2 {
+        planned.resize(2, 1);
+    }
+    (known_shape(planned), true)
+}
+
+fn exact_dimensions(shape: &ShapeFact) -> Option<Vec<usize>> {
+    shape.known_dims()?.into_iter().collect::<Option<Vec<_>>>()
+}
+
+fn effective_dimensions(shape: &[usize], count: usize) -> Option<Vec<usize>> {
+    if count == 1 {
+        return Some(vec![shape
+            .iter()
+            .try_fold(1usize, |n, d| n.checked_mul(*d))?]);
+    }
+    let mut effective = Vec::with_capacity(count);
+    for dimension in 0..count {
+        if dimension + 1 == count {
+            effective.push(
+                shape
+                    .iter()
+                    .skip(dimension)
+                    .try_fold(1usize, |n, d| n.checked_mul(*d))?,
+            );
+        } else {
+            effective.push(shape.get(dimension).copied().unwrap_or(1));
+        }
+    }
+    Some(effective)
+}
+
+fn known_shape(dims: Vec<usize>) -> ShapeFact {
+    ShapeFact::from(dims.into_iter().map(Some).collect::<Vec<_>>())
+}
+
+fn definitely_bounded_without_extent(selector: &IndexSelectorFact) -> bool {
+    match selector {
+        IndexSelectorFact::Colon => true,
+        IndexSelectorFact::End { offset } => *offset <= 0,
+        _ => false,
+    }
+}
+
+fn selectors_guarantee_nonempty(shape: &ShapeFact, selectors: &[IndexSelectorFact]) -> bool {
+    if selectors.is_empty() {
+        return false;
+    }
+    if selectors.iter().all(|selector| {
+        matches!(selector, IndexSelectorFact::KnownOneBasedIndex(index) if *index > 0)
+            || matches!(selector, IndexSelectorFact::End { .. })
+    }) {
+        return true;
+    }
+    let Some(mut dims) = exact_dimensions(shape) else {
+        return false;
+    };
+    if dims.len() < 2 {
+        dims.resize(2, 1);
+    }
+    let Some(effective) = effective_dimensions(&dims, selectors.len()) else {
+        return false;
+    };
+    selectors
         .iter()
-        .map(|dimension| match dimension {
-            crate::DimensionFact::Known(value) => Some(*value),
-            crate::DimensionFact::Symbolic(_) | crate::DimensionFact::Unknown => None,
+        .enumerate()
+        .all(|(dimension, selector)| match selector {
+            IndexSelectorFact::KnownOneBasedIndex(index) => *index > 0,
+            IndexSelectorFact::Colon => effective[dimension] > 0,
+            IndexSelectorFact::End { .. } => true,
+            _ => false,
         })
-        .collect::<Option<Vec<_>>>();
-    let Some(known) = known else { return };
-    let current_count = known
-        .iter()
-        .try_fold(1usize, |count, dimension| count.checked_mul(*dimension));
-    if current_count.is_some_and(|count| *index <= count) {
-        return;
-    }
-    if known.len() != 2 {
-        *shape = ShapeFact::Unknown;
-        return;
-    }
-    let (rows, columns) = (known[0], known[1]);
-    if rows == 1 {
-        dims[1] = crate::DimensionFact::Known(*index);
-    } else if columns == 1 {
-        dims[0] = crate::DimensionFact::Known(*index);
-    } else if rows > 0 {
-        dims[1] = crate::DimensionFact::Known(index.div_ceil(rows));
-    } else {
-        dims[0] = crate::DimensionFact::Known(1);
-        dims[1] = crate::DimensionFact::Known(*index);
-    }
 }
 
 fn failure(code: &str, message: &str) -> FactInference {

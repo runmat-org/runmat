@@ -27,6 +27,11 @@ impl DependencyGeneration {
     pub(crate) fn next(self) -> Option<Self> {
         self.0.checked_add(1).map(Self)
     }
+
+    #[cfg(test)]
+    pub(crate) fn at_limit_for_test() -> Self {
+        Self(u64::MAX)
+    }
 }
 
 /// Exact dependency generations used to compile one published entry.

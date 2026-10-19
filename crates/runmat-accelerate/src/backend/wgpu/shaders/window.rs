@@ -22,9 +22,9 @@ fn cospi_window(value: f64) -> f64 {
     let rounded = round(doubled);
     if (doubled == rounded) {
         let residue = u32(rounded) % 4u;
-        if (residue == 0u) { return 1.0; }
-        if (residue == 2u) { return -1.0; }
-        return 0.0;
+        if (residue == 0u) { return 1.0lf; }
+        if (residue == 2u) { return f64(-1.0); }
+        return 0.0lf;
     }
     let cycle = value - 2.0 * floor(value / 2.0);
     let reduced = select(cycle, 2.0 - cycle, cycle > 1.0);
@@ -33,14 +33,13 @@ fn cospi_window(value: f64) -> f64 {
 
 fn coeff(kind: u32, idx: u32, total: u32) -> f64 {
     if (total == 0u) {
-        return 0.0;
+        return 0.0lf;
     }
     if (total == 1u) {
-        return 1.0;
+        return 1.0lf;
     }
-    let phase = 2.0 * 3.141592653589793 * f64(idx) / f64(total - 1u);
     switch kind {
-        case 0u: { return 0.5 - 0.5 * cos(phase); }
+        case 0u: { return 0.5 - 0.5 * cospi_window(2.0 * f64(idx) / f64(total - 1u)); }
         case 1u: {
             let turns = 2.0 * f64(idx) / f64(total - 1u);
             return 0.54 - 0.46 * cospi_window(turns);
@@ -110,9 +109,8 @@ fn coeff(kind: u32, idx: u32, total: u32) -> f32 {
     if (total == 1u) {
         return 1.0;
     }
-    let phase = 2.0 * 3.1415927 * f32(idx) / f32(total - 1u);
     switch kind {
-        case 0u: { return 0.5 - 0.5 * cos(phase); }
+        case 0u: { return 0.5 - 0.5 * cospi_window(2.0 * f32(idx) / f32(total - 1u)); }
         case 1u: {
             let turns = 2.0 * f32(idx) / f32(total - 1u);
             return 0.54 - 0.46 * cospi_window(turns);

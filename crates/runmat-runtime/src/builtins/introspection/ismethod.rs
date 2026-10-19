@@ -6,7 +6,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::type_resolvers::ismethod_type;
-use crate::class_registry::{lookup_method, register_class};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -14,7 +13,6 @@ use runmat_builtins::{
 };
 use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntValue, IntegerStorage};
 use runmat_value::{Listener, MException, Value};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::ismethod")]
@@ -141,33 +139,26 @@ fn value_has_public_method(receiver: &Value, method_name: &str) -> bool {
         return false;
     }
 
-    let class_name = match receiver_class_name(receiver) {
-        Some(class_name) if !class_name.is_empty() => class_name,
-        _ => return false,
+    let Some(class_name) = receiver_class_name(receiver) else {
+        return false;
     };
 
-    crate::class_registry::lookup_method(&class_name, method_name)
+    crate::class_registry::lookup_method(&class_name, &runmat_types::MethodName::from(method_name))
         .is_some_and(|(method, _owner)| matches!(method.access, MemberAccess::Public))
 }
 
-fn receiver_class_name(receiver: &Value) -> Option<String> {
+fn receiver_class_name(receiver: &Value) -> Option<runmat_types::ClassIdentity> {
     match receiver {
-        Value::ObjectArray(array) => Some(array.class_name().to_string()),
+        Value::ObjectArray(array) => Some(array.class_name().clone()),
         Value::Object(object) => Some(object.class_name.clone()),
-        Value::HandleObject(handle) => {
-            if handle.class_name.is_empty() {
-                Some("handle".to_string())
-            } else {
-                Some(handle.class_name.clone())
-            }
-        }
+        Value::HandleObject(handle) => Some(handle.class_name.clone()),
         Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle) => {
-            Some("gpuArray".to_string())
+            Some(runmat_types::standard::GPU_ARRAY.into())
         }
         Value::GpuTensor(_) => None,
-        Value::Listener(Listener { .. }) => Some("event.listener".to_string()),
+        Value::Listener(Listener { .. }) => Some(runmat_types::standard::EVENT_LISTENER.into()),
         Value::ClassRef(_) => None,
-        Value::MException(MException { .. }) => Some("MException".to_string()),
+        Value::MException(MException { .. }) => Some(runmat_types::standard::MEXCEPTION.into()),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => None,
         _ => None,
     }
@@ -178,7 +169,9 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
+    use runmat_value::{
+        CharArray, HandleRef, IntValue, IntegerStorage, ObjectInstance, StringArray, Tensor,
+    };
     use std::collections::HashMap;
 
     fn unique_class_name(label: &str) -> String {
@@ -195,13 +188,14 @@ mod tests {
         is_static: bool,
     ) -> crate::class_registry::RuntimeMethod {
         crate::class_registry::RuntimeMethod {
-            name: name.to_string(),
+            name: name.into(),
             is_static,
             is_abstract: false,
             is_sealed: false,
             access,
             function_name: format!("{name}_impl"),
             implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
         }
     }
 
@@ -211,38 +205,34 @@ mod tests {
 
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
-            "inherited".to_string(),
+            "inherited".into(),
             method("inherited", MemberAccess::Public, false),
         );
         parent_methods.insert(
-            "hidden".to_string(),
+            "hidden".into(),
             method("hidden", MemberAccess::Private, false),
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: parent.clone(),
+            events: Default::default(),
+            name: parent.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
 
         let mut child_methods = HashMap::new();
+        child_methods.insert("run".into(), method("run", MemberAccess::Public, false));
+        child_methods.insert("make".into(), method("make", MemberAccess::Public, true));
         child_methods.insert(
-            "run".to_string(),
-            method("run", MemberAccess::Public, false),
-        );
-        child_methods.insert(
-            "make".to_string(),
-            method("make", MemberAccess::Public, true),
-        );
-        child_methods.insert(
-            "secret".to_string(),
+            "secret".into(),
             method("secret", MemberAccess::Protected, false),
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: child.clone(),
-            parent: Some(parent.clone()),
+            events: Default::default(),
+            name: child.clone().into(),
+            parent: Some(parent.clone().into()),
             properties: HashMap::new(),
             methods: child_methods,
         });
@@ -259,7 +249,7 @@ mod tests {
             runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(class_name.to_string())))
                 .expect("gc allocation");
         Value::HandleObject(HandleRef {
-            class_name: class_name.to_string(),
+            class_name: class_name.into(),
             target,
             valid: true,
         })
@@ -331,7 +321,7 @@ mod tests {
             Value::String("inherited".to_string())
         ));
         assert!(!call(
-            Value::ClassRef(child),
+            Value::ClassRef(child.into()),
             Value::String("run".to_string())
         ));
     }
@@ -343,15 +333,22 @@ mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
+            let caller_alias = handle.clone();
+            let original = handle.wire_descriptor();
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
             assert!(!call(
                 Value::GpuTensor(handle.clone()),
                 Value::from("gather")
             ));
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit immutable view");
+            drop(handle);
+            let handle = explicit;
             for method in [
                 "arrayfun",
                 "existsOnGPU",
@@ -369,6 +366,11 @@ mod tests {
                 Value::GpuTensor(handle),
                 Value::from("notARealGpuArrayMethod")
             ));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(caller_alias.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            drop(caller_alias);
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -423,19 +425,31 @@ mod tests {
                 let tensor = Tensor::new_integer(storage, vec![1, 1]).unwrap();
                 let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                     .expect("upload integer");
+                let caller_alias = handle.clone();
+                let original = handle.wire_descriptor();
+                let lease = handle.allocation_lease().downgrade();
+                provider.reset_telemetry();
                 assert_eq!(
                     ismethod_builtin(Value::GpuTensor(handle.clone()), Value::from("gather"))
                         .unwrap(),
                     Value::Bool(false)
                 );
-                let handle =
-                    handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+                let explicit = handle
+                    .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                    .expect("explicit immutable view");
+                drop(handle);
+                let handle = explicit;
                 assert_eq!(
                     ismethod_builtin(Value::GpuTensor(handle.clone()), Value::from("gather"))
                         .unwrap(),
                     Value::Bool(true)
                 );
-                provider.free(&handle).ok();
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+                assert_eq!(caller_alias.wire_descriptor(), original);
+                handle.release().expect("release explicit view");
+                assert!(lease.acquire().is_some());
+                drop(caller_alias);
+                assert!(lease.acquire().is_none());
             }
         });
     }

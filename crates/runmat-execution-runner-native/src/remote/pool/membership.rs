@@ -49,7 +49,12 @@ impl RemotePoolDriver {
                 )));
             }
         }
-        let described = channel.describe_worker().await?;
+        let mut described = channel.describe_worker().await?;
+        // Software support is admitted only from the route's authenticated
+        // ReadyV1, never from the static description or allocation inventory.
+        for capability in super::super::worker_protocol::software_capabilities() {
+            described.resources.capabilities.remove(&capability);
+        }
         if described != worker {
             return Err(NativeExecutionError::Protocol(
                 "remote worker inventory differs from its encrypted description".into(),
@@ -57,28 +62,24 @@ impl RemotePoolDriver {
         }
         let node = channel.node_identity().to_string();
         let node_was_installed = self.installed_nodes.lock().await.contains(&node);
-        let receipt = if node_was_installed {
-            match channel.activate_bundle(self.bundle_digest).await {
-                Ok(receipt) => receipt,
-                Err(_) => {
-                    channel
-                        .install_bundle(self.bundle_digest, &self.bundle)
-                        .await?
+        if let Some(bundle) = &self.direct_bundle {
+            let receipt = if node_was_installed {
+                match channel.activate_bundle(bundle.digest).await {
+                    Ok(receipt) => receipt,
+                    Err(_) => channel.install_bundle(bundle.digest, &bundle.bytes).await?,
                 }
+            } else {
+                channel.install_bundle(bundle.digest, &bundle.bytes).await?
+            };
+            if receipt.bundle_digest != bundle.digest
+                || receipt.bundle_identity != bundle.identity
+                || receipt.project_revision != bundle.project_revision
+                || receipt.stored_bytes != bundle.bytes.len() as u64
+            {
+                return Err(NativeExecutionError::Protocol(
+                    "remote worker did not acknowledge the exact bundle".into(),
+                ));
             }
-        } else {
-            channel
-                .install_bundle(self.bundle_digest, &self.bundle)
-                .await?
-        };
-        if receipt.bundle_digest != self.bundle_digest
-            || receipt.bundle_identity != self.bundle_identity
-            || receipt.project_revision != self.project_revision
-            || receipt.stored_bytes != self.bundle.len() as u64
-        {
-            return Err(NativeExecutionError::Protocol(
-                "remote worker did not acknowledge the exact bundle".into(),
-            ));
         }
         // Acquire every fallible asynchronous guard before mutating driver state.
         // Once RegisterWorker succeeds, publishing the route and installed-node
@@ -96,9 +97,13 @@ impl RemotePoolDriver {
             })?;
         let actions = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
-            driver.handle(DriverCommand::RegisterWorker(worker))?
+            let mut actions = driver.handle(DriverCommand::RegisterWorker(worker))?;
+            actions.extend(driver.handle(DriverCommand::RefreshPoolCapabilities {
+                pool_id: self.pool_id,
+            })?);
+            actions
         };
-        if !node_was_installed {
+        if !node_was_installed && self.direct_bundle.is_some() {
             installed_nodes.insert(node);
         }
         channels.insert(
@@ -115,6 +120,56 @@ impl RemotePoolDriver {
         drop(installed_nodes);
         self.dispatch(actions);
         self.refresh_pool_state()?;
+        self.refresh_worker_software_capabilities().await?;
+        Ok(())
+    }
+
+    /// Pull only readiness already authenticated by each encrypted route.
+    /// This does not query or wait for a worker and is safe on the ordinary
+    /// V10 reconciliation path.
+    pub async fn refresh_worker_software_capabilities(
+        self: &Arc<Self>,
+    ) -> NativeExecutionResult<()> {
+        let observed = self
+            .channels
+            .read()
+            .await
+            .iter()
+            .filter_map(|(id, route)| {
+                route
+                    .channel
+                    .verified_software_capabilities()
+                    .map(|capabilities| (*id, capabilities))
+            })
+            .collect::<Vec<_>>();
+        if observed.is_empty() {
+            return Ok(());
+        }
+        let actions = {
+            let mut applied = self
+                .applied_software_readiness
+                .lock()
+                .expect("worker readiness registry poisoned");
+            let mut driver = self.driver.lock().expect("remote driver poisoned");
+            let mut actions = Vec::new();
+            for (worker_id, capabilities) in observed {
+                if applied.contains(&worker_id) {
+                    continue;
+                }
+                actions.extend(
+                    driver.handle(DriverCommand::AdmitWorkerSoftwareCapabilities {
+                        worker_id,
+                        capabilities,
+                    })?,
+                );
+                actions.extend(driver.handle(DriverCommand::RefreshPoolCapabilities {
+                    pool_id: self.pool_id,
+                })?);
+                applied.insert(worker_id);
+            }
+            actions
+        };
+        self.dispatch(actions);
         Ok(())
     }
 
@@ -139,14 +194,14 @@ impl RemotePoolDriver {
         } else {
             Some(self.worker_registration.lock().await)
         };
+        self.applied_software_readiness
+            .lock()
+            .expect("worker readiness registry poisoned")
+            .remove(&worker_id);
         let (channel, actions) = if lost {
             let mut channels = self.channels.write().await;
             let channel = channels.remove(&worker_id).map(|route| route.channel);
-            let actions = self
-                .driver
-                .lock()
-                .expect("remote driver poisoned")
-                .handle(DriverCommand::WorkerLost(worker_id))?;
+            let actions = self.worker_transition(DriverCommand::WorkerLost(worker_id))?;
             drop(channels);
             (channel, actions)
         } else {
@@ -156,11 +211,7 @@ impl RemotePoolDriver {
                 .await
                 .get(&worker_id)
                 .map(|route| Arc::clone(&route.channel));
-            let actions = self
-                .driver
-                .lock()
-                .expect("remote driver poisoned")
-                .handle(DriverCommand::DrainWorker(worker_id))?;
+            let actions = self.worker_transition(DriverCommand::DrainWorker(worker_id))?;
             (channel, actions)
         };
         self.dispatch(actions);
@@ -170,11 +221,7 @@ impl RemotePoolDriver {
                 if let Err(error) = channel.drain().await {
                     let mut channels = self.channels.write().await;
                     channels.remove(&worker_id);
-                    let actions = self
-                        .driver
-                        .lock()
-                        .expect("remote driver poisoned")
-                        .handle(DriverCommand::WorkerLost(worker_id))?;
+                    let actions = self.worker_transition(DriverCommand::WorkerLost(worker_id))?;
                     drop(channels);
                     self.dispatch(actions);
                     self.resolve_non_success_terminals();
@@ -186,6 +233,19 @@ impl RemotePoolDriver {
         }
         self.refresh_pool_state()?;
         Ok(())
+    }
+
+    /// Apply a membership transition and re-derive the pool's admitted capabilities.
+    fn worker_transition(
+        &self,
+        command: DriverCommand,
+    ) -> NativeExecutionResult<Vec<DriverAction>> {
+        let mut driver = self.driver.lock().expect("remote driver poisoned");
+        let mut actions = driver.handle(command)?;
+        actions.extend(driver.handle(DriverCommand::RefreshPoolCapabilities {
+            pool_id: self.pool_id,
+        })?);
+        Ok(actions)
     }
 
     pub(super) fn refresh_pool_state(self: &Arc<Self>) -> NativeExecutionResult<()> {

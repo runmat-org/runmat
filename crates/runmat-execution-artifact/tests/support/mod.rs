@@ -53,12 +53,16 @@ pub fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
         entrypoint: "main".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
-        target: runmat_execution_artifact::ProgramTarget::portable("portable-bytecode-v1"),
+        target: runmat_execution_artifact::ProgramTarget::portable("portable-bytecode-v2"),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     }
 }

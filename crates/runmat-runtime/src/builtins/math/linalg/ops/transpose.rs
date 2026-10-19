@@ -12,19 +12,20 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
+use crate::builtins::math::linalg::ops::transpose_sparse_tensor;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::matrix_transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use log::warn;
 use runmat_accelerate_api::GpuTensorHandle;
+
+#[path = "transpose/resident.rs"]
+pub(super) mod resident;
+use runmat_builtins::BuiltinErrorDescriptor;
+
+#[cfg(test)]
+use runmat_builtins::TRANSPOSE_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    TRANSPOSE_ERROR_INTERNAL, TRANSPOSE_ERROR_INVALID_ARGUMENT, TRANSPOSE_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 #[cfg(test)]
@@ -32,83 +33,6 @@ use runmat_value::IntegerStorage;
 use runmat_value::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
 const NAME: &str = "transpose";
-
-const TRANSPOSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value with first two dimensions swapped.",
-}];
-
-const TRANSPOSE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar/array value.",
-}];
-
-const TRANSPOSE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "B = transpose(A)",
-    inputs: &TRANSPOSE_INPUTS,
-    outputs: &TRANSPOSE_OUTPUT,
-}];
-
-const TRANSPOSE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRANSPOSE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:transpose:InvalidArgument"),
-    when: "Call does not provide exactly one input argument.",
-    message: "transpose: invalid argument",
-};
-
-const TRANSPOSE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRANSPOSE.INVALID_INPUT",
-    identifier: Some("RunMat:transpose:InvalidInput"),
-    when: "Input type is unsupported for transpose or the input has a nonsingleton dimension above two.",
-    message: "transpose: unsupported input type",
-};
-
-const TRANSPOSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRANSPOSE.INTERNAL",
-    identifier: Some("RunMat:transpose:Internal"),
-    when: "Runtime cannot materialize transpose output.",
-    message: "transpose: internal runtime failure",
-};
-
-const TRANSPOSE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    TRANSPOSE_ERROR_INVALID_ARGUMENT,
-    TRANSPOSE_ERROR_INVALID_INPUT,
-    TRANSPOSE_ERROR_INTERNAL,
-];
-
-pub const TRANSPOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRANSPOSE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TRANSPOSE_ERRORS,
-};
-
-const TRANSPOSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are documented matrix inputs. Transpose reorders elements without arithmetic or conversion.",
-    }];
-
-pub const TRANSPOSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = transpose(integer_A)",
-        inputs: &TRANSPOSE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Dense, sparse, empty, host, and supported resident inputs preserve exact integer class, shape, and values; provider fallback gathers and restores through the input handle's owner.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::transpose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -163,23 +87,6 @@ fn ensure_vector_or_matrix_shape(shape: &[usize]) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
-    if let Some(identifier) = err.identifier() {
-        builder = builder.with_identifier(identifier.to_string());
-    }
-    if let Some(task_id) = err.context.task_id.clone() {
-        builder = builder.with_task_id(task_id);
-    }
-    if !err.context.call_stack.is_empty() {
-        builder = builder.with_call_stack(err.context.call_stack.clone());
-    }
-    if let Some(phase) = err.context.phase.clone() {
-        builder = builder.with_phase(phase);
-    }
-    builder.with_source(err).build()
-}
-
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
@@ -196,18 +103,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "transpose",
-    category = "math/linalg/ops",
-    summary = "Transpose vectors and matrices without conjugation.",
-    keywords = "transpose,swap rows and columns,non-conjugate",
-    accel = "transpose",
-    type_resolver(matrix_transpose_type),
-    descriptor(crate::builtins::math::linalg::ops::transpose::TRANSPOSE_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::math::linalg::ops::transpose::TRANSPOSE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
-async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
     let value = match args.len() {
         0 => return Err(builtin_error(&TRANSPOSE_ERROR_INVALID_ARGUMENT)),
         1 => args.remove(0),
@@ -217,13 +116,23 @@ async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => transpose_gpu(handle).await,
         Value::Tensor(t) => Ok(tensor::tensor_into_value(transpose_tensor(t)?)),
         Value::SparseTensor(s) => Ok(Value::SparseTensor(
-            transpose_real_sparse_tensor(s).map_err(|e| internal_error(format!("{NAME}: {e}")))?,
+            transpose_sparse_tensor(s, false)
+                .map_err(|e| internal_error(format!("{NAME}: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(Value::ComplexTensor(transpose_complex_tensor(ct)?)),
         Value::LogicalArray(la) => Ok(Value::LogicalArray(transpose_logical_array(la)?)),
         Value::CharArray(ca) => Ok(Value::CharArray(transpose_char_array(ca)?)),
         Value::StringArray(sa) => Ok(Value::StringArray(transpose_string_array(sa)?)),
         Value::Cell(ca) => Ok(Value::Cell(transpose_cell_array(ca)?)),
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(array) => {
+            ensure_vector_or_matrix_shape(array.shape())?;
+            let order = transpose_order(array.shape().len());
+            array
+                .permute(&order)
+                .map(Value::StructArray)
+                .map_err(invalid_input)
+        }
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Int(i)),
@@ -236,8 +145,8 @@ async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn transpose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    ensure_vector_or_matrix_shape(&tensor.shape)?;
-    let rank = tensor.shape.len();
+    ensure_vector_or_matrix_shape(tensor.shape())?;
+    let rank = tensor.shape().len();
     if rank == 0 {
         return Ok(tensor);
     }
@@ -246,8 +155,8 @@ fn transpose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn transpose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
-    ensure_vector_or_matrix_shape(&ct.shape)?;
-    let rank = ct.shape.len();
+    ensure_vector_or_matrix_shape(ct.shape())?;
+    let rank = ct.shape().len();
     if rank == 0 {
         return Ok(ct);
     }
@@ -388,39 +297,75 @@ fn transpose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
 }
 
 async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    ensure_vector_or_matrix_shape(&handle.shape)?;
-    let rank = handle.shape.len();
+    ensure_vector_or_matrix_shape(handle.shape())?;
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+    let provider = resident::owner(&handle, native_provider_error)?;
+    let rank = handle.shape().len();
     if rank == 0 {
-        return Ok(Value::GpuTensor(handle));
+        return resident::adopt(&handle, handle.clone(), native_provider_error);
     }
-    if rank <= 2 {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            match provider.transpose(&handle) {
-                Ok(out) => return Ok(Value::GpuTensor(out)),
-                Err(err) => {
-                    let info = provider.device_info_struct();
-                    warn!(
-                        "transpose: provider {} (backend: {}) is missing transpose support; falling back ({err})",
-                        info.name,
-                        info.backend.as_deref().unwrap_or("unknown")
-                    );
-                }
+    let shape = resident::shape(&handle);
+    let result = if rank <= 2 {
+        match provider.transpose(&handle) {
+            Ok(output) => Some(output),
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
+            Err(error) => return Err(native_provider_error(error)),
+        }
+    } else {
+        let order: Vec<_> = transpose_order(rank)
+            .into_iter()
+            .map(|axis| axis - 1)
+            .collect();
+        let output = provider
+            .permute(&handle, &order)
+            .map_err(native_provider_error)?;
+        if let Some(output) = output {
+            if !gpu_helpers::permutation_output_matches(&handle, &output, provider, &order) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    internal_error("transpose: invalid provider permutation output"),
+                ));
             }
+            Some(output)
+        } else {
+            None
         }
-    }
-    let host = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(map_control_flow)?;
-    let transposed = transpose_tensor(host)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        match gpu_helpers::upload_tensor(provider, &transposed) {
-            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-            Err(upload_err) => warn!(
-                "transpose: re-upload after host fallback failed; returning host tensor ({upload_err})"
-            ),
+    };
+    match result {
+        Some(output) if resident::output_matches(&handle, &output, provider, &shape) => {
+            return resident::adopt(&handle, output, native_provider_error);
         }
+        Some(output) => {
+            return Err(gpu_helpers::reject_gpu_output(
+                output,
+                native_provider_error(anyhow::anyhow!("malformed transpose output")),
+            ))
+        }
+        None => {}
     }
-    Ok(tensor::tensor_into_value(transposed))
+    let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+    let result = match host {
+        Value::Tensor(tensor) => Value::Tensor(transpose_tensor(tensor)?),
+        Value::ComplexTensor(tensor) => Value::ComplexTensor(transpose_complex_tensor(tensor)?),
+        Value::LogicalArray(array) => Value::LogicalArray(transpose_logical_array(array)?),
+        scalar @ (Value::Num(_) | Value::Complex(_, _) | Value::Int(_) | Value::Bool(_)) => scalar,
+        other => {
+            return Err(invalid_input(format!(
+                "transpose: unsupported gathered resident value {other:?}"
+            )))
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, result, NAME)
+}
+
+fn native_provider_error(
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> RuntimeError {
+    let source = source.into();
+    crate::runtime_error::with_provider_execution_source(
+        internal_error(format!("transpose: provider failed: {source}")),
+        source,
+    )
 }
 
 fn transpose_order(rank: usize) -> Vec<usize> {
@@ -492,9 +437,10 @@ pub(crate) mod tests {
                 panic!("expected complex tensor for {class}");
             };
             let result_storage = complex_result.integer_storage().expect("integer storage");
-            assert_eq!(result_storage.real, expected, "{class} real");
+            assert_eq!(result_storage.real(), &expected, "{class} real");
             assert_eq!(
-                result_storage.imag, result_storage.real,
+                result_storage.imag(),
+                result_storage.real(),
                 "{class} imaginary"
             );
         }
@@ -518,12 +464,12 @@ pub(crate) mod tests {
             panic!("expected complex tensor");
         };
         let storage = result.integer_storage().expect("exact integer storage");
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(
-            storage.real,
-            IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 1_u64 << 63])
+            storage.real(),
+            &IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 1_u64 << 63])
         );
-        assert_eq!(storage.imag, IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6]));
+        assert_eq!(storage.imag(), &IntegerStorage::U64(vec![1, 3, 5, 2, 4, 6]));
     }
 
     #[test]
@@ -537,7 +483,7 @@ pub(crate) mod tests {
         let Value::Tensor(result) = call_transpose(Value::Tensor(input)).expect("transpose") else {
             panic!("expected tensor");
         };
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![
@@ -559,7 +505,7 @@ pub(crate) mod tests {
         let Value::Tensor(result) = call_transpose(Value::Tensor(input)).expect("transpose") else {
             panic!("expected tensor");
         };
-        assert_eq!(result.shape, vec![3, 0]);
+        assert_eq!(result.shape(), [3, 0]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::I64(Vec::new()))
@@ -573,7 +519,7 @@ pub(crate) mod tests {
         let Value::Tensor(result) = call_transpose(Value::Tensor(input)).expect("transpose") else {
             panic!("expected tensor");
         };
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(
             result.into_numeric_storage().unwrap(),
             runmat_value::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
@@ -591,7 +537,7 @@ pub(crate) mod tests {
         let value = call_transpose(Value::Tensor(input)).expect("transpose");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), [3, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -688,7 +634,7 @@ pub(crate) mod tests {
         let value = call_transpose(Value::Tensor(input)).expect("transpose");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -703,7 +649,7 @@ pub(crate) mod tests {
         let value = call_transpose(Value::ComplexTensor(ct)).expect("transpose");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -728,7 +674,7 @@ pub(crate) mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(result.shape, vec![2, 2, 1]);
+        assert_eq!(result.shape(), [2, 2, 1]);
         assert_eq!(result.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     }
 
@@ -871,12 +817,12 @@ pub(crate) mod tests {
             let t = tensor(&[1.0, 4.0, 2.0, 5.0], &[2, 2]);
             let view = HostTensorView {
                 data: &t.materialize_f64(),
-                shape: &t.shape,
+                shape: t.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call_transpose(Value::GpuTensor(handle)).expect("transpose");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 4.0, 5.0]);
         });
     }
@@ -924,12 +870,12 @@ pub(crate) mod tests {
 
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = call_transpose(Value::GpuTensor(handle)).expect("gpu transpose");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

@@ -73,7 +73,8 @@ fn fused_single_pass_reduce_len_1_no_alias() {
                 output: Some(vid_mul),
             },
             FusionOp::Builtin {
-                name: "sum".to_string(),
+                origin: Default::default(),
+                name: "sum".into(),
                 inputs: vec![vid_mul, vid_dim],
                 output: Some(vid_sum),
             },

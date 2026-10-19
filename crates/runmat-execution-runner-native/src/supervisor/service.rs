@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use super::auth::acquire_supervisor_lock;
 use super::driver_files::write_driver_marker;
 use super::filesystem::{secure_directory, unix_millis};
-use super::model::{BatchSubmission, LocalJobRecord, LocalJobState};
+use super::model::{BatchSubmission, GraphBatchSubmission, LocalJobRecord, LocalJobState};
 use super::protocol::{SupervisorCommand, SupervisorResponse};
 use super::store::JobStore;
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -54,6 +54,22 @@ impl LocalSupervisor {
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         let mut store = self.store.lock().await;
         let (record, created) = store.create_script(submission, unix_millis())?;
+        if !created {
+            return Ok((record, true));
+        }
+        let record = self.launch(&mut store, record).await?;
+        Ok((record, false))
+    }
+
+    pub async fn submit_graph(
+        &self,
+        submission: GraphBatchSubmission,
+    ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
+        // Canonical archive decode and selected-V3 admission can be expensive;
+        // complete it before entering the durable-store critical section.
+        let validated = submission.into_validated()?;
+        let mut store = self.store.lock().await;
+        let (record, created) = store.create_graph_validated(validated, unix_millis())?;
         if !created {
             return Ok((record, true));
         }
@@ -263,6 +279,10 @@ impl LocalSupervisor {
             }
             SupervisorCommand::SubmitProgram { submission } => {
                 let (record, duplicate) = self.submit_program(*submission).await?;
+                SupervisorResponse::Submitted { record, duplicate }
+            }
+            SupervisorCommand::SubmitGraph { submission } => {
+                let (record, duplicate) = self.submit_graph(*submission).await?;
                 SupervisorResponse::Submitted { record, duplicate }
             }
             SupervisorCommand::List => SupervisorResponse::Jobs {

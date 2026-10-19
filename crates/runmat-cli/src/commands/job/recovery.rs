@@ -292,22 +292,13 @@ async fn recover(
                 }))?
             );
         } else {
-            match result {
-                ProgramExecutionResponse::Success { value } => {
-                    println!("{}", serde_json::to_string_pretty(&value)?);
-                }
-                ProgramExecutionResponse::ExternalizedSuccess {
-                    outputs,
-                    result_objects,
-                } => {
-                    println!(
-                        "{} externalized output(s), {} verified result object(s)",
-                        outputs.len(),
-                        result_objects.len()
-                    );
-                }
-                ProgramExecutionResponse::Failure { message } => bail!("{message}"),
-            }
+            println!(
+                "{}",
+                super::result::format_terminal_result(
+                    result,
+                    super::result::ResultOrigin::Recovered,
+                )?
+            );
         }
         return Ok(());
     }

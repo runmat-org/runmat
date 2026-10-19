@@ -1,6 +1,5 @@
 use once_cell::sync::OnceCell;
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
@@ -123,6 +122,31 @@ pub fn replace_async_handler(handler: Option<Arc<AsyncInteractionHandler>>) -> A
         previous,
         state: None,
     }
+}
+
+/// Invoke the already-installed execution-scoped input handler without entering
+/// host dispatch again. Application host adapters use this to preserve Core's
+/// stdin recording and error lifecycle. `None` means no handler; an installed
+/// handler's failure is final, not permission to prompt through another route.
+pub fn invoke_installed_async_handler(
+    request: crate::context::HostInteraction,
+) -> Option<crate::context::RuntimeServiceFuture<Result<InteractionResponse, RuntimeError>>> {
+    let handler = current_async_handler()?;
+    let request = match request {
+        crate::context::HostInteraction::Line { prompt, echo } => InteractionPromptOwned {
+            prompt,
+            kind: InteractionKind::Line { echo },
+        },
+        crate::context::HostInteraction::KeyPress { prompt } => InteractionPromptOwned {
+            prompt,
+            kind: InteractionKind::KeyPress,
+        },
+    };
+    Some(Box::pin(async move {
+        handler(request)
+            .await
+            .map_err(|error| interaction_error("RunMat:interaction:AsyncHandlerError", error))
+    }))
 }
 
 pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
@@ -318,11 +342,41 @@ pub fn push_queued_response(response: Result<InteractionResponse, String>) {
 // named constants like `pi`, arithmetic, etc.).
 // ---------------------------------------------------------------------------
 
-/// Future returned by the eval hook.
-pub type EvalHookFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'static>>;
+/// A language diagnostic is distinct from an operational evaluator failure.
+/// The host interaction consumer owns presentation and whether to ask again.
+#[derive(Debug)]
+pub enum EvalHookOutcome {
+    Value(crate::execution::RootedValue),
+    InvalidExpression(RuntimeError),
+}
+
+impl EvalHookOutcome {
+    pub fn from_evaluation(
+        result: Result<crate::execution::RootedValue, RuntimeError>,
+    ) -> Result<Self, RuntimeError> {
+        match result {
+            Ok(value) => Ok(Self::Value(value)),
+            Err(error)
+                if error.failure_origin()
+                    == crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation =>
+            {
+                Ok(Self::InvalidExpression(error))
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// Future returned by the eval hook. Errors propagate without prompting again.
+pub type EvalHookFuture =
+    Pin<Box<dyn Future<Output = Result<EvalHookOutcome, RuntimeError>> + 'static>>;
 
 /// Function signature for the eval hook.
 pub type EvalHookFn = dyn Fn(String) -> EvalHookFuture + Send + Sync;
+
+#[cfg(test)]
+#[path = "interaction/eval_outcome_tests.rs"]
+mod eval_outcome_tests;
 
 static EVAL_HOOK: OnceCell<RwLock<Option<Arc<EvalHookFn>>>> = OnceCell::new();
 

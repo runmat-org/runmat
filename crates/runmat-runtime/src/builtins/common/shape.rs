@@ -3,6 +3,12 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::RuntimeError;
 
+mod object;
+pub(crate) use object::array_payload_storage_matches;
+#[cfg(test)]
+#[path = "shape/object_tests.rs"]
+mod object_tests;
+
 /// Return true if a shape should be treated as a scalar.
 pub fn is_scalar_shape(shape: &[usize]) -> bool {
     shape.is_empty()
@@ -44,20 +50,39 @@ pub fn effective_rank(shape: &[usize]) -> usize {
         .map_or(2, |index| (index + 1).max(2))
 }
 
+/// Compare array dimensions, ignoring stored singleton axes beyond the
+/// two-dimensional language minimum. Internal rank-zero/rank-one carriers
+/// retain their exact shape rather than becoming public matrix arrays.
+pub fn array_shapes_equal(left: &[usize], right: &[usize]) -> bool {
+    if left.len() < 2 || right.len() < 2 {
+        return left == right;
+    }
+    let left_rank = effective_rank(left);
+    let right_rank = effective_rank(right);
+    left_rank == right_rank && left[..left_rank] == right[..right_rank]
+}
+
 /// Return the MATLAB-visible dimension vector for a runtime value.
 #[async_recursion::async_recursion(?Send)]
 pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     let dims = match value {
-        Value::Tensor(t) => normalize_shape(&t.shape),
+        Value::Tensor(t) => normalize_shape(t.shape()),
         Value::SparseTensor(t) => normalize_shape(&[t.rows, t.cols]),
-        Value::ComplexTensor(t) => normalize_shape(&t.shape),
+        Value::ComplexTensor(t) => normalize_shape(t.shape()),
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
         Value::SymbolicArray(sa) => normalize_shape(&sa.shape),
         Value::CharArray(ca) => ca.shape.clone(),
         Value::Cell(ca) => normalize_shape(&ca.shape),
+        Value::StructArray(array) => normalize_shape(array.shape()),
         Value::ObjectArray(array) => normalize_shape(array.shape()),
-        Value::GpuTensor(handle) => normalize_shape(&handle.shape),
+        Value::GpuTensor(handle) => normalize_shape(handle.shape()),
+        Value::Object(object) => {
+            match runmat_builtins::standard_class_array_shape(&object.class_name) {
+                Some(declaration) => object::dimensions(object, declaration).await?,
+                None => canonical_scalar_shape(),
+            }
+        }
         _ => vec![1, 1],
     };
     Ok(dims)
@@ -75,12 +100,21 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
         Value::SymbolicArray(sa) => sa.data.len(),
         Value::CharArray(ca) => ca.data.len(),
         Value::Cell(ca) => ca.data.len(),
+        Value::StructArray(array) => array.len(),
         Value::ObjectArray(array) => array.len(),
         Value::GpuTensor(handle) => handle
-            .shape
+            .shape()
             .iter()
             .copied()
             .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
+        Value::Object(_) => value_dimensions(value)
+            .await?
+            .into_iter()
+            .try_fold(1usize, |count, dimension| count.checked_mul(dimension))
+            .ok_or_else(|| {
+                crate::build_runtime_error("array element count exceeds the structural range")
+                    .build()
+            })?,
         _ => 1,
     };
     Ok(numel)
@@ -126,31 +160,62 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dimensions_normalize_low_rank_real_and_complex_arrays() {
+        for value in [
+            Value::Tensor(Tensor::new(vec![1.0], Vec::new()).expect("rank-zero real")),
+            Value::ComplexTensor(
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0)], Vec::new())
+                    .expect("rank-zero complex"),
+            ),
+        ] {
+            assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 1]);
+        }
+        for value in [
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one real")),
+            Value::ComplexTensor(
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2])
+                    .expect("rank-one complex"),
+            ),
+        ] {
+            assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 2]);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_gpu_uses_shape_product() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![4, 5, 6],
-            device_id: 0,
-            buffer_id: 1,
-            descriptor: Default::default(),
-        };
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(
+                vec![4, 5, 6],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
         assert_eq!(
-            block_on(value_numel(&Value::GpuTensor(handle))).unwrap(),
+            block_on(value_numel(&Value::GpuTensor(allocation.handle))).unwrap(),
             120
         );
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
     fn empty_gpu_shape_is_scalar_metadata_without_provider_access() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: Vec::new(),
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        let value = Value::GpuTensor(handle);
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(
+                vec![],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let value = Value::GpuTensor(allocation.handle);
         assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 1]);
         assert_eq!(block_on(value_numel(&value)).unwrap(), 1);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(value);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -181,7 +246,7 @@ pub(crate) mod tests {
     #[test]
     fn dims_to_row_tensor_converts() {
         let tensor = dims_to_row_tensor(&[2, 4, 6]).unwrap();
-        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.shape(), &[1, 3]);
         assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
     }
 
@@ -191,5 +256,11 @@ pub(crate) mod tests {
         assert_eq!(effective_rank(&[2, 3, 1, 1]), 2);
         assert_eq!(effective_rank(&[1, 1, 4, 1]), 3);
         assert_eq!(effective_rank(&[1, 1, 1]), 2);
+        assert!(array_shapes_equal(&[2, 1, 1], &[2, 1]));
+        assert!(array_shapes_equal(&[0, 3, 1], &[0, 3]));
+        assert!(!array_shapes_equal(&[2, 1, 2], &[2, 1]));
+        assert!(!array_shapes_equal(&[1, 2], &[2, 1]));
+        assert!(!array_shapes_equal(&[], &[1, 1]));
+        assert!(!array_shapes_equal(&[1], &[1, 1]));
     }
 }

@@ -52,6 +52,22 @@ describe("in-memory filesystem provider", () => {
     provider.removeDir?.("/tmp");
     expect(() => provider.metadata("/tmp/file.txt")).toThrow();
   });
+
+  it("seeds nested initial files without changing ordinary write parent checks", () => {
+    const provider = createInMemoryFsProvider({
+      initialFiles: {
+        "/occupied/keep": "keep",
+        "/source/child": "value"
+      }
+    });
+    expect(toText(provider.readFile("/occupied/keep"))).toBe("keep");
+    expect(toText(provider.readFile("/source/child"))).toBe("value");
+    expect(provider.readDir("/").map((entry) => entry.fileName)).toEqual(["occupied", "source"]);
+    expect(() => provider.writeFile("/missing/child", encoder.encode("no parent"))).toThrow();
+    expect(() => createInMemoryFsProvider({
+      initialFiles: { "/file": "file", "/file/child": "invalid" }
+    })).toThrow();
+  });
 });
 
 describe("indexeddb filesystem provider", () => {

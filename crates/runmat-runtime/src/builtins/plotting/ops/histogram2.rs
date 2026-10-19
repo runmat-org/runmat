@@ -386,7 +386,7 @@ pub async fn histogram2_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let x = args.next().expect("x");
     let y = args.next().expect("y");
     let retained_data = histogram2_data_value(&x, &y).await?;
-    let normalization_denominator = retained_data.rows as f64;
+    let normalization_denominator = retained_data.rows() as f64;
     let rest: Vec<Value> = args.collect();
     let options = parse_options(rest)?;
     crate::builtins::stats::hist::histcounts2::ensure_histcounts2_public_syntax(
@@ -560,7 +560,7 @@ pub(crate) fn build_surface_from_values(
     display_name: Option<&str>,
     color_limits: Option<(f64, f64)>,
 ) -> BuiltinResult<SurfacePlot> {
-    if values.shape.len() < 2 || x_edges.len() < 2 || y_edges.len() < 2 {
+    if values.shape().len() < 2 || x_edges.len() < 2 || y_edges.len() < 2 {
         return Err(internal("histogram2: invalid 2-D histogram grid"));
     }
     let x_bins = x_edges.len() - 1;
@@ -610,12 +610,8 @@ fn render_histogram2(
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
-    let render_result = render_active_plot(
-        NAME,
-        PlotRenderOptions {
-            ..Default::default()
-        },
-        move |figure, axes| {
+    let render_result =
+        render_active_plot(NAME, PlotRenderOptions::default(), move |figure, axes| {
             let plot_index = figure.add_surface_plot_on_axes(
                 surface.take().expect("histogram2 plot consumed once"),
                 axes,
@@ -623,8 +619,7 @@ fn render_histogram2(
             figure.set_axes_colorbar_enabled(axes, true);
             *plot_index_slot.borrow_mut() = Some((axes, plot_index));
             Ok(())
-        },
-    );
+        });
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
@@ -645,8 +640,7 @@ fn render_histogram2(
         data,
     );
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(internal(err.message));
@@ -736,7 +730,7 @@ pub(crate) fn apply_normalization_2d(
             )))
         }
     };
-    Tensor::new(values, raw_counts.shape.clone())
+    Tensor::new(values, raw_counts.shape().to_vec())
         .map_err(|err| internal(format!("histogram2: {err}")))
 }
 
@@ -884,7 +878,7 @@ fn bin_centers(edges: &[f64]) -> Vec<f64> {
 }
 
 fn value_as_string(value: &Value) -> Option<String> {
-    tensor::value_to_string(value)
+    crate::builtins::plotting::style::value_as_string(value)
 }
 
 #[cfg(test)]
@@ -920,6 +914,17 @@ mod tests {
             option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
             1.0
         );
+
+        for bins in [Value::Num(4.0), Value::Int(runmat_value::IntValue::U8(4))] {
+            let parsed = parse_options(vec![
+                bins.clone(),
+                Value::String("ShowEmptyBins".into()),
+                Value::Bool(true),
+            ])
+            .expect("numeric bin count remains positional");
+            assert_eq!(parsed.histcounts_args, vec![bins]);
+            assert!(parsed.show_empty_bins);
+        }
     }
 
     #[test]
@@ -961,6 +966,24 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn histogram2_retained_low_rank_data_has_two_columns() {
+        for (shape, x_values, y_values) in [
+            (Vec::new(), vec![0.25], vec![0.75]),
+            (vec![2], vec![0.25, 1.25], vec![0.75, 1.75]),
+        ] {
+            let x = Value::Tensor(Tensor::new(x_values.clone(), shape.clone()).unwrap());
+            let y = Value::Tensor(Tensor::new(y_values.clone(), shape).unwrap());
+            let data = futures::executor::block_on(histogram2_data_value(&x, &y))
+                .expect("retained histogram data");
+
+            assert_eq!(data.shape(), &[x_values.len(), 2]);
+            assert_eq!(data.rows(), x_values.len());
+            assert_eq!(data.materialize_f64(), [x_values, y_values].concat());
+        }
+    }
+
     #[test]
     fn histogram2_counts_edges_and_registers_chart_state() {
         let _guard = lock_plot_registry();
@@ -978,7 +1001,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Values".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(double_values(&values), &[2.0, 0.0, 0.0, 2.0]);
 
         let figure = clone_figure(current_figure_handle()).unwrap();
@@ -1002,7 +1025,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("Data".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(data.shape, vec![4, 2]);
+        assert_eq!(data.shape(), &[4, 2]);
         assert_eq!(
             double_values(&data),
             &[0.0, 0.2, 0.8, 1.0, 0.0, 0.1, 0.9, 1.0]

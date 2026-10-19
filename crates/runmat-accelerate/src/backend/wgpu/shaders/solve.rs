@@ -4,6 +4,7 @@ pub fn triangular_linsolve_shader(
     precision: NumericPrecision,
     transpose: bool,
     lower: bool,
+    workgroup: u32,
 ) -> String {
     let scalar_ty = match precision {
         NumericPrecision::F64 => "f64",
@@ -64,7 +65,7 @@ fn a_at(row: u32, col: u32, rows: u32) -> {scalar_ty} {{
     {a_at}
 }}
 
-@compute @workgroup_size(512)
+@compute @workgroup_size({workgroup})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     let local = gid.x;
     if (local >= params.len) {{

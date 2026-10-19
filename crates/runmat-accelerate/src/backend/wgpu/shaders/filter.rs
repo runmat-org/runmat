@@ -38,91 +38,9 @@ struct Params {
 @group(0) @binding(6) var<storage, read_write> FinalState: Tensor;
 @group(0) @binding(7) var<uniform> params: Params;
 
-fn compute_before_coords(channel: u32, before: ptr<function, array<u32, MAX_RANK>>) -> u32 {
-    if params.dim_idx == 0u {
-        return 0u;
-    }
-    var idx: u32 = channel % params.leading;
-    var axis: u32 = 0u;
-    loop {
-        if axis >= params.dim_idx {
-            break;
-        }
-        let size = params.signal_shape[axis].value;
-        if size == 0u {
-            (*before)[axis] = 0u;
-        } else {
-            (*before)[axis] = idx % size;
-            idx = idx / size;
-        }
-        axis = axis + 1u;
-    }
-    return channel % params.leading;
+fn state_linear_index(state_index: u32, channel: u32) -> u32 {
+    return channel * params.state_len + state_index;
 }
-
-fn compute_after_coords(
-    channel: u32,
-    after: ptr<function, array<u32, MAX_RANK>>,
-) -> u32 {
-    if params.rank <= params.dim_idx + 1u {
-        return 0u;
-    }
-    let leading = max(params.leading, 1u);
-    var idx: u32 = channel / leading;
-    var axis: u32 = params.dim_idx + 1u;
-    var offset: u32 = 0u;
-    loop {
-        if axis >= params.rank {
-            break;
-        }
-        let size = params.signal_shape[axis].value;
-        if size == 0u {
-            (*after)[offset] = 0u;
-        } else {
-            (*after)[offset] = idx % size;
-            idx = idx / size;
-        }
-        offset = offset + 1u;
-        axis = axis + 1u;
-    }
-    return offset;
-}
-
-fn state_linear_index(
-    state_index: u32,
-    before: ptr<function, array<u32, MAX_RANK>>,
-    after: ptr<function, array<u32, MAX_RANK>>,
-    after_len: u32,
-) -> u32 {
-    var offset: u32 = 0u;
-    var stride: u32 = 1u;
-    var axis: u32 = 0u;
-    var after_axis: u32 = 0u;
-    loop {
-        if axis >= params.state_rank {
-            break;
-        }
-        let shape = params.state_shape[axis].value;
-        var coord: u32 = 0u;
-        if axis < params.dim_idx {
-            coord = (*before)[axis];
-        } else if axis == params.dim_idx {
-            coord = state_index;
-        } else {
-            if after_axis < after_len {
-                coord = (*after)[after_axis];
-            } else {
-                coord = 0u;
-            }
-            after_axis = after_axis + 1u;
-        }
-        offset = offset + coord * stride;
-        stride = stride * max(shape, 1u);
-        axis = axis + 1u;
-    }
-    return offset;
-}
-
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let channel = gid.x;
@@ -183,11 +101,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    var before_coords: array<u32, MAX_RANK>;
-    var after_coords: array<u32, MAX_RANK>;
-    _ = compute_before_coords(channel, &before_coords);
-    let after_len = compute_after_coords(channel, &after_coords);
-
     let state_base = channel * state_len * params.lane_factor;
 
     if params.zi_present != 0u && zi_len > 0u {
@@ -196,7 +109,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if s >= state_len {
                 break;
             }
-            let offset = state_linear_index(s, &before_coords, &after_coords, after_len);
+            let offset = state_linear_index(s, channel);
             let raw_offset = offset * params.lane_factor;
             let raw_state = state_base + s * params.lane_factor;
             var lane: u32 = 0u;
@@ -291,7 +204,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if s >= state_len {
                 break;
             }
-            let offset = state_linear_index(s, &before_coords, &after_coords, after_len);
+            let offset = state_linear_index(s, channel);
             let raw_offset = offset * params.lane_factor;
             let raw_state = state_base + s * params.lane_factor;
             var lane: u32 = 0u;
@@ -350,91 +263,9 @@ struct Params {
 @group(0) @binding(6) var<storage, read_write> FinalState: Tensor;
 @group(0) @binding(7) var<uniform> params: Params;
 
-fn compute_before_coords(channel: u32, before: ptr<function, array<u32, MAX_RANK>>) -> u32 {
-    if params.dim_idx == 0u {
-        return 0u;
-    }
-    var idx: u32 = channel % params.leading;
-    var axis: u32 = 0u;
-    loop {
-        if axis >= params.dim_idx {
-            break;
-        }
-        let size = params.signal_shape[axis].value;
-        if size == 0u {
-            (*before)[axis] = 0u;
-        } else {
-            (*before)[axis] = idx % size;
-            idx = idx / size;
-        }
-        axis = axis + 1u;
-    }
-    return channel % params.leading;
+fn state_linear_index(state_index: u32, channel: u32) -> u32 {
+    return channel * params.state_len + state_index;
 }
-
-fn compute_after_coords(
-    channel: u32,
-    after: ptr<function, array<u32, MAX_RANK>>,
-) -> u32 {
-    if params.rank <= params.dim_idx + 1u {
-        return 0u;
-    }
-    let leading = max(params.leading, 1u);
-    var idx: u32 = channel / leading;
-    var axis: u32 = params.dim_idx + 1u;
-    var offset: u32 = 0u;
-    loop {
-        if axis >= params.rank {
-            break;
-        }
-        let size = params.signal_shape[axis].value;
-        if size == 0u {
-            (*after)[offset] = 0u;
-        } else {
-            (*after)[offset] = idx % size;
-            idx = idx / size;
-        }
-        offset = offset + 1u;
-        axis = axis + 1u;
-    }
-    return offset;
-}
-
-fn state_linear_index(
-    state_index: u32,
-    before: ptr<function, array<u32, MAX_RANK>>,
-    after: ptr<function, array<u32, MAX_RANK>>,
-    after_len: u32,
-) -> u32 {
-    var offset: u32 = 0u;
-    var stride: u32 = 1u;
-    var axis: u32 = 0u;
-    var after_axis: u32 = 0u;
-    loop {
-        if axis >= params.state_rank {
-            break;
-        }
-        let shape = params.state_shape[axis].value;
-        var coord: u32 = 0u;
-        if axis < params.dim_idx {
-            coord = (*before)[axis];
-        } else if axis == params.dim_idx {
-            coord = state_index;
-        } else {
-            if after_axis < after_len {
-                coord = (*after)[after_axis];
-            } else {
-                coord = 0u;
-            }
-            after_axis = after_axis + 1u;
-        }
-        offset = offset + coord * stride;
-        stride = stride * max(shape, 1u);
-        axis = axis + 1u;
-    }
-    return offset;
-}
-
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let channel = gid.x;
@@ -495,11 +326,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    var before_coords: array<u32, MAX_RANK>;
-    var after_coords: array<u32, MAX_RANK>;
-    _ = compute_before_coords(channel, &before_coords);
-    let after_len = compute_after_coords(channel, &after_coords);
-
     let state_base = channel * state_len * params.lane_factor;
 
     if params.zi_present != 0u && zi_len > 0u {
@@ -508,7 +334,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if s >= state_len {
                 break;
             }
-            let offset = state_linear_index(s, &before_coords, &after_coords, after_len);
+            let offset = state_linear_index(s, channel);
             let raw_offset = offset * params.lane_factor;
             let raw_state = state_base + s * params.lane_factor;
             var lane: u32 = 0u;
@@ -603,7 +429,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if s >= state_len {
                 break;
             }
-            let offset = state_linear_index(s, &before_coords, &after_coords, after_len);
+            let offset = state_linear_index(s, channel);
             let raw_offset = offset * params.lane_factor;
             let raw_state = state_base + s * params.lane_factor;
             var lane: u32 = 0u;

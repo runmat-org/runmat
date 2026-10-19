@@ -16,7 +16,11 @@ use runmat_value::{
     NumericStorage, Value,
 };
 
-use super::{float_order::SetFloat, integer_order, type_resolvers::bool_output_type};
+use super::{
+    float_order::{ComplexSequence, SetFloat},
+    integer_order,
+    type_resolvers::bool_output_type,
+};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
@@ -504,7 +508,7 @@ fn parse_columns(value: &Value, num_cols: usize) -> crate::BuiltinResult<Option<
             .ok_or_else(|| invalid_argument("issortedrows: column index is out of range"))?],
         Value::Num(value) => vec![floating_column(*value)?],
         Value::Tensor(tensor) => {
-            if !is_vector(&tensor.shape) {
+            if !is_vector(tensor.shape()) {
                 return Err(invalid_argument(
                     "issortedrows: column specification must be a vector",
                 ));
@@ -601,7 +605,7 @@ fn check_numeric(storage: &NumericStorage, rows: usize, _cols: usize, args: &Arg
 }
 
 fn check_logical(array: &LogicalArray, rows: usize, cols: usize, args: &Args) -> bool {
-    let storage = NumericStorage::from_integer_storage(IntegerStorage::U8(array.data.clone()));
+    let storage = NumericStorage::from_integer_storage(IntegerStorage::U8(array.data.to_vec()));
     check_numeric(&storage, rows, cols, args)
 }
 
@@ -622,19 +626,19 @@ fn check_complex_integer(
         let left = row + column * rows;
         let right = row + 1 + column * rows;
         let left_real = storage
-            .real
+            .real()
             .value_at(left)
             .expect("validated complex row index");
         let left_imag = storage
-            .imag
+            .imag()
             .value_at(left)
             .expect("validated complex row index");
         let right_real = storage
-            .real
+            .real()
             .value_at(right)
             .expect("validated complex row index");
         let right_imag = storage
-            .imag
+            .imag()
             .value_at(right)
             .expect("validated complex row index");
         integer_order::compare_complex(
@@ -646,23 +650,23 @@ fn check_complex_integer(
     })
 }
 
-fn check_complex_values<T: SetFloat>(
-    values: &[(T, T)],
+fn check_complex_values<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
+    values: &S,
     rows: usize,
     _cols: usize,
     args: &Args,
 ) -> bool {
     if args.strict()
         && args.columns.iter().any(|column| {
-            (0..rows).any(|row| complex_is_missing(values[row + column.index * rows]))
+            (0..rows).any(|row| complex_is_missing(values.pair_at(row + column.index * rows)))
         })
     {
         return false;
     }
     check_adjacent(rows, args, |row, column, direction| {
         compare_complex(
-            values[row + column * rows],
-            values[row + 1 + column * rows],
+            values.pair_at(row + column * rows),
+            values.pair_at(row + 1 + column * rows),
             direction,
             args,
         )
@@ -853,9 +857,9 @@ fn complex_phase<T: SetFloat>((real, imaginary): (T, T)) -> T {
 
 fn value_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
-        Value::LogicalArray(array) => array.shape.clone(),
-        Value::ComplexTensor(tensor) => tensor.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
+        Value::LogicalArray(array) => array.shape.to_vec(),
+        Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
         Value::CharArray(array) => array.shape.clone(),
         _ => vec![1, 1],
     }
@@ -1087,7 +1091,7 @@ mod tests {
             builtin(Value::Tensor(values), vec![Value::from("strictascend")]).unwrap(),
             Value::Bool(false)
         );
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = builtin(Value::Int(IntValue::I8(1)), Vec::new())
             .expect_err("excess output must reject");
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);

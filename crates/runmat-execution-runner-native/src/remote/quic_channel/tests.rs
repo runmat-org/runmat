@@ -207,12 +207,25 @@ async fn foreign_or_late_progress_cannot_allocate_history_or_refresh_a_live_requ
             .unwrap();
         let registry = Mutex::new(registry);
         let progress = Mutex::new(HashMap::new());
+        let collectives = Mutex::new(HashMap::new());
+        let ready = receive::ReadyExpectation {
+            run_identity: "progress-identity".into(),
+            session_id: [23; 16],
+            driver_fence: 1,
+            worker_id: runmat_execution::identity::WorkerId::derive(&[b"progress-worker"]),
+            pool_id: runmat_execution::identity::PoolId::derive(&[b"progress-pool"]),
+            capabilities: Arc::new(Mutex::new(None)),
+        };
         let error = receive::run(
             &OneFrameRoute(std::sync::Mutex::new(Some(frame))),
             &mut receiver,
             FrameLimits::default(),
-            &registry,
-            &progress,
+            &ready,
+            receive::Registries {
+                pending: &registry,
+                progress: &progress,
+                collectives: &collectives,
+            },
         )
         .await
         .unwrap_err();

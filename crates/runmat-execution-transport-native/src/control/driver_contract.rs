@@ -34,7 +34,8 @@ impl DriverAuthority {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DriverArtifactDownload {
     pub artifact_id: String,
     pub kind: String,
@@ -55,6 +56,8 @@ pub struct DriverBootstrap {
     pub checkpoint: Option<DriverArtifactDownload>,
     pub cancellation_requested: bool,
     pub driver_resources: ResourceRequest,
+    /// Exact active driver-allocation devices from authenticated bootstrap.
+    pub driver_accelerator_devices: Vec<runmat_execution::resource::AcceleratorDevice>,
     pub desired_worker_count: u32,
     pub worker_resources: ResourceRequest,
 }
@@ -135,6 +138,20 @@ pub trait DriverControlPlane: Send + Sync {
             "run-scoped execution artifact retrieval is not implemented".into(),
         ))
     }
+    /// Stream a bounded Graph Program chunk into caller-owned private staging.
+    /// The destination is not admitted until the exact ciphertext size/digest
+    /// have been verified. Direct artifacts continue to use `download`.
+    async fn download_to(
+        &self,
+        artifact: &DriverArtifactDownload,
+        writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+        maximum_ciphertext_bytes: u64,
+    ) -> TransportResult<()> {
+        let _ = (artifact, writer, maximum_ciphertext_bytes);
+        Err(TransportError::Unavailable(
+            "streamed Graph Program download is unavailable".into(),
+        ))
+    }
     async fn store_artifact(
         &self,
         authority: &DriverAuthority,
@@ -169,12 +186,14 @@ pub trait DriverControlPlane: Send + Sync {
         allocation_lease_id: &str,
         endpoint_fingerprint: &str,
         run_key_envelope: &[u8],
+        ready_v1: bool,
     ) -> TransportResult<()> {
         let _ = (
             authority,
             allocation_lease_id,
             endpoint_fingerprint,
             run_key_envelope,
+            ready_v1,
         );
         Err(TransportError::Unavailable(
             "remote worker authorization is not implemented".into(),

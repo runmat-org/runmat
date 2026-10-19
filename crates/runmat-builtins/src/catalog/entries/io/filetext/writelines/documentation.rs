@@ -1,0 +1,41 @@
+use crate::*;
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog, title: Some("writelines"), slug: Some("writelines"),
+    summary: "Write text lines to a file.", description: "`writelines(lines, filename)` writes each supplied text value as a line in a host file.",
+    keywords: &["writelines"], related: &["readlines"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["`lines` may be a string scalar, string array, character vector, or cell array of scalar text. String-array and cell elements are written in linear order.",
+"`filename` must be scalar host text. Native integer and resident numeric inputs are rejected rather than converted to text.",
+"RunMat writes a line ending after every input element, including the last. The `LineEnding` option accepts `\"unix\"`, `\"windows\"`, `\"pc\"`, or `\"mac\"`.",
+"The current implementation overwrites the destination file. `WriteMode` and `Encoding` options are not yet implemented.",
+"All textual arguments and controls are admitted before filesystem or network access. Numeric resident values are invalid text and are rejected without accelerator download.",
+"Character text allows trailing singleton dimensions but rejects genuine pages. Filesystem operations use the active provider; unsupported host capabilities report errors.",
+"Calls are effectful runtime boundaries, not fusion kernels. VM and native/JIT/AOT execution use the same canonical binding.",
+"A statement has no public result. Assigning the UTF-8 byte count is a RunMat-only extension rejected in strict MATLAB mode before I/O. Unknown options and invalid LineEnding values reject; crlf, cr, and lf aliases are also accepted.",
+"The existing empty text-container behavior writes one line ending. Empty scalar text likewise writes one empty line."] },
+        BuiltinDocumentationSection { heading: "Placement and compatibility", paragraphs: &["Host text and filesystem operation; no accelerator kernel, upload, implicit gather, broadcast, or fusion. Numeric precision controls do not apply.", "No optional feature is required. Unsupported active-filesystem or HTTP capabilities fail rather than bypassing the configured provider."] },
+    ],
+    examples: &[BuiltinExample {
+        id: "example-1", title: "Write a string array as separate lines",
+        program: "lines = [\"alpha\"; \"beta\"];\nwritelines(lines, \"names.txt\");\nresult = readlines(\"names.txt\");", display_output: Some("`names.txt` contains `alpha` and `beta` on separate lines."),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
+            id: BuiltinExampleFixtureId { local_name: "text-files" },
+            root: BuiltinFilesystemRoot::IsolatedWorkspace,
+            entries: &[BuiltinFilesystemEntry::File { relative_path: "input.txt", content: BuiltinFixtureContent::Utf8("fixture\n") }],
+        }),
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(result, [\"alpha\"; \"beta\"]));" },
+    }],
+    example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq { question: "Does `writelines` gather GPU values?", answer: "No. Its inputs are text and filesystem options, so numeric resident values are rejected before provider access." }],
+    links: &[BuiltinDocumentationLink { label: "readlines", target: BuiltinDocumentationLinkTarget::Builtin("readlines") }],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "Runtime domain", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/lines.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Domain admission and filesystem behavior", location: "builtins::io::filetext::lines::tests" }],
+        notes: &["Typed isolated-filesystem examples verify content and result representation; provider, native, browser, and transport qualification is tracked by the exact-revision integrated gates."],
+    },
+    introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

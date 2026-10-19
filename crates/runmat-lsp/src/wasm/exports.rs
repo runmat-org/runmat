@@ -743,10 +743,7 @@ mod tests {
                 elements: vec![unknown()],
                 elements_complete: true,
             }),
-            ValueKindFact::Struct(runmat_types::StructFact {
-                fields: BTreeMap::new(),
-                fields_complete: true,
-            }),
+            ValueKindFact::Struct(runmat_types::StructFact::scalar(BTreeMap::new(), true)),
             ValueKindFact::Object(runmat_types::ObjectFact {
                 class: None,
                 runtime_class: None,
@@ -760,6 +757,7 @@ mod tests {
             }),
             ValueKindFact::Callable(runmat_types::CallableFact {
                 identity: None,
+                capabilities: Default::default(),
                 parameters: vec![unknown()],
                 parameters_complete: false,
                 outputs: vec![unknown()],
@@ -777,16 +775,16 @@ mod tests {
                 identifier: Some("RunMat:test".to_string()),
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Future {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
                 state: runmat_types::FutureStateFact::Lazy,
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Task {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
                 spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Pool),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Job {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
             }),
             ValueKindFact::Distributed(runmat_types::DistributedFact {
                 id: runmat_types::DistributedValueId {

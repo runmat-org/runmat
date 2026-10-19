@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::ValueId;
-use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef};
+use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueTransportContext};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport, FilesystemObjectStore};
 use runmat_execution_artifact::{LogicalObject, ObjectNamespace};
@@ -352,7 +352,7 @@ fn validate_object(
     authorization_scope: &str,
 ) -> NativeExecutionResult<()> {
     ValuePayload::Object(Box::new(reference.clone()))
-        .validate(ValueLimits::default())
+        .validate_for_transport(ValueLimits::default(), ValueTransportContext::Portable)
         .map_err(protocol)?;
     if reference.authorization_scope != authorization_scope
         || reference.encoded_length == 0

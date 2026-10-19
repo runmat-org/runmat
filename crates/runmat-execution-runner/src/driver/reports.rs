@@ -33,6 +33,72 @@ impl Driver {
         let resources = report.unsuccessful_resources.clone();
         let execution = report.execution.clone();
         let console = report.console.take();
+        let cancelling_graph = attempt.cancellation_requested_at.is_some()
+            && matches!(
+                &attempt.request.task.callable.program,
+                runmat_execution::ProgramCallable::GraphTarget { .. }
+            );
+        if matches!(&report.report, AttemptReport::GraphRetiredCancelled) && !cancelling_graph {
+            self.discard_backend_report(
+                report,
+                "Graph retirement certificate lacks an active cancellation",
+                actions,
+            );
+            return Ok(());
+        }
+        if cancelling_graph
+            && !matches!(
+                &report.report,
+                AttemptReport::Started
+                    | AttemptReport::GraphRetiredCancelled
+                    | AttemptReport::RetirementUnverified { .. }
+            )
+        {
+            // A generic Lost, Failed, Success, or Cancelled report does not
+            // certify Graph worker retirement. Fail closed without replay or
+            // masking uncertainty as ordinary cancellation.
+            if let AttemptReport::Succeeded { result } = &report.report {
+                actions.push(DriverAction::GarbageCollectResults {
+                    task_id: report.task_id,
+                    objects: result.result_objects().to_vec(),
+                });
+            }
+            self.finish_attempt(
+                &attempt,
+                AttemptDisposition::Lost,
+                ProviderEvidence {
+                    resources,
+                    execution,
+                    console,
+                },
+                Some("Graph worker retirement was not certified after cancellation".into()),
+            )?;
+            self.emit(DriverEventKind::AttemptLost {
+                task_id: report.task_id,
+                attempt_id: report.attempt_id,
+            });
+            self.transition_task(report.task_id, TaskState::Indeterminate)?;
+            return Ok(());
+        }
+        if let Some(contract) = &attempt.request.task.outputs.owned_work {
+            let invalid_failure = matches!(
+                &report.report,
+                AttemptReport::RuntimeFailed { failure } if failure.validate().is_err()
+            );
+            if invalid_failure || contract.validate_json_wire(&report.report).is_err() {
+                self.fail_attempt(
+                    &attempt,
+                    AttemptFailureKind::Rejected,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    Some("owned builtin report differs from its output contract".into()),
+                )?;
+                return Ok(());
+            }
+        }
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
@@ -49,7 +115,7 @@ impl Driver {
                                 success: true,
                                 ..
                             }
-                        ) || result.resources.as_ref().is_none_or(|resources| {
+                        ) || result.resources().is_some_and(|resources| {
                             resources.resources.usage.wall_millis != execution.wall_millis
                         })
                     })
@@ -69,12 +135,28 @@ impl Driver {
                     )?;
                     return Ok(());
                 }
-                let uncommitted_objects = result.result_objects.clone();
+                if result
+                    .validate_for_portable_transport(&attempt.request.task)
+                    .is_err()
+                {
+                    self.fail_attempt(
+                        &attempt,
+                        AttemptFailureKind::Rejected,
+                        ProviderEvidence {
+                            resources: None,
+                            execution,
+                            console,
+                        },
+                        Some("worker success violates its portable transport contract".into()),
+                    )?;
+                    return Ok(());
+                }
+                let uncommitted_objects = result.result_objects().to_vec();
                 self.finish_attempt(
                     &attempt,
                     AttemptDisposition::Succeeded,
                     ProviderEvidence {
-                        resources: result.resources.clone(),
+                        resources: result.resources().cloned().map(Box::new),
                         execution,
                         console,
                     },
@@ -112,6 +194,18 @@ impl Driver {
                     Some(message),
                 )?;
             }
+            AttemptReport::RuntimeFailed { .. } => {
+                self.fail_attempt(
+                    &attempt,
+                    AttemptFailureKind::Execution,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    None,
+                )?;
+            }
             AttemptReport::Lost { message } => {
                 self.finish_attempt(
                     &attempt,
@@ -128,6 +222,42 @@ impl Driver {
                     attempt_id: report.attempt_id,
                 });
                 self.finish_unsuccessful(report.task_id, RetryCause::Lost)?;
+            }
+            AttemptReport::RetirementUnverified { message } => {
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Lost,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    Some(message),
+                )?;
+                self.emit(DriverEventKind::AttemptLost {
+                    task_id: report.task_id,
+                    attempt_id: report.attempt_id,
+                });
+                if !self.task_is_terminal(report.task_id)? {
+                    self.transition_task(report.task_id, TaskState::Indeterminate)?;
+                }
+            }
+            AttemptReport::GraphRetiredCancelled => {
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Cancelled,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    None,
+                )?;
+                self.emit(DriverEventKind::AttemptCancelled {
+                    task_id: report.task_id,
+                    attempt_id: report.attempt_id,
+                });
+                self.transition_task(report.task_id, TaskState::Cancelled)?;
             }
             AttemptReport::Cancelled => {
                 self.finish_attempt(
@@ -290,9 +420,13 @@ impl Driver {
             .workers
             .get_mut(&attempt.request.worker_id)
             .ok_or(RunnerError::UnknownWorker(attempt.request.worker_id))?;
-        scheduler::release(&mut worker.allocated, &attempt.request.task.resources);
+        scheduler::release(
+            &mut worker.allocated,
+            &attempt.request.task.resources,
+            &attempt.request.resource_assignment,
+        );
         worker.active_attempts = worker.active_attempts.saturating_sub(1);
-        scheduler::release(&mut pool.allocated, &attempt.request.task.resources);
+        scheduler::release_scalar(&mut pool.allocated, &attempt.request.task.resources);
         pool.active_attempts = pool.active_attempts.saturating_sub(1);
         Ok(())
     }
@@ -357,7 +491,7 @@ impl Driver {
         if let AttemptReport::Succeeded { result } = report.report {
             actions.push(DriverAction::GarbageCollectResults {
                 task_id: report.task_id,
-                objects: result.result_objects,
+                objects: result.result_objects().to_vec(),
             });
         }
         self.emit(DriverEventKind::ReportDiscarded {

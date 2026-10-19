@@ -8,18 +8,34 @@ use crate::FilesystemObjectStore;
 
 pub(crate) struct SessionStoreLifetime {
     root: PathBuf,
+    retained_for_recovery: std::sync::atomic::AtomicBool,
 }
 
 impl SessionStoreLifetime {
     /// The driver supplies its freshly created, validated per-session directory.
     pub(crate) fn new(root: PathBuf) -> Arc<Self> {
-        Arc::new(Self { root })
+        Arc::new(Self {
+            root,
+            retained_for_recovery: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// A private scratch whose process tree could not be reaped must remain
+    /// recoverable; never recursively erase it as ordinary session data.
+    pub(crate) fn retain_for_recovery(&self) {
+        self.retained_for_recovery
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 }
 
 impl Drop for SessionStoreLifetime {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
+        if !self
+            .retained_for_recovery
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
     }
 }
 

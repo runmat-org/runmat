@@ -5,12 +5,17 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use runmat_execution::Digest;
 use runmat_hir::FunctionId;
 use runmat_jit::{
-    entry::{EntryKey, EntryRegistry, PublishedEntry},
-    invalidation::{DependencyKey, DependencyTracker},
+    entry::{EntryKey, EntryPublications, EntryRegistry, PublishedEntry},
+    invalidation::{
+        DependencyKey, DependencyTracker, PreparedDependencyObservation, ReadyDependencyObservation,
+    },
     tiering::{CompilationMode, RepresentationProfile, TierDecision, TierSiteId, TieringSession},
 };
 
 use crate::ExecutableUnit;
+mod diagnostics;
+#[cfg(test)]
+mod diagnostic_tests;
 
 /// Core-owned publication boundary for generic-native products in one session.
 /// JIT owns cells and dependency matching; Core supplies authoritative program,
@@ -24,6 +29,58 @@ pub(crate) struct GenericNativeCache {
     failed_compilations: BTreeSet<CompilationKey>,
     #[cfg(test)]
     compilations: usize,
+}
+
+pub(crate) struct PreparedProjectRevision {
+    baseline_namespace: String,
+    observation: PreparedDependencyObservation,
+}
+
+pub(crate) struct ReadyProjectRevision<'a> {
+    observation: ReadyDependencyObservation<'a>,
+    project_scope_revision: &'a mut String,
+    failed_compilations: &'a mut BTreeSet<CompilationKey>,
+    entries: &'a mut EntryRegistry,
+    namespace: String,
+}
+
+impl PreparedProjectRevision {
+    pub(crate) fn admit_commit(
+        self,
+        cache: &mut GenericNativeCache,
+    ) -> Result<ReadyProjectRevision<'_>, runmat_runtime::RuntimeError> {
+        if cache.project_scope_revision != self.baseline_namespace {
+            return Err(super::error::stage(
+                "NativeDependency",
+                "project scope changed after preparation",
+            ));
+        }
+        let namespace = self.observation.revision().to_owned();
+        let observation = self
+            .observation
+            .admit_commit(&mut cache.dependencies)
+            .map_err(|error| super::error::stage("NativeDependency", error))?;
+        Ok(ReadyProjectRevision {
+            observation,
+            project_scope_revision: &mut cache.project_scope_revision,
+            failed_compilations: &mut cache.failed_compilations,
+            entries: &mut cache.entries,
+            namespace,
+        })
+    }
+}
+
+impl ReadyProjectRevision<'_> {
+    pub(crate) fn commit(self) {
+        if self.namespace == *self.project_scope_revision {
+            self.observation.commit();
+            return;
+        }
+        let (_, current) = self.observation.commit_with_snapshot();
+        *self.project_scope_revision = self.namespace;
+        self.failed_compilations.clear();
+        self.entries.invalidate(&current);
+    }
 }
 
 struct PendingCompilation {
@@ -77,6 +134,52 @@ impl Default for GenericNativeCache {
 }
 
 impl GenericNativeCache {
+    pub(crate) fn has_retained_entries(&self) -> bool {
+        self.entries.retained_cell_count() != 0
+    }
+
+    /// Snapshot products that existed before this invocation's tiering decision
+    /// can compile synchronously. Only those products have zero ready compile
+    /// charge and are eligible for a ready-route placement comparison.
+    pub(crate) fn ready_publications(
+        &self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        profile: Option<&RepresentationProfile>,
+    ) -> Result<EntryPublications, runmat_runtime::RuntimeError> {
+        let key = entry_key(unit, preferred_function)?;
+        Ok(self
+            .entries
+            .publications(&key, profile.map(|profile| profile.digest)))
+    }
+
+    /// Recheck the product selected by whole-work placement immediately before
+    /// arguments enter either executor. A placement receipt never pins code or
+    /// its source dependencies by itself.
+    pub(crate) fn ready_entry_is_current(
+        &mut self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        selected: &PublishedEntry,
+    ) -> Result<bool, runmat_runtime::RuntimeError> {
+        self.observe_unit_dependencies(unit, preferred_function)?;
+        let current = self.dependencies.snapshot_all();
+        let key = entry_key(unit, preferred_function)?;
+        let ready = match selected.tier {
+            runmat_jit::entry::PublishedTier::Generic => self.entries.resolve(&key, &current),
+            runmat_jit::entry::PublishedTier::Specialized { profile } => {
+                self.entries.resolve_specialized(&key, profile, &current)
+            }
+        };
+        Ok(ready.is_some_and(|ready| {
+            ready.publication == selected.publication
+                && ready.tier == selected.tier
+                && ready.entrypoint == selected.entrypoint
+                && ready.dependencies == selected.dependencies
+                && Rc::ptr_eq(&ready.executor, &selected.executor)
+        }))
+    }
+
     #[cfg(test)]
     pub(crate) fn with_tiering_config(config: runmat_jit::tiering::TieringConfig) -> Self {
         Self {
@@ -90,9 +193,9 @@ impl GenericNativeCache {
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
     ) -> Result<PublishedEntry, runmat_runtime::RuntimeError> {
-        let dependency_keys = self.observe_unit_dependencies(unit)?;
+        let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
-        let key = entry_key(unit, preferred_function);
+        let key = entry_key(unit, preferred_function)?;
         if let Some(entry) = self.entries.resolve(&key, &current) {
             return Ok(entry);
         }
@@ -104,7 +207,13 @@ impl GenericNativeCache {
         }
         let snapshot = self.dependencies.snapshot(dependency_keys.iter());
         self.entries
-            .publish(key, compiled.executor, compiled.entrypoint, snapshot)
+            .publish(
+                key,
+                compiled.executor,
+                compiled.entrypoint,
+                snapshot,
+                compiled.compilation,
+            )
             .map_err(|error| super::error::stage("NativePublication", error))
     }
 
@@ -112,8 +221,15 @@ impl GenericNativeCache {
         &self,
         arguments: &[runmat_value::Value],
     ) -> Option<RepresentationProfile> {
+        self.representation_profile_from_values(arguments.iter())
+    }
+
+    pub(crate) fn representation_profile_from_values<'a>(
+        &self,
+        arguments: impl IntoIterator<Item = &'a runmat_value::Value>,
+    ) -> Option<RepresentationProfile> {
         let facts = arguments
-            .iter()
+            .into_iter()
             .map(runmat_runtime::value_fact::value_fact)
             .collect();
         RepresentationProfile::from_facts(facts, self.tiering.config().max_profile_bytes).ok()
@@ -123,20 +239,32 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        invocation_profile: &RepresentationProfile,
+        invocation_profile: Option<&RepresentationProfile>,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
-        let dependency_keys = self.observe_unit_dependencies(unit)?;
+        let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
-        let key = entry_key(unit, preferred_function);
+        let key = entry_key(unit, preferred_function)?;
         self.publish_completed(&current)?;
-        let site = tier_site(unit, preferred_function, &key)?;
+        let site = tier_site(unit, preferred_function)?;
         let availability = self
             .entries
             .availability(&key, &current, self.pending.len());
-        match self.tiering.decide(&site, &availability) {
-            TierDecision::Interpret => Ok(None),
-            TierDecision::ExecuteGeneric => Ok(self.entries.resolve(&key, &current)),
-            TierDecision::ExecuteSpecialized { profile }
+        let decision = if invocation_profile.is_some() {
+            self.tiering.decide(&site, &availability)
+        } else {
+            self.tiering.decide_generic(&site, &availability)
+        };
+        diagnostics::decision(
+            &site,
+            &decision,
+            &availability,
+            invocation_profile.is_some(),
+            &self.tiering,
+        );
+        match (decision, invocation_profile) {
+            (TierDecision::Interpret, _) => Ok(None),
+            (TierDecision::ExecuteGeneric, _) => Ok(self.entries.resolve(&key, &current)),
+            (TierDecision::ExecuteSpecialized { profile }, Some(invocation_profile))
                 if profile == invocation_profile.digest =>
             {
                 Ok(self
@@ -144,13 +272,16 @@ impl GenericNativeCache {
                     .resolve_specialized(&key, profile, &current)
                     .or_else(|| self.entries.resolve(&key, &current)))
             }
-            TierDecision::ExecuteSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
-            TierDecision::CompileGeneric { mode } => {
+            (TierDecision::ExecuteSpecialized { .. }, _) => {
+                Ok(self.entries.resolve(&key, &current))
+            }
+            (TierDecision::CompileGeneric { mode }, _) => {
                 let compilation = CompilationKey {
                     entry: key.clone(),
                     tier: CompilationTier::Generic,
                 };
                 if self.failed_compilations.contains(&compilation) {
+                    diagnostics::rejected(&compilation, "previous_compilation_failure", None);
                     return Ok(None);
                 }
                 match mode {
@@ -166,6 +297,11 @@ impl GenericNativeCache {
                         if !self
                             .code_budget_admits(compiled.executor.retained_code_bytes(), &current)
                         {
+                            diagnostics::rejected(
+                                &compilation,
+                                "code_budget",
+                                Some(compiled.executor.retained_code_bytes()),
+                            );
                             self.failed_compilations.insert(compilation);
                             return Ok(None);
                         }
@@ -175,7 +311,13 @@ impl GenericNativeCache {
                         }
                         let snapshot = self.dependencies.snapshot(dependency_keys.iter());
                         self.entries
-                            .publish(key, compiled.executor, compiled.entrypoint, snapshot)
+                            .publish(
+                                key,
+                                compiled.executor,
+                                compiled.entrypoint,
+                                snapshot,
+                                compiled.compilation,
+                            )
                             .map(Some)
                             .map_err(|error| super::error::stage("NativePublication", error))
                     }
@@ -194,7 +336,7 @@ impl GenericNativeCache {
                     }
                 }
             }
-            TierDecision::CompileSpecialized { profile, mode }
+            (TierDecision::CompileSpecialized { profile, mode }, Some(invocation_profile))
                 if profile == invocation_profile.digest =>
             {
                 let compilation = CompilationKey {
@@ -234,7 +376,9 @@ impl GenericNativeCache {
                     }
                 }
             }
-            TierDecision::CompileSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
+            (TierDecision::CompileSpecialized { .. }, _) => {
+                Ok(self.entries.resolve(&key, &current))
+            }
         }
     }
 
@@ -242,14 +386,15 @@ impl GenericNativeCache {
         &self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        profile: &RepresentationProfile,
+        profile: Option<&RepresentationProfile>,
         elapsed_ns: u64,
     ) -> Result<(), runmat_runtime::RuntimeError> {
-        let key = entry_key(unit, preferred_function);
-        let site = tier_site(unit, preferred_function, &key)?;
-        self.tiering
-            .observe_invocation(site, profile, elapsed_ns)
-            .map_err(|error| super::error::stage("NativeTierFeedback", error))
+        let site = tier_site(unit, preferred_function)?;
+        match profile {
+            Some(profile) => self.tiering.observe_invocation(site, profile, elapsed_ns),
+            None => self.tiering.observe_unprofiled_invocation(site, elapsed_ns),
+        }
+        .map_err(|error| super::error::stage("NativeTierFeedback", error))
     }
 
     pub(crate) fn observe_loop_backedges(
@@ -261,15 +406,14 @@ impl GenericNativeCache {
         if backedges.is_empty() {
             return Ok(());
         }
-        let key = entry_key(unit, preferred_function);
-        let function_site = tier_site(unit, preferred_function, &key)?;
+        let function_site = tier_site(unit, preferred_function)?;
         for (header, count) in backedges {
             self.tiering
                 .observe_backedge(function_site.clone(), *count)
                 .and_then(|_| {
                     self.tiering.observe_backedge(
                         TierSiteId {
-                            entry: key.0.clone(),
+                            entry: function_site.entry.clone(),
                             function: header.function,
                             loop_header: Some(*header),
                         },
@@ -285,14 +429,17 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        profile: &RepresentationProfile,
+        profile: Option<&RepresentationProfile>,
     ) -> Result<Option<(PublishedEntry, runmat_types::ProgramPointId)>, runmat_runtime::RuntimeError>
     {
-        let dependency_keys = self.observe_unit_dependencies(unit)?;
+        let Some(profile) = profile else {
+            return Ok(None);
+        };
+        let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
         self.publish_completed(&current)?;
-        let key = entry_key(unit, preferred_function);
-        let function_site = tier_site(unit, preferred_function, &key)?;
+        let key = entry_key(unit, preferred_function)?;
+        let function_site = tier_site(unit, preferred_function)?;
         let Some(loop_site) = self.tiering.hottest_osr_site(&function_site) else {
             return Ok(None);
         };
@@ -362,6 +509,7 @@ impl GenericNativeCache {
             return Ok(());
         }
         let prepared = super::compile::prepare(unit, preferred_function, specialization)?;
+        diagnostics::scheduled(&key, &dependencies);
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("runmat-jit-compile".into())
@@ -416,6 +564,7 @@ impl GenericNativeCache {
                 Rc::new(compiled.executor),
                 compiled.entrypoint,
                 snapshot,
+                compiled.compilation,
             )
             .map(Some)
             .map_err(|error| super::error::stage("NativePublication", error))
@@ -439,11 +588,12 @@ impl GenericNativeCache {
                 .pending
                 .remove(&key)
                 .expect("completed native compilation must remain pending");
-            let Some(Ok(compiled)) = result else {
+            let Some(compiled) = diagnostics::completed(&key, result) else {
                 self.failed_compilations.insert(key);
                 continue;
             };
             if !pending.dependencies.is_satisfied_by(current) {
+                diagnostics::stale(&key, &pending.dependencies, current);
                 continue;
             }
             let admitted = match key.tier {
@@ -462,6 +612,11 @@ impl GenericNativeCache {
                     .is_ok(),
             };
             if !admitted {
+                diagnostics::rejected(
+                    &key,
+                    "code_or_version_budget",
+                    Some(compiled.executor.retained_code_bytes()),
+                );
                 self.failed_compilations.insert(key);
                 continue;
             }
@@ -469,12 +624,14 @@ impl GenericNativeCache {
             {
                 self.compilations += 1;
             }
+            diagnostics::publishing(&key, compiled.executor.retained_code_bytes());
             let published = match key.tier {
                 CompilationTier::Generic => self.entries.publish(
                     key.entry,
                     Rc::new(compiled.executor),
                     compiled.entrypoint,
                     pending.dependencies,
+                    compiled.compilation,
                 ),
                 CompilationTier::Specialized(profile) => self.entries.publish_specialized(
                     key.entry,
@@ -482,6 +639,7 @@ impl GenericNativeCache {
                     Rc::new(compiled.executor),
                     compiled.entrypoint,
                     pending.dependencies,
+                    compiled.compilation,
                 ),
             };
             published.map_err(|error| super::error::stage("NativePublication", error))?;
@@ -522,9 +680,11 @@ impl GenericNativeCache {
                 continue;
             }
             changed = true;
+            diagnostics::dependency_changed(&DependencyKey::SessionFunction(name.clone()));
             self.observe(DependencyKey::SessionFunction(name.clone()), after_revision)?;
         }
         if changed {
+            diagnostics::dependency_changed(&DependencyKey::SessionCatalog);
             self.failed_compilations.clear();
             self.observe(
                 DependencyKey::SessionCatalog,
@@ -536,27 +696,27 @@ impl GenericNativeCache {
         Ok(())
     }
 
-    pub(crate) fn publish_project_revision(
-        &mut self,
+    pub(crate) fn prepare_project_revision(
+        &self,
         revision: Option<&runmat_package::ProjectRevision>,
-    ) -> Result<(), runmat_runtime::RuntimeError> {
-        let revision = revision
+    ) -> Result<PreparedProjectRevision, runmat_runtime::RuntimeError> {
+        let namespace = revision
             .map(runmat_package::ProjectRevision::cache_namespace)
             .unwrap_or_else(|| "loose".to_string());
-        if revision == self.project_scope_revision {
-            return Ok(());
-        }
-        self.project_scope_revision = revision.clone();
-        self.failed_compilations.clear();
-        self.observe(DependencyKey::Program("session-project".into()), revision)?;
-        let current = self.dependencies.snapshot_all();
-        self.entries.invalidate(&current);
-        Ok(())
+        let observation = self
+            .dependencies
+            .prepare_observation(DependencyKey::Program("session-project".into()), namespace)
+            .map_err(|error| super::error::stage("NativeDependency", error))?;
+        Ok(PreparedProjectRevision {
+            baseline_namespace: self.project_scope_revision.clone(),
+            observation,
+        })
     }
 
     fn observe_unit_dependencies(
         &mut self,
         unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
     ) -> Result<BTreeSet<DependencyKey>, runmat_runtime::RuntimeError> {
         let revision = &unit.revision().program_revision;
         let program_key = DependencyKey::Program(revision.graph_digest().to_string());
@@ -573,7 +733,20 @@ impl GenericNativeCache {
         )?;
         let mut keys = BTreeSet::from([program_key, project_scope_key, catalog_key]);
 
-        let referenced = super::dependencies::analyze(unit.mir());
+        let roots = BTreeSet::from([unit.native_entrypoint_function(preferred_function)?]);
+        let selected = runmat_mir::analysis::selected_function_closure(unit.mir(), &roots);
+        let mut referenced = super::dependencies::analyze(unit.mir(), &selected);
+        if !referenced.super_callers.is_empty() {
+            let registry = unit.bytecode().function_registry();
+            for caller in &referenced.super_callers {
+                for target in registry
+                    .retained_super_constructor_targets_for(*caller)
+                    .map_err(|error| super::error::stage("NativeSuperConstructorOwner", error))?
+                {
+                    referenced.functions.insert(target.function);
+                }
+            }
+        }
         for function in referenced.functions {
             let mut names = unit
                 .functions()
@@ -639,29 +812,41 @@ impl GenericNativeCache {
 fn tier_site(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
-    key: &EntryKey,
 ) -> Result<TierSiteId, runmat_runtime::RuntimeError> {
-    let function = preferred_function
-        .and_then(|name| unit.native_function_id(name))
-        .or_else(|| unit.script_entrypoint())
-        .ok_or_else(|| super::error::stage("NativeTierIdentity", "entry function is missing"))?;
+    let function = unit.native_entrypoint_function(preferred_function)?;
     let function = u32::try_from(function.0)
         .map(runmat_types::ProgramFunctionId)
         .map_err(|_| super::error::stage("NativeTierIdentity", "function identity exceeds u32"))?;
     Ok(TierSiteId {
-        entry: key.0.clone(),
+        entry: authored_entry_key(unit, preferred_function).0,
         function,
         loop_header: None,
     })
 }
 
-fn entry_key(unit: &ExecutableUnit, preferred_function: Option<&str>) -> EntryKey {
+fn authored_entry_key(unit: &ExecutableUnit, preferred_function: Option<&str>) -> EntryKey {
     EntryKey(format!(
         "{}|{}|{}",
         unit.revision().program_revision.canonical_identity(),
         unit.revision().source_digest,
         preferred_function.unwrap_or("<entrypoint>")
     ))
+}
+
+fn entry_key(
+    unit: &ExecutableUnit,
+    preferred_function: Option<&str>,
+) -> Result<EntryKey, runmat_runtime::RuntimeError> {
+    let digest = unit
+        .native_compilation_digest()
+        .map_err(|error| super::error::stage("NativeCompilationIdentity", error))?;
+    // Hotness belongs to authored code; published machine code additionally
+    // depends on its exact semantic ABI and analysis inputs.
+    Ok(EntryKey(format!(
+        "{}|{}",
+        authored_entry_key(unit, preferred_function).0,
+        digest
+    )))
 }
 
 fn function_revision(
@@ -671,67 +856,8 @@ fn function_revision(
     let Some(function) = function.and_then(|function| registry.get(function)) else {
         return Ok("removed".to_string());
     };
-
-    // Spell out every semantic field so adding a new FunctionBytecode field makes this
-    // destructure fail to compile until its invalidation semantics are chosen. HashMap and
-    // HashSet iteration order is not stable, so canonicalize those fields explicitly.
-    let runmat_vm::FunctionBytecode {
-        function,
-        display_name,
-        private_owner_scope,
-        source_id,
-        instructions,
-        instr_spans,
-        call_arg_spans,
-        coverage_sites,
-        var_count,
-        input_slots,
-        varargin_slot,
-        implicit_nargin_slot,
-        output_slots,
-        varargout_slot,
-        implicit_nargout_slot,
-        capture_slots,
-        var_names,
-        initially_unassigned_slots,
-        argument_validations,
-        resume_points,
-        regions,
-    } = function;
-    let var_names = var_names.iter().collect::<BTreeMap<_, _>>();
-    let initially_unassigned_slots = initially_unassigned_slots.iter().collect::<BTreeSet<_>>();
-    let resume_points = resume_points.iter().collect::<Vec<_>>();
-    let mut payload = Vec::new();
-    macro_rules! append {
-        ($value:expr) => {{
-            let bytes = serde_json::to_vec($value)
-                .map_err(|error| super::error::stage("NativeDependencyRevision", error))?;
-            payload.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-            payload.extend_from_slice(&bytes);
-        }};
-    }
-    append!(function);
-    append!(display_name);
-    append!(private_owner_scope);
-    append!(source_id);
-    append!(instructions);
-    append!(instr_spans);
-    append!(call_arg_spans);
-    append!(coverage_sites);
-    append!(var_count);
-    append!(input_slots);
-    append!(varargin_slot);
-    append!(implicit_nargin_slot);
-    append!(output_slots);
-    append!(varargout_slot);
-    append!(implicit_nargout_slot);
-    append!(capture_slots);
-    append!(&var_names);
-    append!(&initially_unassigned_slots);
-    append!(argument_validations);
-    append!(&resume_points);
-    append!(regions);
-    Ok(runmat_execution::Digest::sha256(&payload).to_string())
+    crate::session::semantic_definition::fingerprint(function)
+        .map_err(|error| super::error::stage("NativeDependencyRevision", error))
 }
 
 fn session_catalog_revision(
@@ -797,6 +923,21 @@ mod revision_tests {
         assert_ne!(
             session_catalog_revision(&first).unwrap(),
             session_catalog_revision(&reordered).unwrap()
+        );
+
+        let before_owner = session_catalog_revision(&first).unwrap();
+        let function = reordered.functions.get_mut(&FunctionId(7)).unwrap();
+        function.instructions[0] = runmat_vm::Instr::LoadConst(1.0);
+        function.class_method_owner = Some(runmat_types::ClassMethodOwner {
+            declaring_class: runmat_types::ClassIdentity::new("RevisionOwner").unwrap(),
+            method: runmat_types::MethodName::from("revisionTarget"),
+            is_static: false,
+            role: runmat_types::ClassMethodRole::Ordinary,
+        });
+        assert_ne!(
+            before_owner,
+            session_catalog_revision(&reordered).unwrap(),
+            "declaration owner identity participates in the executable function revision"
         );
     }
 }

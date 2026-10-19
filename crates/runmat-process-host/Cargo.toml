@@ -10,8 +10,14 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-std", "io-util", "process", "rt", "sync"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "process", "rt", "sync", "time"] }
+rand = "0.8"
+hmac = { workspace = true }
+sha2 = { workspace = true }
+zeroize = { workspace = true }
+tempfile = "3.12"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -27,6 +33,5 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [dev-dependencies]
-serde_json = { workspace = true }
 tempfile = "3.12"
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }

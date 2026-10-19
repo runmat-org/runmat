@@ -1,3 +1,6 @@
+#[path = "construct/expression_regions.rs"]
+mod expression_regions;
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -7,6 +10,20 @@ pub enum NativeLoweringClass {
     StructuredSuspendResume,
     CapabilityRejection,
     ProvenUnreachable,
+}
+
+pub fn effective_native_lowering_class(
+    construct: MirConstructKind,
+    effects: &runmat_types::EffectSet,
+) -> NativeLoweringClass {
+    let base = construct.native_lowering_class();
+    if base == NativeLoweringClass::NativeOperation
+        && effects.0.contains(&runmat_types::EffectKind::MaySuspend)
+    {
+        NativeLoweringClass::RuntimeSlowPath
+    } else {
+        base
+    }
 }
 
 #[derive(
@@ -23,6 +40,7 @@ pub enum MirConstructKind {
     StructLiteral,
     ObjectLiteral,
     Index,
+    SubscriptChain,
     Member,
     DynamicMember,
     WorkspaceFirstStaticProperty,
@@ -32,8 +50,12 @@ pub enum MirConstructKind {
     Future,
     Spawn,
     DistributedCreate,
+    CodistributedCreate,
+    CodistributedBuild,
     DistributedLocalPart,
     DistributedMaterialize,
+    DistributedCodistributor,
+    DistributedGlobalIndices,
     DistributedRedistribute,
     CollectiveBarrier,
     CollectiveBroadcast,
@@ -42,11 +64,18 @@ pub enum MirConstructKind {
     CollectiveAllGather,
     CollectiveReduce,
     CollectiveAllReduce,
+    CollectiveCat,
+    CollectiveFunctionalReduce,
     CollectiveSend,
     CollectiveReceive,
+    CollectiveSendReceive,
+    CollectiveProbe,
     Assign,
     MultiAssign,
+    SequenceAssign,
+    CaptureSequence,
     Expr,
+    StatementOutput,
     PlaceMutation,
     WorkspaceEffect,
     EnvironmentEffect,
@@ -78,6 +107,7 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
         R::StructLiteral { .. } => K::StructLiteral,
         R::ObjectLiteral { .. } => K::ObjectLiteral,
         R::Index { .. } => K::Index,
+        R::SubscriptChain(_) => K::SubscriptChain,
         R::Member { .. } => K::Member,
         R::DynamicMember { .. } => K::DynamicMember,
         R::WorkspaceFirstStaticProperty { .. } => K::WorkspaceFirstStaticProperty,
@@ -88,8 +118,12 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
         R::Spawn(_) => K::Spawn,
         R::Distributed(operation) => match operation {
             D::Create { .. } => K::DistributedCreate,
+            D::Codistributed { .. } => K::CodistributedCreate,
+            D::Build { .. } => K::CodistributedBuild,
             D::LocalPart { .. } => K::DistributedLocalPart,
             D::Materialize { .. } => K::DistributedMaterialize,
+            D::Codistributor { .. } => K::DistributedCodistributor,
+            D::GlobalIndices { .. } => K::DistributedGlobalIndices,
             D::Redistribute { .. } => K::DistributedRedistribute,
         },
         R::Collective(operation) => match operation {
@@ -100,8 +134,12 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
             C::AllGather { .. } => K::CollectiveAllGather,
             C::Reduce { .. } => K::CollectiveReduce,
             C::AllReduce { .. } => K::CollectiveAllReduce,
+            C::Cat { .. } => K::CollectiveCat,
+            C::FunctionalReduce { .. } => K::CollectiveFunctionalReduce,
             C::Send { .. } => K::CollectiveSend,
             C::Receive { .. } => K::CollectiveReceive,
+            C::SendReceive { .. } => K::CollectiveSendReceive,
+            C::Probe { .. } => K::CollectiveProbe,
         },
     }
 }
@@ -113,7 +151,10 @@ pub fn statement_construct_kind(statement: &crate::MirStmtKind) -> MirConstructK
     match statement {
         S::Assign { .. } => K::Assign,
         S::MultiAssign { .. } => K::MultiAssign,
+        S::SequenceAssign { .. } => K::SequenceAssign,
+        S::CaptureSequence { .. } => K::CaptureSequence,
         S::Expr(_) => K::Expr,
+        S::StatementOutput(_) => K::StatementOutput,
         S::PlaceMutation(_) => K::PlaceMutation,
         S::WorkspaceEffect { .. } => K::WorkspaceEffect,
         S::EnvironmentEffect(_) => K::EnvironmentEffect,
@@ -151,6 +192,18 @@ pub fn rvalue_declared_requirements(
     let mut capabilities = CapabilitySet::default();
     match value {
         crate::MirRvalue::Call(call) => {
+            if matches!(
+                call.workspace_effect,
+                Some(
+                    runmat_builtins::BuiltinWorkspaceEffect::DynamicEval
+                        | runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
+                )
+            ) {
+                capabilities.0.insert(CapabilityRequirement::HostRuntime);
+            }
+            if !matches!(call.async_behavior, crate::AsyncBehaviorFact::NeverSuspends) {
+                effects.0.insert(EffectKind::MaySuspend);
+            }
             let declared = call.effects;
             for (enabled, effect) in [
                 (declared.workspace, EffectKind::WorkspaceWrite),
@@ -183,9 +236,10 @@ pub fn rvalue_declared_requirements(
         }
         crate::MirRvalue::ShortCircuit { right_temps, .. } => {
             for statement in right_temps {
-                effects
-                    .0
-                    .extend(statement_declared_effects(&statement.kind).0);
+                let (nested_effects, nested_capabilities) =
+                    statement_declared_requirements(&statement.kind);
+                effects.0.extend(nested_effects.0);
+                capabilities.0.extend(nested_capabilities.0);
                 if let Some(value) = statement_rvalue(&statement.kind) {
                     let (nested_effects, nested_capabilities) = rvalue_declared_requirements(value);
                     effects.0.extend(nested_effects.0);
@@ -195,17 +249,31 @@ pub fn rvalue_declared_requirements(
         }
         _ => {}
     }
+    value.visit_direct_expression_steps_dyn(&mut |steps| {
+        let (nested_effects, nested_capabilities) =
+            expression_regions::declared_requirements(steps);
+        effects.0.extend(nested_effects.0);
+        capabilities.0.extend(nested_capabilities.0);
+    });
     (effects, capabilities)
 }
 
 /// Complete canonical construct inventory for one rvalue, including the
 /// conditional statement region embedded by short-circuit MIR.
 pub fn rvalue_construct_inventory(value: &crate::MirRvalue) -> Vec<MirConstructKind> {
+    let mut constructs = rvalue_construct_inventory_without_regions(value);
+    value.visit_direct_expression_steps_dyn(&mut |steps| {
+        constructs.extend(expression_regions::inventory(steps));
+    });
+    constructs
+}
+
+fn rvalue_construct_inventory_without_regions(value: &crate::MirRvalue) -> Vec<MirConstructKind> {
     let mut constructs = vec![rvalue_construct_kind(value)];
     if let crate::MirRvalue::ShortCircuit { right_temps, .. } = value {
         for statement in right_temps {
             if let Some(value) = statement_rvalue(&statement.kind) {
-                constructs.extend(rvalue_construct_inventory(value));
+                constructs.extend(rvalue_construct_inventory_without_regions(value));
             }
             constructs.push(statement_construct_kind(&statement.kind));
         }
@@ -217,8 +285,11 @@ fn statement_rvalue(statement: &crate::MirStmtKind) -> Option<&crate::MirRvalue>
     match statement {
         crate::MirStmtKind::Assign { value, .. }
         | crate::MirStmtKind::MultiAssign { value, .. }
+        | crate::MirStmtKind::SequenceAssign { value, .. }
         | crate::MirStmtKind::Expr(value) => Some(value),
-        crate::MirStmtKind::PlaceMutation(_)
+        crate::MirStmtKind::StatementOutput(_)
+        | crate::MirStmtKind::PlaceMutation(_)
+        | crate::MirStmtKind::CaptureSequence { .. }
         | crate::MirStmtKind::WorkspaceEffect { .. }
         | crate::MirStmtKind::EnvironmentEffect(_) => None,
     }
@@ -226,10 +297,17 @@ fn statement_rvalue(statement: &crate::MirStmtKind) -> Option<&crate::MirRvalue>
 
 /// Declared effects carried by a canonical MIR statement.
 pub fn statement_declared_effects(statement: &crate::MirStmtKind) -> runmat_types::EffectSet {
-    use runmat_hir::WorkspaceEffect;
-    use runmat_types::{EffectKind, EffectSet};
+    statement_declared_requirements(statement).0
+}
+
+pub fn statement_declared_requirements(
+    statement: &crate::MirStmtKind,
+) -> (runmat_types::EffectSet, runmat_types::CapabilitySet) {
+    use runmat_types::WorkspaceEffect;
+    use runmat_types::{CapabilityRequirement, CapabilitySet, EffectKind, EffectSet};
 
     let mut effects = EffectSet::default();
+    let mut capabilities = CapabilitySet::default();
     match statement {
         crate::MirStmtKind::WorkspaceEffect { effect, .. } => match effect {
             WorkspaceEffect::None => {}
@@ -244,18 +322,46 @@ pub fn statement_declared_effects(statement: &crate::MirStmtKind) -> runmat_type
             | WorkspaceEffect::LoadsExternalBindings
             | WorkspaceEffect::DynamicEval => {
                 effects.0.insert(EffectKind::WorkspaceWrite);
+                if *effect == WorkspaceEffect::DynamicEval {
+                    capabilities.0.insert(CapabilityRequirement::HostRuntime);
+                }
             }
         },
         crate::MirStmtKind::EnvironmentEffect(_) => {
             effects.0.insert(EffectKind::EnvironmentWrite);
         }
+        crate::MirStmtKind::CaptureSequence { .. } => {
+            effects.0.insert(EffectKind::Unknown);
+        }
+        crate::MirStmtKind::StatementOutput(_) => {
+            effects.0.extend([
+                EffectKind::UserInterface,
+                EffectKind::MaySuspend,
+                EffectKind::MayThrow,
+            ]);
+            capabilities.0.insert(CapabilityRequirement::UserInterface);
+        }
         _ => {}
     }
-    effects
+    statement.visit_statement_expression_steps_dyn(&mut |steps| {
+        let (nested_effects, nested_capabilities) =
+            expression_regions::declared_requirements(steps);
+        effects.0.extend(nested_effects.0);
+        capabilities.0.extend(nested_capabilities.0);
+    });
+    (effects, capabilities)
+}
+
+pub fn statement_construct_inventory(statement: &crate::MirStmtKind) -> Vec<MirConstructKind> {
+    let mut constructs = vec![statement_construct_kind(statement)];
+    statement.visit_statement_expression_steps_dyn(&mut |steps| {
+        constructs.extend(expression_regions::inventory(steps));
+    });
+    constructs
 }
 
 impl MirConstructKind {
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 59] = [
         Self::Use,
         Self::Unary,
         Self::Binary,
@@ -266,6 +372,7 @@ impl MirConstructKind {
         Self::StructLiteral,
         Self::ObjectLiteral,
         Self::Index,
+        Self::SubscriptChain,
         Self::Member,
         Self::DynamicMember,
         Self::WorkspaceFirstStaticProperty,
@@ -275,8 +382,12 @@ impl MirConstructKind {
         Self::Future,
         Self::Spawn,
         Self::DistributedCreate,
+        Self::CodistributedCreate,
+        Self::CodistributedBuild,
         Self::DistributedLocalPart,
         Self::DistributedMaterialize,
+        Self::DistributedCodistributor,
+        Self::DistributedGlobalIndices,
         Self::DistributedRedistribute,
         Self::CollectiveBarrier,
         Self::CollectiveBroadcast,
@@ -285,11 +396,18 @@ impl MirConstructKind {
         Self::CollectiveAllGather,
         Self::CollectiveReduce,
         Self::CollectiveAllReduce,
+        Self::CollectiveCat,
+        Self::CollectiveFunctionalReduce,
         Self::CollectiveSend,
         Self::CollectiveReceive,
+        Self::CollectiveSendReceive,
+        Self::CollectiveProbe,
         Self::Assign,
         Self::MultiAssign,
+        Self::SequenceAssign,
+        Self::CaptureSequence,
         Self::Expr,
+        Self::StatementOutput,
         Self::PlaceMutation,
         Self::WorkspaceEffect,
         Self::EnvironmentEffect,
@@ -322,6 +440,8 @@ impl MirConstructKind {
             | K::End
             | K::Assign
             | K::MultiAssign
+            | K::SequenceAssign
+            | K::CaptureSequence
             | K::Expr
             | K::Goto
             | K::Branch
@@ -336,11 +456,18 @@ impl MirConstructKind {
             | K::PlaceMutation
             | K::WorkspaceEffect
             | K::EnvironmentEffect
+            | K::StatementOutput
             | K::TryCatch => C::RuntimeSlowPath,
-            K::Future | K::Spawn | K::ParFor | K::Spmd | K::Await => C::StructuredSuspendResume,
+            K::SubscriptChain | K::Future | K::Spawn | K::ParFor | K::Spmd | K::Await => {
+                C::StructuredSuspendResume
+            }
             K::DistributedCreate
+            | K::CodistributedCreate
+            | K::CodistributedBuild
             | K::DistributedLocalPart
             | K::DistributedMaterialize
+            | K::DistributedCodistributor
+            | K::DistributedGlobalIndices
             | K::DistributedRedistribute
             | K::CollectiveBarrier
             | K::CollectiveBroadcast
@@ -349,8 +476,12 @@ impl MirConstructKind {
             | K::CollectiveAllGather
             | K::CollectiveReduce
             | K::CollectiveAllReduce
+            | K::CollectiveCat
+            | K::CollectiveFunctionalReduce
             | K::CollectiveSend
-            | K::CollectiveReceive => C::CapabilityRejection,
+            | K::CollectiveReceive
+            | K::CollectiveSendReceive
+            | K::CollectiveProbe => C::CapabilityRejection,
             K::Unreachable => C::ProvenUnreachable,
         }
     }

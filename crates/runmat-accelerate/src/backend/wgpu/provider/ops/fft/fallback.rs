@@ -53,13 +53,15 @@ impl WgpuProvider {
 
         if target_len == 0 || num_slices == 0 {
             fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-            let buffer = self.create_storage_buffer(0, "runmat-fft-empty");
-            return Ok(self.register_existing_buffer_with_storage(
+            let buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-fft-empty")
+            })??;
+            return self.register_existing_buffer_with_storage(
                 buffer,
                 out_shape,
                 0,
                 GpuTensorStorage::ComplexInterleaved,
-            ));
+            );
         }
 
         let total_elems = shape
@@ -129,23 +131,25 @@ impl WgpuProvider {
             packed.push(complex.im);
         }
 
-        let buffer = self.create_storage_buffer(packed.len(), "runmat-fft-host-fallback-out");
-        match self.precision {
-            NumericPrecision::F64 => {
-                self.queue_ref()
-                    .write_buffer(buffer.as_ref(), 0, cast_slice(&packed))
+        let buffer = self.with_emission(|emission, _| -> Result<_> {
+            let buffer =
+                self.create_storage_buffer(emission, packed.len(), "runmat-fft-host-fallback-out")?;
+            match self.precision {
+                NumericPrecision::F64 => {
+                    emission.write_buffer(buffer.as_ref(), 0, cast_slice(&packed))
+                }
+                NumericPrecision::F32 => {
+                    let packed32: Vec<f32> = packed.iter().map(|&v| v as f32).collect();
+                    emission.write_buffer(buffer.as_ref(), 0, cast_slice(&packed32));
+                }
             }
-            NumericPrecision::F32 => {
-                let packed32: Vec<f32> = packed.iter().map(|&v| v as f32).collect();
-                self.queue_ref()
-                    .write_buffer(buffer.as_ref(), 0, cast_slice(&packed32));
-            }
-        }
-        Ok(self.register_existing_buffer_with_storage(
+            Ok(buffer)
+        })??;
+        self.register_existing_buffer_with_storage(
             buffer,
             out_shape,
             packed.len(),
             GpuTensorStorage::ComplexInterleaved,
-        ))
+        )
     }
 }

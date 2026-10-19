@@ -1,23 +1,22 @@
 //! MATLAB-compatible `regexp` builtin for RunMat.
 
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use regex::RegexBuilder;
+#[cfg(test)]
+use runmat_builtins::REGEXP_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    project_regex_options, EmptyMatchPolicy, RegexOptionError, RegexOptions,
+    RegexOutput as OutputSpec, RegexParseMode,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StringArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
-use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
@@ -28,178 +27,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Runs on the CPU; when inputs live on the GPU, the runtime gathers them before matching and re-uploads numeric tensors afterwards.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "regexp",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Regex evaluation is control-flow heavy and not eligible for fusion today.",
+    notes: "The runtime rejects numeric and resident text roles before provider access; matching remains on the host.",
 };
 
 const BUILTIN_NAME: &str = "regexp";
-
-const REGEXP_OUTPUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Primary regexp output (depends on options and requested output count).",
-}];
-
-const REGEXP_OUTPUT_MULTI: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "1-based match start indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "end_idx",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "1-based inclusive match end indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "match",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Matched substrings.",
-    },
-    BuiltinParamDescriptor {
-        name: "tokens",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Capture-group token outputs.",
-    },
-    BuiltinParamDescriptor {
-        name: "names",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Named capture-group outputs.",
-    },
-    BuiltinParamDescriptor {
-        name: "split",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Split output around regex matches.",
-    },
-];
-
-const REGEXP_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Regular-expression pattern.",
-    },
-];
-
-const REGEXP_INPUTS_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Regular-expression pattern.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Output selectors and regexp options.",
-    },
-];
-
-const REGEXP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "out = regexp(subject, pattern)",
-        inputs: &REGEXP_INPUTS_CORE,
-        outputs: &REGEXP_OUTPUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = regexp(subject, pattern, options...)",
-        inputs: &REGEXP_INPUTS_OPTIONS,
-        outputs: &REGEXP_OUTPUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[start,end_idx,match,tokens,names,split] = regexp(subject, pattern, options...)",
-        inputs: &REGEXP_INPUTS_OPTIONS,
-        outputs: &REGEXP_OUTPUT_MULTI,
-    },
-];
-
-const REGEXP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:regexp:InvalidArgument"),
-    when: "Input/options are malformed or unsupported.",
-    message: "regexp: invalid argument",
-};
-
-const REGEXP_ERROR_PATTERN_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.PATTERN_INVALID",
-    identifier: Some("RunMat:regexp:PatternInvalid"),
-    when: "Pattern cannot be compiled as a regular expression.",
-    message: "regexp: invalid regular expression pattern",
-};
-
-const REGEXP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.INTERNAL",
-    identifier: Some("RunMat:regexp:Internal"),
-    when: "Internal regexp output assembly fails.",
-    message: "regexp: internal operation failed",
-};
-
-const REGEXP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    REGEXP_ERROR_INVALID_ARGUMENT,
-    REGEXP_ERROR_PATTERN_INVALID,
-    REGEXP_ERROR_INTERNAL,
-];
-
-pub const REGEXP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGEXP_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REGEXP_ERRORS,
-};
-
-pub const REGEXP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "regexp accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access.",
-};
 
 fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
@@ -228,6 +64,16 @@ pub async fn evaluate_with(
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
+    evaluate_with_default(builtin, subject, pattern, rest, false).await
+}
+
+pub(crate) async fn evaluate_with_default(
+    builtin: &'static str,
+    subject: Value,
+    pattern: Value,
+    rest: &[Value],
+    case_insensitive_by_default: bool,
+) -> BuiltinResult<RegexpEvaluation> {
     if contains_numeric_or_resident_text_input(&subject)
         || contains_numeric_or_resident_text_input(&pattern)
         || rest.iter().any(contains_numeric_or_resident_text_input)
@@ -243,19 +89,13 @@ pub async fn evaluate_with(
     let pattern = gather_if_needed_async(&pattern)
         .await
         .map_err(|err| with_builtin_context(builtin, err))?;
-    let options = RegexpOptions::parse(builtin, rest)?;
+    let options = parse_options(builtin, rest, case_insensitive_by_default)?;
     RegexpEvaluation::new(builtin, subject, pattern, options).await
 }
 
 #[runtime_builtin(
     name = "regexp",
-    category = "strings/regex",
-    summary = "Regular expression matching with MATLAB-compatible outputs.",
-    keywords = "regexp,regex,pattern,match,tokens,split",
-    accel = "sink",
-    type_resolver(unknown_type),
-    descriptor(crate::builtins::strings::regex::regexp::REGEXP_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::regex::regexp::REGEXP_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::regex::regexp"
 )]
 async fn regexp_builtin(
@@ -266,7 +106,7 @@ async fn regexp_builtin(
     let evaluation = evaluate(subject, pattern, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = evaluation.outputs_for_multi()?;
         if outputs.len() > out_count {
@@ -289,145 +129,32 @@ async fn regexp_builtin(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OutputSpec {
-    Start,
-    End,
-    Match,
-    Tokens,
-    TokenExtents,
-    Names,
-    Split,
-}
+type RegexpOptions = RegexOptions;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EmptyMatchPolicy {
-    Remove,
-    Allow,
-}
-
-#[derive(Debug, Clone)]
-struct RegexpOptions {
-    outputs: Vec<OutputSpec>,
-    once: bool,
-    emptymatch: EmptyMatchPolicy,
-    force_cell_output: bool,
-    case_insensitive: bool,
-    multi_line: bool,
-    dot_all: bool,
-}
-
-impl RegexpOptions {
-    fn parse(builtin: &'static str, rest: &[Value]) -> BuiltinResult<Self> {
-        let mut outputs = Vec::new();
-        let mut once = false;
-        let mut emptymatch = EmptyMatchPolicy::Remove;
-        let mut force_cell_output = false;
-        let mut case_insensitive = false;
-        let mut multi_line = false;
-        let mut dot_all = false;
-        let mut idx = 0usize;
-        while idx < rest.len() {
-            let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
-                runtime_error_for(
-                    builtin,
-                    format!("{builtin}: expected option string, got {:?}", rest[idx]),
-                )
-            })?;
-            idx += 1;
-            match raw.as_str() {
-                "match" => outputs.push(OutputSpec::Match),
-                "tokens" => outputs.push(OutputSpec::Tokens),
-                "tokenextents" => outputs.push(OutputSpec::TokenExtents),
-                "names" => outputs.push(OutputSpec::Names),
-                "split" => outputs.push(OutputSpec::Split),
-                "start" => outputs.push(OutputSpec::Start),
-                "end" => outputs.push(OutputSpec::End),
-                "once" => once = true,
-                "forcecelloutput" => force_cell_output = true,
-                "ignorecase" => case_insensitive = true,
-                "matchcase" => case_insensitive = false,
-                "lineanchors" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'lineanchors'"),
-                        )
-                    })?;
-                    multi_line = flag;
-                    idx += 1;
-                }
-                "dotall" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'dotall'"),
-                        )
-                    })?;
-                    dot_all = flag;
-                    idx += 1;
-                }
-                "dotexceptnewline" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'dotExceptNewline'"),
-                        )
-                    })?;
-                    dot_all = !flag;
-                    idx += 1;
-                }
-                "emptymatch" => {
-                    let policy = rest.get(idx).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
-                        )
-                    })?;
-                    let policy_str = value_to_lower_string(policy).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
-                        )
-                    })?;
-                    idx += 1;
-                    match policy_str.as_str() {
-                        "allow" => emptymatch = EmptyMatchPolicy::Allow,
-                        "remove" => emptymatch = EmptyMatchPolicy::Remove,
-                        other => {
-                            return Err(runtime_error_for(
-                                builtin,
-                                format!(
-                                    "{builtin}: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
-                                ),
-                            ))
-                        }
-                    }
-                }
-                "warnings" => {
-                    // MATLAB accepts 'on'/'off' here but RunMat currently ignores it.
-                    if rest.get(idx).is_some() {
-                        idx += 1;
-                    }
-                }
-                other => {
-                    return Err(runtime_error_for(
-                        builtin,
-                        format!("{builtin}: unrecognised option '{other}'"),
-                    ));
-                }
-            }
+fn parse_options(
+    builtin: &'static str,
+    rest: &[Value],
+    case_insensitive_by_default: bool,
+) -> BuiltinResult<RegexpOptions> {
+    let mut options = project_regex_options(
+        rest.len(),
+        |index| value_to_option_text(&rest[index]),
+        RegexParseMode::Runtime,
+    )
+    .map_err(|error| match error {
+        RegexOptionError::NonText(index) => runtime_error_for(
+            builtin,
+            format!("{builtin}: expected option string, got {:?}", rest[index]),
+        ),
+        RegexOptionError::Unknown { name, .. } => {
+            runtime_error_for(builtin, format!("{builtin}: unrecognised option '{name}'"))
         }
-        Ok(Self {
-            outputs,
-            once,
-            emptymatch,
-            force_cell_output,
-            case_insensitive,
-            multi_line,
-            dot_all,
-        })
+    })?
+    .options;
+    if case_insensitive_by_default {
+        options.apply_regexpi_default();
     }
+    Ok(options)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -601,22 +328,11 @@ fn extract_string(value: &Value) -> Option<String> {
     }
 }
 
-fn value_to_lower_string(value: &Value) -> Option<String> {
+fn value_to_option_text(value: &Value) -> Option<Cow<'_, str>> {
     match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(ca.data.iter().collect::<String>().to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
-fn parse_on_off(value: Option<&Value>) -> Option<bool> {
-    let text = value_to_lower_string(value?)?;
-    match text.as_str() {
-        "on" => Some(true),
-        "off" => Some(false),
+        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(Cow::Borrowed(sa.data[0].as_str())),
+        Value::CharArray(ca) if ca.rows == 1 => Some(Cow::Owned(ca.data.iter().collect())),
         _ => None,
     }
 }
@@ -674,9 +390,7 @@ impl RegexpEvaluation {
         if options.multi_line {
             builder.multi_line(true);
         }
-        if options.dot_all {
-            builder.dot_matches_new_line(true);
-        }
+        builder.dot_matches_new_line(options.dot_all);
         let regex = builder
             .build()
             .map_err(|e| runtime_error_for(builtin, format!("{builtin}: {e}")))?;
@@ -686,10 +400,11 @@ impl RegexpEvaluation {
                 named_groups.push(name.to_string());
             }
         }
-        let compute_splits = options
-            .outputs
-            .iter()
-            .any(|spec| matches!(spec, OutputSpec::Split));
+        let compute_splits = options.outputs.is_empty()
+            || options
+                .outputs
+                .iter()
+                .any(|spec| matches!(spec, OutputSpec::Split));
         let mut data = Vec::with_capacity(subjects.entries.len());
         for text in &subjects.entries {
             let subject_data =
@@ -717,20 +432,12 @@ impl RegexpEvaluation {
     }
 
     pub fn outputs_for_single(&self) -> BuiltinResult<Vec<Value>> {
-        let specs = if self.options.outputs.is_empty() {
-            vec![OutputSpec::Start]
-        } else {
-            self.options.outputs.clone()
-        };
+        let specs = self.options.outputs_for_single();
         self.values_for_specs(&specs)
     }
 
     pub fn outputs_for_multi(&self) -> BuiltinResult<Vec<Value>> {
-        let specs = if self.options.outputs.is_empty() {
-            vec![OutputSpec::Start, OutputSpec::End, OutputSpec::Match]
-        } else {
-            self.options.outputs.clone()
-        };
+        let specs = self.options.outputs_for_multi();
         self.values_for_specs(&specs)
     }
 
@@ -1128,8 +835,8 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = REGEXP_DESCRIPTOR
@@ -1140,7 +847,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"out = regexp(subject, pattern)"));
         assert!(labels.contains(&"out = regexp(subject, pattern, options...)"));
         assert!(labels.contains(
-            &"[start,end_idx,match,tokens,names,split] = regexp(subject, pattern, options...)"
+            &"[start,end_idx,token_extents,match,tokens,names,split] = regexp(subject, pattern, options...)"
         ));
     }
 
@@ -1280,7 +987,7 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 6.0, 9.0, 4.0, 7.0, 10.0]);
             }
             other => panic!("expected token extent matrix, got {other:?}"),
@@ -1362,12 +1069,12 @@ pub(crate) mod tests {
     fn regexp_multi_output_default() {
         let eval = evaluate(
             Value::String("abcabc".into()),
-            Value::String("a.".into()),
+            Value::String("(a.)".into()),
             &[],
         )
         .unwrap();
         let outputs = eval.outputs_for_multi().unwrap();
-        assert_eq!(outputs.len(), 3);
+        assert_eq!(outputs.len(), 7);
         match &outputs[0] {
             Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
             other => panic!("unexpected output {other:?}"),
@@ -1379,9 +1086,72 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 2);
+                for entry in &ca.data {
+                    match entry {
+                        Value::Tensor(t) => assert_eq!(t.shape(), &[1, 2]),
+                        other => panic!("expected token extents, got {other:?}"),
+                    }
+                }
             }
             other => panic!("unexpected output {other:?}"),
         }
+        match &outputs[3] {
+            Value::Cell(ca) => assert_eq!(ca.data.len(), 2),
+            other => panic!("expected match cells, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexp_matlab_option_flags_and_dot_default() {
+        let subject = Value::String("a\nb".into());
+        let pattern = Value::String("a.b".into());
+        let all = evaluate(subject.clone(), pattern.clone(), &[]).unwrap();
+        assert_eq!(all.outputs_for_single().unwrap()[0], Value::Num(1.0));
+
+        let excluding_newline = evaluate(
+            subject.clone(),
+            pattern.clone(),
+            &[Value::String("dotexceptnewline".into())],
+        )
+        .unwrap();
+        assert_ne!(
+            excluding_newline.outputs_for_single().unwrap()[0],
+            Value::Num(1.0)
+        );
+
+        let including_again = evaluate(
+            subject,
+            pattern,
+            &[
+                Value::String("dotexceptnewline".into()),
+                Value::String("dotall".into()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            including_again.outputs_for_single().unwrap()[0],
+            Value::Num(1.0)
+        );
+
+        let empty = evaluate(
+            Value::String("abc".into()),
+            Value::String("^".into()),
+            &[Value::String("emptymatch".into())],
+        )
+        .unwrap();
+        assert_eq!(empty.outputs_for_single().unwrap()[0], Value::Num(1.0));
+
+        let removed = evaluate(
+            Value::String("abc".into()),
+            Value::String("^".into()),
+            &[
+                Value::String("emptymatch".into()),
+                Value::String("noemptymatch".into()),
+            ],
+        )
+        .unwrap();
+        assert_ne!(removed.outputs_for_single().unwrap()[0], Value::Num(1.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1468,7 +1238,7 @@ pub(crate) mod tests {
                 let matrix = &ca.data[0];
                 match matrix {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![3, 2]);
+                        assert_eq!(t.shape(), &[3, 2]);
                         // Starts should be 1,6,9 (1-based); ends 4,7,10
                         assert_eq!(t.materialize_f64()[0], 1.0);
                         assert_eq!(t.materialize_f64()[1], 6.0);
@@ -1689,11 +1459,111 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn regexp_type_is_unknown() {
-        assert_eq!(
-            unknown_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::Unknown
+    fn regexp_registered_option_projection_and_output_counts() {
+        let call = |rest: Vec<Value>| {
+            futures::executor::block_on(regexp_builtin(
+                Value::String("aba".into()),
+                Value::String("a".into()),
+                rest,
+            ))
+            .expect("registered regexp")
+        };
+        {
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
+            match call(vec![
+                Value::String("warnings".into()),
+                Value::String("match".into()),
+            ]) {
+                Value::OutputList(values) => match &values[0] {
+                    Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![1.0, 3.0]),
+                    other => panic!("expected start indices, got {other:?}"),
+                },
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
+        {
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
+            match call(vec![Value::String("match".into())]) {
+                Value::OutputList(values) => match &values[0] {
+                    Value::Cell(cell) => assert_eq!((cell.rows, cell.cols), (1, 2)),
+                    other => panic!("expected match cell, got {other:?}"),
+                },
+                other => panic!("expected output list, got {other:?}"),
+            }
+            for rest in [
+                vec!["lineanchors", "off", "match"],
+                vec!["emptymatch", "remove", "match"],
+                vec!["warnings", "on", "match"],
+            ] {
+                let rest = rest
+                    .into_iter()
+                    .map(|flag| Value::String(flag.into()))
+                    .collect();
+                match call(rest) {
+                    Value::OutputList(values) => assert!(matches!(values[0], Value::Cell(_))),
+                    other => panic!("expected selected match output, got {other:?}"),
+                }
+            }
+        }
+        {
+            let _outputs =
+                crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+            assert_eq!(
+                call(vec![Value::String("match".into())]),
+                Value::output_list(vec![])
+            );
+        }
+        for count in [7, 8] {
+            let _outputs =
+                crate::output_count::push_output_count(Some(count)).expect("output-count scope");
+            match call(vec![]) {
+                Value::OutputList(values) => {
+                    assert_eq!(values.len(), count);
+                    assert!(matches!(values[6], Value::Cell(_)));
+                    if count == 8 {
+                        assert_eq!(values[7], Value::Num(0.0));
+                    }
+                }
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexp_ignored_warning_operand_and_early_error_order_remain_intact() {
+        let ignored = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::String("not an option".into())], 1, 1)
+                .unwrap(),
         );
+        let subject = Value::String("aba".into());
+        let pattern = Value::String("a".into());
+        let evaluation = evaluate(
+            subject.clone(),
+            pattern.clone(),
+            &[
+                Value::String("warnings".into()),
+                ignored.clone(),
+                Value::String("match".into()),
+            ],
+        )
+        .expect("ignored warning operand is not decoded");
+        assert!(matches!(
+            evaluation.outputs_for_single().unwrap()[0],
+            Value::Cell(_)
+        ));
+
+        let error = evaluate(
+            subject,
+            pattern,
+            &[Value::String("invalid".into()), ignored],
+        )
+        .err()
+        .expect("invalid first option must reject");
+        assert!(error.message().contains("unrecognised option 'invalid'"));
     }
 }

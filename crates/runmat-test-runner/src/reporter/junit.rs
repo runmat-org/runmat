@@ -22,6 +22,15 @@ impl Reporter for JunitReporter {
         );
         for test in &result.tests {
             let diagnostic = primary_diagnostic(test);
+            let name = test
+                .report_identity
+                .as_ref()
+                .map(|identity| identity.case_name.as_str())
+                .unwrap_or_else(|| test.test_id.as_str());
+            let classname = test
+                .report_identity
+                .as_ref()
+                .map(|identity| identity.suite_name.as_str());
             let source_attributes = diagnostic
                 .and_then(|diagnostic| diagnostic.source.as_ref())
                 .map(|source| {
@@ -32,10 +41,22 @@ impl Reporter for JunitReporter {
                     )
                 })
                 .unwrap_or_default();
-            xml.push_str(&format!(
-                "  <testcase name=\"{}\"{}>",
-                escape_xml(test.test_id.as_str()),
+            let source_attributes = if source_attributes.is_empty() {
+                test.report_identity
+                    .as_ref()
+                    .map(|identity| format!(" file=\"{}\"", escape_xml(&identity.source_path)))
+                    .unwrap_or_default()
+            } else {
                 source_attributes
+            };
+            let class_attribute = classname
+                .map(|name| format!(" classname=\"{}\"", escape_xml(name)))
+                .unwrap_or_default();
+            xml.push_str(&format!(
+                "  <testcase name=\"{}\"{}{}>",
+                escape_xml(name),
+                class_attribute,
+                source_attributes,
             ));
             if test.state.failed {
                 let message = diagnostic

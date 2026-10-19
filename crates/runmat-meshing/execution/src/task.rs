@@ -11,7 +11,7 @@ use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
-use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, TaskId};
+use runmat_execution::{ExecutionScopeId, OutputContract, PoolId, TaskId};
 use runmat_execution_runner::TaskSubmission;
 use runmat_meshing_core::{
     CanonicalMeshingContract, ElementOrder, MeshingCapabilityRequirement, MeshingInputKind,
@@ -37,6 +37,7 @@ pub struct MeshingExecutionContext {
     pub scope_id: ExecutionScopeId,
     pub pool_id: PoolId,
     pub program_artifact_id: ArtifactId,
+    pub host: runmat_execution::host::ExecutionHostRequirement,
     pub artifact_access: ArtifactAccess,
     pub cpu_millicores: u32,
     pub maximum_egress_bytes: u64,
@@ -93,7 +94,7 @@ pub fn build_task_submission(
         .iter()
         .map(|input| match input {
             ValuePayload::Object(root) => Ok((**root).clone()),
-            ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
+            _ => Err(MeshingExecutionError::Invalid(
                 "meshing semantic inputs must remain externalized".into(),
             )),
         })
@@ -130,7 +131,6 @@ pub fn build_task_submission(
         required_capabilities: capabilities,
     };
     resources.validate()?;
-    let qualified_name = stage_callable(workload.stage).to_string();
     Ok(TaskSubmission {
         request: TaskRequest {
             console: None,
@@ -138,17 +138,23 @@ pub fn build_task_submission(
             id: task_id,
             scope_id: context.scope_id,
             pool_id: context.pool_id,
-            program_artifact_id: context.program_artifact_id,
-            callable: Callable {
-                owner_identity: MESHING_EXECUTION_CALLABLE_OWNER.into(),
-                qualified_name: qualified_name.clone(),
-                entrypoint_digest: Digest::sha256(format!(
-                    "runmat-meshing-host-entrypoint-v2\0{qualified_name}"
-                )),
-            },
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                context.program_artifact_id,
+            ),
+            callable: Callable::for_program(
+                MESHING_EXECUTION_CALLABLE_OWNER,
+                &runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(0),
+                    Some(qualified_name.clone()),
+                ),
+            ),
+            host: context.host.clone(),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: program_inputs.to_vec(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources,
             retry,
@@ -440,24 +446,5 @@ const fn order_name(order: ElementOrder) -> &'static str {
     match order {
         ElementOrder::Tet4 => "tet4",
         ElementOrder::Tet10 => "tet10",
-    }
-}
-
-const fn stage_callable(stage: MeshingStageKind) -> &'static str {
-    match stage {
-        MeshingStageKind::GeometryAdmission => "geometry-admission",
-        MeshingStageKind::Healing => "healing",
-        MeshingStageKind::Sizing => "sizing",
-        MeshingStageKind::CurveMesh => "curve-mesh",
-        MeshingStageKind::SurfaceMesh => "surface-mesh",
-        MeshingStageKind::ProtectedBoundaryComplex => "protected-boundary-complex",
-        MeshingStageKind::Tetrahedralization => "tetrahedralization",
-        MeshingStageKind::ConstraintRecovery => "constraint-recovery",
-        MeshingStageKind::Refinement => "refinement",
-        MeshingStageKind::Optimization => "optimization",
-        MeshingStageKind::OrderElevation => "order-elevation",
-        MeshingStageKind::Validation => "validation",
-        MeshingStageKind::Serialization => "serialization",
-        MeshingStageKind::Publication => "publication",
     }
 }

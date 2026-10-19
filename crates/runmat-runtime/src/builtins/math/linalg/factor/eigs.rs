@@ -9,14 +9,10 @@
 use std::cmp::Ordering;
 
 use num_complex::Complex64;
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    EIGS_ERROR_INTERNAL as ERROR_INTERNAL, EIGS_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    EIGS_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT, EIGS_ERROR_UNSUPPORTED as ERROR_UNSUPPORTED,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -35,282 +31,11 @@ use super::eig;
 const NAME: &str = "eigs";
 const DEFAULT_K: usize = 6;
 
-const EIGS_NONFLOATING_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "eigs-nonfloating-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eigs with a non-single/non-double coefficient matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EigsNonfloatingMatrixExtension"),
-};
-
-const EIGS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "eigs-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eigs with a gpuArray argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EigsGpuInputExtension"),
-};
-
-const EIGS_INTEGER_SIGMA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "eigs-integer-sigma",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eigs with a typed-integer sigma is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EigsIntegerSigmaExtension"),
-};
-
-const EIGS_INTEGER_START_VECTOR_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "eigs-integer-start-vector",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "eigs with a typed-integer StartVector is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EigsIntegerStartVectorExtension"),
-    };
-
-pub const EIGS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+#[cfg(test)]
+use runmat_builtins::EIGS_EXTENSIONS;
+use runmat_builtins::{
+    EIGS_GPU_INPUT_EXTENSION, EIGS_INTEGER_SIGMA_EXTENSION, EIGS_INTEGER_START_VECTOR_EXTENSION,
     EIGS_NONFLOATING_MATRIX_EXTENSION,
-    EIGS_GPU_INPUT_EXTENSION,
-    EIGS_INTEGER_SIGMA_EXTENSION,
-    EIGS_INTEGER_START_VECTOR_EXTENSION,
-];
-
-const EIGS_INTEGER_COEFFICIENT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Primary coefficient matrix.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Optional generalized coefficient matrix.",
-    },
-];
-const EIGS_INTEGER_K_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "k",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Positive structural count parsed exactly in every supported integer class.",
-}];
-const EIGS_INTEGER_SIGMA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "sigma",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat-only numeric shift crossing an exact binary64 boundary.",
-    }];
-const EIGS_INTEGER_START_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "StartVector",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat-only initial-vector class; current dense fallback validates shape but does not consume iterative values.",
-    }];
-
-pub const EIGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "eigs(A, B, ...) with a typed-integer coefficient",
-        inputs: &EIGS_INTEGER_COEFFICIENT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only coefficients are checked before dense binary64 fallback.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "eigs(A, k, ...) with typed-integer k",
-        inputs: &EIGS_INTEGER_K_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Documented exact structural control.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "eigs(A, k, sigma, ...) with typed-integer sigma",
-        inputs: &EIGS_INTEGER_SIGMA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "RunMat-only shift extension.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "eigs(..., 'StartVector', v) with typed-integer v",
-        inputs: &EIGS_INTEGER_START_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "RunMat-only iterative-control class extension.",
-    },
-];
-
-const OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "d",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Selected eigenvalues as a column vector.",
-}];
-
-const OUTPUT_VD: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Selected right eigenvectors.",
-    },
-    BuiltinParamDescriptor {
-        name: "D",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal matrix of selected eigenvalues.",
-    },
-];
-
-const OUTPUT_VDFLAG: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "V",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Selected right eigenvectors.",
-    },
-    BuiltinParamDescriptor {
-        name: "D",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal matrix of selected eigenvalues.",
-    },
-    BuiltinParamDescriptor {
-        name: "flag",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Convergence flag; exact host fallback returns 0.",
-    },
-];
-
-const INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Square numeric, sparse, logical, complex, or gpuArray matrix.",
-}];
-
-const INPUT_A_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Square numeric, sparse, logical, complex, or gpuArray matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional B, k, sigma, opts, and name-value arguments.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "d = eigs(A)",
-        inputs: &INPUT_A,
-        outputs: &OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eigs(A, k)",
-        inputs: &INPUT_A_REST,
-        outputs: &OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eigs(A, k, sigma)",
-        inputs: &INPUT_A_REST,
-        outputs: &OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eigs(A, k, sigma, opts)",
-        inputs: &INPUT_A_REST,
-        outputs: &OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eigs(A, k, sigma, Name, Value)",
-        inputs: &INPUT_A_REST,
-        outputs: &OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = eigs(A, B, ...)",
-        inputs: &INPUT_A_REST,
-        outputs: &OUTPUT_D,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D] = eigs(...)",
-        inputs: &INPUT_A_REST,
-        outputs: &OUTPUT_VD,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[V, D, flag] = eigs(...)",
-        inputs: &INPUT_A_REST,
-        outputs: &OUTPUT_VDFLAG,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIGS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:eigs:InvalidArgument"),
-    when: "Inputs, options, or requested output count are invalid.",
-    message: "eigs: invalid argument",
-};
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIGS.INVALID_INPUT",
-    identifier: Some("RunMat:eigs:InvalidInput"),
-    when: "The matrix input is unsupported or has invalid shape.",
-    message: "eigs: input matrix must be square",
-};
-
-const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIGS.UNSUPPORTED",
-    identifier: Some("RunMat:eigs:UnsupportedInput"),
-    when: "Function-handle or provider-only eigs behavior is requested.",
-    message: "eigs: unsupported input form",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.EIGS.INTERNAL",
-    identifier: Some("RunMat:eigs:Internal"),
-    when: "Runtime cannot materialize selected eigen outputs.",
-    message: "eigs: internal runtime failure",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ERROR_INVALID_ARGUMENT,
-    ERROR_INVALID_INPUT,
-    ERROR_UNSUPPORTED,
-    ERROR_INTERNAL,
-];
-
-pub const EIGS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::eigs")]
@@ -342,14 +67,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "eigs",
-    category = "math/linalg/factor",
-    summary = "Compute selected eigenvalues and eigenvectors.",
-    keywords = "eigs,eigenvalues,eigenvectors,sparse,linalg,largestabs,smallestabs",
-    accel = "cpu",
-    type_resolver(eigs_type),
-    descriptor(crate::builtins::math::linalg::factor::eigs::EIGS_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::factor::eigs::EIGS_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::factor::eigs::EIGS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::eigs"
 )]
 async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -366,10 +84,10 @@ async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let eval = compute_subset(request).await?;
 
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![eval.values])),
-        Some(2) => Ok(Value::OutputList(vec![eval.vectors, eval.diagonal])),
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![eval.values])),
+        Some(2) => Ok(Value::output_list(vec![eval.vectors, eval.diagonal])),
+        Some(3) => Ok(Value::output_list(vec![
             eval.vectors,
             eval.diagonal,
             Value::Num(0.0),
@@ -496,13 +214,6 @@ fn is_nonfloating_supported_coefficient_matrix(value: &Value) -> bool {
     }
 }
 
-fn eigs_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::Unknown) | None => Type::Unknown,
-        _ => Type::tensor(),
-    }
-}
-
 #[derive(Clone, Copy)]
 enum Sigma {
     LargestAbs,
@@ -550,7 +261,7 @@ impl Request {
             Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::BoundFunctionHandle { .. }
+                | Value::BoundFunctionHandle(_)
                 | Value::Closure(_)
         ) {
             return Err(error_with_detail(
@@ -658,7 +369,7 @@ fn matrix_host_value(value: Value) -> BuiltinResult<Value> {
 fn matrix_order(value: &Value) -> BuiltinResult<usize> {
     let (rows, cols) = match value {
         Value::Tensor(tensor) => (tensor.rows(), tensor.cols()),
-        Value::ComplexTensor(tensor) => (tensor.rows, tensor.cols),
+        Value::ComplexTensor(tensor) => (tensor.rows(), tensor.cols()),
         Value::LogicalArray(logical) => matrix_shape_from_slice(&logical.shape),
         Value::SparseTensor(sparse) => (sparse.rows, sparse.cols),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => (1, 1),
@@ -1142,10 +853,10 @@ fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
                 .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
         }
         Value::ComplexTensor(tensor) => {
-            let rows = tensor.rows;
+            let rows = tensor.rows();
             let mut data = Vec::with_capacity(rows * selected.len());
             for &col in selected {
-                if col >= tensor.cols {
+                if col >= tensor.cols() {
                     return Err(error_with_detail(
                         "eigs: eigenvector column index out of range",
                         &ERROR_INTERNAL,
@@ -1278,8 +989,8 @@ fn dense_complex_matrix(value: Value) -> BuiltinResult<DenseComplexMatrix> {
                 .collect(),
         }),
         Value::ComplexTensor(tensor) => Ok(DenseComplexMatrix {
-            rows: tensor.rows,
-            cols: tensor.cols,
+            rows: tensor.rows(),
+            cols: tensor.cols(),
             data: tensor
                 .materialize_f64()
                 .into_iter()
@@ -1404,7 +1115,7 @@ fn numeric_vector_len(value: &Value, name: &str) -> BuiltinResult<usize> {
         Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
             Ok(tensor_element_len(tensor))
         }
-        Value::ComplexTensor(tensor) if tensor.rows == 1 || tensor.cols == 1 => {
+        Value::ComplexTensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
             Ok(complex_tensor_element_len(tensor))
         }
         Value::LogicalArray(logical) => {
@@ -1655,17 +1366,14 @@ fn tensor_element_len(tensor: &Tensor) -> usize {
 }
 
 fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
-    tensor
-        .integer_storage()
-        .as_ref()
-        .map_or(tensor.materialize_f64().len(), |storage| storage.real.len())
+    tensor.len()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::builtin_catalog_entry_by_name;
     use runmat_value::{CharArray, IntegerComplexStorage, IntegerStorage, SparseTensor};
 
     fn real_matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
@@ -1710,7 +1418,11 @@ mod tests {
 
     fn outputs(value: Value) -> Vec<Value> {
         match value {
-            Value::OutputList(values) => values,
+            Value::OutputList(values) => values
+                .try_into_owned()
+                .expect("unique output list")
+                .try_into_unbounded_vec()
+                .expect("unbounded output list"),
             other => panic!("expected output list, got {other:?}"),
         }
     }
@@ -1722,7 +1434,7 @@ mod tests {
         );
         let selected = tensor(select_columns(&matrix, &[1]).expect("selected column"));
         assert_eq!(selected.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(selected.shape, vec![2, 1]);
+        assert_eq!(selected.shape(), [2, 1]);
         assert_eq!(selected.materialize_f64(), vec![3.0, 4.0]);
     }
 
@@ -1764,16 +1476,14 @@ mod tests {
             assert!(call(integer_matrix(), Vec::new()).is_ok());
         }
 
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: 0,
-            buffer_id: 9_300_002,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::I16,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 2],
+                runmat_accelerate_api::NumericElementType::I16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = call(Value::GpuTensor(handle.clone()), Vec::new())
@@ -1820,12 +1530,16 @@ mod tests {
         let mut options = StructValue::new();
         options.insert(
             "StartVector",
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![2, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX,
-                descriptor: Default::default(),
-            }),
+            Value::GpuTensor(
+                runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                    .allocate_zeroed(
+                        vec![2, 1],
+                        runmat_accelerate_api::NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .unwrap()
+                    .handle,
+            ),
         );
         let error = call(a, vec![Value::Num(1.0), Value::Struct(options)])
             .expect_err("nested resident StartVector must gate before gather");
@@ -1873,7 +1587,7 @@ mod tests {
         let output = tensor(call(a, vec![Value::Num(1.0)]).unwrap());
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
 
-        let builtin = builtin_function_by_name(NAME).expect("registered eigs");
+        let builtin = builtin_catalog_entry_by_name(NAME).expect("registered eigs catalog entry");
         assert_eq!(builtin.extensions, &EIGS_EXTENSIONS);
         assert_eq!(builtin.integer_capabilities.len(), 4);
     }
@@ -1882,7 +1596,7 @@ mod tests {
     fn eigs_defaults_to_largest_magnitude_six_clamped() {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 4.0], 2, 2);
         let out = tensor(call(a, Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), [2, 1]);
         assert_eq!(out.materialize_f64(), vec![4.0, 1.0]);
     }
 
@@ -1906,14 +1620,14 @@ mod tests {
 
     #[test]
     fn eigs_supports_two_and_three_output_forms() {
-        let guard = crate::output_count::push_output_count(Some(3));
+        let guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let a = real_matrix(vec![2.0, 0.0, 0.0, 5.0], 2, 2);
         let out = outputs(call(a, vec![Value::Num(1.0)]).unwrap());
         drop(guard);
         assert_eq!(out.len(), 3);
-        assert_eq!(tensor(out[0].clone()).shape, vec![2, 1]);
+        assert_eq!(tensor(out[0].clone()).shape(), [2, 1]);
         let d = tensor(out[1].clone());
-        assert_eq!(d.shape, vec![1, 1]);
+        assert_eq!(d.shape(), [1, 1]);
         assert_eq!(d.materialize_f64(), vec![5.0]);
         assert_eq!(out[2], Value::Num(0.0));
     }
@@ -2128,7 +1842,7 @@ mod tests {
 
         let out = tensor(call(a, vec![Value::Num(1.0), Value::Struct(opts)]).unwrap());
 
-        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.shape(), [1, 1]);
         assert_eq!(out.materialize_f64(), vec![3.0]);
     }
 

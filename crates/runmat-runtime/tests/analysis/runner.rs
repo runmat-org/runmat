@@ -3028,7 +3028,7 @@ fn record_threshold_assertion(
         })
         .unwrap_or(false);
     assertions.push(ThresholdAssertionRecord {
-        name: name.to_string(),
+        name: name.into(),
         source_diagnostic: source_diagnostic.to_string(),
         observed,
         min_allowed,

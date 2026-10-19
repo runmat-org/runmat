@@ -48,28 +48,24 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     info!("RunMat v{} starting", env!("CARGO_PKG_VERSION"));
     debug!("Configuration loaded: {config:?}");
 
-    configure_gc_from_config(&config)?;
-
-    let needs_runtime_initialization = !matches!(
+    let compilation_only = matches!(
         cli.command,
-        Some(Commands::Compile { .. } | Commands::Mesh { .. })
+        Some(Commands::Compile { .. } | Commands::Mesh { .. } | Commands::NativeInterface { .. })
     );
-    if needs_runtime_initialization {
-        let accel_options: AccelerateInitOptions = (&config.accelerate).into();
-        runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
-
-        configure_plotting_from_config(&config);
-        configure_analysis_from_config(&config)?;
-        report_plot_context_status(&config);
-    }
-
     let wants_gui = match config.plotting.mode {
-        PlotMode::Gui => needs_runtime_initialization,
+        PlotMode::Gui => !compilation_only && !config.plotting.force_headless,
         PlotMode::Auto => {
-            needs_runtime_initialization && !config.plotting.force_headless && is_gui_available()
+            !compilation_only && !config.plotting.force_headless && is_gui_available()
         }
         PlotMode::Headless => false,
     };
+
+    #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
+    if wants_gui && super::native_graphics::applies(&cli) {
+        return super::native_graphics::run(cli, config);
+    }
+
+    initialize_execution_lane(&config, compilation_only)?;
 
     let _gui_initialized = if wants_gui {
         info!("Initializing GUI plotting system");
@@ -115,6 +111,21 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     .map_err(|error| anyhow::anyhow!("failed to install native meshing execution: {error}"))?;
 
     dispatch::dispatch(&cli, &config).await
+}
+
+pub(super) fn initialize_execution_lane(
+    config: &RunMatRuntimeConfig,
+    compilation_only: bool,
+) -> Result<()> {
+    configure_gc_from_config(config)?;
+    if !compilation_only {
+        let accel_options: AccelerateInitOptions = (&config.accelerate).into();
+        runmat_accelerate::initialize_acceleration_provider_with(&accel_options);
+        configure_plotting_from_config(config);
+        configure_analysis_from_config(config)?;
+        report_plot_context_status(config);
+    }
+    Ok(())
 }
 
 /// Load configuration from files and environment

@@ -1,7 +1,6 @@
 //! Helpers and builtins for contour construction (CPU + GPU).
 
 use glam::{Vec2, Vec3, Vec4};
-use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -31,7 +30,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 
-use super::gpu_helpers::{axis_bounds, axis_bounds_async};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::surf::build_color_lut;
@@ -711,10 +709,8 @@ fn from_explicit_args(
     };
     let mut z_input = contour_surface_input(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
-    let (x_axis, y_axis, transpose_z) = if x_tensor.rows == rows
-        && x_tensor.cols == cols
-        && y_tensor.rows == rows
-        && y_tensor.cols == cols
+    let (x_axis, y_axis, transpose_z) = if contour_matrix_dimensions(&x_tensor) == (rows, cols)
+        && contour_matrix_dimensions(&y_tensor) == (rows, cols)
     {
         extract_contour_meshgrid_axes(&x_tensor, &y_tensor, rows, cols, name)?
     } else {
@@ -796,12 +792,21 @@ fn tensor_has_two_distinct_values(tensor: &Tensor) -> bool {
         .is_some_and(|rest| rest.iter().any(|value| *value != values[0]))
 }
 
+fn contour_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn validated_contour_axis_vector(
     tensor: &Tensor,
     axis: &str,
     name: &'static str,
 ) -> BuiltinResult<Vec<f64>> {
-    if tensor.rows != 1 && tensor.cols != 1 {
+    let (rows, cols) = contour_matrix_dimensions(tensor);
+    if rows != 1 && cols != 1 {
         return Err(plotting_error(
             name,
             format!("{name}: {axis} must be a vector or meshgrid matrix"),
@@ -823,7 +828,8 @@ fn extract_contour_meshgrid_axes(
     cols: usize,
     name: &'static str,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>, bool)> {
-    if x.rows != rows || x.cols != cols || y.rows != rows || y.cols != cols {
+    if contour_matrix_dimensions(x) != (rows, cols) || contour_matrix_dimensions(y) != (rows, cols)
+    {
         return Err(plotting_error(
             name,
             format!("{name}: when X and Y are matrices, they must match the shape of Z"),
@@ -1137,8 +1143,7 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f
     let handle =
         crate::builtins::plotting::state::register_contour_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
-        let lower = err.to_string().to_lowercase();
-        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+        if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(handle);
         }
         return Err(map_contour_internal(err));
@@ -1199,7 +1204,7 @@ impl ContourCall {
         }
 
         if let SurfaceDataInput::Gpu(handle) = &z_input {
-            match build_contour_gpu_plot(
+            if let Some(contour) = build_contour_gpu_plot(
                 name,
                 &x_axis,
                 &y_axis,
@@ -1208,14 +1213,9 @@ impl ContourCall {
                 base_z,
                 &level_spec,
                 &line_color,
-            ) {
-                Ok(contour) => {
-                    figure.add_contour_plot_on_axes(contour.with_line_width(line_width), axes);
-                    return Ok(());
-                }
-                Err(err) => {
-                    warn!("{name} GPU path unavailable: {err}");
-                }
+            )? {
+                figure.add_contour_plot_on_axes(contour.with_line_width(line_width), axes);
+                return Ok(());
             }
         }
 
@@ -1595,8 +1595,14 @@ fn parse_line_color_option(
 
 fn is_implicit_level_style_value(value: &Value, context: &str) -> bool {
     if let Value::GpuTensor(handle) = value {
-        return handle.shape.is_empty()
-            || handle.shape.iter().copied().filter(|dim| *dim > 1).count() <= 1;
+        return handle.shape().is_empty()
+            || handle
+                .shape()
+                .iter()
+                .copied()
+                .filter(|dim| *dim > 1)
+                .count()
+                <= 1;
     }
     matches!(
         value,
@@ -1617,33 +1623,6 @@ fn is_contour_option_name(token: &str) -> bool {
     )
 }
 
-fn host_axis_bounds(values: &[f64]) -> (f32, f32) {
-    let min = values
-        .iter()
-        .fold(f32::INFINITY, |acc, &v| acc.min(v as f32));
-    let max = values
-        .iter()
-        .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32));
-    (min, max)
-}
-
-fn axis_source_bounds(axis: &AxisSource, name: &'static str) -> BuiltinResult<(f32, f32)> {
-    match axis {
-        AxisSource::Host(values) => Ok(host_axis_bounds(values)),
-        AxisSource::Gpu(handle) => axis_bounds(handle, name),
-    }
-}
-
-async fn axis_source_bounds_async(
-    axis: &AxisSource,
-    name: &'static str,
-) -> BuiltinResult<(f32, f32)> {
-    match axis {
-        AxisSource::Host(values) => Ok(host_axis_bounds(values)),
-        AxisSource::Gpu(handle) => axis_bounds_async(handle, name).await,
-    }
-}
-
 pub(crate) fn build_contour_gpu_plot(
     name: &'static str,
     x_axis: &[f64],
@@ -1653,7 +1632,7 @@ pub(crate) fn build_contour_gpu_plot(
     base_z: f32,
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
-) -> BuiltinResult<ContourPlot> {
+) -> BuiltinResult<Option<ContourPlot>> {
     build_contour_gpu_plot_with_z_mode(
         name,
         x_axis,
@@ -1677,7 +1656,7 @@ pub(crate) fn build_contour_gpu_plot_with_z_mode(
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
     z_mode: ContourZMode,
-) -> BuiltinResult<ContourPlot> {
+) -> BuiltinResult<Option<ContourPlot>> {
     build_contour_gpu_plot_with_axes_and_z_mode(
         name,
         &AxisSource::Host(x_axis.to_vec()),
@@ -1701,7 +1680,7 @@ pub(crate) async fn build_contour_gpu_plot_with_z_mode_async(
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
     z_mode: ContourZMode,
-) -> BuiltinResult<ContourPlot> {
+) -> BuiltinResult<Option<ContourPlot>> {
     build_contour_gpu_plot_with_axes_and_z_mode_async(
         name,
         &AxisSource::Host(x_axis.to_vec()),
@@ -1716,29 +1695,6 @@ pub(crate) async fn build_contour_gpu_plot_with_z_mode_async(
     .await
 }
 
-pub(crate) fn build_contour_gpu_plot_with_axes(
-    name: &'static str,
-    x_axis: &AxisSource,
-    y_axis: &AxisSource,
-    z: &GpuTensorHandle,
-    color_map: ColorMap,
-    base_z: f32,
-    level_spec: &ContourLevelSpec,
-    line_color: &ContourLineColor,
-) -> BuiltinResult<ContourPlot> {
-    build_contour_gpu_plot_with_axes_and_z_mode(
-        name,
-        x_axis,
-        y_axis,
-        z,
-        color_map,
-        base_z,
-        level_spec,
-        line_color,
-        ContourZMode::Base,
-    )
-}
-
 pub(crate) async fn build_contour_gpu_plot_with_axes_and_z_mode_async(
     name: &'static str,
     x_axis: &AxisSource,
@@ -1749,24 +1705,26 @@ pub(crate) async fn build_contour_gpu_plot_with_axes_and_z_mode_async(
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
     z_mode: ContourZMode,
-) -> BuiltinResult<ContourPlot> {
-    let (min_z, max_z) = axis_bounds_async(z, name).await?;
-    let (min_x, max_x) = axis_source_bounds_async(x_axis, name).await?;
-    let (min_y, max_y) = axis_source_bounds_async(y_axis, name).await?;
-    build_contour_gpu_plot_with_axes_bounds_and_z_mode(
+) -> BuiltinResult<Option<ContourPlot>> {
+    let Some(mut prepared) =
+        super::op_common::surface_inputs::PreparedSurfaceGpu::prepare(name, x_axis, y_axis, z)
+            .await?
+    else {
+        return Ok(None);
+    };
+    build_contour_gpu_plot_prepared(
         name,
         x_axis,
         y_axis,
         z,
+        &mut prepared,
         color_map,
         base_z,
         level_spec,
         line_color,
         z_mode,
-        (min_x, max_x),
-        (min_y, max_y),
-        (min_z, max_z),
     )
+    .map(Some)
 }
 
 pub(crate) fn build_contour_gpu_plot_with_axes_and_z_mode(
@@ -1779,157 +1737,158 @@ pub(crate) fn build_contour_gpu_plot_with_axes_and_z_mode(
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
     z_mode: ContourZMode,
-) -> BuiltinResult<ContourPlot> {
-    let (min_z, max_z) = axis_bounds(z, name)?;
-    let (min_x, max_x) = axis_source_bounds(x_axis, name)?;
-    let (min_y, max_y) = axis_source_bounds(y_axis, name)?;
-    build_contour_gpu_plot_with_axes_bounds_and_z_mode(
-        name,
-        x_axis,
-        y_axis,
-        z,
-        color_map,
-        base_z,
-        level_spec,
-        line_color,
-        z_mode,
-        (min_x, max_x),
-        (min_y, max_y),
-        (min_z, max_z),
-    )
+) -> BuiltinResult<Option<ContourPlot>> {
+    futures::executor::block_on(build_contour_gpu_plot_with_axes_and_z_mode_async(
+        name, x_axis, y_axis, z, color_map, base_z, level_spec, line_color, z_mode,
+    ))
 }
 
-fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
+pub(crate) fn build_contour_gpu_plot_prepared(
     name: &'static str,
     x_axis: &AxisSource,
     y_axis: &AxisSource,
     z: &GpuTensorHandle,
+    prepared: &mut super::op_common::surface_inputs::PreparedSurfaceGpu<'_>,
     color_map: ColorMap,
     base_z: f32,
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
     z_mode: ContourZMode,
-    x_bounds: (f32, f32),
-    y_bounds: (f32, f32),
-    z_bounds: (f32, f32),
 ) -> BuiltinResult<ContourPlot> {
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
+    prepared.validate_sources(name, x_axis, y_axis, z)?;
+    let x_bounds = prepared.x_bounds;
+    let y_bounds = prepared.y_bounds;
+    let z_bounds = prepared.z_bounds;
+    let context = &prepared.context;
+    let gpu_exports = &mut prepared.exports;
+    let result = (|| {
+        let z_ref = gpu_exports
+            .export(z, name)?
+            .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
 
-    let (min_z, max_z) = z_bounds;
-    let levels = level_spec.resolve(name, min_z, max_z)?;
-    if levels.is_empty() {
-        return Err(plotting_error(
-            name,
-            format!("{name}: no contour levels available"),
-        ));
-    }
+        let (min_z, max_z) = z_bounds;
+        let levels = level_spec.resolve(name, min_z, max_z)?;
+        if levels.is_empty() {
+            return Err(plotting_error(
+                name,
+                format!("{name}: no contour levels available"),
+            ));
+        }
 
-    let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
-    let color_table = match line_color {
-        ContourLineColor::Auto => build_color_lut(&color_map, 512, 1.0),
-        ContourLineColor::Color(color) => vec![color.to_array()],
-        ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
-    };
-    let (min_x, max_x) = x_bounds;
-    let (min_y, max_y) = y_bounds;
-    let bounds = contour_plot_bounds(min_x, max_x, min_y, max_y, base_z, min_z, max_z, z_mode);
+        let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
+        let color_table = match line_color {
+            ContourLineColor::Auto => build_color_lut(&color_map, 512, 1.0),
+            ContourLineColor::Color(color) => vec![color.to_array()],
+            ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
+        };
+        let (min_x, max_x) = x_bounds;
+        let (min_y, max_y) = y_bounds;
+        let bounds = contour_plot_bounds(min_x, max_x, min_y, max_y, base_z, min_z, max_z, z_mode);
 
-    let mut x_f32_storage: Vec<f32> = Vec::new();
-    let x_axis_data = match x_axis {
-        AxisSource::Gpu(h) => {
-            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
-                plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
+        let mut x_f32_storage: Vec<f32> = Vec::new();
+        let x_axis_data = match x_axis {
+            AxisSource::Gpu(h) => {
+                let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
+                    plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
+                })?;
+                if exported.len != x_axis.len() {
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: X axis length mismatch"),
+                    ));
+                }
+                if exported.precision != z_ref.precision {
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: X axis precision must match Z precision"),
+                    ));
+                }
+                runmat_plot::gpu::axis::AxisData::Buffer(exported.clone().into())
+            }
+            AxisSource::Host(v) => {
+                if scalar == ScalarType::F32 {
+                    x_f32_storage = v.iter().map(|&val| val as f32).collect();
+                    runmat_plot::gpu::axis::AxisData::F32(x_f32_storage.as_slice())
+                } else {
+                    runmat_plot::gpu::axis::AxisData::F64(v.as_slice())
+                }
+            }
+        };
+        let mut y_f32_storage: Vec<f32> = Vec::new();
+        let y_axis_data = match y_axis {
+            AxisSource::Gpu(h) => {
+                let exported = gpu_exports.export(h, name)?.ok_or_else(|| {
+                    plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
+                })?;
+                if exported.len != y_axis.len() {
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: Y axis length mismatch"),
+                    ));
+                }
+                if exported.precision != z_ref.precision {
+                    return Err(plotting_error(
+                        name,
+                        format!("{name}: Y axis precision must match Z precision"),
+                    ));
+                }
+                runmat_plot::gpu::axis::AxisData::Buffer(exported.clone().into())
+            }
+            AxisSource::Host(v) => {
+                if scalar == ScalarType::F32 {
+                    y_f32_storage = v.iter().map(|&val| val as f32).collect();
+                    runmat_plot::gpu::axis::AxisData::F32(y_f32_storage.as_slice())
+                } else {
+                    runmat_plot::gpu::axis::AxisData::F64(v.as_slice())
+                }
+            }
+        };
+        let _keep_alive = (&x_f32_storage, &y_f32_storage);
+
+        let inputs = runmat_plot::gpu::contour::ContourGpuInputs {
+            x_axis: x_axis_data,
+            y_axis: y_axis_data,
+            z_buffer: z_ref.clone().into(),
+            color_table: &color_table,
+            level_values: &levels,
+            x_len: x_axis.len() as u32,
+            y_len: y_axis.len() as u32,
+            scalar,
+        };
+
+        let params = runmat_plot::gpu::contour::ContourGpuParams {
+            min_z,
+            max_z,
+            base_z,
+            level_z: z_mode == ContourZMode::Level,
+            level_count: levels.len() as u32,
+        };
+
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::contour::pack_contour_vertices(emission, &inputs, &params)
+            })
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    name,
+                    format!("{}: GPU emission unavailable: {source}", name),
+                    source,
+                )
+            })?
+            .map_err(|e| {
+                plotting_error(name, format!("{name}: failed to build GPU vertices: {e}"))
             })?;
-            if exported.len as usize != x_axis.len() {
-                return Err(plotting_error(
-                    name,
-                    format!("{name}: X axis length mismatch"),
-                ));
-            }
-            if exported.precision != z_ref.precision {
-                return Err(plotting_error(
-                    name,
-                    format!("{name}: X axis precision must match Z precision"),
-                ));
-            }
-            runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone())
-        }
-        AxisSource::Host(v) => {
-            if scalar == ScalarType::F32 {
-                x_f32_storage = v.iter().map(|&val| val as f32).collect();
-                runmat_plot::gpu::axis::AxisData::F32(x_f32_storage.as_slice())
-            } else {
-                runmat_plot::gpu::axis::AxisData::F64(v.as_slice())
-            }
-        }
-    };
-    let mut y_f32_storage: Vec<f32> = Vec::new();
-    let y_axis_data = match y_axis {
-        AxisSource::Gpu(h) => {
-            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
-                plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
-            })?;
-            if exported.len as usize != y_axis.len() {
-                return Err(plotting_error(
-                    name,
-                    format!("{name}: Y axis length mismatch"),
-                ));
-            }
-            if exported.precision != z_ref.precision {
-                return Err(plotting_error(
-                    name,
-                    format!("{name}: Y axis precision must match Z precision"),
-                ));
-            }
-            runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone())
-        }
-        AxisSource::Host(v) => {
-            if scalar == ScalarType::F32 {
-                y_f32_storage = v.iter().map(|&val| val as f32).collect();
-                runmat_plot::gpu::axis::AxisData::F32(y_f32_storage.as_slice())
-            } else {
-                runmat_plot::gpu::axis::AxisData::F64(v.as_slice())
-            }
-        }
-    };
-    let _keep_alive = (&x_f32_storage, &y_f32_storage);
 
-    let inputs = runmat_plot::gpu::contour::ContourGpuInputs {
-        x_axis: x_axis_data,
-        y_axis: y_axis_data,
-        z_buffer: z_ref.buffer.clone(),
-        color_table: &color_table,
-        level_values: &levels,
-        x_len: x_axis.len() as u32,
-        y_len: y_axis.len() as u32,
-        scalar,
-    };
-
-    let params = runmat_plot::gpu::contour::ContourGpuParams {
-        min_z,
-        max_z,
-        base_z,
-        level_z: z_mode == ContourZMode::Level,
-        level_count: levels.len() as u32,
-    };
-
-    let gpu_vertices = runmat_plot::gpu::contour::pack_contour_vertices(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
-
-    let vertex_count = gpu_vertices.vertex_count;
-    Ok(
-        ContourPlot::from_gpu_buffer(gpu_vertices, vertex_count, base_z, bounds)
-            .with_force_3d(z_mode == ContourZMode::Level)
-            .with_value_range(Some((min_z as f64, max_z as f64)))
-            .with_label("Contours"),
-    )
+        let vertex_count = gpu_vertices.vertex_count;
+        Ok(
+            ContourPlot::from_gpu_buffer(gpu_vertices, vertex_count, base_z, bounds)
+                .with_force_3d(z_mode == ContourZMode::Level)
+                .with_value_range(Some((min_z as f64, max_z as f64)))
+                .with_label("Contours"),
+        )
+    })();
+    gpu_exports.complete(result, name)
 }
 
 pub(crate) fn build_contour_plot(
@@ -2039,80 +1998,97 @@ pub(crate) fn build_contour_fill_gpu_plot(
     x_axis: &[f64],
     y_axis: &[f64],
     z: &GpuTensorHandle,
+    prepared: &mut super::op_common::surface_inputs::PreparedSurfaceGpu<'_>,
     color_map: ColorMap,
     base_z: f32,
     level_spec: &ContourLevelSpec,
 ) -> BuiltinResult<ContourFillPlot> {
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-    let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
-    let (min_z, max_z) = axis_bounds(z, name)?;
-    let levels = ensure_fill_levels(name, level_spec, min_z, max_z)?;
-    let palette = build_color_lut(&color_map, palette_size(&levels), 0.95);
-    let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
-    let x_f32 = if scalar == ScalarType::F32 {
-        Some(x_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
-    } else {
-        None
-    };
-    let y_f32 = if scalar == ScalarType::F32 {
-        Some(y_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
-    } else {
-        None
-    };
-    let (min_x, max_x) = (
-        x_axis
-            .iter()
-            .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
-        x_axis
-            .iter()
-            .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
-    );
-    let (min_y, max_y) = (
-        y_axis
-            .iter()
-            .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
-        y_axis
-            .iter()
-            .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
-    );
-    let bounds = contour_bounds(min_x, max_x, min_y, max_y, base_z);
+    prepared.validate_host_sources(name, x_axis, y_axis, z)?;
+    let (min_z, max_z) = prepared.z_bounds;
+    let context = &prepared.context;
+    let gpu_exports = &mut prepared.exports;
+    let result = (|| {
+        let z_ref = gpu_exports
+            .export(z, name)?
+            .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
+        let levels = ensure_fill_levels(name, level_spec, min_z, max_z)?;
+        let palette = build_color_lut(&color_map, palette_size(&levels), 0.95);
+        let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
+        let x_f32 = if scalar == ScalarType::F32 {
+            Some(x_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
+        } else {
+            None
+        };
+        let y_f32 = if scalar == ScalarType::F32 {
+            Some(y_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
+        } else {
+            None
+        };
+        let (min_x, max_x) = (
+            x_axis
+                .iter()
+                .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
+            x_axis
+                .iter()
+                .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
+        );
+        let (min_y, max_y) = (
+            y_axis
+                .iter()
+                .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
+            y_axis
+                .iter()
+                .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
+        );
+        let bounds = contour_bounds(min_x, max_x, min_y, max_y, base_z);
 
-    let x_axis_data = if let Some(values) = x_f32.as_ref() {
-        runmat_plot::gpu::axis::AxisData::F32(values.as_slice())
-    } else {
-        runmat_plot::gpu::axis::AxisData::F64(x_axis)
-    };
-    let y_axis_data = if let Some(values) = y_f32.as_ref() {
-        runmat_plot::gpu::axis::AxisData::F32(values.as_slice())
-    } else {
-        runmat_plot::gpu::axis::AxisData::F64(y_axis)
-    };
+        let x_axis_data = if let Some(values) = x_f32.as_ref() {
+            runmat_plot::gpu::axis::AxisData::F32(values.as_slice())
+        } else {
+            runmat_plot::gpu::axis::AxisData::F64(x_axis)
+        };
+        let y_axis_data = if let Some(values) = y_f32.as_ref() {
+            runmat_plot::gpu::axis::AxisData::F32(values.as_slice())
+        } else {
+            runmat_plot::gpu::axis::AxisData::F64(y_axis)
+        };
 
-    let inputs = contour_fill::ContourFillGpuInputs {
-        x_axis: x_axis_data,
-        y_axis: y_axis_data,
-        z_buffer: z_ref.buffer.clone(),
-        color_table: &palette,
-        level_values: &levels,
-        x_len: x_axis.len() as u32,
-        y_len: y_axis.len() as u32,
-        scalar,
-    };
+        let inputs = contour_fill::ContourFillGpuInputs {
+            x_axis: x_axis_data,
+            y_axis: y_axis_data,
+            z_buffer: z_ref.clone().into(),
+            color_table: &palette,
+            level_values: &levels,
+            x_len: x_axis.len() as u32,
+            y_len: y_axis.len() as u32,
+            scalar,
+        };
 
-    let params = contour_fill::ContourFillGpuParams { base_z, alpha: 1.0 };
+        let params = contour_fill::ContourFillGpuParams { base_z, alpha: 1.0 };
 
-    let gpu_vertices =
-        contour_fill::pack_contour_fill_vertices(&context.device, &context.queue, &inputs, &params)
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                contour_fill::pack_contour_fill_vertices(emission, &inputs, &params)
+            })
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    name,
+                    format!("{}: GPU emission unavailable: {source}", name),
+                    source,
+                )
+            })?
             .map_err(|e| {
                 plotting_error(name, format!("{name}: failed to build GPU vertices: {e}"))
             })?;
-    let vertex_count = gpu_vertices.vertex_count;
-    Ok(
-        ContourFillPlot::from_gpu_buffer(gpu_vertices, vertex_count, bounds)
-            .with_value_range(level_value_range(&levels))
-            .with_label("Filled Contours"),
-    )
+        let vertex_count = gpu_vertices.vertex_count;
+        Ok(
+            ContourFillPlot::from_gpu_buffer(gpu_vertices, vertex_count, bounds)
+                .with_value_range(level_value_range(&levels))
+                .with_label("Filled Contours"),
+        )
+    })();
+    gpu_exports.complete(result, name)
 }
 
 pub(crate) fn build_contour_fill_plot(
@@ -2634,6 +2610,24 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), shape).expect("contour test tensor")
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn contour_explicit_axes_preserve_dense_rank_boundaries() {
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).unwrap());
+        let z = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+        let parsed = parse_contour_args("contour", x, vec![y.clone(), z.clone()]).unwrap();
+        assert_eq!(parsed.x_axis, vec![1.0, 2.0]);
+        assert_eq!(parsed.y_axis, vec![10.0, 20.0]);
+
+        let scalar_x = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        let error = match parse_contour_args("contour", scalar_x, vec![y, z]) {
+            Ok(_) => panic!("rank-zero X is not a contour coordinate vector"),
+            Err(error) => error,
+        };
+        assert!(error.message().contains("vector or meshgrid matrix"));
+    }
+
     fn all_integer_z_storages() -> [IntegerStorage; 8] {
         [
             IntegerStorage::I8(vec![0, 1, 2, 3]),
@@ -2894,7 +2888,7 @@ pub(crate) mod tests {
         let SurfaceDataInput::Host(z) = args.z_input else {
             panic!("transposed Z must use exact client storage");
         };
-        assert_eq!(z.shape, vec![3, 2]);
+        assert_eq!(z.shape(), [3, 2]);
         assert_eq!(
             z.integer_storage(),
             Some(&IntegerStorage::U64(vec![
@@ -3529,6 +3523,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contour_accepts_leading_axes_handle_but_not_typed_integer_handle_aliases() {
+        let _guard = crate::builtins::plotting::lock_plot_test_context();
         setup_plot_tests();
         let ax = crate::builtins::plotting::axes::axes_builtin(Vec::new()).expect("axes");
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));

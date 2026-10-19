@@ -1,62 +1,11 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinErrorDescriptor, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
-};
+//! Runtime binding for canonical handle/listener validity query.
+use runmat_builtins::ISVALID_ERROR_INVALID_INPUT;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-use runmat_value::{IntValue, IntegerStorage, Tensor};
-
-const ISVALID_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when handle/listener is valid.",
-}];
-
-const ISVALID_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Value to inspect.",
-}];
-
-const ISVALID_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isvalid(value)",
-    inputs: &ISVALID_INPUTS,
-    outputs: &ISVALID_OUTPUT,
-}];
-
-const ISVALID_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISVALID.INVALID_INPUT",
-    identifier: Some("RunMat:isvalid:InvalidInput"),
-    when: "The input is not a handle object or listener.",
-    message: "isvalid: input must be a handle object or listener",
-};
-
-pub const ISVALID_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISVALID_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[ISVALID_ERROR_INVALID_INPUT],
-};
-pub const ISVALID_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "isvalid is a handle-object method; fundamental integer host or resident values are invalid-domain inputs and reject before payload or provider access.",
-};
 
 #[runtime_builtin(
     name = "isvalid",
-    category = "introspection",
-    summary = "Return true for valid handles and listeners.",
-    keywords = "handle,listener,validity,classdef",
-    descriptor(crate::builtins::introspection::isvalid::ISVALID_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::isvalid::ISVALID_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::isvalid"
 )]
 pub async fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
@@ -81,6 +30,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn all_integer_classes_reject_as_invalid_handle_inputs() {

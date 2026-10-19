@@ -754,7 +754,7 @@ async fn strsplit_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value>
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let matches_value = make_strsplit_output(matches, input_kind)?;
         return Ok(crate::output_count::output_list_with_padding(
@@ -925,7 +925,7 @@ impl TextMatrix {
             let parts = Value::StringArray(parts);
             if let Some(output_count) = crate::output_count::current_output_count() {
                 if output_count == 0 {
-                    return Ok(Value::OutputList(Vec::new()));
+                    return Ok(Value::output_list(Vec::new()));
                 }
                 let matches = StringArray::new(Vec::new(), shape).map_err(|e| {
                     split_error_with_message(format!("{BUILTIN_NAME}: {e}"), &SPLIT_ERROR_INTERNAL)
@@ -961,7 +961,7 @@ impl TextMatrix {
         let parts = Value::StringArray(array);
         if let Some(output_count) = crate::output_count::current_output_count() {
             if output_count == 0 {
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(Value::output_list(Vec::new()));
             }
             let (matches, match_shape) =
                 orient_split_values(&per_element_matches, rows, cols, dimension, max_matches)?;
@@ -1677,8 +1677,9 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("resident dimension");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let result = split_builtin(
                 Value::String("Mary Butler".into()),
                 vec![Value::String(" ".into()), Value::GpuTensor(handle.clone())],
@@ -1690,8 +1691,9 @@ pub(crate) mod tests {
             assert_eq!(result.shape, vec![2, 1]);
 
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let error = split_builtin(
                 Value::String("Mary Butler".into()),
                 vec![Value::String(" ".into()), Value::GpuTensor(handle.clone())],
@@ -1701,7 +1703,7 @@ pub(crate) mod tests {
                 error.identifier(),
                 SPLIT_RESIDENT_DIMENSION_EXTENSION.error_identifier
             );
-            provider.free(&handle).expect("free dimension");
+            handle.release().expect("release fixture handle");
         });
     }
 
@@ -2195,14 +2197,14 @@ pub(crate) mod tests {
 
     #[test]
     fn split_empty_input_honors_requested_output_count() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let input = StringArray::new(Vec::new(), vec![0, 1]).expect("empty input");
         let result = split_builtin(Value::StringArray(input), Vec::new()).expect("empty split");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list")
         };
         assert_eq!(outputs.len(), 2);
-        for output in outputs {
+        for output in outputs.try_into_owned().expect("unique split outputs") {
             let Value::StringArray(array) = output else {
                 panic!("expected empty string array")
             };
@@ -2213,7 +2215,7 @@ pub(crate) mod tests {
 
     #[test]
     fn split_second_output_contains_matched_delimiters_in_requested_orientation() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = split_builtin(
             Value::String("a,b,c".into()),
             vec![Value::String(",".into()), Value::Num(2.0)],
@@ -2270,7 +2272,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strsplit_multi_output_returns_matches() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = strsplit_builtin(
             Value::String("a,,b,".into()),
             vec![Value::String(",".into())],
@@ -2302,7 +2304,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strsplit_regular_expression_mode() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = strsplit_builtin(
             Value::String("1.21m/s 1.985 m/s".into()),
             vec![

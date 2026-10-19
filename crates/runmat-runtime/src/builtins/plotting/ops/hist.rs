@@ -1,8 +1,7 @@
 //! MATLAB-compatible `hist` builtin.
 
 use glam::{Vec3, Vec4};
-use log::warn;
-use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
+use runmat_accelerate_api::{self, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -14,13 +13,10 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::bar::{BarGpuInputs, BarGpuParams, BarLayoutMode, BarOrientation};
-use runmat_plot::gpu::histogram::{
-    HistogramGpuInputs, HistogramGpuOutput, HistogramGpuParams, HistogramGpuWeights,
-    HistogramNormalizationMode,
-};
+use runmat_plot::gpu::histogram::{histogram_counts, histogram_render_values, ExactHistogramEdges};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::BarChart;
-use runmat_value::{IntValue, NumericDType, Tensor, Value};
+use runmat_value::{IntValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -32,7 +28,7 @@ use super::bar::apply_bar_style;
 use super::common::{numeric_vector, value_as_f64};
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarStyle, BarStyleDefaults};
-use crate::builtins::plotting::gpu_helpers::{axis_bounds_async, gather_tensor_from_gpu_async};
+use crate::builtins::plotting::gpu_helpers::gather_tensor_from_gpu_async;
 use crate::builtins::plotting::type_resolvers::hist_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -446,13 +442,6 @@ impl HistBinOptions {
             bin_method: None,
         }
     }
-
-    fn is_uniform(&self) -> bool {
-        match &self.spec {
-            HistBinSpec::Edges(edges) => uniform_edge_width(edges).is_some(),
-            _ => true,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -478,31 +467,11 @@ enum HistWeightsInput {
 }
 
 impl HistWeightsInput {
-    fn gpu_fast_path_eligible(&self, samples: &GpuTensorHandle) -> bool {
-        match self {
-            Self::None | Self::Host(_) => true,
-            Self::Gpu(handle) => {
-                let same_provider = match (
-                    runmat_accelerate_api::provider_for_handle(handle),
-                    runmat_accelerate_api::provider_for_handle(samples),
-                ) {
-                    (Some(weights_provider), Some(samples_provider)) => {
-                        std::ptr::eq(weights_provider, samples_provider)
-                    }
-                    _ => false,
-                };
-                handle.device_id == samples.device_id
-                    && same_provider
-                    && runmat_accelerate_api::handle_integer_type(handle).is_none()
-                    && !runmat_accelerate_api::handle_is_logical(handle)
-            }
-        }
-    }
-
     fn from_value(value: Value, expected_len: usize) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
-                let len: usize = handle.shape.iter().product();
+                let len =
+                    super::gpu_helpers::GpuBufferExports::element_count(&handle, BUILTIN_NAME)?;
                 if len != expected_len {
                     return Err(hist_err(format!(
                         "hist: Weights must contain {expected_len} elements (got {len})"
@@ -545,65 +514,6 @@ impl HistWeightsInput {
             }
         }
     }
-
-    fn total_weight_hint(&self, sample_len: usize) -> Option<f64> {
-        match self {
-            HistWeightsInput::None => Some(sample_len as f64),
-            HistWeightsInput::Host(tensor) => {
-                let values = numeric_vector(tensor.clone());
-                Some(values.iter().copied().sum::<f64>())
-            }
-            HistWeightsInput::Gpu(_) => None,
-        }
-    }
-
-    fn to_gpu_weights(&self, sample_len: usize) -> BuiltinResult<HistogramGpuWeights> {
-        match self {
-            HistWeightsInput::None => Ok(HistogramGpuWeights::Uniform {
-                total_weight: sample_len as f32,
-            }),
-            HistWeightsInput::Host(tensor) => {
-                let values = numeric_vector(tensor.clone());
-                let total = values.iter().copied().sum::<f64>() as f32;
-                match tensor.numeric_dtype() {
-                    NumericDType::F32 => {
-                        let data: Vec<f32> = values.iter().map(|v| *v as f32).collect();
-                        Ok(HistogramGpuWeights::HostF32 {
-                            data,
-                            total_weight: total,
-                        })
-                    }
-                    NumericDType::F64 => Ok(HistogramGpuWeights::HostF64 {
-                        data: values,
-                        total_weight: total,
-                    }),
-                    NumericDType::I8
-                    | NumericDType::I16
-                    | NumericDType::I32
-                    | NumericDType::I64
-                    | NumericDType::U8
-                    | NumericDType::U16
-                    | NumericDType::U32
-                    | NumericDType::U64 => Ok(HistogramGpuWeights::HostF64 {
-                        data: values,
-                        total_weight: total,
-                    }),
-                }
-            }
-            HistWeightsInput::Gpu(handle) => {
-                let exported = runmat_accelerate_api::export_wgpu_buffer(handle)
-                    .ok_or_else(|| hist_internal("unable to export GPU weights"))?;
-                match exported.precision {
-                    ProviderPrecision::F32 => Ok(HistogramGpuWeights::GpuF32 {
-                        buffer: exported.buffer.clone(),
-                    }),
-                    ProviderPrecision::F64 => Ok(HistogramGpuWeights::GpuF64 {
-                        buffer: exported.buffer.clone(),
-                    }),
-                }
-            }
-        }
-    }
 }
 
 #[runtime_builtin(
@@ -638,9 +548,9 @@ pub async fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult
     let evaluation = evaluate_async(data, &rest).await?;
     evaluation.render_plot()?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![evaluation.counts_value()])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![evaluation.counts_value()])),
+        Some(2) => Ok(Value::output_list(vec![
             evaluation.counts_value(),
             evaluation.centers_value(),
         ])),
@@ -669,27 +579,36 @@ pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEv
         HistWeightsInput::None
     };
 
+    let mut prepared_bins = None;
+    let mut continued_effect = false;
+    let mut host_statistics = false;
     let computation = if !bar_style.requires_cpu_path() {
         if let Some(handle) = input.as_ref().and_then(|value| value.vector_gpu_handle()) {
-            if bin_options.is_uniform() && weights_input.gpu_fast_path_eligible(handle) {
-                match build_histogram_gpu_chart_async(
-                    handle,
-                    &bin_options,
-                    sample_len,
-                    normalization,
-                    &bar_style,
-                    &weights_input,
-                )
-                .await
-                {
-                    Ok(chart) => Some(chart),
-                    Err(err) => {
-                        warn!("hist GPU path unavailable: {err}");
-                        None
-                    }
+            match build_histogram_gpu_chart_async(
+                handle,
+                &bin_options,
+                sample_len,
+                normalization,
+                &bar_style,
+                &weights_input,
+            )
+            .await?
+            {
+                Some(HistogramGpuPreparation::Complete(chart)) => Some(chart),
+                Some(HistogramGpuPreparation::HostBins {
+                    bins,
+                    completed_effect,
+                }) => {
+                    prepared_bins = Some(bins);
+                    continued_effect = completed_effect;
+                    None
                 }
-            } else {
-                None
+                Some(HistogramGpuPreparation::HostStatistics) => {
+                    host_statistics = true;
+                    continued_effect = true;
+                    None
+                }
+                None => None,
             }
         } else {
             None
@@ -701,24 +620,55 @@ pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEv
     let computation = match computation {
         Some(chart) => chart,
         None => {
-            let data_arg = input.take().expect("hist input consumed once");
-            let tensor = match data_arg {
-                HistInput::Host(tensor) => tensor,
-                HistInput::Gpu(handle) => gather_tensor_from_gpu_async(handle, "hist").await?,
-            };
-            let tensor_shape = tensor.shape.clone();
-            let samples = numeric_vector(tensor);
-            let (weight_values, total_weight) = weights_input
-                .resolve_for_cpu_async("hist weights", sample_len)
-                .await?;
-            build_histogram_charts(
-                samples,
-                &tensor_shape,
-                &bin_options,
-                normalization,
-                weight_values.as_deref(),
-                total_weight,
-            )?
+            let continuing_prepared_work = continued_effect;
+            let result = async {
+                let data_arg = input.take().expect("hist input consumed once");
+                let tensor = match data_arg {
+                    HistInput::Host(tensor) => tensor,
+                    HistInput::Gpu(handle) => gather_tensor_from_gpu_async(handle, "hist").await?,
+                };
+                let tensor_shape = tensor.shape().to_vec();
+                let samples = numeric_vector(tensor);
+                let (weight_values, total_weight) = weights_input
+                    .resolve_for_cpu_async("hist weights", sample_len)
+                    .await?;
+                Ok(if let Some(bins) = prepared_bins {
+                    // This is continuation of successful bounds/bin preparation,
+                    // not replay of an unavailable or failed GPU operation.
+                    build_histogram_chart_with_bins(
+                        &samples,
+                        &bins,
+                        normalization,
+                        weight_values.as_deref(),
+                        total_weight,
+                    )?
+                } else if host_statistics {
+                    build_histogram_chart(
+                        samples,
+                        &bin_options,
+                        normalization,
+                        weight_values.as_deref(),
+                        total_weight,
+                    )?
+                } else {
+                    build_histogram_charts(
+                        samples,
+                        &tensor_shape,
+                        &bin_options,
+                        normalization,
+                        weight_values.as_deref(),
+                        total_weight,
+                    )?
+                })
+            }
+            .await;
+            if continuing_prepared_work {
+                result.map_err(|error| {
+                    super::gpu_helpers::preparation_after_effect(error, BUILTIN_NAME)
+                })?
+            } else {
+                result?
+            }
         }
     };
 
@@ -922,7 +872,6 @@ struct RealizedBins {
     widths: Vec<f64>,
     labels: Vec<String>,
     centers: Vec<f64>,
-    uniform_width: Option<f64>,
 }
 
 impl RealizedBins {
@@ -935,17 +884,11 @@ impl RealizedBins {
         let widths = widths_from_edges(&edges);
         let labels = histogram_labels_from_edges(&edges);
         let centers = centers_from_edges(&edges);
-        let uniform_width = if widths.iter().all(|w| approx_equal(*w, widths[0])) {
-            Some(widths[0])
-        } else {
-            None
-        };
         Ok(Self {
             edges,
             widths,
             labels,
             centers,
-            uniform_width,
         })
     }
 
@@ -1048,7 +991,14 @@ fn uniform_edges_from_options(
 fn widths_from_edges(edges: &[f64]) -> Vec<f64> {
     edges
         .windows(2)
-        .map(|pair| (pair[1] - pair[0]).max(f64::MIN_POSITIVE))
+        .map(|pair| {
+            let width = pair[1] - pair[0];
+            if width > 0.0 {
+                width
+            } else {
+                f64::MIN_POSITIVE
+            }
+        })
         .collect()
 }
 
@@ -1310,34 +1260,15 @@ fn ensure_uniform_spacing(values: &[f64]) -> BuiltinResult<()> {
     if first <= 0.0 || !first.is_finite() {
         return Err(hist_err("hist: bin centers must be strictly increasing"));
     }
-    let tol = first.abs().max(1.0) * 1e-6;
+    // Relative to the spacing, not an absolute unit-sized floor: a tiny but
+    // materially uneven interval must not be admitted as uniform geometry.
+    let tol = first.abs() * 1e-6;
     for diff in diffs {
         if (diff - first).abs() > tol {
             return Err(hist_err("hist: bin centers must be evenly spaced"));
         }
     }
     Ok(())
-}
-
-fn uniform_edge_width(edges: &[f64]) -> Option<f64> {
-    if edges.len() < 2 {
-        return None;
-    }
-    let mut diffs = edges.windows(2).map(|pair| pair[1] - pair[0]);
-    let first = diffs.next().unwrap();
-    if first <= 0.0 || !first.is_finite() {
-        return None;
-    }
-    let tol = first.abs().max(1.0) * 1e-5;
-    for diff in diffs {
-        if diff <= 0.0 || !diff.is_finite() {
-            return None;
-        }
-        if (diff - first).abs() > tol {
-            return None;
-        }
-    }
-    Some(first)
 }
 
 fn parse_hist_normalization(arg: Option<Value>) -> BuiltinResult<HistNormalization> {
@@ -1489,6 +1420,16 @@ fn build_histogram_chart(
     let stats = HistDataStats::from_samples(&data);
     let fallback = data.first().copied();
     let bins = realize_bins(bin_options, sample_len, Some(&stats), fallback)?;
+    build_histogram_chart_with_bins(&data, &bins, normalization, weights, total_weight)
+}
+
+fn build_histogram_chart_with_bins(
+    data: &[f64],
+    bins: &RealizedBins,
+    normalization: HistNormalization,
+    weights: Option<&[f64]>,
+    total_weight: f64,
+) -> BuiltinResult<HistComputation> {
     let weight_for_sample = |sample_idx: usize| -> f64 {
         weights
             .and_then(|slice| slice.get(sample_idx).copied())
@@ -1500,7 +1441,7 @@ fn build_histogram_chart(
         counts[bin_idx] += weight_for_sample(sample_idx);
     }
     apply_normalization(&mut counts, &bins.widths, normalization, total_weight);
-    build_hist_cpu_result(&bins, counts)
+    build_hist_cpu_result(bins, counts)
 }
 
 fn build_empty_histogram_chart(
@@ -1602,19 +1543,44 @@ fn apply_normalization(
     match normalization {
         HistNormalization::Count => {}
         HistNormalization::Probability => {
-            let total = total_weight.max(f64::EPSILON);
+            let total = if total_weight > 0.0 {
+                total_weight
+            } else {
+                f64::EPSILON
+            };
             for count in counts {
                 *count /= total;
             }
         }
         HistNormalization::Pdf => {
-            let total = total_weight.max(f64::EPSILON);
+            let total = if total_weight > 0.0 {
+                total_weight
+            } else {
+                f64::EPSILON
+            };
             for (count, width) in counts.iter_mut().zip(widths.iter()) {
-                let w = width.max(f64::MIN_POSITIVE);
-                *count /= total * w;
+                let w = if *width > 0.0 {
+                    *width
+                } else {
+                    f64::MIN_POSITIVE
+                };
+                // Dividing in stages avoids underflowing a valid tiny total
+                // times a valid tiny bin width to zero first.
+                *count = (*count / total) / w;
             }
         }
     }
+}
+
+/// A completed bounds stage may discover nonuniform data-dependent bins.
+/// Retain those exact bins for the existing host count algorithm.
+enum HistogramGpuPreparation {
+    Complete(HistComputation),
+    HostBins {
+        bins: RealizedBins,
+        completed_effect: bool,
+    },
+    HostStatistics,
 }
 
 async fn build_histogram_gpu_chart_async(
@@ -1624,168 +1590,184 @@ async fn build_histogram_gpu_chart_async(
     normalization: HistNormalization,
     style: &BarStyle,
     weights: &HistWeightsInput,
-) -> BuiltinResult<HistComputation> {
-    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let exported = runmat_accelerate_api::export_wgpu_buffer(values)
-        .ok_or_else(|| hist_internal("unable to export GPU data"))?;
-    if exported.len == 0 {
-        let total_hint = weights
-            .total_weight_hint(sample_len)
-            .unwrap_or(sample_len as f64);
-        return build_empty_histogram_chart(bin_options, normalization, sample_len, total_hint);
-    }
-
-    let sample_count_u32 = u32::try_from(exported.len)
-        .map_err(|_| hist_err("hist: sample count exceeds supported range"))?;
-    let gpu_weights = weights.to_gpu_weights(sample_len)?;
-    let (min_value_f32, max_value_f32) = axis_bounds_async(values, "hist").await?;
-    let stats = HistDataStats {
-        min: Some(min_value_f32 as f64),
-        max: Some(max_value_f32 as f64),
-    };
-    let bins = realize_bins(
-        bin_options,
-        sample_len,
-        Some(&stats),
-        Some(min_value_f32 as f64),
-    )?;
-    let Some(uniform_width_f64) = bins.uniform_width else {
+) -> BuiltinResult<Option<HistogramGpuPreparation>> {
+    if super::gpu_helpers::GpuBufferExports::element_count(values, BUILTIN_NAME)? != sample_len {
         return Err(hist_err(
-            "hist: GPU rendering currently requires uniform bin edges",
+            "hist: GPU sample shape does not match its admitted length",
         ));
-    };
-    let uniform_width = uniform_width_f64 as f32;
-    let bin_count_u32 = u32::try_from(bins.bin_count())
-        .map_err(|_| hist_err("hist: bin count exceeds supported range for GPU execution"))?;
-
-    let histogram_inputs = HistogramGpuInputs {
-        samples: exported.buffer.clone(),
-        sample_count: sample_count_u32,
-        scalar: ScalarType::from_is_f64(exported.precision == ProviderPrecision::F64),
-        weights: gpu_weights,
-    };
-    let histogram_params = HistogramGpuParams {
-        min_value: bins.edges[0] as f32,
-        inv_bin_width: 1.0 / uniform_width,
-        bin_count: bin_count_u32,
-    };
-    let normalization_mode = match normalization {
-        HistNormalization::Count => HistogramNormalizationMode::Count,
-        HistNormalization::Probability => HistogramNormalizationMode::Probability,
-        HistNormalization::Pdf => HistogramNormalizationMode::Pdf {
-            bin_width: uniform_width.max(f32::MIN_POSITIVE),
-        },
-    };
-
-    let histogram_output = runmat_plot::gpu::histogram::histogram_values_buffer(
-        &context.device,
-        &context.queue,
-        histogram_inputs,
-        &histogram_params,
-        normalization_mode,
-    )
-    .await
-    .map_err(|e| hist_internal(format!("failed to build GPU histogram counts: {e}")))?;
-
-    let HistogramGpuOutput {
-        values_buffer,
-        total_weight,
-    } = histogram_output;
-
-    let bar_inputs = BarGpuInputs {
-        values_buffer,
-        row_count: bin_count_u32,
-        scalar: ScalarType::F32,
-    };
-    let bar_params = BarGpuParams {
-        color: style.face_rgba(),
-        bar_width: style.bar_width,
-        series_index: 0,
-        series_count: 1,
-        source_row_count: bin_count_u32,
-        transpose_source: false,
-        group_index: 0,
-        group_count: 1,
-        orientation: BarOrientation::Vertical,
-        layout: BarLayoutMode::Grouped,
-    };
-
-    let gpu_vertices = runmat_plot::gpu::bar::pack_vertices_from_values(
-        &context.device,
-        &context.queue,
-        &bar_inputs,
-        &bar_params,
-    )
-    .map_err(|e| hist_internal(format!("failed to build GPU vertices: {e}")))?;
-
-    let bin_count = bins.bin_count();
-    let normalization_scale = match normalization {
-        HistNormalization::Count => 1.0,
-        HistNormalization::Probability => {
-            if total_weight <= f32::EPSILON {
-                0.0
-            } else {
-                1.0 / total_weight
-            }
+    }
+    if u32::try_from(sample_len).is_err() {
+        return Ok(None);
+    }
+    if let HistWeightsInput::Gpu(input) = weights {
+        if super::gpu_helpers::GpuBufferExports::element_count(input, BUILTIN_NAME)? != sample_len {
+            return Err(hist_err("hist: GPU weights must match sample length"));
         }
-        HistNormalization::Pdf => {
-            if total_weight <= f32::EPSILON {
-                0.0
-            } else {
-                1.0 / (total_weight * uniform_width)
-            }
+    }
+    // Explicit edge/center geometry does not depend on samples; no bounds pass
+    // may replace it with a rendering approximation.
+    let mut known_bins = match &bin_options.spec {
+        HistBinSpec::Edges(_) | HistBinSpec::Centers(_) => {
+            Some(realize_bins(bin_options, sample_len, None, None)?)
         }
+        _ => None,
     };
-    let bounds = histogram_bar_bounds(
-        bin_count,
-        total_weight,
-        normalization_scale,
-        style.bar_width,
-    );
-    let vertex_count = gpu_vertices.vertex_count;
-    let mut bar = BarChart::from_gpu_buffer(
-        bins.labels.clone(),
-        bin_count,
-        gpu_vertices,
-        vertex_count,
-        bounds,
-        style.face_rgba(),
-        style.bar_width,
-    )
-    .with_gpu_source(bar_inputs.clone(), 0, 1);
-    bar.label = Some(HIST_DEFAULT_LABEL.to_string());
-    let counts_f32 = runmat_plot::gpu::util::readback_f32_buffer(
-        &context.device,
-        bar_inputs.values_buffer.as_ref(),
-        bin_count,
-    )
-    .await
-    .map_err(|e| hist_internal(format!("failed to read GPU histogram counts: {e}")))?;
-    let counts: Vec<f64> = counts_f32.iter().map(|v| *v as f64).collect();
-
-    Ok(HistComputation {
-        counts,
-        centers: bins.centers.clone(),
-        output_shape: vec![1, bins.bin_count()],
-        charts: vec![bar],
-    })
+    if let Some(bins) = &known_bins {
+        if u32::try_from(bins.bin_count()).is_err()
+            || !bins.edges.windows(2).all(|pair| pair[0] < pair[1])
+        {
+            return Ok(None);
+        }
+    }
+    if !matches!(weights, HistWeightsInput::None) {
+        if let Some(bins) = known_bins.take() {
+            return Ok(Some(HistogramGpuPreparation::HostBins {
+                bins,
+                completed_effect: false,
+            }));
+        }
+    }
+    let Some((context, mut gpu_exports)) =
+        super::gpu_helpers::GpuBufferExports::prepare(&[values], BUILTIN_NAME)?
+    else {
+        return Ok(None);
+    };
+    let result = async {
+        let exported = gpu_exports
+            .export(values, BUILTIN_NAME)?
+            .ok_or_else(|| hist_internal("unable to export GPU data"))?;
+        if exported.len == 0 {
+            return build_empty_histogram_chart(bin_options, normalization, 0, 0.0)
+                .map(HistogramGpuPreparation::Complete);
+        }
+        let bins = if let Some(bins) = known_bins {
+            bins
+        } else {
+            let bounds = {
+                let mut protected = gpu_exports.protected_handles();
+                if let HistWeightsInput::Gpu(input) = weights {
+                    protected.push(input);
+                }
+                super::gpu_helpers::numeric_bounds_protecting(values, &protected, BUILTIN_NAME)
+                    .await?
+            };
+            gpu_exports.record_completed_effect();
+            // Generic extrema may include NaN; histogram statistics omit NaNs.
+            // This successful-prefix continuation uses the existing CPU stats
+            // owner, not a failed hook or a second GPU reduction.
+            if bounds.min.is_nan() || bounds.max.is_nan() {
+                return Ok(HistogramGpuPreparation::HostStatistics);
+            }
+            realize_bins(
+                bin_options,
+                sample_len,
+                Some(&HistDataStats {
+                    min: Some(bounds.min),
+                    max: Some(bounds.max),
+                }),
+                Some(bounds.min),
+            )?
+        };
+        if !matches!(weights, HistWeightsInput::None)
+            || u32::try_from(bins.bin_count()).is_err()
+            || !bins.edges.windows(2).all(|pair| pair[0] < pair[1])
+        {
+            return Ok(HistogramGpuPreparation::HostBins {
+                bins,
+                completed_effect: gpu_exports.has_completed_effect(),
+            });
+        }
+        let edges = ExactHistogramEdges::new(&bins.edges).map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                hist_internal("invalid numerical edges"),
+                error,
+            )
+        })?;
+        let evidence = histogram_counts(&context.access, exported, &edges)
+            .await
+            .map_err(|error| {
+                crate::runtime_error::with_provider_execution_source(
+                    hist_internal("GPU numerical counting failed"),
+                    error,
+                )
+            })?;
+        gpu_exports.record_completed_effect();
+        let mut counts = evidence.into_double_counts();
+        apply_normalization(&mut counts, &bins.widths, normalization, sample_len as f64);
+        let values_buffer = histogram_render_values(&context.access, &counts).map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                hist_internal("render-value projection failed"),
+                error,
+            )
+        })?;
+        let bin_count_u32 = u32::try_from(bins.bin_count())
+            .map_err(|_| hist_internal("bin count exceeds GPU range"))?;
+        let bar_inputs = BarGpuInputs {
+            values_buffer: values_buffer.into(),
+            row_count: bin_count_u32,
+            scalar: ScalarType::F32,
+        };
+        let bar_params = BarGpuParams {
+            color: style.face_rgba(),
+            bar_width: style.bar_width,
+            series_index: 0,
+            series_count: 1,
+            source_row_count: bin_count_u32,
+            transpose_source: false,
+            group_index: 0,
+            group_count: 1,
+            orientation: BarOrientation::Vertical,
+            layout: BarLayoutMode::Grouped,
+        };
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::bar::pack_vertices_from_values(emission, &bar_inputs, &bar_params)
+            })
+            .map_err(|source| {
+                super::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    format!("hist: GPU emission unavailable: {source}"),
+                    source,
+                )
+            })?
+            .map_err(|error| hist_internal(format!("failed to build GPU vertices: {error}")))?;
+        let bounds = histogram_bar_bounds(&counts, style.bar_width);
+        let vertex_count = gpu_vertices.vertex_count;
+        let mut bar = BarChart::from_gpu_buffer(
+            bins.labels.clone(),
+            bins.bin_count(),
+            gpu_vertices,
+            vertex_count,
+            bounds,
+            style.face_rgba(),
+            style.bar_width,
+        )
+        .with_gpu_source(bar_inputs, 0, 1);
+        bar.label = Some(HIST_DEFAULT_LABEL.to_string());
+        let bin_count = bins.bin_count();
+        Ok(HistogramGpuPreparation::Complete(HistComputation {
+            counts,
+            centers: bins.centers,
+            output_shape: vec![1, bin_count],
+            charts: vec![bar],
+        }))
+    }
+    .await;
+    gpu_exports.complete(result, BUILTIN_NAME).map(Some)
 }
 
-fn histogram_bar_bounds(
-    bins: usize,
-    total_weight: f32,
-    normalization_scale: f32,
-    bar_width: f32,
-) -> BoundingBox {
-    let min_x = 1.0 - bar_width * 0.5;
-    let max_x = bins as f32 + bar_width * 0.5;
-    let max_y = total_weight * normalization_scale;
+fn histogram_bar_bounds(counts: &[f64], bar_width: f32) -> BoundingBox {
+    let max_y = counts.iter().copied().fold(0.0_f64, f64::max) as f32;
     let max_y = if max_y.is_finite() && max_y > 0.0 {
         max_y
     } else {
         1.0
     };
-    BoundingBox::new(Vec3::new(min_x, 0.0, 0.0), Vec3::new(max_x, max_y, 0.0))
+    BoundingBox::new(
+        Vec3::new(1.0 - bar_width * 0.5, 0.0, 0.0),
+        Vec3::new(counts.len() as f32 + bar_width * 0.5, max_y, 0.0),
+    )
 }
 
 enum HistInput {
@@ -1808,7 +1790,7 @@ impl HistInput {
     fn vector_gpu_handle(&self) -> Option<&GpuTensorHandle> {
         match self {
             Self::Gpu(handle)
-                if handle.shape.iter().filter(|&&dim| dim > 1).count() <= 1
+                if handle.shape().iter().filter(|&&dim| dim > 1).count() <= 1
                     && runmat_accelerate_api::handle_integer_type(handle).is_none()
                     && !runmat_accelerate_api::handle_is_logical(handle) =>
             {
@@ -1822,7 +1804,7 @@ impl HistInput {
     fn len(&self) -> usize {
         match self {
             Self::Host(tensor) => tensor_utils::tensor_element_len(tensor),
-            Self::Gpu(handle) => handle.shape.iter().product(),
+            Self::Gpu(handle) => handle.shape().iter().product(),
         }
     }
 }
@@ -1837,6 +1819,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_value::NumericDType;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
@@ -1855,9 +1838,8 @@ pub(crate) mod tests {
     }
 
     fn assert_plotting_unavailable(err: &RuntimeError) {
-        let lower = err.to_string().to_lowercase();
         assert!(
-            lower.contains("plotting is unavailable") || lower.contains("non-main thread"),
+            crate::builtins::plotting::state::presentation_unavailable(err),
             "unexpected error: {err}"
         );
     }
@@ -1953,7 +1935,9 @@ pub(crate) mod tests {
         let weights = HistWeightsInput::from_value(Value::Tensor(int_tensor(vec![1, 2, 3])), 3)
             .expect("weights");
 
-        assert_eq!(weights.total_weight_hint(3), Some(6.0));
+        let (values, total) = block_on(weights.resolve_for_cpu_async("hist weights", 3)).unwrap();
+        assert_eq!(values, Some(vec![1.0, 2.0, 3.0]));
+        assert_eq!(total, 6.0);
     }
 
     #[test]
@@ -1963,13 +1947,13 @@ pub(crate) mod tests {
         let weights =
             HistWeightsInput::from_value(Value::Tensor(tensor), 3).expect("single weights");
 
-        match weights.to_gpu_weights(3).expect("GPU weights") {
-            HistogramGpuWeights::HostF32 { data, total_weight } => {
-                assert_eq!(data, vec![1.0_f32, 2.0, 3.0]);
-                assert_eq!(total_weight, 6.0);
-            }
-            _ => panic!("expected native single host weights"),
-        }
+        let HistWeightsInput::Host(tensor) = &weights else {
+            panic!("host Single weights");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        let (values, total) = block_on(weights.resolve_for_cpu_async("hist weights", 3)).unwrap();
+        assert_eq!(values, Some(vec![1.0, 2.0, 3.0]));
+        assert_eq!(total, 6.0);
     }
 
     #[test]
@@ -2026,19 +2010,17 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             ensure_plot_test_env();
             let data = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[0.0, 1.0, 1.0, 0.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1, 0],
                     shape: &[1, 4],
                 })
                 .expect("resident logical data");
-            runmat_accelerate_api::set_handle_logical(&data, true);
             let weights = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[1.0, 0.0, 1.0, 0.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1, 0],
                     shape: &[1, 4],
                 })
                 .expect("resident logical weights");
-            runmat_accelerate_api::set_handle_logical(&weights, true);
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let output = block_on(hist_builtin(
                 Value::GpuTensor(data),
@@ -2145,9 +2127,9 @@ pub(crate) mod tests {
         let eval = block_on(evaluate_async(data, &bins)).expect("matrix hist evaluation");
         let counts = Tensor::try_from(&eval.counts_value()).expect("matrix counts");
         let centers = Tensor::try_from(&eval.centers_value()).expect("matrix centers");
-        assert_eq!(counts.shape, vec![2, 2]);
+        assert_eq!(counts.shape(), &[2, 2]);
         assert_eq!(counts.materialize_f64(), vec![3.0, 0.0, 0.0, 3.0]);
-        assert_eq!(centers.shape, vec![2, 2]);
+        assert_eq!(centers.shape(), &[2, 2]);
         assert_eq!(centers.materialize_f64(), vec![1.0, 10.0, 1.0, 10.0]);
         assert_eq!(eval.charts.len(), 2);
         assert_eq!(
@@ -2168,7 +2150,7 @@ pub(crate) mod tests {
         );
         let eval = block_on(evaluate_async(data, &[])).expect("matrix hist evaluation");
         let centers = Tensor::try_from(&eval.centers_value()).expect("matrix centers");
-        assert_eq!(centers.shape, vec![10, 2]);
+        assert_eq!(centers.shape(), &[10, 2]);
         let values = centers.materialize_f64();
         assert!(values[0] < 1.0);
         assert!(values[10] > 100.0);
@@ -2206,6 +2188,80 @@ pub(crate) mod tests {
         };
         assert_eq!(centers.len(), 2);
         assert!((centers[0] - 0.25).abs() < 1e-9);
+
+        // A successful bounds stage can realize a clipped final bin. Continue
+        // counting with those exact retained bins, not fresh host-data bounds.
+        let mut options = HistBinOptions::new(HistBinSpec::Auto);
+        options.bin_width = Some(0.6);
+        let bins = realize_bins(
+            &options,
+            4,
+            Some(&HistDataStats {
+                min: Some(0.0),
+                max: Some(1.0),
+            }),
+            Some(0.0),
+        )
+        .unwrap();
+        assert_ne!(bins.widths[0], bins.widths[1]);
+        let continued = build_histogram_chart_with_bins(
+            &[0.1, 0.2, 0.6, 0.8],
+            &bins,
+            HistNormalization::Count,
+            Some(&[1.0, 2.0, 3.0, 4.0]),
+            10.0,
+        )
+        .unwrap();
+        assert_eq!(continued.counts, vec![3.0, 7.0]);
+        assert_eq!(&continued.centers, &bins.centers);
+        assert_eq!(continued.output_shape, vec![1, 2]);
+        for centers in [vec![0.0, 1.0, 4.0], vec![0.0, 1.0, 2.0]] {
+            let bins = realize_bins(
+                &HistBinOptions::new(HistBinSpec::Centers(centers)),
+                4,
+                None,
+                None,
+            )
+            .unwrap();
+            assert!(
+                ExactHistogramEdges::new(&bins.edges).is_ok(),
+                "both uniform and nonuniform actual edges are valid numerical inputs"
+            );
+        }
+        let tiny_weight = build_histogram_chart_with_bins(
+            &[0.1],
+            &bins,
+            HistNormalization::Probability,
+            Some(&[1.0e-10]),
+            1.0e-10,
+        )
+        .unwrap();
+        assert_eq!(tiny_weight.counts, vec![1.0, 0.0]);
+        let exact_weight = 1.0 + 2.0f64.powi(-30);
+        let precise = build_histogram_chart_with_bins(
+            &[0.1],
+            &bins,
+            HistNormalization::Count,
+            Some(&[exact_weight]),
+            exact_weight,
+        )
+        .unwrap();
+        assert_eq!(precise.counts, vec![exact_weight, 0.0]);
+
+        // A unit-sized absolute tolerance used to admit these materially
+        // different tiny intervals as uniformly spaced centers.
+        assert!(ensure_uniform_spacing(&[0.0, 1.0e-10, 2.1e-10]).is_err());
+        assert!(ensure_uniform_spacing(&[0.1, 0.2, 0.3]).is_ok());
+        let tiny_edges = RealizedBins::from_edges(vec![0.0, f64::from_bits(1), 1.0]).unwrap();
+        assert_eq!(tiny_edges.widths[0], f64::from_bits(1));
+        let mut tiny_pdf = vec![f64::from_bits(1)];
+        apply_normalization(
+            &mut tiny_pdf,
+            &tiny_edges.widths[..1],
+            HistNormalization::Pdf,
+            f64::from_bits(1),
+        );
+        assert_eq!(tiny_pdf[0], f64::INFINITY);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

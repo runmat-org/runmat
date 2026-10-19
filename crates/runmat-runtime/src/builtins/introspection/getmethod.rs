@@ -5,7 +5,6 @@ use runmat_builtins::{
     BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_types::MemberAccess;
 use runmat_value::Value;
 
 const GETMETHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -91,15 +90,20 @@ pub const GETMETHOD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntege
 pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResult<Value> {
     crate::compatibility::ensure_builtin_extension_enabled(&GETMETHOD_EXTENSION, "getmethod")?;
 
-    fn ensure_method_accessible(class_name: &str, method_name: &str) -> crate::BuiltinResult<()> {
-        let Some((method, owner)) = crate::class_registry::lookup_method(class_name, method_name)
+    fn ensure_method_accessible(
+        class_name: &runmat_types::ClassIdentity,
+        method_name: &str,
+    ) -> crate::BuiltinResult<()> {
+        let method_identity = runmat_types::MethodName::from(method_name);
+        let Some((method, owner)) =
+            crate::class_registry::lookup_method(class_name, &method_identity)
         else {
             return Ok(());
         };
         let caller_class = crate::class_access_context();
         let access_allowed = match method.access {
             runmat_types::MemberAccess::Public => true,
-            runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(owner.as_str()),
+            runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(&owner),
             runmat_types::MemberAccess::Protected => caller_class
                 .as_deref()
                 .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
@@ -122,57 +126,132 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         ));
     }
     let caller_scope = crate::class_access_context()
-        .map(Value::String)
+        .map(|identity| Value::String(identity.display_name().to_owned()))
         .unwrap_or_else(|| Value::String(String::new()));
     match obj {
         Value::Object(o) => {
             ensure_method_accessible(&o.class_name, method_name)?;
-            if let Some((resolved, _owner)) =
-                crate::class_registry::lookup_method(&o.class_name, method_name)
-            {
-                return Ok(Value::Closure(runmat_value::Closure {
-                    function_name: resolved.function_name.clone(),
-                    bound_function: crate::user_functions::resolve_semantic_function_by_name(
-                        &resolved.function_name,
-                    ),
-                    captures: vec![Value::Object(o)],
-                }));
+            if let Some((resolved, _owner)) = crate::class_registry::lookup_method(
+                &o.class_name,
+                &runmat_types::MethodName::from(method_name),
+            ) {
+                let registered = crate::class_registry::lookup_bound_method(
+                    &o.class_name,
+                    &runmat_types::MethodName::from(method_name),
+                )
+                .and_then(|method| method.bound_function);
+                let bound_function =
+                    registered
+                        .as_ref()
+                        .map(|binding| binding.function)
+                        .or_else(|| {
+                            crate::user_functions::resolve_semantic_function_by_name(
+                                &resolved.function_name,
+                            )
+                        });
+                return Ok(Value::Closure(runmat_value::Closure::from_data(
+                    runmat_value::ClosureData {
+                        lexical_environment: None,
+                        function_name: resolved.function_name.clone(),
+                        binding: registered.or_else(|| {
+                            bound_function.map(crate::user_functions::bound_function_binding_for)
+                        }),
+                        source_role: runmat_types::FunctionSourceRole::Method,
+                        source_file: bound_function
+                            .and_then(crate::user_functions::source_file_for)
+                            .map(String::into_boxed_str),
+                        captures: vec![Value::Object(o)],
+                    },
+                )));
             }
-            Ok(Value::Closure(runmat_value::Closure {
-                function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
-                bound_function: None,
-                captures: vec![
-                    Value::Object(o),
-                    Value::String(method_name.to_string()),
-                    caller_scope.clone(),
-                ],
-            }))
+            Ok(Value::Closure(runmat_value::Closure::from_data(
+                runmat_value::ClosureData {
+                    lexical_environment: None,
+                    function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
+                    binding: None,
+                    source_role: runmat_types::FunctionSourceRole::Method,
+                    source_file: None,
+                    captures: vec![
+                        Value::Object(o),
+                        Value::String(method_name.to_string()),
+                        caller_scope.clone(),
+                    ],
+                },
+            )))
         }
         Value::HandleObject(h) => {
             ensure_method_accessible(&h.class_name, method_name)?;
-            if let Some((resolved, _owner)) =
-                crate::class_registry::lookup_method(&h.class_name, method_name)
-            {
-                return Ok(Value::Closure(runmat_value::Closure {
-                    function_name: resolved.function_name.clone(),
-                    bound_function: crate::user_functions::resolve_semantic_function_by_name(
-                        &resolved.function_name,
-                    ),
-                    captures: vec![Value::HandleObject(h)],
-                }));
+            if let Some((resolved, _owner)) = crate::class_registry::lookup_method(
+                &h.class_name,
+                &runmat_types::MethodName::from(method_name),
+            ) {
+                let registered = crate::class_registry::lookup_bound_method(
+                    &h.class_name,
+                    &runmat_types::MethodName::from(method_name),
+                )
+                .and_then(|method| method.bound_function);
+                let bound_function =
+                    registered
+                        .as_ref()
+                        .map(|binding| binding.function)
+                        .or_else(|| {
+                            crate::user_functions::resolve_semantic_function_by_name(
+                                &resolved.function_name,
+                            )
+                        });
+                return Ok(Value::Closure(runmat_value::Closure::from_data(
+                    runmat_value::ClosureData {
+                        lexical_environment: None,
+                        function_name: resolved.function_name.clone(),
+                        binding: registered.or_else(|| {
+                            bound_function.map(crate::user_functions::bound_function_binding_for)
+                        }),
+                        source_role: runmat_types::FunctionSourceRole::Method,
+                        source_file: bound_function
+                            .and_then(crate::user_functions::source_file_for)
+                            .map(String::into_boxed_str),
+                        captures: vec![Value::HandleObject(h)],
+                    },
+                )));
             }
-            Ok(Value::Closure(runmat_value::Closure {
-                function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
-                bound_function: None,
-                captures: vec![
-                    Value::HandleObject(h),
-                    Value::String(method_name.to_string()),
-                    caller_scope,
-                ],
-            }))
+            Ok(Value::Closure(runmat_value::Closure::from_data(
+                runmat_value::ClosureData {
+                    lexical_environment: None,
+                    function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
+                    binding: None,
+                    source_role: runmat_types::FunctionSourceRole::Method,
+                    source_file: None,
+                    captures: vec![
+                        Value::HandleObject(h),
+                        Value::String(method_name.to_string()),
+                        caller_scope,
+                    ],
+                },
+            )))
         }
         Value::ClassRef(cls) => {
             ensure_method_accessible(&cls, method_name)?;
+            let method = runmat_types::MethodName::from(method_name);
+            if let Some((declaration, _)) = crate::class_registry::lookup_method(&cls, &method) {
+                if declaration.is_static {
+                    if let Some(binding) = crate::class_registry::lookup_bound_method(&cls, &method)
+                        .and_then(|method| method.bound_function)
+                    {
+                        let function = binding.function;
+                        return Ok(Value::Closure(runmat_value::Closure::from_data(
+                            runmat_value::ClosureData {
+                                lexical_environment: None,
+                                function_name: declaration.function_name,
+                                binding: Some(binding),
+                                source_role: runmat_types::FunctionSourceRole::Method,
+                                source_file: crate::user_functions::source_file_for(function)
+                                    .map(String::into_boxed_str),
+                                captures: vec![],
+                            },
+                        )));
+                    }
+                }
+            }
             crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String(
                 format!("@{cls}.{method_name}"),
             ))
@@ -256,12 +335,16 @@ mod tests {
                 GETMETHOD_ERROR_RECEIVER_UNSUPPORTED.identifier
             );
         }
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("valid unregistered resident fixture")
+                .handle,
+        );
         let error = futures::executor::block_on(getmethod_builtin(
             resident,
             Value::String("method".into()),

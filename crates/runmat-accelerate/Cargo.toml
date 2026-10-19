@@ -9,7 +9,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [features]
 # Backends are opt-in features
-cuda = []
+cuda = ["dep:libloading"]
 rocm = []
 metal = []
 vulkan = []
@@ -23,7 +23,6 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
-runmat-hir = { workspace = true }
 runmat-gc = { workspace = true }
 runmat-types = { workspace = true }
 runmat-accelerate-api = { workspace = true }
@@ -41,19 +40,22 @@ smallvec = "1.13"
 rand = "0.8"
 tracing = "0.1"
 futures = "0.3"
+hashbrown = "=0.16.1"
 libm = "0.2"
 
 # Optional backend deps
 pollster = { version = "0.3", optional = true }
 
 [dev-dependencies]
+runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 runmat-vm = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
+naga = { version = "24.0.0", features = ["wgsl-in"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wgpu = { version = "24.0.0", optional = true }
+wgpu = { workspace = true, optional = true }
 tokio = { workspace = true, default-features = false, features = ["macros", "rt"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -71,6 +73,14 @@ web-sys = { version = "0.3", features = [
   "IdbTransactionMode",
 ] }
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wgpu = { version = "0.19", optional = true, features = ["trace"] }
+wgpu = { workspace = true, optional = true }
+libloading = { version = "0.8.9", optional = true }
 tokio = { workspace = true, default-features = false, features = ["macros", "rt-multi-thread"] }
+
+[[bench]]
+name = "direct_call_observation"
+harness = false

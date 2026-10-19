@@ -141,6 +141,22 @@ pub fn infer_binary(operator: OperatorKind, left: &ValueFact, right: &ValueFact)
     };
     let kind = if comparison {
         ValueKindFact::Logical
+    } else if let Some(recipe) = super::RealFloatingRecipe::for_facts(operator, left, right) {
+        ValueKindFact::Numeric(NumericFact {
+            class: recipe.result_class(),
+            domain: crate::NumericDomain::Real,
+        })
+    } else if operator == OperatorKind::ElementwiseMultiply
+        || (operator == OperatorKind::MatrixMultiply
+            && [left, right]
+                .iter()
+                .any(|operand| operand.shape.element_count() == Some(1)))
+    {
+        // Scalar matrix multiplication delegates to elementwise times. Share
+        // its floating class contract without asserting contraction arithmetic
+        // or extending integer, complex, or unproven-carrier inference.
+        real_floating_product_kind(left, right)
+            .unwrap_or_else(|| numeric_result_kind(numeric_fact(left), numeric_fact(right)))
     } else {
         numeric_result_kind(numeric_fact(left), numeric_fact(right))
     };
@@ -155,6 +171,100 @@ pub fn infer_binary(operator: OperatorKind, left: &ValueFact, right: &ValueFact)
     }
     fact.storage = binary_storage(operator, left, right, &fact.shape);
     FactInference::exact(fact)
+}
+
+/// Exact represented arithmetic for real floating `+`. Mixed precision uses
+/// a Double addition followed by one Single result conversion, as the shared
+/// host operation does; rounding both operands to Single first is different.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RealFloatingAddMode {
+    Single,
+    Double,
+    MixedDoubleThenSingle,
+}
+
+/// Class projection shared with catalog arithmetic. This does not by itself
+/// admit a computation or establish its intermediate precision.
+#[inline]
+pub const fn floating_binary_result_class(
+    left: crate::NumericClass,
+    right: crate::NumericClass,
+) -> Option<crate::NumericClass> {
+    match (left, right) {
+        (crate::NumericClass::Single, crate::NumericClass::Single)
+        | (crate::NumericClass::Single, crate::NumericClass::Double)
+        | (crate::NumericClass::Double, crate::NumericClass::Single) => {
+            Some(crate::NumericClass::Single)
+        }
+        (crate::NumericClass::Double, crate::NumericClass::Double) => {
+            Some(crate::NumericClass::Double)
+        }
+        _ => None,
+    }
+}
+
+fn real_floating_product_kind(left: &ValueFact, right: &ValueFact) -> Option<ValueKindFact> {
+    if !matches!(left.storage, StorageFact::Scalar | StorageFact::Dense)
+        || !matches!(right.storage, StorageFact::Scalar | StorageFact::Dense)
+    {
+        return None;
+    }
+    let left = left.numeric()?;
+    let right = right.numeric()?;
+    if left.domain != crate::NumericDomain::Real || right.domain != crate::NumericDomain::Real {
+        return None;
+    }
+    Some(ValueKindFact::Numeric(NumericFact {
+        class: floating_binary_result_class(left.class, right.class)?,
+        domain: crate::NumericDomain::Real,
+    }))
+}
+
+impl RealFloatingAddMode {
+    /// Project a canonical represented Add recipe onto the provider ABI.
+    /// The caller must separately establish that the operands have a real
+    /// scalar/dense physical representation before using this mode.
+    pub fn from_recipe(recipe: super::RealFloatingRecipe) -> Option<Self> {
+        if recipe.operator() != OperatorKind::Add {
+            return None;
+        }
+        match (recipe.computation_class(), recipe.result_class()) {
+            (crate::NumericClass::Single, crate::NumericClass::Single) => Some(Self::Single),
+            (crate::NumericClass::Double, crate::NumericClass::Double) => Some(Self::Double),
+            (crate::NumericClass::Double, crate::NumericClass::Single) => {
+                Some(Self::MixedDoubleThenSingle)
+            }
+            _ => None,
+        }
+    }
+
+    pub const fn result_class(self) -> crate::NumericClass {
+        match self {
+            Self::Single | Self::MixedDoubleThenSingle => crate::NumericClass::Single,
+            Self::Double => crate::NumericClass::Double,
+        }
+    }
+
+    #[inline]
+    pub fn add_represented(self, left: f64, right: f64) -> f64 {
+        let (left_class, right_class) = match self {
+            Self::Single => (crate::NumericClass::Single, crate::NumericClass::Single),
+            Self::Double => (crate::NumericClass::Double, crate::NumericClass::Double),
+            Self::MixedDoubleThenSingle => {
+                (crate::NumericClass::Single, crate::NumericClass::Double)
+            }
+        };
+        super::RealFloatingRecipe::for_classes(OperatorKind::Add, left_class, right_class)
+            .and_then(|recipe| recipe.evaluate(left, right))
+            .expect("real Add mode has a represented recipe")
+    }
+}
+
+pub fn real_floating_add_mode(left: &ValueFact, right: &ValueFact) -> Option<RealFloatingAddMode> {
+    // Retain the established provider ABI modes only as a projection of the
+    // canonical represented arithmetic owner, never a second classifier.
+    let recipe = super::RealFloatingRecipe::for_facts(OperatorKind::Add, left, right)?;
+    RealFloatingAddMode::from_recipe(recipe)
 }
 
 fn binary_storage(
@@ -289,5 +399,174 @@ fn unsupported(code: &str, message: &str) -> FactInference {
     FactInference {
         fact: ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
         diagnostics: vec![InferenceDiagnostic::error(code, message)],
+    }
+}
+
+#[cfg(test)]
+mod mixed_add_tests {
+    use super::*;
+
+    fn real(class: crate::NumericClass, shape: &[Option<usize>]) -> ValueFact {
+        ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class,
+                domain: crate::NumericDomain::Real,
+            }),
+            ShapeFact::from(shape.to_vec()),
+            StorageFact::Dense,
+        )
+    }
+
+    #[test]
+    fn mixed_real_add_proves_single_and_shared_arithmetic_contracts() {
+        let single = real(crate::NumericClass::Single, &[Some(2), Some(1)]);
+        let double_scalar = real(crate::NumericClass::Double, &[Some(1), Some(1)]);
+        let inferred = infer_binary(OperatorKind::Add, &single, &double_scalar);
+        assert!(inferred.diagnostics.is_empty());
+        assert_eq!(inferred.fact.shape, ShapeFact::from(vec![Some(2), Some(1)]));
+        assert_eq!(
+            inferred.fact.numeric().map(|numeric| numeric.class),
+            Some(crate::NumericClass::Single)
+        );
+        assert_eq!(
+            real_floating_add_mode(&single, &double_scalar),
+            Some(RealFloatingAddMode::MixedDoubleThenSingle)
+        );
+        for storage in [
+            StorageFact::Sparse,
+            StorageFact::Unknown,
+            StorageFact::Opaque,
+        ] {
+            let mut unproved = single.clone();
+            unproved.storage = storage;
+            assert_eq!(real_floating_add_mode(&unproved, &double_scalar), None);
+            assert!(infer_binary(OperatorKind::Add, &unproved, &double_scalar)
+                .fact
+                .numeric()
+                .is_none());
+        }
+        let double_array = real(crate::NumericClass::Double, &[Some(1), Some(3)]);
+        assert_eq!(
+            infer_binary(OperatorKind::Add, &single, &double_array)
+                .fact
+                .shape,
+            ShapeFact::from(vec![Some(2), Some(3)])
+        );
+        assert_eq!(
+            infer_binary(OperatorKind::Subtract, &single, &double_scalar)
+                .fact
+                .kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: crate::NumericClass::Single,
+                domain: crate::NumericDomain::Real,
+            })
+        );
+        let mismatch = real(crate::NumericClass::Double, &[Some(3), Some(2)]);
+        assert!(!infer_binary(OperatorKind::Add, &single, &mismatch)
+            .diagnostics
+            .is_empty());
+    }
+
+    #[test]
+    fn mixed_real_products_share_class_contract_for_scalar_matrix_and_elementwise_times() {
+        let single = real(crate::NumericClass::Single, &[Some(2), Some(1)]);
+        let mut double_scalar = real(crate::NumericClass::Double, &[Some(1), Some(1)]);
+        double_scalar.storage = StorageFact::Scalar;
+        for operator in [
+            OperatorKind::MatrixMultiply,
+            OperatorKind::ElementwiseMultiply,
+        ] {
+            for (left, right) in [(&single, &double_scalar), (&double_scalar, &single)] {
+                let inferred = infer_binary(operator, left, right);
+                assert!(inferred.diagnostics.is_empty());
+                assert_eq!(inferred.fact.shape, single.shape);
+                assert_eq!(inferred.fact.storage, StorageFact::Dense);
+                assert_eq!(
+                    inferred.fact.numeric(),
+                    Some(NumericFact {
+                        class: crate::NumericClass::Single,
+                        domain: crate::NumericDomain::Real,
+                    })
+                );
+            }
+            for storage in [
+                StorageFact::Sparse,
+                StorageFact::Unknown,
+                StorageFact::Opaque,
+            ] {
+                let mut unproved = single.clone();
+                unproved.storage = storage;
+                assert!(infer_binary(operator, &unproved, &double_scalar)
+                    .fact
+                    .numeric()
+                    .is_none());
+            }
+            let mut complex = single.clone();
+            complex.kind = ValueKindFact::Numeric(NumericFact {
+                class: crate::NumericClass::Single,
+                domain: crate::NumericDomain::Complex,
+            });
+            assert!(infer_binary(operator, &complex, &double_scalar)
+                .fact
+                .numeric()
+                .is_none());
+            let integer = real(crate::NumericClass::Int8, &[Some(2), Some(1)]);
+            assert!(infer_binary(operator, &integer, &double_scalar)
+                .fact
+                .numeric()
+                .is_none());
+        }
+        let double_row = real(crate::NumericClass::Double, &[Some(1), Some(3)]);
+        assert!(
+            infer_binary(OperatorKind::MatrixMultiply, &single, &double_row)
+                .fact
+                .numeric()
+                .is_none()
+        );
+        let broadcast = infer_binary(OperatorKind::ElementwiseMultiply, &single, &double_row);
+        assert_eq!(
+            broadcast.fact.shape,
+            ShapeFact::from(vec![Some(2), Some(3)])
+        );
+        assert_eq!(
+            broadcast.fact.numeric().map(|numeric| numeric.class),
+            Some(crate::NumericClass::Single)
+        );
+        for operator in [OperatorKind::Subtract, OperatorKind::ElementwiseDivide] {
+            let inferred = infer_binary(operator, &single, &double_scalar);
+            assert!(inferred.diagnostics.is_empty());
+            assert_eq!(inferred.fact.shape, single.shape);
+            assert_eq!(
+                inferred.fact.kind,
+                ValueKindFact::Numeric(NumericFact {
+                    class: crate::NumericClass::Single,
+                    domain: crate::NumericDomain::Real,
+                })
+            );
+        }
+        assert!(
+            infer_binary(OperatorKind::ElementwisePower, &single, &double_scalar)
+                .fact
+                .numeric()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn mixed_add_rounds_sum_once_and_preserves_unknown_exceptional_bounds() {
+        let below_one = f64::from(f32::from_bits(0x3f7f_ffff));
+        let half_ulp = f64::from(f32::EPSILON) / 4.0;
+        let mode = RealFloatingAddMode::MixedDoubleThenSingle;
+        assert_eq!(
+            mode.add_represented(below_one, half_ulp - f64::EPSILON),
+            below_one
+        );
+        assert_eq!(
+            mode.add_represented(half_ulp + f64::EPSILON, below_one),
+            1.0
+        );
+        assert!(mode
+            .add_represented(f64::INFINITY, f64::NEG_INFINITY)
+            .is_nan());
     }
 }

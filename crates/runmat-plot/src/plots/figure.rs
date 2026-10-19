@@ -12,7 +12,35 @@ use crate::plots::{
 };
 use glam::Vec4;
 use log::trace;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[path = "figure/axes_reset.rs"]
+mod axes_reset;
+#[path = "figure/colormap.rs"]
+mod colormap;
+#[path = "figure/color_range.rs"]
+mod color_range;
+#[path = "figure/y_direction.rs"]
+mod y_direction;
+pub use y_direction::YDirection;
+#[path = "figure/dimensionality.rs"]
+mod dimensionality;
+#[path = "figure/limits.rs"]
+mod limits;
+#[path = "figure/preparation.rs"]
+mod preparation;
+#[path = "figure/persistence_projection/mod.rs"]
+mod persistence_projection;
+pub use limits::{
+    display_bounds_3d, positive_log_bounds, resolve_axis_bounds, AxisLimitAxis, AxisLimitMethod,
+};
+pub use persistence_projection::project_figure_for_persistence;
+pub use persistence_projection::{
+    FigureAnnotationRemap, FigureAxesContainerSelection, FigureAxesPersistenceSelection,
+    FigureAxesRemap, FigureAxesSelectionKind, FigureDecoration, FigureDecorationRemap,
+    FigurePersistenceProjection, FigurePersistenceProjectionError, FigurePersistenceSelection,
+    FigurePlotRemap, FigureProjectionRemap,
+};
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];
@@ -53,6 +81,9 @@ pub struct Figure {
 
     /// Global colormap and colorbar
     pub colormap: ColorMap,
+    /// Figure-owned defaults for new/reset axes, distinct from the active-axes mirror.
+    pub default_colormap: ColorMap,
+    pub default_colormap_length: usize,
     pub colorbar_enabled: bool,
 
     /// Color mapping limits for all color-mapped plots in this figure (caxis)
@@ -67,6 +98,9 @@ pub struct Figure {
     pub axes_cols: usize,
     /// For each plot element, the axes index (row-major, 0..rows*cols-1)
     plot_axes_indices: Vec<usize>,
+
+    /// Exact source grid cells retained when a hierarchy is compacted.
+    axes_grid_cells: Vec<Option<AxesGridCell>>,
 
     /// The axes index whose annotation metadata is currently active.
     pub active_axes_index: usize,
@@ -90,6 +124,14 @@ pub struct TextStyle {
     pub vertical_alignment: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AxesGridCell {
+    pub rows: u32,
+    pub columns: u32,
+    pub index: u32,
+}
+
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
@@ -102,6 +144,23 @@ impl Default for TextStyle {
             horizontal_alignment: None,
             vertical_alignment: None,
         }
+    }
+}
+
+impl TextStyle {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        for value in [
+            self.font_weight.as_ref(),
+            self.font_angle.as_ref(),
+            self.interpreter.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        Some(total)
     }
 }
 
@@ -134,8 +193,29 @@ impl Default for LegendStyle {
     }
 }
 
+impl LegendStyle {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        for value in [
+            self.location.as_ref(),
+            self.font_weight.as_ref(),
+            self.font_angle.as_ref(),
+            self.interpreter.as_ref(),
+            self.orientation.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        Some(total)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AxesMetadata {
+    pub colormap_length: usize,
+    pub y_direction: YDirection,
     pub axes_kind: AxesKind,
     pub overlay_parent: Option<usize>,
     pub y_axis_location: String,
@@ -158,6 +238,9 @@ pub struct AxesMetadata {
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
     pub z_limits: Option<(f64, f64)>,
+    pub x_limit_method: AxisLimitMethod,
+    pub y_limit_method: AxisLimitMethod,
+    pub z_limit_method: AxisLimitMethod,
     pub x_log: bool,
     pub y_log: bool,
     pub view_azimuth_deg: Option<f32>,
@@ -198,6 +281,76 @@ pub struct TextAnnotation {
     pub position: glam::Vec3,
     pub text: String,
     pub style: TextStyle,
+}
+
+impl AxesMetadata {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        for value in [
+            Some(&self.y_axis_location),
+            Some(&self.units),
+            self.title.as_ref(),
+            self.subtitle.as_ref(),
+            self.x_label.as_ref(),
+            self.y_label.as_ref(),
+            self.z_label.as_ref(),
+            self.x_tick_format.as_ref(),
+            self.y_tick_format.as_ref(),
+            Some(&self.data_aspect_ratio_mode),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        for values in [&self.x_ticks, &self.y_ticks].into_iter().flatten() {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for labels in [&self.x_tick_labels, &self.y_tick_labels]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::strings(labels)?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.color_order.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        for style in [
+            &self.axes_style,
+            &self.title_style,
+            &self.subtitle_style,
+            &self.x_label_style,
+            &self.y_label_style,
+            &self.z_label_style,
+        ] {
+            crate::plots::clone_budget::add(&mut total, style.retained_snapshot_bytes()?)?;
+        }
+        crate::plots::clone_budget::add(&mut total, self.legend_style.retained_snapshot_bytes()?)?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<TextAnnotation>(
+                self.world_text_annotations.capacity(),
+            )?,
+        )?;
+        for annotation in &self.world_text_annotations {
+            crate::plots::clone_budget::add(&mut total, annotation.text.capacity())?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                annotation.style.retained_snapshot_bytes()?,
+            )?;
+        }
+        Some(total)
+    }
 }
 
 /// A plot element that can be any type of plot
@@ -270,7 +423,87 @@ pub enum PlotType {
     ReferenceLine,
 }
 
+#[path = "figure/metadata_budget.rs"]
+mod metadata_budget;
+pub use metadata_budget::FigureMetadataOverlay;
+
 impl Figure {
+    /// Proposed text metadata uses the same retained-body accounting as a
+    /// real snapshot, without cloning plot data or its backing allocations.
+    pub fn retained_snapshot_bytes_with_metadata<'a>(
+        &self,
+        overlays: impl IntoIterator<Item = FigureMetadataOverlay<'a>>,
+    ) -> Option<usize> {
+        let current = self.retained_snapshot_bytes()?;
+        let body = current.checked_sub(self.metadata_overlay().retained_bytes(self)?)?;
+        let mut maximum: Option<usize> = None;
+        for overlay in overlays {
+            let bytes = body.checked_add(overlay.retained_bytes(self)?)?;
+            maximum = Some(maximum.map_or(bytes, |maximum| maximum.max(bytes)));
+        }
+        maximum.or(Some(current))
+    }
+
+    pub fn metadata_overlay(&self) -> FigureMetadataOverlay<'_> {
+        FigureMetadataOverlay {
+            name: self.name.as_ref(),
+            sg_title: self.sg_title.as_ref(),
+            sg_title_style: &self.sg_title_style,
+            active_axes: None,
+        }
+    }
+
+    /// Heap bytes retained by an immutable snapshot of this figure.
+    ///
+    /// Shared GPU buffers are cheap resident handles. Reference-counted host
+    /// tables are included because the snapshot pins their payloads in memory.
+    pub fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::vec::<PlotElement>(self.plots.capacity())?;
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            self.default_colormap.retained_snapshot_bytes()?,
+        )?;
+        for value in [
+            self.name.as_ref(),
+            self.title.as_ref(),
+            self.sg_title.as_ref(),
+            self.x_label.as_ref(),
+            self.y_label.as_ref(),
+            self.z_label.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<usize>(self.plot_axes_indices.capacity())?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Option<AxesGridCell>>(
+                self.axes_grid_cells.capacity(),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<AxesMetadata>(self.axes_metadata.capacity())?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            self.sg_title_style.retained_snapshot_bytes()?,
+        )?;
+        for plot in &self.plots {
+            crate::plots::clone_budget::add(&mut total, plot.retained_snapshot_bytes()?)?;
+        }
+        for axes in &self.axes_metadata {
+            crate::plots::clone_budget::add(&mut total, axes.retained_snapshot_bytes()?)?;
+        }
+        Some(total)
+    }
+
     fn default_axes_metadata() -> AxesMetadata {
         AxesMetadata {
             axes_kind: AxesKind::Cartesian,
@@ -293,6 +526,7 @@ impl Figure {
             legend_enabled: false,
             colorbar_enabled: false,
             colormap: ColorMap::Parula,
+            colormap_length: 256,
             color_limits: None,
             ..Default::default()
         }
@@ -323,6 +557,8 @@ impl Figure {
             y_log: false,
             axis_equal: false,
             colormap: ColorMap::Parula,
+            default_colormap: ColorMap::Parula,
+            default_colormap_length: 256,
             colorbar_enabled: false,
             color_limits: None,
             bounds: None,
@@ -330,6 +566,7 @@ impl Figure {
             axes_rows: 1,
             axes_cols: 1,
             plot_axes_indices: Vec::new(),
+            axes_grid_cells: vec![None],
             active_axes_index: 0,
             axes_metadata: vec![Self::default_axes_metadata()],
             sg_title_style: TextStyle::default(),
@@ -338,8 +575,9 @@ impl Figure {
 
     fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
         while self.axes_metadata.len() < min_len.max(1) {
-            self.axes_metadata.push(Self::default_axes_metadata());
+            self.axes_metadata.push(self.inherited_axes_metadata());
         }
+        self.axes_grid_cells.resize(self.axes_metadata.len(), None);
     }
 
     fn sync_legacy_fields_from_active_axes(&mut self) {
@@ -382,6 +620,31 @@ impl Figure {
 
     pub fn axes_metadata(&self, axes_index: usize) -> Option<&AxesMetadata> {
         self.axes_metadata.get(axes_index)
+    }
+
+    pub fn axes_grid_cell(&self, axes_index: usize) -> Option<AxesGridCell> {
+        self.axes_grid_cells.get(axes_index).copied().flatten()
+    }
+
+    pub(crate) fn restore_axes_grid_cells(
+        &mut self,
+        cells: Vec<Option<AxesGridCell>>,
+    ) -> Result<(), String> {
+        if cells.len() > self.axes_metadata.len() {
+            return Err("axes grid-cell metadata exceeds the axes count".into());
+        }
+        for cell in cells.iter().flatten() {
+            let count = cell
+                .rows
+                .checked_mul(cell.columns)
+                .ok_or_else(|| "axes grid-cell dimensions overflow".to_string())?;
+            if cell.rows == 0 || cell.columns == 0 || cell.index >= count {
+                return Err("axes grid-cell metadata is invalid".into());
+            }
+        }
+        self.axes_grid_cells = cells;
+        self.axes_grid_cells.resize(self.axes_metadata.len(), None);
+        Ok(())
     }
 
     pub fn active_axes_metadata(&self) -> Option<&AxesMetadata> {
@@ -473,6 +736,28 @@ impl Figure {
     /// Set axis labels in-place
     pub fn set_axis_labels<S: Into<String>>(&mut self, x_label: S, y_label: S) {
         self.set_axes_labels(self.active_axes_index, x_label, y_label);
+        self.dirty = true;
+    }
+
+    /// Clear axes annotations when a plot replaces the axes' previous contents.
+    /// Figure/window names and the figure-wide title are unaffected.
+    pub fn reset_axes_text(&mut self, axes_index: usize) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.title = None;
+            meta.subtitle = None;
+            meta.x_label = None;
+            meta.y_label = None;
+            meta.z_label = None;
+            meta.title_style = TextStyle::default();
+            meta.subtitle_style = TextStyle::default();
+            meta.x_label_style = TextStyle::default();
+            meta.y_label_style = TextStyle::default();
+            meta.z_label_style = TextStyle::default();
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
         self.dirty = true;
     }
 
@@ -997,6 +1282,7 @@ impl Figure {
                 meta.minor_grid_enabled = false;
             }
         }
+        self.axes_grid_cells[index] = self.axes_grid_cells.get(parent).copied().flatten();
         self.dirty = true;
         index
     }
@@ -1021,6 +1307,7 @@ impl Figure {
             meta.position = position;
             meta.position_explicit = true;
         }
+        self.axes_grid_cells[axes_index] = None;
         self.dirty = true;
     }
 
@@ -1060,6 +1347,7 @@ impl Figure {
         self.axes_cols = cols.max(1);
         let grid_axes = self.axes_rows * self.axes_cols;
         self.ensure_axes_metadata_capacity(grid_axes);
+        self.axes_grid_cells.fill(None);
         for axes_index in 0..grid_axes {
             if self
                 .axes_metadata
@@ -1067,9 +1355,7 @@ impl Figure {
                 .is_some_and(|meta| meta.overlay_parent.is_some())
             {
                 self.clear_axes(axes_index);
-                if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
-                    *meta = Self::default_axes_metadata();
-                }
+                self.axes_metadata[axes_index] = self.inherited_axes_metadata();
             }
         }
         self.active_axes_index = self.active_axes_index.min(
@@ -1120,6 +1406,23 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_limit_method(
+        &mut self,
+        axes_index: usize,
+        axis: AxisLimitAxis,
+        method: AxisLimitMethod,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            match axis {
+                AxisLimitAxis::X => meta.x_limit_method = method,
+                AxisLimitAxis::Y => meta.y_limit_method = method,
+                AxisLimitAxis::Z => meta.z_limit_method = method,
+            }
+        }
+        self.dirty = true;
+    }
+
     pub fn set_axes_box_enabled(&mut self, axes_index: usize, enabled: bool) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
@@ -1153,6 +1456,9 @@ impl Figure {
     pub fn set_axes_colormap(&mut self, axes_index: usize, cmap: ColorMap) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            if let ColorMap::Listed(colors) = &cmap {
+                meta.colormap_length = colors.len();
+            }
             meta.colormap = cmap.clone();
         }
         for (idx, plot) in self.plots.iter_mut().enumerate() {
@@ -1203,7 +1509,9 @@ impl Figure {
                 continue;
             }
             if let PlotElement::Surface(surface) = plot {
-                surface.set_color_limits(limits);
+                if surface.color_mapping == crate::plots::surface::SurfaceColorMapping::Scaled {
+                    surface.set_color_limits(limits);
+                }
             }
         }
         if axes_index == self.active_axes_index {
@@ -1495,23 +1803,6 @@ impl Figure {
         self.dirty = true;
     }
 
-    /// Clears the title, subtitle and axis labels of one axes, as a MATLAB plot with
-    /// `NextPlot` 'replace' (hold off) resets them; `cla` keeps them.
-    pub fn reset_axes_text(&mut self, axes_index: usize) {
-        self.ensure_axes_metadata_capacity(axes_index + 1);
-        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
-            meta.title = None;
-            meta.subtitle = None;
-            meta.x_label = None;
-            meta.y_label = None;
-            meta.z_label = None;
-        }
-        if axes_index == self.active_axes_index {
-            self.sync_legacy_fields_from_active_axes();
-        }
-        self.dirty = true;
-    }
-
     /// Get the number of plots
     pub fn len(&self) -> usize {
         self.plots.len()
@@ -1683,6 +1974,12 @@ impl Figure {
             let axes_view_bounds = axes_view_bounds
                 .and_then(|bounds| bounds.get(axes_index).copied())
                 .flatten();
+            let resolved_viewport = crate::core::ResolvedViewport {
+                pixels: axes_viewports_px
+                    .and_then(|viewports| viewports.get(axes_index).copied())
+                    .or(viewport_px),
+                view: axes_view_bounds,
+            };
             let hidden_line_removal = self
                 .axes_metadata
                 .get(axes_index)
@@ -1690,8 +1987,20 @@ impl Figure {
                 .unwrap_or(true);
             if let PlotElement::Surface(s) = p {
                 if let Some(meta) = self.axes_metadata.get(axes_index) {
-                    s.set_color_limits(meta.color_limits);
+                    if s.color_mapping == crate::plots::surface::SurfaceColorMapping::Scaled {
+                        s.set_color_limits(meta.color_limits);
+                    }
+                    s.colormap_length = meta.colormap_length;
                     *s = s.clone().with_colormap(meta.colormap.clone());
+                }
+            }
+            if let PlotElement::Patch(patch) = p {
+                if let Some(meta) = self.axes_metadata.get(axes_index) {
+                    patch.set_color_context(
+                        meta.colormap.clone(),
+                        meta.colormap_length,
+                        meta.color_limits,
+                    );
                 }
             }
 
@@ -1733,10 +2042,8 @@ impl Figure {
                         &mut out,
                         axes_index,
                         plot.render_data_with_viewport_gpu(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                            axes_view_bounds,
+                            resolved_viewport.pixels,
+                            resolved_viewport.view,
                             log_axes,
                             gpu,
                         ),
@@ -1748,10 +2055,8 @@ impl Figure {
                         &mut out,
                         axes_index,
                         plot.render_data_on_axes(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                            axes_view_bounds,
+                            resolved_viewport.pixels,
+                            resolved_viewport.view,
                             log_axes,
                         ),
                         plot.marker_render_data(),
@@ -1762,10 +2067,8 @@ impl Figure {
                         &mut out,
                         axes_index,
                         plot.render_data_on_axes(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                            axes_view_bounds,
+                            resolved_viewport.pixels,
+                            resolved_viewport.view,
                             log_axes,
                         ),
                         plot.marker_render_data(),
@@ -1773,11 +2076,7 @@ impl Figure {
                 }
                 PlotElement::Contour(plot) => out.push((
                     axes_index,
-                    plot.render_data_with_viewport(
-                        axes_viewports_px
-                            .and_then(|viewports| viewports.get(axes_index).copied())
-                            .or(viewport_px),
-                    ),
+                    plot.render_data_with_resolved_viewport(resolved_viewport),
                 )),
                 PlotElement::ReferenceLine(plot) => {
                     let (x_range, y_range) = Self::reference_line_ranges(
@@ -1789,23 +2088,14 @@ impl Figure {
                     );
                     out.push((
                         axes_index,
-                        plot.render_data_with_range(
-                            x_range,
-                            y_range,
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                            log_axes,
-                        ),
+                        plot.render_data_with_range(x_range, y_range, resolved_viewport.pixels, log_axes),
                     ));
                 }
                 PlotElement::Patch(plot) => {
                     out.push((axes_index, plot.render_data()));
-                    if let Some(edge_data) = plot.edge_render_data_with_viewport(
-                        axes_viewports_px
-                            .and_then(|viewports| viewports.get(axes_index).copied())
-                            .or(viewport_px),
-                    ) {
+                    if let Some(edge_data) =
+                        plot.edge_render_data_with_resolved_viewport(resolved_viewport)
+                    {
                         out.push((axes_index, edge_data));
                     }
                 }
@@ -2280,6 +2570,35 @@ fn normalize_reference_range(range: (f64, f64)) -> (f64, f64) {
 }
 
 impl PlotElement {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let (boxed, payload) = match self {
+            Self::Line(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Scatter(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Bar(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ErrorBar(plot) => (
+                std::mem::size_of::<ErrorBar>(),
+                plot.retained_snapshot_bytes()?,
+            ),
+            Self::Stairs(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Stem(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Area(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Quiver(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Pie(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Surface(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Mesh(plot) => (
+                std::mem::size_of::<MeshPlot>(),
+                plot.retained_snapshot_bytes()?,
+            ),
+            Self::Patch(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Line3(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Scatter3(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Contour(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ContourFill(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ReferenceLine(plot) => (0, plot.retained_snapshot_bytes()?),
+        };
+        boxed.checked_add(payload)
+    }
+
     /// Check if the plot is visible
     pub fn is_visible(&self) -> bool {
         match self {
@@ -2595,6 +2914,7 @@ mod tests {
         assert_eq!(figure.len(), 0);
         assert!(figure.is_empty());
         assert!(!figure.legend_enabled);
+        assert!(!figure.axes_metadata(0).unwrap().legend_enabled);
         assert!(figure.grid_enabled);
     }
 
@@ -2675,7 +2995,7 @@ mod tests {
 
     #[test]
     fn test_mixed_plot_types() {
-        let mut figure = Figure::new();
+        let mut figure = Figure::new().with_legend(true);
 
         // Add different plot types
         let line = LinePlot::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0])

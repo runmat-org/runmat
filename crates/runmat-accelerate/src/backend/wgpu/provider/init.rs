@@ -4,25 +4,72 @@ use log::{info, warn};
 use pollster::block_on;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
+use super::moments_cache::{CacheBudget, ReductionReuseCache};
+use super::owner_shared::OwnerShared;
 use super::{
     canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode,
-    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuDeviceCaches,
-    WgpuDeviceHealth, WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions, WorkgroupConfig,
+    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuDeviceHealth,
+    WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions, WorkgroupConfig,
 };
 use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::bind_group::BindGroupCache;
 use crate::backend::wgpu::config::{
     self, DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD, MATMUL_TILE, WORKGROUP_SIZE,
 };
-use crate::backend::wgpu::pipelines::{ImageNormalizeBootstrap, WgpuPipelines};
-use crate::backend::wgpu::residency::BufferResidency;
+use crate::backend::wgpu::pipelines::{FrozenLinearLaunch, ImageNormalizeBootstrap, WgpuPipelines};
 use crate::backend::wgpu::resources::KernelResourceRegistry;
 use crate::telemetry::AccelTelemetry;
 
+#[path = "init/timestamp_features.rs"]
+mod timestamp_features;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_required_features(
+    precision: NumericPrecision,
+    adapter_features: wgpu::Features,
+) -> wgpu::Features {
+    let mut features = match precision {
+        NumericPrecision::F32 => wgpu::Features::empty(),
+        NumericPrecision::F64 => wgpu::Features::SHADER_F64,
+    };
+    if precision == NumericPrecision::F64 && adapter_features.contains(wgpu::Features::SHADER_INT64)
+    {
+        features |= wgpu::Features::SHADER_INT64;
+    }
+    features
+}
+
 impl WgpuProvider {
+    /// Provider-local reuse ceiling, independent of the adapter residency
+    /// pool and aggregate placement hardware capacity. Zero disables reuse.
+    pub(super) fn reduction_reuse_budget() -> CacheBudget {
+        fn parse(var: &str, default: u64) -> u64 {
+            match std::env::var(var) {
+                Ok(raw) => match raw.parse::<u64>() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        log::warn!(
+                            "invalid {var}='{raw}'; using reduction-cache default {default}"
+                        );
+                        default
+                    }
+                },
+                Err(_) => default,
+            }
+        }
+        let entries = parse("RUNMAT_WGPU_MOMENTS_CACHE_MAX_ENTRIES", 128);
+        let max_entries = usize::try_from(entries).unwrap_or_else(|_| {
+            warn!("WGPU reduction-cache entry limit {entries} exceeds usize; using default 128");
+            128
+        });
+        CacheBudget {
+            max_entries,
+            max_bytes: parse("RUNMAT_WGPU_MOMENTS_CACHE_MAX_BYTES", 64 << 20),
+        }
+    }
+
     pub(super) fn buffer_residency_pool_limit() -> usize {
         const VAR: &str = "RUNMAT_WGPU_POOL_MAX_PER_KEY";
         match std::env::var(VAR) {
@@ -47,33 +94,6 @@ impl WgpuProvider {
                 }
             },
             Err(_) => Self::BUFFER_RESIDENCY_MAX_PER_KEY,
-        }
-    }
-
-    pub(super) fn buffer_residency_total_limit() -> usize {
-        const VAR: &str = "RUNMAT_WGPU_POOL_MAX_BUFFERS";
-        match std::env::var(VAR) {
-            Ok(raw) => match raw.parse::<usize>() {
-                Ok(value) => {
-                    log::info!(
-                        "RunMat Accelerate: total buffer residency pool capacity set to {} via {}",
-                        value,
-                        VAR
-                    );
-                    value
-                }
-                Err(err) => {
-                    log::warn!(
-                        "RunMat Accelerate: failed to parse {}='{}' ({}); using default {}",
-                        VAR,
-                        raw,
-                        err,
-                        Self::BUFFER_RESIDENCY_MAX_TOTAL
-                    );
-                    Self::BUFFER_RESIDENCY_MAX_TOTAL
-                }
-            },
-            Err(_) => Self::BUFFER_RESIDENCY_MAX_TOTAL,
         }
     }
 
@@ -143,18 +163,17 @@ impl WgpuProvider {
             // Keeping compute and presentation on this one backend is required
             // for provider-owned buffers to remain WGPU-resident through draw.
             // Advanced users can still opt into another backend explicitly.
-            instance_desc.backends =
-                wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::DX12);
-            instance_desc.dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env()
-                .unwrap_or(wgpu::Dx12Compiler::Dxc {
-                    dxil_path: None,
-                    dxc_path: None,
+            instance_desc.backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::DX12);
+            instance_desc.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::from_env()
+                .unwrap_or(wgpu::Dx12Compiler::DynamicDxc {
+                    dxil_path: "dxil.dll".into(),
+                    dxc_path: "dxcompiler.dll".into(),
                 });
         }
         #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
         {
-            if let Some(compiler) = wgpu::util::dx12_shader_compiler_from_env() {
-                instance_desc.dx12_shader_compiler = compiler;
+            if let Some(compiler) = wgpu::Dx12Compiler::from_env() {
+                instance_desc.backend_options.dx12.shader_compiler = compiler;
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -173,7 +192,6 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("wgpu: no compatible adapter found"))?;
 
         let adapter_info = adapter.get_info();
-        #[cfg(not(target_arch = "wasm32"))]
         let adapter_features = adapter.features();
         let requested_precision = match opts.precision {
             WgpuPrecisionPolicy::Automatic => environment_precision()?,
@@ -223,10 +241,13 @@ impl WgpuProvider {
             _ => ReductionTwoPassMode::Auto,
         };
 
-        let required_features = match precision {
-            NumericPrecision::F64 => wgpu::Features::SHADER_F64,
-            NumericPrecision::F32 => wgpu::Features::empty(),
-        };
+        let optional_timestamp_features =
+            timestamp_features::requested(adapter_info.backend, adapter_features);
+        #[cfg(not(target_arch = "wasm32"))]
+        let required_features =
+            native_required_features(precision, adapter_features) | optional_timestamp_features;
+        #[cfg(target_arch = "wasm32")]
+        let required_features = optional_timestamp_features;
         let limits = adapter.limits();
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -252,12 +273,35 @@ impl WgpuProvider {
             )
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
-        let device = Arc::new(device_raw);
         let device_health = Arc::new(WgpuDeviceHealth::default());
-        install_device_error_handlers(&device, device_health.clone());
-        let queue = Arc::new(queue_raw);
+        let timestamp_period_ns = queue_raw.get_timestamp_period();
+        let (access, emission_authority) =
+            runmat_accelerate_api::WgpuDeviceAccess::new_profiled(device_raw, queue_raw);
+        #[cfg(target_arch = "wasm32")]
+        access.with_profiled_shared(&emission_authority, |emission| {
+            install_device_error_handlers(emission.device(), device_health.clone())
+        })?;
         let adapter = Arc::new(adapter);
-        let satisfied_limits = device.limits();
+        let satisfied_limits = access
+            .with_profiled_shared(&emission_authority, |emission| emission.device().limits())?;
+        let enabled_features = access
+            .with_profiled_shared(&emission_authority, |emission| emission.device().features())?;
+        let timestamp_capability = enabled_features
+            .contains(wgpu::Features::TIMESTAMP_QUERY)
+            .then(|| {
+                crate::backend::wgpu::dispatch::observation::TimestampCapability::new(
+                    timestamp_period_ns,
+                    enabled_features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
+                )
+            })
+            .flatten();
+        let observation_limit =
+            std::num::NonZeroU32::new(64).expect("nonzero provider observation safety limit");
+        // The same optional byte admission also covers browser direct-work
+        // completion fences when timestamp queries are unavailable.
+        let query_requested_byte_limit = u64::from(observation_limit.get())
+            .checked_mul(crate::backend::wgpu::dispatch::observation::MAX_QUERY_REQUESTED_BYTES)
+            .ok_or_else(|| anyhow!("WGPU observation byte bound overflow"))?;
 
         let workgroup_config = WorkgroupConfig::new(
             &satisfied_limits,
@@ -386,119 +430,139 @@ impl WgpuProvider {
             lane_count: sanitized_bootstrap.lane_count,
             spatial_tile: sanitized_bootstrap.spatial_tile,
         };
-        let pipelines = Arc::new(WgpuPipelines::new(&device, precision, image_norm_bootstrap));
+        let linear_launch = FrozenLinearLaunch::new(
+            workgroup_config.scalar,
+            satisfied_limits.max_compute_workgroups_per_dimension,
+        )
+        .ok_or_else(|| anyhow!("enabled WGPU linear launch limits are invalid"))?;
+        let global_reduce_launch =
+            crate::backend::wgpu::pipelines::FrozenGlobalReductionLaunch::new(
+                workgroup_config.reduction_default,
+                precision,
+                &satisfied_limits,
+            )
+            .ok_or_else(|| anyhow!("enabled WGPU global reduction launch limits are invalid"))?;
+        let pipelines = WgpuPipelines::new(
+            &access,
+            precision,
+            image_norm_bootstrap,
+            linear_launch,
+            global_reduce_launch,
+            workgroup_config.matmul_tile,
+        );
+        let f32_real_floating = (precision == NumericPrecision::F64).then(|| {
+            crate::backend::wgpu::pipelines::F32RealFloatingPipelines::new(
+                &access,
+                linear_launch,
+                crate::backend::wgpu::pipelines::FrozenShaderTokens::new(
+                    linear_launch,
+                    workgroup_config.matmul_tile,
+                ),
+            )
+        });
+        let ordered_real_mean = (precision == NumericPrecision::F64)
+            .then(|| crate::backend::wgpu::pipelines::OrderedRealMeanPipelines::new(&access));
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
-        let buffer_pool_total_limit = Self::buffer_residency_total_limit();
         let max_poolable_bytes =
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
-        Ok(Self {
+        let bind_group_cache = Arc::new(BindGroupCache::default());
+        let reduction_reuse = OwnerShared::new(Mutex::new(ReductionReuseCache::try_new(
+            Self::reduction_reuse_budget(),
+        )?));
+        let kernel_resources = OwnerShared::new(KernelResourceRegistry::default());
+        let allocations = OwnerShared::new(super::allocation_state::AllocationState::new(
+            runtime_device_id,
+            buffer_pool_limit,
+            max_poolable_bytes,
+            bind_group_cache.clone(),
+            OwnerShared::downgrade(&kernel_resources),
+        ));
+        allocations.set_reduction_reuse(OwnerShared::downgrade(&reduction_reuse))?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let observation_stopped = access.with_profiled_shared(&emission_authority, |emission| {
+            install_device_error_handlers(emission.device(), &allocations, device_health.clone())
+        })?;
+        #[cfg(not(target_arch = "wasm32"))]
+        let observation_progress = super::observation_progress::NativeObservationProgress::start(
+            access.clone(),
+            observation_limit,
+            observation_stopped,
+        )
+        .map_err(|error| log::warn!("provider observation progress unavailable: {error}"))
+        .ok();
+
+        let provider = Self {
+            capability_snapshot: std::sync::OnceLock::new(),
             instance,
-            device,
+            access,
+            emission_authority,
             device_health,
-            queue,
             adapter,
             adapter_info,
             adapter_limits: satisfied_limits,
+            enabled_features,
+            timestamp_capability,
             workgroup_config,
-            buffers: Mutex::new(HashMap::new()),
+            linear_launch,
+            global_reduce_launch,
+            allocations,
             sparse: super::sparse::SparseState::default(),
-            buffer_residency: Arc::new(BufferResidency::new(
-                buffer_pool_limit,
-                buffer_pool_total_limit,
-            )),
-            buffer_residency_max_poolable_bytes: max_poolable_bytes,
-            next_id: AtomicU64::new(1),
+            sparse_pipelines: super::sparse::SparsePipelines::default(),
             pipelines,
+            f32_real_floating,
+            ordered_real_mean,
             runtime_device_id,
+            #[cfg(not(target_arch = "wasm32"))]
+            observation_progress,
+            observation_budget: Arc::new(
+                runmat_accelerate_api::observation::ProviderObservationBudget::with_wgpu_query_bytes(
+                    observation_limit,
+                    query_requested_byte_limit,
+                ),
+            ),
             cache_device_id,
             precision,
             element_size,
-            device_caches: Arc::new(WgpuDeviceCaches::default()),
-            bind_group_cache: BindGroupCache::default(),
-            kernel_resources: KernelResourceRegistry::default(),
+            fused_pipeline_cache: Mutex::new(HashMap::new()),
+            validated_fusion_cache: Mutex::new(HashMap::new()),
+            warmed_pipeline_cache: Mutex::new(HashMap::new()),
+            bind_group_layout_cache: Mutex::new(HashMap::new()),
+            bind_group_layout_tags: Mutex::new(HashMap::new()),
+            bind_group_cache,
+            kernel_resources,
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
             telemetry: AccelTelemetry::default(),
+            #[cfg(test)]
+            numeric_upload_post_buffer_fault: Mutex::new(None),
+            #[cfg(test)]
+            numeric_upload_post_buffer_count: std::sync::atomic::AtomicUsize::new(0),
             reduction_two_pass_mode,
             reduction_two_pass_threshold: two_pass_threshold,
             reduction_workgroup_size_default: reduction_wg_default,
             pipeline_cache_dir,
             reduction_autotune,
             image_norm_autotune,
+            image_norm_pipeline_cache: Mutex::new(HashMap::new()),
             autotune_base_dir,
             autotune_device_tag,
-            pow2_of: Mutex::new(HashMap::new()),
-            moments_cache: Mutex::new(HashMap::new()),
-        })
+            reduction_reuse,
+            fft_twiddle_cache: Mutex::new(HashMap::new()),
+        };
+        let mut snapshot = crate::placement::wgpu_capability_snapshot(
+            &provider,
+            provider.adapter_limits.max_buffer_size,
+        );
+        snapshot.sparse = Some(super::sparse::capabilities(&provider));
+        // Construction owns the provider until its immutable contract is set.
+        let _ = provider.capability_snapshot.set(snapshot);
+        Ok(provider)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(opts: WgpuProviderOptions) -> Result<Self> {
         block_on(Self::new_async(opts))
-    }
-
-    /// Create an independent runtime session on this provider's physical GPU context.
-    ///
-    /// Device-level objects and immutable pipeline definitions are shared, while
-    /// handle ownership, residency, operation caches, metrics, and telemetry begin
-    /// empty. This is the same boundary a caller needs when multiple logical
-    /// sessions use one adapter without repeatedly creating native GPU devices.
-    #[cfg(all(test, not(target_arch = "wasm32")))]
-    pub(crate) fn new_session(&self) -> Self {
-        let reduction_autotune = AutotuneController::new_from_env(
-            "RUNMAT_REDUCTION_AUTOTUNE",
-            "fused_reduction",
-            self.autotune_base_dir.clone(),
-            &self.autotune_device_tag,
-        );
-        let image_norm_autotune = AutotuneController::new_from_env(
-            "RUNMAT_IMAGE_NORMALIZE_AUTOTUNE",
-            "image_normalize",
-            self.autotune_base_dir.clone(),
-            &self.autotune_device_tag,
-        );
-
-        Self {
-            instance: self.instance.clone(),
-            device: self.device.clone(),
-            device_health: self.device_health.clone(),
-            queue: self.queue.clone(),
-            adapter: self.adapter.clone(),
-            adapter_info: self.adapter_info.clone(),
-            adapter_limits: self.adapter_limits.clone(),
-            workgroup_config: self.workgroup_config,
-            buffers: Mutex::new(HashMap::new()),
-            sparse: super::sparse::SparseState::default(),
-            buffer_residency: self.buffer_residency.clone(),
-            buffer_residency_max_poolable_bytes: self.buffer_residency_max_poolable_bytes,
-            next_id: AtomicU64::new(1),
-            pipelines: self.pipelines.clone(),
-            runtime_device_id: runmat_accelerate_api::next_device_id(),
-            cache_device_id: self.cache_device_id,
-            precision: self.precision,
-            element_size: self.element_size,
-            device_caches: self.device_caches.clone(),
-            bind_group_cache: BindGroupCache::default(),
-            kernel_resources: KernelResourceRegistry::default(),
-            metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
-            telemetry: AccelTelemetry::default(),
-            reduction_two_pass_mode: self.reduction_two_pass_mode,
-            reduction_two_pass_threshold: self.reduction_two_pass_threshold,
-            reduction_workgroup_size_default: self.reduction_workgroup_size_default,
-            pipeline_cache_dir: self.pipeline_cache_dir.clone(),
-            reduction_autotune,
-            image_norm_autotune,
-            autotune_base_dir: self.autotune_base_dir.clone(),
-            autotune_device_tag: self.autotune_device_tag.clone(),
-            pow2_of: Mutex::new(HashMap::new()),
-            moments_cache: Mutex::new(HashMap::new()),
-        }
-    }
-
-    #[cfg(all(test, not(target_arch = "wasm32")))]
-    pub(crate) fn test_device_handle(&self) -> Arc<wgpu::Device> {
-        self.device.clone()
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -552,6 +616,26 @@ mod precision_tests {
         assert_eq!(
             select_precision(None, false).expect("default native precision"),
             NumericPrecision::F32
+        );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod ieee_feature_tests {
+    use super::*;
+
+    #[test]
+    fn absent_integer_words_does_not_disable_plain_f64_provider() {
+        let basic = native_required_features(NumericPrecision::F64, wgpu::Features::SHADER_F64);
+        assert_eq!(basic, wgpu::Features::SHADER_F64);
+        let capable = native_required_features(
+            NumericPrecision::F64,
+            wgpu::Features::SHADER_F64 | wgpu::Features::SHADER_INT64,
+        );
+        assert!(capable.contains(wgpu::Features::SHADER_INT64));
+        assert_eq!(
+            native_required_features(NumericPrecision::F32, wgpu::Features::SHADER_INT64),
+            wgpu::Features::empty()
         );
     }
 }

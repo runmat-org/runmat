@@ -54,11 +54,11 @@ fn format_kind(kind: &ValueKindFact) -> String {
         ValueKindFact::Struct(_) => "struct".to_string(),
         ValueKindFact::Object(object) => object.runtime_class.as_ref().map_or_else(
             || "object".to_string(),
-            |class| format!("object<{}>", qualified_name(class)),
+            |class| format!("object<{}>", class.display_name()),
         ),
         ValueKindFact::ClassReference(class) => class.runtime_class.as_ref().map_or_else(
             || format!("class<{:?}>", class.class),
-            |name| format!("class<{}>", qualified_name(name)),
+            |name| format!("class<{}>", name.display_name()),
         ),
         ValueKindFact::Callable(_) => "callable".to_string(),
         ValueKindFact::OutputList(_) => "output-list".to_string(),
@@ -70,15 +70,12 @@ fn format_kind(kind: &ValueKindFact) -> String {
             runmat_types::ExecutionFact::Job { .. } => "job".to_string(),
         },
         ValueKindFact::Distributed(_) => "distributed".to_string(),
+        ValueKindFact::Composite(_) => "Composite".to_string(),
         ValueKindFact::Foreign(foreign) => foreign.type_name.as_ref().map_or_else(
             || format!("foreign<{}>", foreign.family),
             |name| format!("foreign<{name}>"),
         ),
     }
-}
-
-fn qualified_name(name: &runmat_types::QualifiedName) -> String {
-    name.display_name().unwrap_or_else(|| "unknown".to_string())
 }
 
 fn format_shape(shape: &ShapeFact) -> String {
@@ -171,10 +168,7 @@ mod tests {
                 "cell",
             ),
             (
-                ValueKindFact::Struct(runmat_types::StructFact {
-                    fields: BTreeMap::new(),
-                    fields_complete: true,
-                }),
+                ValueKindFact::Struct(runmat_types::StructFact::scalar(BTreeMap::new(), true)),
                 "struct",
             ),
             (
@@ -197,6 +191,7 @@ mod tests {
             (
                 ValueKindFact::Callable(runmat_types::CallableFact {
                     identity: None,
+                    capabilities: Default::default(),
                     parameters: vec![unknown()],
                     parameters_complete: false,
                     outputs: vec![unknown()],
@@ -223,14 +218,14 @@ mod tests {
             ),
             (
                 ValueKindFact::Execution(runmat_types::ExecutionFact::Future {
-                    output: Box::new(unknown()),
+                    output: runmat_types::ValueSequenceFact::single(unknown()),
                     state: runmat_types::FutureStateFact::Lazy,
                 }),
                 "future",
             ),
             (
                 ValueKindFact::Execution(runmat_types::ExecutionFact::Task {
-                    output: Box::new(unknown()),
+                    output: runmat_types::ValueSequenceFact::single(unknown()),
                     spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 }),
                 "task",
@@ -241,7 +236,7 @@ mod tests {
             ),
             (
                 ValueKindFact::Execution(runmat_types::ExecutionFact::Job {
-                    output: Box::new(unknown()),
+                    output: runmat_types::ValueSequenceFact::single(unknown()),
                 }),
                 "job",
             ),
@@ -251,10 +246,12 @@ mod tests {
                         function: runmat_types::ProgramFunctionId(1),
                         ordinal: 2,
                     },
-                    owner: runmat_types::ParallelRegionId(runmat_types::RegionId {
-                        function: runmat_types::ProgramFunctionId(1),
-                        ordinal: 3,
-                    }),
+                    owner: runmat_types::DistributedOwner::Region(runmat_types::ParallelRegionId(
+                        runmat_types::RegionId {
+                            function: runmat_types::ProgramFunctionId(1),
+                            ordinal: 3,
+                        },
+                    )),
                     scheme: Some(runmat_types::DistributionScheme::Replicated),
                     value: Box::new(unknown()),
                     materializable: true,

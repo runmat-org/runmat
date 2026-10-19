@@ -1,11 +1,36 @@
 mod array;
+mod containers_map;
 mod dynamic_property;
+mod graphics_callback;
+mod graphics_receiver;
+mod graphics_scene;
 mod handle;
 mod instance;
 mod listener;
+mod memmap;
+mod selected_class;
 
-pub use array::ObjectArray;
+pub use array::{ObjectArray, ObjectArrayAdmission, ValidatedObjectArrayParts};
+pub use containers_map::{
+    ContainersMapEntry, ContainersMapKey, ContainersMapKeyType, ContainersMapStorage,
+    ContainersMapValueClass, ContainersMapValueType,
+};
 pub use dynamic_property::DynamicPropertyDef;
+pub use graphics_callback::{
+    GraphicsCallbackDisposition, GraphicsCallbackHostFailure, GraphicsCallbackIngressFailure,
+    GraphicsCallbackKind, GraphicsCallbackResult, GraphicsCallbackRolePayload,
+};
+pub use graphics_receiver::{GraphicsReceiverKind, GraphicsReceiverRef};
+pub use graphics_scene::GraphicsSceneLease;
 pub use handle::HandleRef;
-pub use instance::ObjectInstance;
+pub use instance::{ObjectInstance, ObjectPersistencePayloadKind};
 pub use listener::Listener;
+pub use memmap::{
+    MemmapElementType, MemmapFieldState, MemmapFormatPresentationState, MemmapReceiverAuthority,
+    MemmapReceiverState,
+};
+pub use selected_class::{
+    SelectedObjectClassFacts, SelectedObjectMethod, SelectedReceiverClassDeclaration,
+    SelectedReceiverDeclarations, SelectedReceiverMethodDeclaration,
+    SelectedReceiverPropertyDeclaration,
+};

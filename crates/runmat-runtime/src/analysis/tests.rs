@@ -913,7 +913,7 @@ fn sample_geometry_asset() -> GeometryAsset {
         )],
         regions: vec![Region {
             region_id: "region_default".to_string(),
-            name: "Default Region".to_string(),
+            name: "Default Region".into(),
             tag: Some("mesh_default".to_string()),
             cad_ownership: None,
         }],
@@ -980,13 +980,13 @@ fn closed_cube_geometry_asset() -> GeometryAsset {
         regions: vec![
             Region {
                 region_id: "root".to_string(),
-                name: "root".to_string(),
+                name: "root".into(),
                 tag: Some("fixed".to_string()),
                 cad_ownership: None,
             },
             Region {
                 region_id: "tip".to_string(),
-                name: "tip".to_string(),
+                name: "tip".into(),
                 tag: Some("load".to_string()),
                 cad_ownership: None,
             },

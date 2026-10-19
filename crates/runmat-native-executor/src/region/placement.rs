@@ -2,42 +2,69 @@ use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, Digest, EstimateConfidence, EstimateSource,
     ExecutionCandidateDescriptor, ExecutionCandidateKind, ExecutionCostComponents,
-    ExecutionCostEstimate, PlacementFeedback, PlacementGraph, PlacementGraphCandidate,
-    PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest, PlacementResourceSnapshot,
-    PlacementRevision, PlacementSignature,
+    ExecutionCostEstimate, PlacementExecutionAuthorityRevision, PlacementFeedback, PlacementGraph,
+    PlacementGraphCandidate, PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest,
+    PlacementResourceSnapshot, PlacementRevision, PlacementSignature,
 };
 use runmat_runtime::context::RuntimeContext;
 use runmat_value::Value;
 
 use super::plan::OptimizedRegionPlan;
 
-pub(crate) struct VectorizedPlacement {
+pub(crate) enum RegionPlacement {
+    Unavailable,
+    Generic(RegionObservation),
+    Vectorized(RegionObservation),
+}
+
+/// One selected execution, completed explicitly or failed when its scope exits.
+pub(crate) struct RegionObservation {
     runtime: RuntimeContext,
     signature: PlacementSignature,
     candidate: String,
+    kind: ExecutionCandidateKind,
+    started: runmat_time::Instant,
+    reported: bool,
 }
 
-impl VectorizedPlacement {
-    pub fn observe(self, elapsed_ns: u64, succeeded: bool) {
+impl RegionObservation {
+    pub fn complete(mut self) {
+        self.report(true);
+    }
+
+    fn report(&mut self, succeeded: bool) {
+        if self.reported {
+            return;
+        }
+        self.reported = true;
         let Some(service) = self.runtime.service_ports().placement() else {
             return;
         };
         let _ = service.observe(PlacementFeedback {
-            signature: self.signature,
-            candidate: self.candidate,
-            total_elapsed_ns: elapsed_ns.max(1),
+            signature: self.signature.clone(),
+            candidate: self.candidate.clone(),
+            kind: self.kind,
+            total_elapsed_ns: runmat_time::duration_ns_saturating(self.started.elapsed()).max(1),
             succeeded,
         });
     }
 }
 
-pub(crate) fn choose_vectorized(
+impl Drop for RegionObservation {
+    fn drop(&mut self) {
+        self.report(false);
+    }
+}
+
+pub(crate) fn choose_region(
     runtime: &RuntimeContext,
     plan: &OptimizedRegionPlan,
     inputs: &[&Value],
     workload: runmat_runtime::numeric_region::NumericRegionWorkload,
-) -> Option<VectorizedPlacement> {
-    let service = runtime.service_ports().placement()?;
+) -> RegionPlacement {
+    let Some(service) = runtime.service_ports().placement() else {
+        return RegionPlacement::Unavailable;
+    };
     let signature = signature(runtime, plan, inputs);
     let elements = u64::try_from(workload.elements).unwrap_or(u64::MAX);
     let operations = u64::from(plan.arithmetic_operations);
@@ -56,9 +83,12 @@ pub(crate) fn choose_vectorized(
         .parallel()
         .map(|service| service.placement_resources())
         .unwrap_or_default();
-    let output_bytes = workload
-        .output_bytes_per_value
-        .saturating_mul(u64::try_from(plan.program.outputs.len()).unwrap_or(u64::MAX));
+    let Some(output_bytes) =
+        checked_output_bytes(workload.output_bytes_per_value, plan.program.outputs.len())
+    else {
+        return RegionPlacement::Unavailable;
+    };
+    let retained_output = output_bytes.into();
     let request = PlacementPlanRequest {
         signature: signature.clone(),
         graph: PlacementGraph {
@@ -66,21 +96,30 @@ pub(crate) fn choose_vectorized(
                 identity: format!("native.region.{}", plan.region.ordinal),
                 candidates: vec![
                     PlacementGraphCandidate {
-                        descriptor: generic,
+                        descriptor: generic.clone(),
                         resources: CandidateResourceDemand {
                             cpu_millicores: 1_000,
+                            retained_bytes: retained_output,
+                            // The generic executor has not supplied a peak
+                            // scratch bound. A finite host-memory budget must
+                            // not read the omitted dimension as zero.
                             ..CandidateResourceDemand::default()
                         },
+                        output_facts: None,
                         transactional_results: true,
                     },
                     PlacementGraphCandidate {
                         descriptor: vectorized.clone(),
                         resources: CandidateResourceDemand {
                             cpu_millicores: 1_000,
-                            retained_bytes: output_bytes,
-                            scratch_bytes: output_bytes,
+                            retained_bytes: retained_output,
+                            scratch_bytes: output_bytes.into(),
+                            provider_host_workspace: None,
+                            provider_input_stages: None,
                             queue_slots: 0,
+                            peak_live: None,
                         },
+                        output_facts: None,
                         transactional_results: true,
                     },
                 ],
@@ -91,7 +130,7 @@ pub(crate) fn choose_vectorized(
         resources: PlacementResourceSnapshot {
             cpu_millicores_available: resources.cpu_millicores_available,
             memory_available_bytes: resources.memory_available_bytes,
-            cancellation_requested: runtime.cancellation_token().is_cancelled(),
+            cancellation_requested: runtime.is_cancelled(),
             providers: Vec::new(),
             epoch: resources.epoch,
         },
@@ -100,17 +139,36 @@ pub(crate) fn choose_vectorized(
     };
     let decision = match service.plan(request) {
         Ok(decision) => decision,
-        Err(_) => return None,
+        Err(_) => return RegionPlacement::Unavailable,
     };
-    decision
-        .selections
-        .first()
-        .filter(|selected| selected.kind == ExecutionCandidateKind::VectorizedNativeCpu)
-        .map(|_| VectorizedPlacement {
-            runtime: runtime.clone(),
-            signature,
-            candidate: vectorized.identity,
-        })
+    if decision.signature != signature || decision.selections.len() != 1 {
+        return RegionPlacement::Unavailable;
+    }
+    let selected = &decision.selections[0];
+    if selected.node != format!("native.region.{}", plan.region.ordinal) {
+        return RegionPlacement::Unavailable;
+    }
+    let observation = |candidate, kind| RegionObservation {
+        runtime: runtime.clone(),
+        signature: signature.clone(),
+        candidate,
+        kind,
+        started: runmat_time::Instant::now(),
+        reported: false,
+    };
+    if selected.kind == generic.kind && selected.candidate == generic.identity {
+        RegionPlacement::Generic(observation(generic.identity, generic.kind))
+    } else if selected.kind == vectorized.kind && selected.candidate == vectorized.identity {
+        RegionPlacement::Vectorized(observation(vectorized.identity, vectorized.kind))
+    } else {
+        RegionPlacement::Unavailable
+    }
+}
+
+fn checked_output_bytes(bytes_per_value: u64, outputs: usize) -> Option<u64> {
+    u64::try_from(outputs)
+        .ok()
+        .and_then(|count| bytes_per_value.checked_mul(count))
 }
 
 fn candidate(
@@ -133,11 +191,12 @@ fn candidate(
                 execution_ns,
                 ..ExecutionCostComponents::default()
             },
-            scratch_bytes: 0,
+            scratch_bytes: Some(0),
             confidence: EstimateConfidence::Prior,
             source: EstimateSource::Compiler,
         },
         output_residency: CandidateOutputResidency::Host,
+        presentation: runmat_execution::CandidateOutputPresentation::Direct,
         guards: Vec::new(),
     }
 }
@@ -170,70 +229,21 @@ fn signature(
         runtime_facts: Digest::sha256(
             serde_json::to_vec(&facts).expect("portable runtime facts must serialize"),
         ),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision: PlacementRevision {
             program: runtime.program_revision().cloned(),
             catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
             compiler: Digest::sha256(b"runmat-native-vector-region-v1"),
-            provider: Digest::sha256(b"host-only"),
+            authority: PlacementExecutionAuthorityRevision::HostService(Digest::sha256(
+                b"host-only",
+            )),
             policy: Digest::sha256(b"shared-placement-v1"),
         },
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-    use std::rc::Rc;
-
-    use runmat_runtime::execution::RuntimeExecutionService;
-
-    use super::*;
-    use crate::region::{RegionOutputSource, SiteIdentity};
-
-    #[test]
-    fn absent_shared_placement_authority_falls_back_to_specialized_execution() {
-        let region = runmat_types::RegionId {
-            function: runmat_types::ProgramFunctionId(0),
-            ordinal: 0,
-        };
-        let plan = OptimizedRegionPlan {
-            region,
-            entry: SiteIdentity {
-                point: runmat_types::ProgramPointId {
-                    function: region.function,
-                    block: 0,
-                    position: 0,
-                },
-                phase: runmat_native_codegen::NativeSitePhase::Rvalue,
-                ordinal: 0,
-            },
-            inputs: vec![runmat_types::RegionValueId {
-                function: region.function,
-                local: 0,
-            }],
-            outputs: vec![crate::region::plan::RegionOutput {
-                value: None,
-                ssa: runmat_native_codegen::NativeValueId(0),
-                source: RegionOutputSource::Computed(0),
-            }],
-            program: runmat_runtime::numeric_region::NumericRegionProgram {
-                nodes: vec![runmat_runtime::numeric_region::NumericRegionNode::Input(0)],
-                outputs: vec![0],
-            },
-            skipped_sites: BTreeSet::new(),
-            arithmetic_operations: 1,
-        };
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        let input = Value::Num(1.0);
-        assert!(choose_vectorized(
-            &runtime,
-            &plan,
-            &[&input],
-            runmat_runtime::numeric_region::NumericRegionWorkload {
-                elements: 1,
-                output_bytes_per_value: 8,
-            },
-        )
-        .is_none());
-    }
-}
+pub(crate) mod test_support;
+#[cfg(test)]
+mod tests;

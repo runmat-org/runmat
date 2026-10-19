@@ -1,0 +1,55 @@
+//! Shared mechanics for the positional text-conversion builtins.
+
+use runmat_value::{CharArray, Value};
+
+use crate::BuiltinResult;
+
+pub(crate) fn convert_variadic(
+    value: Value,
+    rest: Vec<Value>,
+    convert: fn(Value) -> BuiltinResult<Value>,
+) -> BuiltinResult<Value> {
+    // All inputs are evaluated and converted before selecting requested outputs.
+    let outputs = std::iter::once(value)
+        .chain(rest)
+        .map(convert)
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(n) => Ok(crate::output_count::output_list_with_padding(n, outputs)),
+        None => Ok(outputs
+            .into_iter()
+            .next()
+            .unwrap_or(Value::String(String::new()))),
+    }
+}
+
+pub(crate) fn string_scalar_to_chars(text: &str) -> CharArray {
+    if text.is_empty() || crate::builtins::strings::common::is_missing_string(text) {
+        CharArray::new(Vec::new(), 0, 0).expect("valid empty character array")
+    } else {
+        CharArray::new_row(text)
+    }
+}
+
+pub(crate) fn string_to_chars(value: Value, name: &'static str) -> BuiltinResult<Value> {
+    match value {
+        Value::String(text) => Ok(Value::CharArray(string_scalar_to_chars(&text))),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Value::CharArray(string_scalar_to_chars(&array.data[0])))
+        }
+        Value::StringArray(array) => {
+            let values = array
+                .data
+                .into_iter()
+                .map(|text| Value::CharArray(string_scalar_to_chars(&text)))
+                .collect();
+            crate::make_cell_with_shape(values, array.shape).map_err(|message| {
+                crate::build_runtime_error(message)
+                    .with_builtin(name)
+                    .build()
+            })
+        }
+        other => Ok(other),
+    }
+}

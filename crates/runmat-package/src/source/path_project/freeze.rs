@@ -1,5 +1,5 @@
 use super::load::load_path_project;
-use super::model::{LoadedPathPackage, LoadedPathProject, LoadedSource};
+use super::model::{LoadedPathPackage, LoadedPathProject};
 use super::FrozenProjectError;
 use crate::{
     build_path_graph, CanonicalPackageId, ContentDigest, GraphError, HostCapability,
@@ -13,7 +13,11 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::source::{
-    catalog::{assemble_frozen_project, FrozenPackageInput, FrozenSourceInput},
+    catalog::{
+        assemble_frozen_project, FrozenJavaArtifactInput, FrozenMexArtifactInput,
+        FrozenNativeInterfaceInput, FrozenPackageInput, FrozenPythonArtifactInput,
+        FrozenSourceInput,
+    },
     FrozenProject,
 };
 
@@ -21,6 +25,8 @@ use crate::source::{
 pub enum PathProjectError {
     #[error("failed to read graph-declared source {path}: {reason}")]
     ReadSource { path: PathBuf, reason: String },
+    #[error("failed to read graph-declared native interface artifact {path}: {reason}")]
+    ReadNativeInterface { path: PathBuf, reason: String },
     #[error("invalid project source path {path}: {reason}")]
     SourcePath { path: PathBuf, reason: String },
     #[error("package graph has no instance for manifest {0}")]
@@ -88,7 +94,7 @@ fn graph_input(
                 local_name: package.manifest.package.name.clone(),
                 workspace_path,
                 manifest_digest: ContentDigest::sha256(canonical_manifest),
-                tree_digest: source_tree_digest(&package.sources)?,
+                tree_digest: package_tree_digest(package)?,
                 version: domain.version,
                 dependencies,
                 required_capabilities: domain.required_capabilities,
@@ -142,6 +148,47 @@ fn build_catalog(
                     .map(|source| FrozenSourceInput {
                         descriptor: source.descriptor.clone(),
                         bytes: source.bytes.clone(),
+                    })
+                    .collect(),
+                native_interfaces: package
+                    .native_interfaces
+                    .iter()
+                    .map(|interface| FrozenNativeInterfaceInput {
+                        name: interface.name.clone(),
+                        manifest_path: interface.manifest_path.clone(),
+                        manifest_bytes: interface.manifest_bytes.clone(),
+                        library_path: interface.library_path.clone(),
+                        library_bytes: interface.library_bytes.clone(),
+                    })
+                    .collect(),
+                mex_artifacts: package
+                    .mex_artifacts
+                    .iter()
+                    .map(|artifact| FrozenMexArtifactInput {
+                        name: artifact.name.clone(),
+                        manifest_path: artifact.manifest_path.clone(),
+                        manifest_bytes: artifact.manifest_bytes.clone(),
+                        module_path: artifact.module_path.clone(),
+                        module_bytes: artifact.module_bytes.clone(),
+                    })
+                    .collect(),
+                java_artifacts: package
+                    .java_artifacts
+                    .iter()
+                    .map(|artifact| FrozenJavaArtifactInput {
+                        name: artifact.name.clone(),
+                        path: artifact.path.clone(),
+                        bytes: artifact.bytes.clone(),
+                    })
+                    .collect(),
+                python_artifacts: package
+                    .python_artifacts
+                    .iter()
+                    .map(|artifact| FrozenPythonArtifactInput {
+                        name: artifact.name.clone(),
+                        module: artifact.module.clone(),
+                        path: artifact.path.clone(),
+                        bytes: artifact.bytes.clone(),
                     })
                     .collect(),
             })
@@ -201,12 +248,78 @@ fn canonical_package(package: &LoadedPathPackage) -> Result<CanonicalPackageId, 
         .map_err(|error| GraphError::Invalid(error.to_string()))
 }
 
-fn source_tree_digest(sources: &[LoadedSource]) -> Result<ContentDigest, GraphError> {
+fn package_tree_digest(package: &LoadedPathPackage) -> Result<ContentDigest, GraphError> {
     let mut input = Vec::new();
-    for source in sources {
+    for source in &package.sources {
         append_tree_entry(&mut input, &source.descriptor, &source.bytes)?;
     }
+    for interface in &package.native_interfaces {
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &interface.manifest_path,
+            &interface.manifest_bytes,
+        )?;
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &interface.library_path,
+            &interface.library_bytes,
+        )?;
+    }
+    for artifact in &package.mex_artifacts {
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &artifact.manifest_path,
+            &artifact.manifest_bytes,
+        )?;
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &artifact.module_path,
+            &artifact.module_bytes,
+        )?;
+    }
+    for artifact in &package.java_artifacts {
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &artifact.path,
+            &artifact.bytes,
+        )?;
+    }
+    for artifact in &package.python_artifacts {
+        append_artifact_tree_entry(
+            &mut input,
+            &package.project_root,
+            &artifact.path,
+            &artifact.bytes,
+        )?;
+    }
     Ok(ContentDigest::sha256(input))
+}
+
+fn append_artifact_tree_entry(
+    output: &mut Vec<u8>,
+    project_root: &Path,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), GraphError> {
+    let relative = path.strip_prefix(project_root).map_err(|_| {
+        GraphError::Invalid(format!(
+            "native interface artifact {} is outside package root {}",
+            path.display(),
+            project_root.display()
+        ))
+    })?;
+    let path = NormalizedRelativePath::new(relative)
+        .map_err(|error| GraphError::Invalid(error.to_string()))?;
+    output.extend_from_slice(path.as_str().as_bytes());
+    output.push(0);
+    output.extend_from_slice(ContentDigest::sha256(bytes).to_string().as_bytes());
+    output.push(0);
+    Ok(())
 }
 
 fn append_tree_entry(

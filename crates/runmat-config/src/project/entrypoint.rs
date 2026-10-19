@@ -341,7 +341,7 @@ fn finish_discovered_entrypoint(
 
 fn resolved_path_entrypoint(name: &str, source_file: PathBuf) -> ResolvedProjectEntrypoint {
     ResolvedProjectEntrypoint {
-        name: name.to_string(),
+        name: name.into(),
         source_file,
         module: None,
         function: None,
@@ -356,7 +356,7 @@ fn resolved_module_entrypoint(
     function: &str,
 ) -> ResolvedProjectEntrypoint {
     ResolvedProjectEntrypoint {
-        name: name.to_string(),
+        name: name.into(),
         source_file,
         module: Some(module.to_string()),
         function: Some(function.to_string()),

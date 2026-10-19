@@ -3,6 +3,7 @@ import type { BrowserWorkspaceEntry } from "./browser-workspace.js";
 import type { WorkspaceCaptureRequest, WorkspacePublicationRequest } from "../generated/fea-workspace-contracts.js";
 import type { AtomicCreateResult } from "../generated/collaboration-contracts.js";
 import { basename, dirname, isSubPath, normalizePath } from "./path.js";
+import { notifyCommittedMutation } from "./mutation-notification.js";
 import type {
   RunMatFilesystemDirEntry,
   RunMatFilesystemMetadata,
@@ -10,6 +11,11 @@ import type {
 } from "./provider-types.js";
 
 type Entry = FileEntry | DirEntry;
+
+enum RenamePolicy {
+  PreserveDestination,
+  ReplaceCompatible,
+}
 
 interface FileEntry {
   kind: "file";
@@ -26,6 +32,7 @@ interface DirEntry {
 }
 
 export interface InMemoryFsProviderOptions {
+  /** Bootstrap files; missing parent directories are created only while seeding. */
   initialFiles?: Record<string, Uint8Array | ArrayBuffer | ArrayBufferView | string>;
   now?: () => number;
 }
@@ -55,13 +62,20 @@ export class MemoryVolume {
     this.entries.set("/", this.makeDirEntry());
     if (opts.initialFiles) {
       for (const [path, value] of Object.entries(opts.initialFiles)) {
+        // Seed paths describe a ready-to-use tree; ordinary writeFile still
+        // requires its parent directory to exist.
+        this.createDirAll(dirname(normalizeAbsolute(path)));
         this.writeFile(path, this.coerceBuffer(value));
       }
     }
   }
 
-  createProvider(onMutate?: () => void): RunMatFilesystemProvider {
-    return new MemoryProvider(this, onMutate);
+  /** Observers run synchronously after commit; their errors use a separate reporting sink. */
+  createProvider(
+    onMutate?: () => void,
+    onObserverError?: (error: unknown) => void
+  ): RunMatFilesystemProvider {
+    return new MemoryProvider(this, onMutate, onObserverError);
   }
 
   serialize(): VolumeSnapshotEntry[] {
@@ -323,28 +337,46 @@ export class MemoryVolume {
   }
 
   rename(from: string, to: string): void {
+    this.renameWithPolicy(from, to, RenamePolicy.PreserveDestination);
+  }
+
+  renameReplace(from: string, to: string): void {
+    this.renameWithPolicy(from, to, RenamePolicy.ReplaceCompatible);
+  }
+
+  private renameWithPolicy(from: string, to: string, policy: RenamePolicy): void {
     const src = normalizeAbsolute(from);
     const dst = normalizeAbsolute(to);
-    if (src === dst) {
-      return;
-    }
     const entry = this.entries.get(src);
     if (!entry) {
       throw new Error(`Path not found: ${src}`);
     }
+    if (src === dst) {
+      return;
+    }
+    if (src === "/" || dst === "/") {
+      throw new Error("Cannot rename the filesystem root");
+    }
     if (entry.readonly) {
       throw new Error(`Path is readonly: ${src}`);
     }
-    if (this.entries.has(dst)) {
-      throw new Error(`Destination exists: ${dst}`);
+    const destination = this.entries.get(dst);
+    if (destination) {
+      if (policy === RenamePolicy.PreserveDestination) {
+        throw new Error(`Destination exists: ${dst}`);
+      }
+      if (destination.readonly || destination.kind !== entry.kind) {
+        throw new Error("Destination is readonly or has an incompatible type");
+      }
+      if (destination.kind === "dir" && destination.children.size !== 0) {
+        throw new Error("Destination directory is not empty");
+      }
     }
     if (entry.kind === "dir" && isSubPath(dst, src)) {
       throw new Error("Cannot move directory into its own subtree");
     }
     const parentFrom = this.getDir(dirname(src));
     const parentTo = this.getDir(dirname(dst));
-    parentFrom.children.delete(basename(src));
-    parentTo.children.add(basename(dst));
 
     const updates: Array<{ oldPath: string; newPath: string }> = [];
     for (const key of this.entries.keys()) {
@@ -354,6 +386,8 @@ export class MemoryVolume {
       }
     }
     updates.sort((a, b) => depth(a.oldPath) - depth(b.oldPath));
+    parentFrom.children.delete(basename(src));
+    parentTo.children.add(basename(dst));
     for (const { oldPath, newPath } of updates) {
       const current = this.entries.get(oldPath);
       if (!current) {
@@ -446,7 +480,15 @@ export class MemoryVolume {
 }
 
 class MemoryProvider implements RunMatFilesystemProvider {
-  constructor(private readonly volume: MemoryVolume, private readonly onMutate?: () => void) {}
+  constructor(
+    private readonly volume: MemoryVolume,
+    private readonly onMutate?: () => void,
+    private readonly onObserverError?: (error: unknown) => void
+  ) {}
+
+  private notifyMutation(): void {
+    notifyCommittedMutation(this.onMutate, this.onObserverError);
+  }
 
   captureWorkspace(request: WorkspaceCaptureRequest) {
     return this.volume.workspace.captureWorkspace(request);
@@ -456,7 +498,7 @@ class MemoryProvider implements RunMatFilesystemProvider {
   }
   async publishWorkspace(request: WorkspacePublicationRequest) {
     const result = await this.volume.workspace.publishWorkspace(request);
-    if (result.type === "published") this.onMutate?.();
+    if (result.type === "published") this.notifyMutation();
     return result;
   }
 
@@ -470,18 +512,18 @@ class MemoryProvider implements RunMatFilesystemProvider {
 
   atomicCreateNew(path: string, data: Uint8Array): AtomicCreateResult {
     const result = this.volume.atomicCreateNew(path, data);
-    if (result.kind === "published") this.onMutate?.();
+    if (result.kind === "published") this.notifyMutation();
     return result;
   }
 
   writeFile(path: string, data: Uint8Array | ArrayBuffer | ArrayBufferView): void {
     this.volume.writeFile(path, coerceFilesystemBytes(data));
-    this.onMutate?.();
+    this.notifyMutation();
   }
 
   removeFile(path: string): void {
     this.volume.removeFile(path);
-    this.onMutate?.();
+    this.notifyMutation();
   }
 
   metadata(path: string): RunMatFilesystemMetadata {
@@ -503,35 +545,40 @@ class MemoryProvider implements RunMatFilesystemProvider {
   createDir(path: string): void {
     const changed = this.volume.createDir(path);
     if (changed) {
-      this.onMutate?.();
+      this.notifyMutation();
     }
   }
 
   createDirAll(path: string): void {
     const changed = this.volume.createDirAll(path);
     if (changed) {
-      this.onMutate?.();
+      this.notifyMutation();
     }
   }
 
   removeDir(path: string): void {
     this.volume.removeDir(path);
-    this.onMutate?.();
+    this.notifyMutation();
   }
 
   removeDirAll(path: string): void {
     this.volume.removeDirAll(path);
-    this.onMutate?.();
+    this.notifyMutation();
   }
 
   rename(from: string, to: string): void {
     this.volume.rename(from, to);
-    this.onMutate?.();
+    this.notifyMutation();
+  }
+
+  renameReplace(from: string, to: string): void {
+    this.volume.renameReplace(from, to);
+    this.notifyMutation();
   }
 
   setReadonly(path: string, readonly: boolean): void {
     this.volume.setReadonly(path, readonly);
-    this.onMutate?.();
+    this.notifyMutation();
   }
 }
 

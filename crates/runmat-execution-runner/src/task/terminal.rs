@@ -80,9 +80,8 @@ impl AttemptTerminal {
         if let Some(resources) = &self.resources {
             resources.validate_against(&attempt.request)?;
         }
-        if self.disposition == AttemptDisposition::Succeeded && self.resources.is_none() {
-            return Err("successful attempt lacks original accounting".into());
-        }
+        // Value successes are admitted only with worker accounting (see
+        // AttemptSuccess::validate_against); graph and SPMD successes carry none.
         Ok(())
     }
 }

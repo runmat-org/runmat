@@ -36,10 +36,6 @@ impl AccelProvider for F32TestProvider {
         Box::pin(async move { unreachable!("download should not be invoked in this test") })
     }
 
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     fn device_info(&self) -> String {
         "f32-test-provider".to_string()
     }

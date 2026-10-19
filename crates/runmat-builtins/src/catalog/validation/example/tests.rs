@@ -1,0 +1,348 @@
+use super::*;
+use crate::{
+    BuiltinApplicationSettingsFixture, BuiltinCliTranscriptStep, BuiltinCompilerCapability,
+    BuiltinEndpointSubstitution, BuiltinExampleCompatibility, BuiltinExampleRequirements,
+    BuiltinExampleVerification, BuiltinFilesystemEntry, BuiltinFilesystemFixture,
+    BuiltinFilesystemRoot, BuiltinFixtureContent, BuiltinForeignAdapterFixture,
+    BuiltinForeignPreparation, BuiltinHttpExchange, BuiltinHttpMethod, BuiltinHttpRequest,
+    BuiltinHttpResponse, BuiltinHttpScenario, BuiltinLoopbackFixture, BuiltinMailOutboxFixture,
+    BuiltinMexApi, BuiltinMexPreparation, BuiltinNativeSourceLanguage,
+    BuiltinNativeTranslationUnit, BuiltinRuntimeCapability, BuiltinToolchainCapability,
+};
+
+#[test]
+fn wgpu_browser_lane_accepts_an_isolated_filesystem_fixture() {
+    let example = BuiltinExample {
+        id: "gpu-file",
+        title: "GPU file import",
+        program: "G = gpuArray(1); A = readmatrix('data.csv', 'Like', G);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Wgpu,
+        fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "gpu-file",
+            },
+            root: BuiltinFilesystemRoot::IsolatedWorkspace,
+            entries: &[BuiltinFilesystemEntry::File {
+                relative_path: "data.csv",
+                content: BuiltinFixtureContent::Utf8("1,2\n"),
+            }],
+        }),
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(gather(A),[1 2]));",
+        },
+    };
+    let mut errors = Vec::new();
+    validate("readmatrix", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
+fn application_settings_fixture_requires_supported_engine_and_valid_id() {
+    let mut example = BuiltinExample {
+        id: "isolated",
+        title: "Isolated settings",
+        program: "setpref('Example','Value',1); assert(getpref('Example','Value') == 1);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::ApplicationSettings(BuiltinApplicationSettingsFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "fresh",
+            },
+        }),
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(true);",
+        },
+    };
+    let mut errors = Vec::new();
+    validate("setpref", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    example.harness = BuiltinExampleHarness::NativeFilesystem;
+    let mut errors = Vec::new();
+    validate("setpref", &example, &mut errors);
+    assert!(errors.iter().any(|error| error.message.contains("harness")));
+
+    example.harness = BuiltinExampleHarness::Portable;
+    example.fixture =
+        BuiltinExampleFixture::ApplicationSettings(BuiltinApplicationSettingsFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "bad id",
+            },
+        });
+    let mut errors = Vec::new();
+    validate("setpref", &example, &mut errors);
+    assert!(errors.iter().any(|error| error.message.contains("fixture")));
+}
+
+#[test]
+fn mail_outbox_fixture_requires_native_host_and_exact_bounded_oracle() {
+    let mut example = BuiltinExample {
+        id: "mail",
+        title: "mail",
+        program: "status = sendmail('a', 's');",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Native,
+        fixture: BuiltinExampleFixture::MailOutbox(BuiltinMailOutboxFixture {
+            id: crate::BuiltinExampleFixtureId { local_name: "mail" },
+            expected_message: "To: a\nSubject: s\nContent-Type: text/plain; charset=utf-8\n\n\n",
+        }),
+        requirements: BuiltinExampleRequirements {
+            host: BuiltinExampleHostRequirement::NativeOnly,
+            ..BuiltinExampleRequirements::NONE
+        },
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(status == 0);",
+        },
+    };
+    let mut errors = Vec::new();
+    validate("sendmail", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+    example.harness = BuiltinExampleHarness::Browser;
+    let mut errors = Vec::new();
+    validate("sendmail", &example, &mut errors);
+    assert!(!errors.is_empty());
+}
+
+const HTTP_EXCHANGES: &[BuiltinHttpExchange] = &[BuiltinHttpExchange {
+    request: BuiltinHttpRequest {
+        method: BuiltinHttpMethod::Get,
+        path: "/value",
+        body: None,
+    },
+    response: BuiltinHttpResponse {
+        status: 200,
+        headers: &[],
+        body: b"ok",
+    },
+}];
+
+fn loopback_example() -> BuiltinExample {
+    BuiltinExample {
+        id: "loopback",
+        title: "Use loopback HTTP",
+        program: "url = \"__RUNMAT_HTTP_BASE_URL__/value\";",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeLoopbackNetwork,
+        fixture: BuiltinExampleFixture::Loopback(BuiltinLoopbackFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "http-value",
+            },
+            scenario: crate::BuiltinLoopbackScenario::Http(BuiltinHttpScenario {
+                exchanges: HTTP_EXCHANGES,
+            }),
+            endpoint_substitutions: &[BuiltinEndpointSubstitution::HttpBaseUrl],
+        }),
+        requirements: BuiltinExampleRequirements {
+            host: BuiltinExampleHostRequirement::NativeOnly,
+            ..BuiltinExampleRequirements::NONE
+        },
+        verification: BuiltinExampleVerification::Succeeds,
+    }
+}
+
+#[test]
+fn matching_loopback_fixture_is_valid() {
+    let mut errors = Vec::new();
+    validate("webread", &loopback_example(), &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
+fn fixture_validation_rejects_harness_and_substitution_mismatch() {
+    let mut example = loopback_example();
+    example.harness = BuiltinExampleHarness::Portable;
+    example.program = "url = \"http://example.invalid/value\";";
+    let mut errors = Vec::new();
+    validate("webread", &example, &mut errors);
+    assert!(errors.iter().any(|error| error.message.contains("harness")));
+    assert!(errors
+        .iter()
+        .any(|error| error.message.contains("substitution token")));
+}
+
+#[test]
+fn cli_transcript_requires_one_terminal_action() {
+    let example = BuiltinExample {
+        id: "prompt",
+        title: "Prompt",
+        program: "value = input('value: ');",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::InteractiveHost,
+        fixture: BuiltinExampleFixture::CliInteraction(crate::BuiltinCliInteractionFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "prompt",
+            },
+            transcript: &[BuiltinCliTranscriptStep::SendLine("4")],
+        }),
+        requirements: BuiltinExampleRequirements {
+            host: BuiltinExampleHostRequirement::NativeOnly,
+            ..BuiltinExampleRequirements::NONE
+        },
+        verification: BuiltinExampleVerification::Succeeds,
+    };
+    let mut errors = Vec::new();
+    validate("input", &example, &mut errors);
+    assert!(errors
+        .iter()
+        .any(|error| error.message.contains("terminal action")));
+}
+
+#[test]
+fn foreign_preparation_is_complete_and_references_declared_files() {
+    const FILES: &[BuiltinFilesystemEntry] = &[BuiltinFilesystemEntry::File {
+        relative_path: "gateway.c",
+        content: BuiltinFixtureContent::Utf8("void mexFunction(void) {}"),
+    }];
+    const UNITS: &[BuiltinNativeTranslationUnit] = &[BuiltinNativeTranslationUnit {
+        relative_path: "gateway.c",
+        language: BuiltinNativeSourceLanguage::C,
+    }];
+    let mut example = BuiltinExample {
+        id: "mex",
+        title: "Build a MEX module",
+        program: "value = fixture_mex();",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeForeignRuntime,
+        fixture: BuiltinExampleFixture::ForeignAdapter(BuiltinForeignAdapterFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "fixture-mex",
+            },
+            files: BuiltinFilesystemFixture {
+                id: crate::BuiltinExampleFixtureId {
+                    local_name: "fixture-files",
+                },
+                root: BuiltinFilesystemRoot::IsolatedWorkspace,
+                entries: FILES,
+            },
+            preparation: BuiltinForeignPreparation::Mex(BuiltinMexPreparation {
+                module_name: "fixture_mex",
+                api: BuiltinMexApi::R2017b,
+                translation_units: UNITS,
+                include_directories: &[],
+                definitions: &[],
+            }),
+        }),
+        requirements: BuiltinExampleRequirements {
+            host: BuiltinExampleHostRequirement::NativeOnly,
+            engine: BuiltinExampleEngine::Default,
+            compiler: &[BuiltinCompilerCapability::C],
+            runtime: &[BuiltinRuntimeCapability::Mex],
+            toolchain: &[BuiltinToolchainCapability::CCompiler],
+        },
+        verification: BuiltinExampleVerification::Succeeds,
+    };
+    let mut errors = Vec::new();
+    validate("fixture_mex", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    const MISSING_UNITS: &[BuiltinNativeTranslationUnit] = &[BuiltinNativeTranslationUnit {
+        relative_path: "missing.c",
+        language: BuiltinNativeSourceLanguage::C,
+    }];
+    let BuiltinExampleFixture::ForeignAdapter(mut fixture) = example.fixture else {
+        unreachable!();
+    };
+    fixture.preparation = BuiltinForeignPreparation::Mex(BuiltinMexPreparation {
+        module_name: "fixture_mex",
+        api: BuiltinMexApi::R2017b,
+        translation_units: MISSING_UNITS,
+        include_directories: &[],
+        definitions: &[],
+    });
+    example.fixture = BuiltinExampleFixture::ForeignAdapter(fixture);
+    errors.clear();
+    validate("fixture_mex", &example, &mut errors);
+    assert!(errors
+        .iter()
+        .any(|error| error.message.contains("not a declared fixture file")));
+}
+
+#[test]
+fn desktop_fixture_validates_typed_host_interactions() {
+    const FILTERS: &[crate::BuiltinDialogFilterExpectation] =
+        &[crate::BuiltinDialogFilterExpectation {
+            patterns: &["*.csv"],
+            description: Some("CSV files"),
+        }];
+    const INTERACTIONS: &[crate::BuiltinDesktopHostInteraction] = &[
+        crate::BuiltinDesktopHostInteraction::OpenFileDialog(
+            crate::BuiltinOpenFileDialogInteraction {
+                request: crate::BuiltinOpenFileDialogExpectation {
+                    title: Some("Choose data"),
+                    default_path: Some("data"),
+                    filters: FILTERS,
+                    multiselect: false,
+                },
+                outcome: crate::BuiltinOpenFileDialogOutcome::Selection {
+                    paths: &["data/input.csv"],
+                    filter_index: Some(0),
+                },
+            },
+        ),
+        crate::BuiltinDesktopHostInteraction::FigurePresentation(
+            crate::BuiltinFigurePresentationInteraction {
+                figure_ordinal: 1,
+                event: crate::BuiltinFigurePresentationEvent::Created,
+                snapshot: Some(crate::BuiltinFigureSnapshotExpectation {
+                    title: Some("Result"),
+                    axes_rows: 1,
+                    axes_cols: 1,
+                }),
+            },
+        ),
+    ];
+    let mut example = BuiltinExample {
+        id: "desktop-host",
+        title: "Use desktop host services",
+        program: "file = uigetfile('*.csv'); figure;",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::InteractiveHost,
+        fixture: BuiltinExampleFixture::DesktopHostOnly(crate::BuiltinDesktopHostFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "desktop-host",
+            },
+            entries: &[
+                BuiltinFilesystemEntry::Directory {
+                    relative_path: "data",
+                },
+                BuiltinFilesystemEntry::File {
+                    relative_path: "data/input.csv",
+                    content: BuiltinFixtureContent::Utf8("value\n1\n"),
+                },
+            ],
+            interactions: INTERACTIONS,
+        }),
+        requirements: BuiltinExampleRequirements {
+            host: BuiltinExampleHostRequirement::DesktopHostOnly,
+            ..BuiltinExampleRequirements::NONE
+        },
+        verification: BuiltinExampleVerification::Succeeds,
+    };
+
+    let mut errors = Vec::new();
+    validate("uigetfile", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    let BuiltinExampleFixture::DesktopHostOnly(mut fixture) = example.fixture else {
+        unreachable!();
+    };
+    fixture.id = crate::BuiltinExampleFixtureId {
+        local_name: "Invalid Fixture",
+    };
+    example.fixture = BuiltinExampleFixture::DesktopHostOnly(fixture);
+    errors.clear();
+    validate("uigetfile", &example, &mut errors);
+    assert!(errors
+        .iter()
+        .any(|error| error.message.contains("fixture local name")));
+}

@@ -69,6 +69,19 @@ impl ReferenceLine {
         }
     }
 
+    pub(crate) fn range_bounds(&self, x_range: (f64, f64), y_range: (f64, f64)) -> BoundingBox {
+        match self.orientation {
+            ReferenceLineOrientation::Vertical => BoundingBox::new(
+                Vec3::new(self.value as f32, y_range.0 as f32, 0.0),
+                Vec3::new(self.value as f32, y_range.1 as f32, 0.0),
+            ),
+            ReferenceLineOrientation::Horizontal => BoundingBox::new(
+                Vec3::new(x_range.0 as f32, self.value as f32, 0.0),
+                Vec3::new(x_range.1 as f32, self.value as f32, 0.0),
+            ),
+        }
+    }
+
     pub fn render_data_with_range(
         &self,
         x_range: (f64, f64),
@@ -103,5 +116,18 @@ impl ReferenceLine {
             + self.label.as_ref().map_or(0, String::len)
             + self.display_name.as_ref().map_or(0, String::len)
             + self.label_orientation.len()
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label_orientation.capacity();
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::optional_string(self.label.as_ref()),
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::optional_string(self.display_name.as_ref()),
+        )?;
+        Some(total)
     }
 }

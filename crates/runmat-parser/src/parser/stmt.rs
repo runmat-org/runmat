@@ -59,7 +59,7 @@ impl Parser {
                 }
             }
             _ => {
-                if self.peek_token() == Some(&Token::Ident)
+                if self.peek_token().is_some_and(Token::can_be_identifier)
                     && self.peek_token_at(1) == Some(&Token::Assign)
                 {
                     let name_token = self
@@ -80,7 +80,7 @@ impl Parser {
                     let expr = self.parse_expr()?;
                     let span = self.span_from(start, expr.span().end);
                     Ok(Stmt::Assign(name, expr, false, span))
-                } else if self.peek_token() == Some(&Token::Ident) {
+                } else if self.peek_token().is_some_and(Token::can_be_identifier) {
                     if self.looks_like_super_constructor_stmt() {
                         return self.parse_super_constructor_stmt();
                     }
@@ -90,7 +90,7 @@ impl Parser {
                     if let Some(lv) = self.try_parse_lvalue_assign()? {
                         return Ok(lv);
                     }
-                    if matches!(self.peek_token_at(1), Some(Token::Ident))
+                    if self.peek_token_at(1).is_some_and(Token::can_be_identifier)
                         && matches!(
                             self.peek_token_at(2),
                             Some(
@@ -119,21 +119,18 @@ impl Parser {
     }
 
     fn looks_like_super_constructor_stmt(&self) -> bool {
-        if !matches!(
-            (
-                self.peek_token(),
-                self.peek_token_at(1),
-                self.peek_token_at(2)
-            ),
-            (Some(Token::Ident), Some(Token::At), Some(Token::Ident))
-        ) {
+        if !self.peek_token().is_some_and(Token::can_be_identifier)
+            || self.peek_token_at(1) != Some(&Token::At)
+            || !self.peek_token_at(2).is_some_and(Token::can_be_identifier)
+        {
             return false;
         }
         let mut idx = 3usize;
-        while matches!(
-            (self.peek_token_at(idx), self.peek_token_at(idx + 1)),
-            (Some(Token::Dot), Some(Token::Ident))
-        ) {
+        while self.peek_token_at(idx) == Some(&Token::Dot)
+            && self
+                .peek_token_at(idx + 1)
+                .is_some_and(Token::can_be_identifier)
+        {
             idx += 2;
         }
         matches!(self.peek_token_at(idx), Some(Token::LParen))
@@ -408,7 +405,7 @@ impl Parser {
             if !self.consume(&Token::Assign) {
                 return Err("expected '='".into());
             }
-        } else if self.peek_token() == Some(&Token::Ident)
+        } else if self.peek_token().is_some_and(Token::can_be_identifier)
             && self.peek_token_at(1) == Some(&Token::Assign)
         {
             outputs.push(self.next().unwrap().lexeme);
@@ -419,18 +416,22 @@ impl Parser {
             let member = self.expect_ident()?;
             name = format!("{name}.{member}");
         }
-        if !self.consume(&Token::LParen) {
-            return Err("expected '('".into());
-        }
         let mut params = Vec::new();
-        if !self.consume(&Token::RParen) {
-            params.push(self.expect_ident()?);
-            while self.consume(&Token::Comma) {
-                params.push(self.expect_ident()?);
-            }
+        if self.consume(&Token::LParen) {
             if !self.consume(&Token::RParen) {
-                return Err("expected ')'".into());
+                params.push(self.expect_ident()?);
+                while self.consume(&Token::Comma) {
+                    params.push(self.expect_ident()?);
+                }
+                if !self.consume(&Token::RParen) {
+                    return Err("expected ')'".into());
+                }
             }
+        } else if !matches!(
+            self.peek_token(),
+            Some(Token::Newline | Token::Semicolon | Token::Comma | Token::End)
+        ) {
+            return Err("expected '(' or end of function signature".into());
         }
 
         if let Some(idx) = params.iter().position(|p| p == "varargin") {
@@ -535,7 +536,7 @@ impl Parser {
 
         let mut class_name = None;
         let mut validators = Vec::new();
-        if matches!(self.peek_token(), Some(Token::Ident)) {
+        if self.peek_token().is_some_and(Token::can_be_identifier) {
             let candidate = self.parse_qualified_name_in_stmt()?;
             if self.peek_token() == Some(&Token::LParen) {
                 validators.push(self.parse_function_argument_validator_decl_with_name(candidate)?);
@@ -558,7 +559,7 @@ impl Parser {
                 }
                 continue;
             }
-            if matches!(self.peek_token(), Some(Token::Ident)) {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 validators.push(self.parse_function_argument_validator_decl()?);
                 continue;
             }
@@ -730,7 +731,7 @@ impl Parser {
         if !self.consume(&Token::Catch) {
             return Err("expected 'catch' after try".into());
         }
-        let catch_var = if self.peek_token() == Some(&Token::Ident) {
+        let catch_var = if self.peek_token().is_some_and(Token::can_be_identifier) {
             Some(self.expect_ident()?)
         } else {
             None
@@ -788,7 +789,7 @@ impl Parser {
                 names.push(self.expect_ident()?);
                 continue;
             }
-            if self.peek_token() == Some(&Token::Ident) {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 names.push(self.expect_ident()?);
                 continue;
             }
@@ -808,7 +809,7 @@ impl Parser {
                 names.push(self.expect_ident()?);
                 continue;
             }
-            if self.peek_token() == Some(&Token::Ident) {
+            if self.peek_token().is_some_and(Token::can_be_identifier) {
                 names.push(self.expect_ident()?);
                 continue;
             }
@@ -820,11 +821,7 @@ impl Parser {
 
     pub(super) fn expect_ident(&mut self) -> Result<String, String> {
         match self.next() {
-            Some(TokenInfo {
-                token: Token::Ident,
-                lexeme,
-                ..
-            }) => Ok(lexeme),
+            Some(TokenInfo { token, lexeme, .. }) if token.can_be_identifier() => Ok(lexeme),
             _ => Err("expected identifier".into()),
         }
     }
@@ -844,11 +841,7 @@ impl Parser {
 
     pub(super) fn expect_ident_or_tilde(&mut self) -> Result<String, String> {
         match self.next() {
-            Some(TokenInfo {
-                token: Token::Ident,
-                lexeme,
-                ..
-            }) => Ok(lexeme),
+            Some(TokenInfo { token, lexeme, .. }) if token.can_be_identifier() => Ok(lexeme),
             Some(TokenInfo {
                 token: Token::Tilde,
                 ..

@@ -7,14 +7,13 @@
 
 use runmat_value::{CellArray, CharArray, LogicalArray, ObjectArray, SymbolicArray, Value};
 
+use crate::execution::RootedValue;
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::read_slice::{
     gather_string_slice, read_complex_slice_from_plan, read_gpu_slice_from_plan,
     read_sparse_slice_from_plan, read_tensor_slice_from_plan,
 };
 use crate::indexing::selectors::SliceSelector;
-use crate::object::dispatch::call_object_index_descriptor_method;
-use crate::object::indexing::ObjectIndexDescriptor;
 use crate::{call_builtin_async, RuntimeError};
 
 /// A snapshot of one MATLAB `for` iterable.
@@ -23,7 +22,7 @@ use crate::{call_builtin_async, RuntimeError};
 /// mutation therefore cannot change the loop's remaining values.
 #[derive(Debug, Clone)]
 pub struct ForColumnIterator {
-    source: Value,
+    source: RootedValue,
     next_column: usize,
     column_count: usize,
 }
@@ -31,7 +30,8 @@ pub struct ForColumnIterator {
 impl ForColumnIterator {
     /// Capture an iterable and resolve its MATLAB-visible second dimension.
     pub async fn new(source: Value) -> Result<Self, RuntimeError> {
-        let size = call_builtin_async("size", &[source.clone(), Value::Num(2.0)]).await?;
+        let source = RootedValue::new(source).map_err(|error| error.into_runtime_error())?;
+        let size = call_builtin_async("size", &[source.value().clone(), Value::Num(2.0)]).await?;
         let column_count = dimension_extent(&size)?;
         Ok(Self {
             source,
@@ -41,7 +41,7 @@ impl ForColumnIterator {
     }
 
     /// Return the next column, or `None` once the captured iterable is exhausted.
-    pub async fn next(&mut self) -> Result<Option<Value>, RuntimeError> {
+    pub async fn next(&mut self) -> Result<Option<RootedValue>, RuntimeError> {
         if self.next_column >= self.column_count {
             return Ok(None);
         }
@@ -76,19 +76,19 @@ fn invalid_dimension() -> RuntimeError {
     )
 }
 
-async fn read_column(source: &Value, column: usize) -> Result<Value, RuntimeError> {
-    match source {
+async fn read_column(source: &Value, column: usize) -> Result<RootedValue, RuntimeError> {
+    let value = match source {
         Value::Tensor(value) => {
-            read_tensor_slice_from_plan(value, &column_plan(&value.shape, column)?)
+            read_tensor_slice_from_plan(value, &column_plan(value.shape(), column)?)
         }
         Value::ComplexTensor(value) => {
-            read_complex_slice_from_plan(value, &column_plan(&value.shape, column)?)
+            read_complex_slice_from_plan(value, &column_plan(value.shape(), column)?)
         }
         Value::SparseTensor(value) => {
             read_sparse_slice_from_plan(value, &column_plan(&value.shape(), column)?)
         }
         Value::GpuTensor(value) => {
-            read_gpu_slice_from_plan(value, &column_plan(&value.shape, column)?)
+            read_gpu_slice_from_plan(value, &column_plan(value.shape(), column)?)
         }
         Value::StringArray(value) => {
             gather_string_slice(value, &column_plan(&value.shape, column)?)
@@ -101,18 +101,27 @@ async fn read_column(source: &Value, column: usize) -> Result<Value, RuntimeErro
         }
         Value::SymbolicArray(value) => gather_symbolic(value, &column_plan(&value.shape, column)?),
         Value::Object(_) | Value::HandleObject(_) => {
-            let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
+            let path = crate::object::indexing::ObjectSubscriptPath::single(
+                crate::object::indexing::ObjectSubscript::parentheses(
+                    crate::object::indexing::ObjectIndexSelector::IndexValues {
+                        components: vec![
+                            crate::object::indexing::ObjectIndexComponent::Colon,
+                            Value::Num((column + 1) as f64).into(),
+                        ],
+                    },
+                ),
+            );
+            return crate::object::protocol::read_subscript_path_with_access(
                 source.clone(),
-                2,
-                1,
-                0,
-                &[Value::Num((column + 1) as f64)],
-            )?;
-            call_object_index_descriptor_method(descriptor).await
+                path,
+                crate::object::protocol::ObjectAccessContext::default(),
+            )
+            .await;
         }
         // MATLAB scalars have size 1x1 and bind as themselves.
         value => Ok(value.clone()),
-    }
+    }?;
+    RootedValue::new(value).map_err(|error| error.into_runtime_error())
 }
 
 fn column_plan(shape: &[usize], column: usize) -> Result<IndexPlan, RuntimeError> {
@@ -202,7 +211,7 @@ mod tests {
     use crate::context::RuntimeContext;
     use crate::execution::RuntimeExecutionService;
 
-    fn collect(source: Value) -> Vec<Value> {
+    fn collect(source: Value) -> Vec<crate::execution::RootedValue> {
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         block_on(runtime.scope(async move {
             let mut columns = ForColumnIterator::new(source).await.unwrap();
@@ -214,6 +223,50 @@ mod tests {
         }))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn iterable_and_returned_column_retain_nested_handles() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("column".into()))
+                .expect("allocate column payload");
+            let handle = initial.handle();
+            let source = Value::Cell(
+                CellArray::new_with_shape(
+                    vec![Value::HandleObject(runmat_value::HandleRef {
+                        class_name: "IterationPayload".into(),
+                        target: handle,
+                        valid: true,
+                    })],
+                    vec![1, 1],
+                )
+                .expect("iterable container"),
+            );
+            let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+            block_on(runtime.scope(async move {
+                let mut iterator = ForColumnIterator::new(source)
+                    .await
+                    .expect("capture iterable");
+                initial.unroot().expect("transfer to iterable owner");
+                runmat_gc::gc_collect_major().expect("collect live iterable");
+                assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                let column = iterator
+                    .next()
+                    .await
+                    .expect("read column")
+                    .expect("one column");
+                drop(iterator);
+                runmat_gc::gc_collect_major().expect("collect with returned column");
+                assert_eq!(
+                    runmat_gc::gc_clone_value(&handle).expect("column retains payload"),
+                    Value::String("column".into())
+                );
+                drop(column);
+                runmat_gc::gc_collect_major().expect("collect retired column");
+                assert!(runmat_gc::gc_clone_value(&handle).is_err());
+            }));
+        });
+    }
+
     #[test]
     fn iterates_dense_columns_without_losing_integer_storage() {
         let tensor = Tensor::new_integer(
@@ -223,7 +276,7 @@ mod tests {
         .unwrap();
         let columns = collect(Value::Tensor(tensor));
         assert_eq!(columns.len(), 2);
-        let Value::Tensor(first) = &columns[0] else {
+        let Value::Tensor(first) = columns[0].value() else {
             panic!("expected a tensor column")
         };
         assert_eq!(
@@ -245,7 +298,7 @@ mod tests {
         )
         .unwrap();
         let columns = collect(Value::Cell(cell));
-        let Value::Cell(second) = &columns[1] else {
+        let Value::Cell(second) = columns[1].value() else {
             panic!("expected a cell column")
         };
         assert_eq!(second.shape, vec![2, 1]);

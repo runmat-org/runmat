@@ -72,9 +72,89 @@ impl ExecutionCostComponents {
 #[serde(deny_unknown_fields)]
 pub struct ExecutionCostEstimate {
     pub components: ExecutionCostComponents,
-    pub scratch_bytes: u64,
+    /// Optional physical scratch bound supplied by the estimator. This field
+    /// is not a substitute for the candidate's resource-admission evidence.
+    pub scratch_bytes: Option<u64>,
     pub confidence: EstimateConfidence,
     pub source: EstimateSource,
+}
+
+/// Candidate assembly must not turn missing route evidence into a zero-cost
+/// estimate. Only `Estimated` can enter a numeric placement graph.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CandidateCostEvidence {
+    Estimated(ExecutionCostEstimate),
+    Unavailable(CandidateCostUnavailable),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CandidateCostUnavailable {
+    NoEstimate,
+    UnrepresentableEstimate,
+    NoObservations,
+    InsufficientObservations { successful: u64, failed: u64 },
+    RepeatedFailures { failed: u64 },
+    StaleObservations,
+}
+
+impl CandidateCostEvidence {
+    pub const fn from_estimate(estimate: Option<ExecutionCostEstimate>) -> Self {
+        match estimate {
+            Some(estimate) => Self::Estimated(estimate),
+            None => Self::Unavailable(CandidateCostUnavailable::NoEstimate),
+        }
+    }
+
+    pub const fn estimate(self) -> Option<ExecutionCostEstimate> {
+        match self {
+            Self::Estimated(estimate) => Some(estimate),
+            Self::Unavailable(_) => None,
+        }
+    }
+
+    /// The caller supplies separately admitted scratch evidence when known.
+    /// A completed duration is a full-route observation, so its component is
+    /// not split into guessed upload/kernel/download times.
+    pub const fn from_observation(
+        observation: CandidateObservationEvidence,
+        scratch_bytes: Option<u64>,
+    ) -> Self {
+        match observation {
+            CandidateObservationEvidence::Observed(duration) => {
+                Self::Estimated(ExecutionCostEstimate {
+                    components: ExecutionCostComponents {
+                        compile_or_prepare_ns: 0,
+                        upload_ns: 0,
+                        allocation_ns: 0,
+                        queue_ns: 0,
+                        execution_ns: duration.elapsed_ns,
+                        synchronization_ns: 0,
+                        download_ns: 0,
+                        downstream_ns: 0,
+                    },
+                    scratch_bytes,
+                    confidence: duration.confidence,
+                    source: EstimateSource::Observation,
+                })
+            }
+            CandidateObservationEvidence::Unavailable(reason) => Self::Unavailable(reason),
+        }
+    }
+}
+
+/// Feedback measures completed wall time, not peak/scratch allocation or
+/// individual transfer stages. Candidate assembly retains those independent
+/// facts when combining this observation with its own legal route.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObservedCandidateDuration {
+    pub elapsed_ns: u64,
+    pub confidence: EstimateConfidence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CandidateObservationEvidence {
+    Observed(ObservedCandidateDuration),
+    Unavailable(CandidateCostUnavailable),
 }
 
 impl ExecutionCostEstimate {
@@ -104,7 +184,7 @@ mod tests {
                 upload_ns: 20,
                 ..ExecutionCostComponents::default()
             },
-            scratch_bytes: 0,
+            scratch_bytes: Some(0),
             confidence: EstimateConfidence::Medium,
             source: EstimateSource::Synthetic,
         };
@@ -117,5 +197,43 @@ mod tests {
             ..ExecutionCostComponents::default()
         };
         assert_eq!(overflow.checked_total_ns(), None);
+        assert_eq!(
+            CandidateCostEvidence::from_estimate(None),
+            CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate)
+        );
+        assert_eq!(
+            CandidateCostEvidence::from_estimate(Some(estimate)).estimate(),
+            Some(estimate)
+        );
+        let observed = CandidateCostEvidence::from_observation(
+            CandidateObservationEvidence::Observed(ObservedCandidateDuration {
+                elapsed_ns: 75,
+                confidence: EstimateConfidence::Medium,
+            }),
+            Some(4_096),
+        )
+        .estimate()
+        .unwrap();
+        assert_eq!(observed.checked_total_ns(), Some(75));
+        assert_eq!(observed.scratch_bytes, Some(4_096));
+        assert_eq!(observed.source, EstimateSource::Observation);
+        let unknown = CandidateCostEvidence::from_observation(
+            CandidateObservationEvidence::Observed(ObservedCandidateDuration {
+                elapsed_ns: 75,
+                confidence: EstimateConfidence::Medium,
+            }),
+            None,
+        )
+        .estimate()
+        .unwrap();
+        assert_eq!(unknown.scratch_bytes, None);
+        assert_eq!(unknown.checked_total_ns(), Some(75));
+
+        let known_json = serde_json::to_value(estimate).unwrap();
+        assert_eq!(known_json["scratch_bytes"], 0);
+        let decoded: ExecutionCostEstimate = serde_json::from_value(known_json).unwrap();
+        assert_eq!(decoded.scratch_bytes, Some(0));
+        let unknown_json = serde_json::to_value(unknown).unwrap();
+        assert!(unknown_json["scratch_bytes"].is_null());
     }
 }

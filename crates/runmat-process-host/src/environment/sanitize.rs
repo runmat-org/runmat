@@ -7,6 +7,7 @@ use super::EnvironmentAllowlist;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum EnvironmentPolicy {
     Inherit,
+    InheritExcept(Vec<String>),
     #[default]
     Clear,
     Allow(EnvironmentAllowlist),
@@ -19,6 +20,11 @@ pub fn apply_environment(
 ) {
     match policy {
         EnvironmentPolicy::Inherit => {}
+        EnvironmentPolicy::InheritExcept(names) => {
+            for name in names {
+                command.env_remove(name);
+            }
+        }
         EnvironmentPolicy::Clear => {
             command.env_clear();
         }

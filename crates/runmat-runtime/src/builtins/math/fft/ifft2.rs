@@ -1,10 +1,10 @@
 //! MATLAB-compatible `ifft2` builtin with GPU-aware semantics for RunMat.
 
 use super::common::{
-    complex_tensor_to_real_value, download_provider_complex_tensor, ensure_wide_integer_data_exact,
-    free_rejected_provider_fft_output, gather_gpu_complex_tensor, gpu_metadata_snapshot,
-    is_wide_integer_value, parse_2d_lengths_from_data, parse_2d_lengths_from_tensor, parse_length,
-    parse_symflag, provider_operation_unsupported, restore_complex_gpu_result,
+    complex_tensor_to_real_value, download_owned_provider_complex_tensor,
+    download_provider_complex_tensor, ensure_wide_integer_data_exact, gather_gpu_complex_tensor,
+    gpu_metadata_snapshot, is_wide_integer_value, parse_2d_lengths_from_data,
+    parse_2d_lengths_from_tensor, parse_length, parse_symflag, restore_complex_gpu_result,
     restore_gpu_metadata, restore_real_gpu_result, same_gpu_handle, transform_axes_complex_tensor,
     valid_provider_fft_output, value_to_complex_tensor, TransformDirection,
 };
@@ -15,17 +15,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::fft::type_resolvers::ifft2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Value};
 
@@ -59,317 +51,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "ifft2";
-
-const IFFT2_WIDE_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ifft2-wide-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ifft2 with host int64 or uint64 data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Ifft2WideIntegerDataExtension"),
-};
-const IFFT2_WIDE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ifft2-wide-integer-controls",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ifft2 with int64 or uint64 transform-size controls is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Ifft2WideIntegerControlExtension"),
-};
-const IFFT2_SIZE_FORM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ifft2-size-form",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ifft2(X, SIZE) scalar/vector shorthand is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Ifft2SizeFormExtension"),
-};
-const IFFT2_EMPTY_ZERO_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ifft2-empty-zero-size",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ifft2 empty or zero transform sizes are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Ifft2EmptyZeroSizeExtension"),
-};
-pub const IFFT2_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    IFFT2_WIDE_DATA_EXTENSION,
-    IFFT2_WIDE_CONTROL_EXTENSION,
-    IFFT2_SIZE_FORM_EXTENSION,
-    IFFT2_EMPTY_ZERO_SIZE_EXTENSION,
-];
-
-const IFFT2_DOCUMENTED_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Documented integer arrays enter the double two-dimensional inverse-FFT domain.",
-    }];
-const IFFT2_DOCUMENTED_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "M and N",
-        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "M and N are exact positive scalar structural controls; logical scalars are also documented.",
-    }];
-const IFFT2_WIDE_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &[
-        runmat_builtins::BuiltinIntegerClass::Int64,
-        runmat_builtins::BuiltinIntegerClass::Uint64,
-    ],
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Host wide data is gated and must cross the double boundary exactly.",
-}];
-const IFFT2_WIDE_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "M, N, or SIZE",
-        classes: &[
-            runmat_builtins::BuiltinIntegerClass::Int64,
-            runmat_builtins::BuiltinIntegerClass::Uint64,
-        ],
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
-        notes: "Wide structural controls are independently gated and parsed from authoritative integer storage.",
-    }];
-const IFFT2_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "SIZE",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
-    notes: "The scalar or two-element SIZE shorthand is independently gated.",
-}];
-pub const IFFT2_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft2(integer_X, ...)", inputs: &IFFT2_DOCUMENTED_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Documented integer data produces double output; symmetric changes complexity only." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft2(X, integer_M, integer_N, ...)", inputs: &IFFT2_DOCUMENTED_CONTROL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Documented controls are parsed exactly before provider execution." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft2(int64_or_uint64_X, ...)", inputs: &IFFT2_WIDE_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::Multiple, notes: "RunMat-only wide host data may not silently round; resident wide data rejects before gather." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft2(X, int64_or_uint64_M_or_N_or_SIZE, ...)", inputs: &IFFT2_WIDE_CONTROL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only wide controls are independently gated and decoded exactly." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = ifft2(X, integer_SIZE, ...)", inputs: &IFFT2_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only scalar/two-vector shorthand; empty and zero sizes have a further gate." },
-];
-
-const IFFT2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "2-D inverse FFT output.",
-}];
-
-const IFFT2_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input spectrum or signal.",
-}];
-
-const IFFT2_INPUTS_SIZE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input spectrum or signal.",
-    },
-    BuiltinParamDescriptor {
-        name: "SIZE",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Scalar N or two-element [M N] size vector.",
-    },
-];
-
-const IFFT2_INPUTS_M_N: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input spectrum or signal.",
-    },
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Output row count for transform.",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Output column count for transform.",
-    },
-];
-
-const IFFT2_INPUTS_SYMFLAG: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input spectrum or signal.",
-    },
-    BuiltinParamDescriptor {
-        name: "symflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"nonsymmetric\""),
-        description: "Symmetry flag: \"symmetric\" or \"nonsymmetric\".",
-    },
-];
-
-const IFFT2_INPUTS_SIZE_SYMFLAG: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input spectrum or signal.",
-    },
-    BuiltinParamDescriptor {
-        name: "SIZE",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Scalar N or two-element [M N] size vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "symflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"nonsymmetric\""),
-        description: "Symmetry flag: \"symmetric\" or \"nonsymmetric\".",
-    },
-];
-
-const IFFT2_INPUTS_M_N_SYMFLAG: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input spectrum or signal.",
-    },
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Output row count for transform.",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Output column count for transform.",
-    },
-    BuiltinParamDescriptor {
-        name: "symflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"nonsymmetric\""),
-        description: "Symmetry flag: \"symmetric\" or \"nonsymmetric\".",
-    },
-];
-
-const IFFT2_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = ifft2(X)",
-        inputs: &IFFT2_INPUTS_CORE,
-        outputs: &IFFT2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = ifft2(X, SIZE)",
-        inputs: &IFFT2_INPUTS_SIZE,
-        outputs: &IFFT2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = ifft2(X, M, N)",
-        inputs: &IFFT2_INPUTS_M_N,
-        outputs: &IFFT2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = ifft2(X, symflag)",
-        inputs: &IFFT2_INPUTS_SYMFLAG,
-        outputs: &IFFT2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = ifft2(X, SIZE, symflag)",
-        inputs: &IFFT2_INPUTS_SIZE_SYMFLAG,
-        outputs: &IFFT2_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = ifft2(X, M, N, symflag)",
-        inputs: &IFFT2_INPUTS_M_N_SYMFLAG,
-        outputs: &IFFT2_OUTPUT,
-    },
-];
-
-const IFFT2_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFT2.ARG_COUNT",
-    identifier: Some("RunMat:ifft2:ArgCount"),
-    when: "More than four input arguments are supplied.",
-    message: "ifft2: invalid argument count",
-};
-
-const IFFT2_ERROR_INVALID_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFT2.INVALID_LENGTH",
-    identifier: Some("RunMat:ifft2:InvalidLength"),
-    when: "Length/size arguments are invalid.",
-    message: "ifft2: invalid transform length argument",
-};
-
-const IFFT2_ERROR_INVALID_SIZE_VECTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFT2.INVALID_SIZE_VECTOR",
-    identifier: Some("RunMat:ifft2:InvalidSizeVector"),
-    when: "Single SIZE argument is invalid.",
-    message: "ifft2: invalid size vector argument",
-};
-
-const IFFT2_ERROR_INVALID_SYMFLAG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFT2.INVALID_SYMFLAG",
-    identifier: Some("RunMat:ifft2:InvalidSymflag"),
-    when: "Symmetry flag is invalid or appears in an invalid position.",
-    message: "ifft2: invalid symmetry flag usage",
-};
-
-const IFFT2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFT2.INVALID_INPUT",
-    identifier: Some("RunMat:ifft2:InvalidInput"),
-    when: "Input cannot be converted to supported numeric/complex domain.",
-    message: "ifft2: invalid input",
-};
-
-const IFFT2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFT2.INTERNAL",
-    identifier: Some("RunMat:ifft2:Internal"),
-    when: "IFFT2 execution or tensor shaping fails.",
-    message: "ifft2: internal error",
-};
-const IFFT2_ERROR_PROVIDER_INTEGRITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IFFT2.PROVIDER_INTEGRITY",
-    identifier: Some("RunMat:ifft2:ProviderIntegrity"),
-    when:
-        "The provider returns ownership, shape, or physical metadata inconsistent with the request.",
-    message: "ifft2: provider integrity error",
-};
-
-const IFFT2_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    IFFT2_ERROR_ARG_COUNT,
-    IFFT2_ERROR_INVALID_LENGTH,
-    IFFT2_ERROR_INVALID_SIZE_VECTOR,
-    IFFT2_ERROR_INVALID_SYMFLAG,
-    IFFT2_ERROR_INVALID_INPUT,
-    IFFT2_ERROR_INTERNAL,
-    IFFT2_ERROR_PROVIDER_INTEGRITY,
-];
-
-pub const IFFT2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IFFT2_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IFFT2_ERRORS,
-};
 
 fn ifft2_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     ifft2_error_with_message(error.message, error)
@@ -424,13 +105,7 @@ fn ifft2_provider_error(detail: impl AsRef<str>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "ifft2",
-    category = "math/fft",
-    summary = "Compute two-dimensional inverse Fourier transforms.",
-    keywords = "ifft2,inverse fft,image reconstruction,gpu",
-    type_resolver(ifft2_type),
-    descriptor(crate::builtins::math::fft::ifft2::IFFT2_DESCRIPTOR),
-    extensions(crate::builtins::math::fft::ifft2::IFFT2_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::fft::ifft2::IFFT2_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::ifft2"
 )]
 async fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -509,7 +184,7 @@ async fn ifft2_gpu(
         if input_is_floating {
             let precision = runmat_accelerate_api::handle_precision(&handle)
                 .unwrap_or_else(|| provider.precision());
-            let mut first_shape = handle.shape.clone();
+            let mut first_shape = handle.shape().to_vec();
             if first_shape.is_empty() {
                 first_shape.push(1);
             }
@@ -532,7 +207,6 @@ async fn ifft2_gpu(
                         runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
                         precision,
                     ) {
-                        free_rejected_provider_fft_output(provider, &first, &[&handle]);
                         return Err(ifft2_provider_error(
                             "first ifft_dim pass returned malformed metadata",
                         ));
@@ -551,16 +225,6 @@ async fn ifft2_gpu(
                                 if same_gpu_handle(&second, &handle) {
                                     restore_gpu_metadata(&handle, input_metadata);
                                 }
-                                if same_gpu_handle(&second, &first) {
-                                    free_rejected_provider_fft_output(provider, &first, &[&handle]);
-                                } else {
-                                    free_rejected_provider_fft_output(
-                                        provider,
-                                        &second,
-                                        &[&handle, &first],
-                                    );
-                                    free_rejected_provider_fft_output(provider, &first, &[&handle]);
-                                }
                                 return Err(ifft2_provider_error(
                                     "second ifft_dim pass aliased a protected handle",
                                 ));
@@ -572,55 +236,42 @@ async fn ifft2_gpu(
                                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
                                 precision,
                             ) {
-                                free_rejected_provider_fft_output(
-                                    provider,
-                                    &second,
-                                    &[&handle, &first],
-                                );
-                                free_rejected_provider_fft_output(provider, &first, &[&handle]);
                                 return Err(ifft2_provider_error(
                                     "second ifft_dim pass returned malformed metadata",
                                 ));
                             }
-                            free_rejected_provider_fft_output(
-                                provider,
-                                &first,
-                                &[&handle, &second],
-                            );
                             if !symmetric {
                                 return Ok(Value::GpuTensor(second));
                             }
-                            let complex = download_provider_complex_tensor(
+                            let complex = download_owned_provider_complex_tensor(
                                 provider,
-                                &second,
+                                second,
                                 BUILTIN_NAME,
-                                true,
                             )
                             .await
-                            .map_err(|error| {
-                                ifft2_provider_error(format!(
-                                    "provider result download failed: {error}"
-                                ))
+                            .map_err(|source| {
+                                let mut error = ifft2_provider_error(format!(
+                                    "provider result download failed: {source}"
+                                ));
+                                error.source = Some(Box::new(source));
+                                error
                             })?;
                             let Value::Tensor(real) = finalize_ifft2_output(complex, true)? else {
                                 unreachable!("symmetric ifft2 produces a real tensor")
                             };
                             return restore_real_gpu_result(&handle, &real, BUILTIN_NAME);
                         }
-                        Err(error) if provider_operation_unsupported(&error, "ifft_dim") => {
-                            let downloaded = download_provider_complex_tensor(
-                                provider,
-                                &first,
-                                BUILTIN_NAME,
-                                false,
-                            )
-                            .await;
-                            free_rejected_provider_fft_output(provider, &first, &[&handle]);
+                        Err(error) if error.is_unsupported() => {
+                            let downloaded =
+                                download_provider_complex_tensor(provider, &first, BUILTIN_NAME)
+                                    .await;
                             let completed = ifft_complex_tensor(
-                                downloaded.map_err(|error| {
-                                    ifft2_provider_error(format!(
-                                        "partial provider result download failed: {error}"
-                                    ))
+                                downloaded.map_err(|source| {
+                                    let mut error = ifft2_provider_error(format!(
+                                        "partial provider result download failed: {source}"
+                                    ));
+                                    error.source = Some(Box::new(source));
+                                    error
                                 })?,
                                 lengths.1,
                                 Some(2),
@@ -628,18 +279,21 @@ async fn ifft2_gpu(
                             return restore_ifft2_gpu_result(&handle, completed, symmetric);
                         }
                         Err(error) => {
-                            free_rejected_provider_fft_output(provider, &first, &[&handle]);
-                            return Err(ifft2_provider_error(format!(
-                                "second ifft_dim pass failed: {error}"
-                            )));
+                            return Err(crate::runtime_error::with_provider_execution_source(
+                                ifft2_provider_error(format!(
+                                    "second ifft_dim pass failed: {error}"
+                                )),
+                                error,
+                            ));
                         }
                     }
                 }
-                Err(error) if provider_operation_unsupported(&error, "ifft_dim") => {}
+                Err(error) if error.is_unsupported() => {}
                 Err(error) => {
-                    return Err(ifft2_provider_error(format!(
-                        "first ifft_dim pass failed: {error}"
-                    )));
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        ifft2_provider_error(format!("first ifft_dim pass failed: {error}")),
+                        error,
+                    ));
                 }
             }
         }
@@ -846,10 +500,11 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
         | Value::SparseTensor(_)
         | Value::Cell(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
+        | Value::BoundFunctionHandle(_)
         | Value::Closure(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -861,6 +516,8 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
         | Value::Task(_)
         | Value::Pool(_)
         | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
         | Value::Foreign(_)
         | Value::OutputList(_) => Err(ifft2_error(&IFFT2_ERROR_INVALID_LENGTH)),
     }
@@ -874,8 +531,6 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, Tensor as HostTensor};
 
     fn approx_eq(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
@@ -911,27 +566,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ifft2_type_pads_rank() {
-        let out = ifft2_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(1)])
-            }
-        );
-    }
-
-    #[test]
     fn ifft2_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("ifft2 builtin");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).expect("ifft2 builtin");
         assert_eq!(builtin.integer_capabilities.len(), 5);
         assert_eq!(builtin.extensions.len(), 4);
-        let descriptor = builtin.descriptor.expect("ifft2 descriptor");
+        let descriptor = builtin.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = ifft2(X)"));
         assert!(labels.contains(&"Y = ifft2(X, SIZE)"));
@@ -1002,7 +642,7 @@ pub(crate) mod tests {
             ifft2_builtin(Value::ComplexTensor(spectrum.clone()), Vec::new()).expect("ifft2");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, tensor.shape);
+                assert_eq!(out.shape(), tensor.shape());
                 for (idx, (re, im)) in out.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
@@ -1027,7 +667,7 @@ pub(crate) mod tests {
         .expect("ifft2 symmetric");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, tensor.shape);
+                assert_eq!(out.shape(), tensor.shape());
                 assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected real tensor, got {other:?}"),
@@ -1045,7 +685,7 @@ pub(crate) mod tests {
         )
         .expect("ifft2 nonsymmetric");
         let result = value_to_complex_tensor(value, "ifft2").expect("complex output");
-        assert_eq!(result.shape, tensor.shape);
+        assert_eq!(result.shape(), tensor.shape());
         for (idx, (re, im)) in result.materialize_f64().iter().enumerate() {
             assert!(approx_eq(
                 (*re, *im),
@@ -1067,7 +707,7 @@ pub(crate) mod tests {
         )
         .expect("ifft2");
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 4]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [4, 4]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -1082,7 +722,7 @@ pub(crate) mod tests {
         let value = ifft2_builtin(Value::ComplexTensor(spectrum), vec![Value::Tensor(size)])
             .expect("ifft2");
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [4, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -1098,7 +738,7 @@ pub(crate) mod tests {
             .expect("ifft2");
 
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [4, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -1118,7 +758,7 @@ pub(crate) mod tests {
         .expect("ifft2");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, tensor.shape);
+                assert_eq!(out.shape(), tensor.shape());
                 for (idx, (re, im)) in out.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
@@ -1153,7 +793,7 @@ pub(crate) mod tests {
         )
         .expect("documented logical M and N");
         let result = value_to_complex_tensor(result, "ifft2").expect("complex scalar result");
-        assert_eq!(result.shape, vec![1, 1]);
+        assert_eq!(result.shape(), [1, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1188,7 +828,7 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert!(out.materialize_f64().is_empty());
-                assert_eq!(out.shape, vec![0, 0]);
+                assert_eq!(out.shape(), [0, 0]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1200,24 +840,16 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = HostTensor::new((0..8).map(|v| v as f64).collect(), vec![2, 4]).unwrap();
             let spectrum = fft2_of_tensor(&tensor);
-            let view = HostTensorView {
-                data: &spectrum
-                    .materialize_f64()
-                    .iter()
-                    .flat_map(|(re, im)| [*re, *im])
-                    .collect::<Vec<_>>(),
-                shape: &[2, 4, 2],
-            };
-            let raw = provider.upload(&view).expect("upload spectrum");
-            let second = runmat_accelerate_api::GpuTensorHandle {
-                shape: spectrum.shape.clone(),
-                device_id: raw.device_id,
-                buffer_id: raw.buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                    ..raw.descriptor
-                },
-            };
+            let words = spectrum
+                .materialize_f64()
+                .iter()
+                .flat_map(|(re, im)| [*re, *im])
+                .collect::<Vec<_>>();
+            let second = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
+                provider,
+                &words,
+                spectrum.shape(),
+            );
 
             let gpu =
                 ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
@@ -1226,12 +858,16 @@ pub(crate) mod tests {
 
             let g = value_to_host_complex(gpu);
             let c = value_to_host_complex(cpu);
-            assert_eq!(g.shape, c.shape);
+            assert_eq!(g.shape(), c.shape());
             for (lhs, rhs) in g.materialize_f64().iter().zip(c.materialize_f64().iter()) {
                 assert!(approx_eq(*lhs, *rhs, 1e-10), "{lhs:?} vs {rhs:?}");
             }
-            provider.free(&raw).ok();
-            provider.free(&second).ok();
+            let physical = second.allocation_lease().downgrade();
+            second.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         });
     }
 
@@ -1246,7 +882,7 @@ pub(crate) mod tests {
         )
         .expect("ifft2");
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![5, 2]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [5, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -1303,25 +939,16 @@ pub(crate) mod tests {
 
         let tensor = HostTensor::new((0..16).map(|v| v as f64).collect(), vec![4, 4]).unwrap();
         let spectrum = fft2_of_tensor(&tensor);
-        let host_real_imag = spectrum
+        let words = spectrum
             .materialize_f64()
             .iter()
             .flat_map(|(re, im)| [*re, *im])
             .collect::<Vec<_>>();
-        let view = HostTensorView {
-            data: &host_real_imag,
-            shape: &[4, 4, 2],
-        };
-        let raw = provider.upload(&view).expect("upload spectrum");
-        let second = runmat_accelerate_api::GpuTensorHandle {
-            shape: spectrum.shape.clone(),
-            device_id: raw.device_id,
-            buffer_id: raw.buffer_id,
-            descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                ..raw.descriptor
-            },
-        };
+        let second = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
+            provider,
+            &words,
+            spectrum.shape(),
+        );
 
         let gpu_val =
             ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
@@ -1329,7 +956,7 @@ pub(crate) mod tests {
 
         let gpu_ct = value_to_host_complex(gpu_val);
         let cpu_ct = value_to_host_complex(cpu_val);
-        assert_eq!(gpu_ct.shape, cpu_ct.shape);
+        assert_eq!(gpu_ct.shape(), cpu_ct.shape());
 
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
@@ -1342,8 +969,12 @@ pub(crate) mod tests {
         {
             assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
         }
-        provider.free(&second).ok();
-        runmat_accelerate_api::clear_residency(&second);
+        let physical = second.allocation_lease().downgrade();
+        second.release().expect("release fixture input");
+        assert!(
+            physical.acquire().is_none(),
+            "last fixture owner releases physical allocation"
+        );
     }
 
     fn ifft2_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

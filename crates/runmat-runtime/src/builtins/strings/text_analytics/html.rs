@@ -14,7 +14,8 @@ use runmat_value::{CellArray, ObjectInstance, StringArray, StructValue, Value};
 use crate::builtins::strings::core::compat::{scalar_text, text_items};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
-const HTML_TREE_CLASS: &str = "htmlTree";
+const HTML_TREE_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("htmlTree");
 const MISSING: &str = "<missing>";
 
 const EXTRACT_HTML_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
@@ -376,6 +377,12 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
             .data
             .iter()
             .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::StructArray(array) => array
+            .any_value(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
         _ => false,
     }
 }
@@ -1641,7 +1648,7 @@ struct OpenElement {
 
 fn parse_html_tree(html: &str) -> BuiltinResult<HtmlNode> {
     let mut stack = vec![OpenElement {
-        name: "document".to_string(),
+        name: "document".into(),
         attrs: BTreeMap::new(),
         children: Vec::new(),
         start: 0,
@@ -1720,7 +1727,7 @@ fn parse_html_tree(html: &str) -> BuiltinResult<HtmlNode> {
     } else {
         let raw = html.to_string();
         Ok(HtmlNode::Element(HtmlElement {
-            name: "html".to_string(),
+            name: "html".into(),
             attrs: BTreeMap::new(),
             children: root.children,
             raw,
@@ -2238,7 +2245,7 @@ mod tests {
         let Value::Object(object) = tree else {
             panic!("expected object");
         };
-        assert_eq!(object.class_name, HTML_TREE_CLASS);
+        assert!(object.class_name.is(HTML_TREE_CLASS));
         assert_eq!(
             object.properties.get("Name"),
             Some(&Value::String("HTML".to_string()))
@@ -2279,12 +2286,16 @@ mod tests {
             .expect_err("numeric input must reject");
         assert_eq!(numeric.identifier(), Some("RunMat:html:InvalidInput"));
 
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_419_001,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         let resident = futures::executor::block_on(html_tree_builtin(vec![resident]))
             .expect_err("resident input must reject before provider access");
         assert_eq!(resident.identifier(), Some("RunMat:html:InvalidInput"));
@@ -2628,12 +2639,16 @@ mod tests {
             .expect_err("integer tree input");
             assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
         }
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         let error = futures::executor::block_on(find_element_builtin(vec![
             resident,
             Value::String("p".into()),
@@ -2673,12 +2688,16 @@ mod tests {
             assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
         }
 
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         let error = futures::executor::block_on(get_attribute_builtin(vec![
             resident,
             Value::String("href".into()),
@@ -2737,12 +2756,16 @@ mod tests {
                 .expect_err("integer HTML input");
             assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
         }
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         let error = futures::executor::block_on(extract_html_text_builtin(vec![resident]))
             .expect_err("resident HTML input");
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);

@@ -15,30 +15,30 @@ async fn handle_identity_and_delete_impl() {
     )
     .await
     .unwrap();
-    let e = runmat_runtime::call_builtin_async("eq", &[h1.clone(), h2.clone()])
+    let e = runmat_runtime::call_builtin_async("eq", &[h1.value().clone(), h2.value().clone()])
         .await
         .unwrap();
     assert_eq!(e, Value::Bool(false));
-    let e2 = runmat_runtime::call_builtin_async("eq", &[h1.clone(), h1.clone()])
+    let e2 = runmat_runtime::call_builtin_async("eq", &[h1.value().clone(), h1.value().clone()])
         .await
         .unwrap();
     assert_eq!(e2, Value::Bool(true));
-    let v = runmat_runtime::call_builtin_async("isvalid", std::slice::from_ref(&h1))
+    let v = runmat_runtime::call_builtin_async("isvalid", std::slice::from_ref(h1.value()))
         .await
         .unwrap();
-    if let Value::Bool(b) = v {
-        assert!(b);
+    if let Value::Bool(b) = v.value() {
+        assert!(*b);
     } else {
         panic!();
     }
-    let d = runmat_runtime::call_builtin_async("delete", std::slice::from_ref(&h1))
+    let d = runmat_runtime::call_builtin_async("delete", std::slice::from_ref(h1.value()))
         .await
         .unwrap();
-    let v2 = runmat_runtime::call_builtin_async("isvalid", &[d])
+    let v2 = runmat_runtime::call_builtin_async("isvalid", std::slice::from_ref(d.value()))
         .await
         .unwrap();
-    if let Value::Bool(b) = v2 {
-        assert!(!b);
+    if let Value::Bool(b) = v2.value() {
+        assert!(!*b);
     } else {
         panic!();
     }
@@ -67,13 +67,13 @@ async fn events_addlistener_notify_impl() {
     let cb = Value::String("@isvalid".to_string()); // simple callable that accepts the handle
     let _l = runmat_runtime::call_builtin_async(
         "addlistener",
-        &[obj.clone(), Value::String("moved".to_string()), cb],
+        &[obj.value().clone(), Value::String("moved".to_string()), cb],
     )
     .await
     .unwrap();
     let _ = runmat_runtime::call_builtin_async(
         "notify",
-        &[obj.clone(), Value::String("moved".to_string())],
+        &[obj.value().clone(), Value::String("moved".to_string())],
     )
     .await
     .unwrap();

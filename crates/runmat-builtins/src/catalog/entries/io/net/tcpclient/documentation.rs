@@ -1,0 +1,71 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("tcpclient"), slug: Some("tcpclient"),
+    summary: "Open a TCP client connection for socket I/O workflows.",
+    description: "`tcpclient(host,port)` opens a TCP/IP connection to a remote endpoint. The returned client value exposes connection and configuration properties used by `read`, `write`, and `readline`.",
+    keywords: &["tcpclient", "tcp", "network", "client"],
+    related: &["tcpserver", "accept", "fread", "fwrite", "close", "read", "readline", "write"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Endpoint and options", paragraphs: &[
+            "`tcpclient(host,port)` resolves IPv4, IPv6, or DNS hostnames and connects using a default 10-second `ConnectTimeout`. The documented port range is 1 through 65535.",
+            "The current RunMat parser accepts nonnegative double values or `Inf` for `Timeout` and `ConnectTimeout`. `Timeout = 0` and `Inf` leave I/O blocking, but a zero `ConnectTimeout` currently fails connection setup; use a positive value or `Inf` for connection attempts. The documented `EnableTransferDelay` option is not implemented.",
+            "RunMat mode additionally accepts typed-integer port and timeout values, port zero, and legacy constructor options `ByteOrder`, `InputBufferSize`, `OutputBufferSize`, `UserData`, and `Name`. Integer values entering a seconds boundary must be exactly representable as double.",
+            "Read and write timeouts use the captured `Timeout`. Passing `Inf` keeps operations blocking. The returned value reports the configured timeout verbatim.",
+        ] },
+        BuiltinDocumentationSection { heading: "Result, placement, and failures", paragraphs: &[
+            "RunMat returns a `tcpclient` object with a sealed session-owned socket authority, not a MATLAB handle-class implementation. Public port properties are `double`; editing visible properties does not reconfigure the live connection.",
+            "Connection failures raise `RunMat:tcpclient:ConnectionFailed` with the operating-system error. Invalid addresses, ports, and Name/Value controls use stable RunMat identifiers.",
+            "Automatically resident inputs gather through their owner. Explicit `gpuArray` input requires RunMat mode; the result remains host-resident. No accelerator kernel participates in TCP connection setup.",
+        ] },
+        BuiltinDocumentationSection { heading: "Illustrative programs", paragraphs: &[
+            "Connecting to a loopback server for local testing\nclient = tcpclient(\"127.0.0.1\", 55000);\ndisp(client.Address)\ndisp(client.Port)\nExpected display: 127.0.0.1\n55000",
+            "Customizing timeouts and byte order\nclient = tcpclient(\"localhost\", 60000, \"Timeout\", 5, \"ConnectTimeout\", 2, \"ByteOrder\", \"big-endian\");\ndisp(client.Timeout)\ndisp(client.ConnectTimeout)\ndisp(client.ByteOrder)\nExpected display: 5\n2\nbig-endian",
+            "Storing metadata in UserData\nmeta = struct(\"session\", \"demo\", \"started\", \"2024-01-01T00:00:00Z\");\nclient = tcpclient(\"example.com\", 80, \"UserData\", meta);\ndisp(client.UserData.session)\nExpected display: demo",
+            "Detecting connection failures\ntry\n    client = tcpclient(\"192.0.2.20\", 65530, \"ConnectTimeout\", 0.2);\ncatch err\n    disp(err.identifier)\nend\nExpected error when the endpoint refuses or times out: RunMat:tcpclient:ConnectionFailed",
+            "Keeping a streaming connection open\nclient = tcpclient(\"data.example.com\", 50000, \"Timeout\", inf, \"ConnectTimeout\", inf);\ndisp(client.Timeout)\ndisp(client.ConnectTimeout)\nExpected display: Inf\nInf",
+        ] },
+    ],
+    examples: &[BuiltinExample {
+        id: "loopback-client-properties", title: "Connect to a local TCP peer",
+        program: "client = tcpclient('__RUNMAT_LOOPBACK_HOST__', __RUNMAT_LOOPBACK_PORT__);\nassert(client.Connected);\nassert(strcmp(client.Address, '__RUNMAT_LOOPBACK_HOST__'));\nassert(client.Port == __RUNMAT_LOOPBACK_PORT__);\nwrite(client, uint8(9));\nclose(client);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeLoopbackNetwork,
+        fixture: BuiltinExampleFixture::Loopback(BuiltinLoopbackFixture {
+            id: BuiltinExampleFixtureId { local_name: "tcpclient-properties" },
+            scenario: BuiltinLoopbackScenario::Tcp(BuiltinTcpScenario { exchanges: &[BuiltinTcpExchange { client_bytes: &[9], server_bytes: b"" }] }),
+            endpoint_substitutions: &[BuiltinEndpointSubstitution::LoopbackHost, BuiltinEndpointSubstitution::LoopbackPort],
+        }),
+        requirements: BuiltinExampleRequirements { host: BuiltinExampleHostRequirement::NativeOnly, ..BuiltinExampleRequirements::NONE },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(client.Connected); assert(client.Port == __RUNMAT_LOOPBACK_PORT__);" },
+    }],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Which byte orders are supported?", answer: "In RunMat mode, the legacy `ByteOrder` constructor option accepts `\"little-endian\"` and `\"big-endian\"`. Other values raise `RunMat:tcpclient:InvalidNameValue`." },
+        BuiltinDocumentationFaq { question: "Can I pass `inf` for `Timeout` or `ConnectTimeout`?", answer: "Yes. `Timeout = inf` keeps I/O blocking; `ConnectTimeout = inf` waits indefinitely for a connection." },
+        BuiltinDocumentationFaq { question: "How do I close the client?", answer: "Call `close(client)` to release the socket." },
+        BuiltinDocumentationFaq { question: "Where do buffer sizes apply?", answer: "The RunMat-mode `InputBufferSize` and `OutputBufferSize` options record desired limits for future buffered I/O behavior. They do not currently resize the operating-system socket buffers." },
+        BuiltinDocumentationFaq { question: "Does the builtin support IPv6?", answer: "Yes. Pass an IPv6 literal (for example `\"::1\"`) or a hostname that resolves to IPv6. The returned value reports the chosen address family." },
+        BuiltinDocumentationFaq { question: "What happens when the server rejects the connection?", answer: "`tcpclient` raises `RunMat:tcpclient:ConnectionFailed` with the OS error, such as connection refused." },
+        BuiltinDocumentationFaq { question: "Can I pass an integer port?", answer: "Compatible mode expects the documented double port. RunMat mode also accepts every typed-integer class and validates it directly in the 1-through-65535 structural range." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "tcpserver", target: BuiltinDocumentationLinkTarget::Builtin("tcpserver") },
+        BuiltinDocumentationLink { label: "accept", target: BuiltinDocumentationLinkTarget::Builtin("accept") },
+        BuiltinDocumentationLink { label: "fread", target: BuiltinDocumentationLinkTarget::Builtin("fread") },
+        BuiltinDocumentationLink { label: "fwrite", target: BuiltinDocumentationLinkTarget::Builtin("fwrite") },
+        BuiltinDocumentationLink { label: "close", target: BuiltinDocumentationLinkTarget::Builtin("close") },
+        BuiltinDocumentationLink { label: "read", target: BuiltinDocumentationLinkTarget::Builtin("read") },
+        BuiltinDocumentationLink { label: "readline", target: BuiltinDocumentationLinkTarget::Builtin("readline") },
+        BuiltinDocumentationLink { label: "write", target: BuiltinDocumentationLinkTarget::Builtin("write") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "Runtime TCP constructor", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/tcpclient.rs") }, BuiltinDocumentationLink { label: "Network control parser", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/control.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Loopback TCP constructor tests", location: "builtins::io::net::tcpclient::tests" }],
+        notes: &[],
+    },
+    introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

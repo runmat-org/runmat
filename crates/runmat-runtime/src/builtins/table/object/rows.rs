@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 
 pub(crate) fn selected_row_names(
     object: &ObjectInstance,
@@ -34,16 +34,17 @@ pub(super) fn selected_row_times(
 pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => Ok(tensor.rows()),
-        Value::ComplexTensor(tensor) => Ok(tensor.rows),
+        Value::GpuTensor(handle) => Ok(handle.shape().first().copied().unwrap_or(1)),
+        Value::ComplexTensor(tensor) => Ok(tensor.rows()),
         Value::StringArray(array) => Ok(array.rows()),
         Value::LogicalArray(array) => Ok(array.shape.first().copied().unwrap_or(array.data.len())),
         Value::Cell(cell) => Ok(cell.rows),
         Value::CharArray(array) => Ok(array.rows),
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)
                 .map(|tensor| tensor.rows())
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             crate::builtins::duration::duration_tensor_from_duration_value(value)
                 .map(|tensor| tensor.rows())
         }
@@ -61,7 +62,7 @@ pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
 pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let source_rows = tensor.shape.first().copied().unwrap_or(1);
+            let source_rows = tensor.shape().first().copied().unwrap_or(1);
             let lanes = tensor.len().checked_div(source_rows).unwrap_or(0);
             let mut indices = Vec::with_capacity(rows.len() * lanes);
             for lane in 0..lanes {
@@ -74,7 +75,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     indices.push(row + lane * source_rows);
                 }
             }
-            let mut shape = tensor.shape.clone();
+            let mut shape = tensor.shape().to_vec();
             if shape.is_empty() {
                 shape = vec![rows.len(), 1];
             } else {
@@ -91,7 +92,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 .map_err(invalid_variable)
         }
         Value::ComplexTensor(tensor) => {
-            let source_rows = tensor.shape.first().copied().unwrap_or(1);
+            let source_rows = tensor.shape().first().copied().unwrap_or(1);
             let lanes = tensor.len().checked_div(source_rows).unwrap_or(0);
             let mut indices = Vec::with_capacity(rows.len() * lanes);
             for lane in 0..lanes {
@@ -104,7 +105,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     indices.push(row + lane * source_rows);
                 }
             }
-            let mut shape = tensor.shape.clone();
+            let mut shape = tensor.shape().to_vec();
             if shape.is_empty() {
                 shape = vec![rows.len(), 1];
             } else {
@@ -119,7 +120,8 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                                 invalid_index("table: complex variable row index out of bounds")
                             })
                         })
-                        .collect::<BuiltinResult<Vec<_>>>()?,
+                        .collect::<BuiltinResult<Vec<_>>>()?
+                        .into(),
                 ),
                 runmat_value::ComplexStorage::F32(values) => runmat_value::ComplexStorage::F32(
                     indices
@@ -129,13 +131,14 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                                 invalid_index("table: complex variable row index out of bounds")
                             })
                         })
-                        .collect::<BuiltinResult<Vec<_>>>()?,
+                        .collect::<BuiltinResult<Vec<_>>>()?
+                        .into(),
                 ),
                 runmat_value::ComplexStorage::Integer(storage) => {
                     runmat_value::ComplexStorage::Integer(
                         runmat_value::IntegerComplexStorage::new(
                             storage
-                                .real
+                                .real()
                                 .reorder(|values| {
                                     indices
                                         .iter()
@@ -149,7 +152,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                                 })
                                 .map_err(invalid_variable)?,
                             storage
-                                .imag
+                                .imag()
                                 .reorder(|values| {
                                     indices
                                         .iter()
@@ -213,7 +216,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     })?);
                 }
             }
-            let mut shape = array.shape.clone();
+            let mut shape = array.shape.to_vec();
             if shape.is_empty() {
                 shape = vec![rows.len(), 1];
             } else {
@@ -234,7 +237,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 .map(Value::Cell)
                 .map_err(invalid_variable)
         }
-        Value::Object(obj) if obj.is_class("datetime") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
             let selected = select_rows(&Value::Tensor(tensor), rows)?;
             match selected {
@@ -247,7 +250,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 _ => unreachable!("select_rows tensor branch returns tensor"),
             }
         }
-        Value::Object(obj) if obj.is_class("duration") => {
+        Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             let tensor = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
             let selected = select_rows(&Value::Tensor(tensor), rows)?;
             match selected {
@@ -335,7 +338,7 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
         _ => None,
     });
     if let Some(prototype) = typed_prototype {
-        let target = IntegerTarget::from_storage(prototype);
+        let target = IntegerClass::from_storage(prototype);
         let mut exact = Vec::with_capacity(rows * total_cols);
         for value in values {
             let Value::Tensor(tensor) = value else {
@@ -511,7 +514,7 @@ mod tests {
         let Value::Tensor(result) = concatenate_numeric_columns(&[&first, &second]).unwrap() else {
             panic!("expected tensor result");
         };
-        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(result.shape(), &[2, 3]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![large, u64::MAX, 7, 0, 9, 2]))
@@ -528,7 +531,7 @@ mod tests {
         else {
             panic!("expected tensor result");
         };
-        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.shape(), &[2, 2]);
         assert_eq!(
             result.into_numeric_storage().expect("single storage"),
             NumericStorage::F32(vec![1.5, 2.5, 3.25, 4.25])
@@ -553,7 +556,7 @@ mod tests {
         else {
             panic!("expected exact integer tensor result");
         };
-        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(result.shape(), &[2, 3]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::I8(vec![

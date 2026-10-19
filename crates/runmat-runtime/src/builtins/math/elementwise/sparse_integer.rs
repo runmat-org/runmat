@@ -335,7 +335,7 @@ fn sparse_dense_times_fast_path(
     let ExactOperand::Tensor(dense) = dense else {
         return Ok(None);
     };
-    if dense.shape != sparse.shape() {
+    if dense.shape() != sparse.shape() {
         return Ok(None);
     }
     let sparse_values = sparse
@@ -424,7 +424,7 @@ fn exact_dense_result(
 fn operand_shape(operand: &ExactOperand<'_>) -> Vec<usize> {
     match operand {
         ExactOperand::Sparse(sparse) => sparse.shape(),
-        ExactOperand::Tensor(tensor) => tensor.shape.clone(),
+        ExactOperand::Tensor(tensor) => tensor.shape().to_vec(),
         ExactOperand::ScalarInt(_) | ExactOperand::ScalarReal(_) => vec![1, 1],
     }
 }
@@ -525,6 +525,7 @@ mod tests {
         let Value::SparseTensor(result) = result.unwrap() else {
             panic!("typed sparse output");
         };
+        assert_eq!(result.shape(), vec![2, 2]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![
@@ -572,6 +573,7 @@ mod tests {
         let Value::Tensor(result) = result.unwrap() else {
             panic!("dense exact output");
         };
+        assert_eq!(result.shape(), &[2, 2]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![

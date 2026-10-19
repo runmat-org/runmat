@@ -7,7 +7,11 @@ use crate::BuiltinResult;
 pub fn as_lower_str(val: &Value) -> Option<String> {
     match val {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::CharArray(c) => Some(c.data.iter().collect::<String>().to_ascii_lowercase()),
+        Value::CharArray(c)
+            if c.rows <= 1 && crate::builtins::common::shape::effective_rank(&c.shape) <= 2 =>
+        {
+            Some(c.data.iter().collect::<String>().to_ascii_lowercase())
+        }
         _ => None,
     }
 }
@@ -155,6 +159,22 @@ pub fn parse_hold_mode_str(
 mod tests {
     use super::*;
     use runmat_value::{IntegerStorage, Tensor};
+
+    #[test]
+    fn mode_text_rejects_character_pages_and_rows_without_changing_empty_policy() {
+        for shape in [vec![2, 2], vec![1, 2, 2], vec![1, 1, 4]] {
+            let chars =
+                runmat_value::CharArray::new_with_shape("flat".chars().collect(), shape).unwrap();
+            assert_eq!(as_lower_str(&Value::CharArray(chars)), None);
+        }
+        for shape in [vec![1, 4], vec![1, 4, 1, 1]] {
+            let chars =
+                runmat_value::CharArray::new_with_shape("FLAT".chars().collect(), shape).unwrap();
+            assert_eq!(as_lower_str(&Value::CharArray(chars)), Some("flat".into()));
+        }
+        let empty = runmat_value::CharArray::new_with_shape(vec![], vec![0, 0]).unwrap();
+        assert_eq!(as_lower_str(&Value::CharArray(empty)), Some(String::new()));
+    }
 
     #[test]
     fn scalar_and_hold_parsers_read_typed_integer_storage() {

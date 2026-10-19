@@ -299,10 +299,10 @@ impl SentimentOutputs {
         let compound = tensor_value(self.compound, shape.clone())?;
         if let Some(out_count) = crate::output_count::current_output_count() {
             if out_count == 0 {
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(Value::output_list(Vec::new()));
             }
             if out_count == 1 {
-                return Ok(Value::OutputList(vec![compound]));
+                return Ok(Value::output_list(vec![compound]));
             }
             return Ok(crate::output_count::output_list_with_padding(
                 out_count,
@@ -940,6 +940,10 @@ mod tests {
             panic!("expected output list");
         };
         values
+            .try_into_owned()
+            .expect("unique sentiment outputs")
+            .try_into_unbounded_vec()
+            .expect("ordinary unbounded sentiment outputs")
     }
 
     #[test]
@@ -960,7 +964,7 @@ mod tests {
 
     #[test]
     fn vader_returns_four_requested_score_vectors() {
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let values = outputs(run(vec![documents(vec![vec!["good"], vec!["bad"]])]).unwrap());
         assert_eq!(values.len(), 4);
         let compound_scores = compound(values[0].clone());
