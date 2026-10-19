@@ -75,7 +75,8 @@ pub(super) fn elements(mesh: Value) -> BuiltinResult<Value> {
                 ElementOrder::Tet4 => "tet4",
                 ElementOrder::Tet10 => "tet10",
             }
-            .to_string(),
+            .to_string()
+            .into(),
         ),
     );
     result.insert(
@@ -176,11 +177,15 @@ pub(super) fn regions(mesh: Value) -> BuiltinResult<Value> {
             let mut value = StructValue::new();
             value.insert(
                 "id",
-                Value::String(region.region_id.source_topology_id.clone()),
+                Value::String(region.region_id.source_topology_id.clone().into()),
             );
             value.insert(
                 "kind",
-                Value::String(persistent_entity_kind(region.region_id.kind).to_string()),
+                Value::String(
+                    persistent_entity_kind(region.region_id.kind)
+                        .to_string()
+                        .into(),
+                ),
             );
             value.insert(
                 "assembly_path",
@@ -251,7 +256,8 @@ pub(super) fn quality_value(mesh: &SolverMeshArtifact) -> BuiltinResult<Value> {
                 ElementOrder::Tet4 => "tet4",
                 ElementOrder::Tet10 => "tet10",
             }
-            .to_string(),
+            .to_string()
+            .into(),
         ),
     );
     value.insert("element_ids", u64_tensor(ids, jacobians.len(), 1)?);
@@ -306,11 +312,11 @@ fn persistent_entity_value(id: &PersistentEntityId) -> BuiltinResult<Value> {
     let mut value = StructValue::new();
     value.insert(
         "kind",
-        Value::String(persistent_entity_kind(id.kind).to_string()),
+        Value::String(persistent_entity_kind(id.kind).to_string().into()),
     );
     value.insert(
         "source_topology_id",
-        Value::String(id.source_topology_id.clone()),
+        Value::String(id.source_topology_id.clone().into()),
     );
     value.insert("assembly_path", string_cell(id.assembly_path.clone())?);
     Ok(Value::Struct(value))
@@ -373,7 +379,7 @@ fn column_major_u64(rows: usize, columns: usize, value: impl Fn(usize, usize) ->
 fn string_cell(values: Vec<String>) -> BuiltinResult<Value> {
     let columns = values.len();
     crate::make_cell_with_shape(
-        values.into_iter().map(Value::String).collect(),
+        values.into_iter().map(Value::string).collect(),
         vec![columns, 1],
     )
     .map_err(|message| error("meshing", message))

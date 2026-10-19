@@ -48,7 +48,7 @@ pub(super) fn mesh_object(payload: MeshPayload) -> BuiltinResult<Value> {
     let mut object = ObjectInstance::new(MESH_CLASS.to_string());
     object.properties.insert(
         "canonical_digest".to_string(),
-        Value::String(digest_hex(payload.artifact.canonical_digest.bytes())),
+        Value::String(digest_hex(payload.artifact.canonical_digest.bytes()).into()),
     );
     object.properties.insert(
         "node_count".to_string(),
@@ -80,7 +80,8 @@ pub(super) fn mesh_object(payload: MeshPayload) -> BuiltinResult<Value> {
         REGION_MAP_PROPERTY.to_string(),
         Value::String(
             serde_json::to_string(&payload.region_aliases)
-                .map_err(|cause| error(GENERATE_NAME, cause.to_string()))?,
+                .map_err(|cause| error(GENERATE_NAME, cause.to_string()))?
+                .into(),
         ),
     );
     Ok(Value::Object(object))
@@ -94,7 +95,7 @@ pub(super) fn evidence_object(evidence: MeshingEvidence) -> BuiltinResult<Value>
     let mut object = ObjectInstance::new(EVIDENCE_CLASS.to_string());
     object.properties.insert(
         "artifact_digest".to_string(),
-        Value::String(digest_hex(evidence.artifact_digest.bytes())),
+        Value::String(digest_hex(evidence.artifact_digest.bytes()).into()),
     );
     object.properties.insert(
         "stage_count".to_string(),
@@ -173,7 +174,7 @@ fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
                     "meshing evidence stage did not serialize as a canonical name",
                 )
             })?;
-            value.insert("stage", Value::String(name.to_string()));
+            value.insert("stage", Value::String(name.to_string().into()));
             for (name, count) in [
                 ("completed_work", stage.completed_work),
                 ("estimated_work", stage.estimated_work),
@@ -191,7 +192,7 @@ fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
                 .iter()
                 .map(|invariant| {
                     let mut value = StructValue::new();
-                    value.insert("id", Value::String(invariant.invariant_id.clone()));
+                    value.insert("id", Value::String(invariant.invariant_id.clone().into()));
                     value.insert("passed", Value::Bool(invariant.passed));
                     if let Some(measured) = invariant.measured {
                         value.insert("measured", Value::Num(measured));
@@ -200,7 +201,7 @@ fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
                         value.insert("required", Value::Num(required));
                     }
                     if let Some(unit) = &invariant.unit {
-                        value.insert("unit", Value::String(unit.clone()));
+                        value.insert("unit", Value::String(unit.clone().into()));
                     }
                     Value::Struct(value)
                 })

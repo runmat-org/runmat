@@ -3174,14 +3174,8 @@ fn scatter_property_with_data(
                 Value::String(marker_style_name(scatter.marker_style).into()),
             );
             st.insert("SizeData", scatter_size_data_value(scatter));
-            st.insert(
-                "MarkerFaceColor",
-                rgb_triplet_value(scatter.color),
-            );
-            st.insert(
-                "MarkerEdgeColor",
-                rgb_triplet_value(scatter.edge_color),
-            );
+            st.insert("MarkerFaceColor", rgb_triplet_value(scatter.color));
+            st.insert("MarkerEdgeColor", rgb_triplet_value(scatter.edge_color));
             st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
             if let Some(label) = scatter.label.clone() {
                 st.insert("DisplayName", Value::string(label));
@@ -3862,14 +3856,9 @@ fn get_scatter3_property(
             );
             st.insert(
                 "MarkerFaceColor",
-                rgb_triplet_value(
-                    scatter.colors.first().copied().unwrap_or_default(),
-                ),
+                rgb_triplet_value(scatter.colors.first().copied().unwrap_or_default()),
             );
-            st.insert(
-                "MarkerEdgeColor",
-                rgb_triplet_value(scatter.edge_color),
-            );
+            st.insert("MarkerEdgeColor", rgb_triplet_value(scatter.edge_color));
             st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
             if let Some(label) = scatter.label.clone() {
                 st.insert("DisplayName", Value::string(label));
@@ -4069,14 +4058,8 @@ fn get_stem_property(
                     Value::String(marker_style_name(marker.kind).into()),
                 );
                 st.insert("MarkerSize", Value::Num(marker.size as f64));
-                st.insert(
-                    "MarkerFaceColor",
-                    rgb_triplet_value(marker.face_color),
-                );
-                st.insert(
-                    "MarkerEdgeColor",
-                    rgb_triplet_value(marker.edge_color),
-                );
+                st.insert("MarkerFaceColor", rgb_triplet_value(marker.face_color));
+                st.insert("MarkerEdgeColor", rgb_triplet_value(marker.edge_color));
                 st.insert("Filled", Value::Bool(marker.filled));
             }
             Ok(Value::Struct(st))
@@ -4098,7 +4081,8 @@ fn get_stem_property(
             stem.marker
                 .as_ref()
                 .map(|m| marker_style_name(m.kind).to_string())
-                .unwrap_or("none".into()),
+                .unwrap_or("none".into())
+                .into(),
         )),
         Some("markersize") => Ok(Value::Num(
             stem.marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
@@ -8123,14 +8107,8 @@ fn insert_line_marker_struct_props(
             Value::String(marker_style_name(marker.kind).into()),
         );
         st.insert("MarkerSize", Value::Num(marker.size as f64));
-        st.insert(
-            "MarkerFaceColor",
-            rgb_triplet_value(marker.face_color),
-        );
-        st.insert(
-            "MarkerEdgeColor",
-            rgb_triplet_value(marker.edge_color),
-        );
+        st.insert("MarkerFaceColor", rgb_triplet_value(marker.face_color));
+        st.insert("MarkerEdgeColor", rgb_triplet_value(marker.edge_color));
         st.insert("Filled", Value::Bool(marker.filled));
     }
 }
@@ -8363,7 +8341,7 @@ fn rgb_triplet_value(color: glam::Vec4) -> Value {
         vec![1, 3],
     )
     .map(Value::Tensor)
-    .unwrap_or_else(|_| Value::String(String::new()))
+    .unwrap_or_else(|_| Value::String(String::new().into()))
 }
 
 fn key_name(kind: PlotObjectKind) -> &'static str {

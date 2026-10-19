@@ -3,17 +3,19 @@
 use runmat_value::Value;
 
 use super::super::{
-    analysis_results_by_run_id_op, builtin_error, find_field, normalize_token,
+    analysis_results_by_run_id_op, builtin_error, find_field, normalize_token, object_payload,
     operation_error, run_id_context_from_value, run_id_from_value, scalar_string,
-    object_payload, study_context_value, AnalysisFieldValues, AnalysisResultsQuery, AnalysisStudySpec,
-    BuiltinResult, OperationContext, ERROR_INPUT, ERROR_OPERATION, FEA_FIELD_CLASS, FEA_STUDY_CLASS, MESH_NAME, PLOT_NAME,
+    study_context_value, AnalysisFieldValues, AnalysisResultsQuery, AnalysisStudySpec,
+    BuiltinResult, OperationContext, ERROR_INPUT, ERROR_OPERATION, FEA_FIELD_CLASS,
+    FEA_STUDY_CLASS, MESH_NAME, PLOT_NAME,
 };
 
 pub(in crate::builtins::fea) struct FeaPlotRequest {
     pub(in crate::builtins::fea) study: AnalysisStudySpec,
     pub(in crate::builtins::fea) run_id: String,
     pub(in crate::builtins::fea) field_id: String,
-    pub(in crate::builtins::fea) sample: Option<runmat_analysis_fea::results::field::RecoveredFieldSample>,
+    pub(in crate::builtins::fea) sample:
+        Option<runmat_analysis_fea::results::field::RecoveredFieldSample>,
     pub(in crate::builtins::fea) options: FeaPlotOptions,
 }
 
@@ -24,8 +26,9 @@ pub(in crate::builtins::fea) struct FeaMeshRequest {
     pub(in crate::builtins::fea) show_edges: bool,
 }
 
-
-pub(in crate::builtins::fea) fn mesh_request_from_args(args: &[Value]) -> BuiltinResult<FeaMeshRequest> {
+pub(in crate::builtins::fea) fn mesh_request_from_args(
+    args: &[Value],
+) -> BuiltinResult<FeaMeshRequest> {
     if args.is_empty() {
         return Err(builtin_error(
             MESH_NAME,
@@ -120,7 +123,9 @@ impl Default for FeaPlotOptions {
     }
 }
 
-pub(in crate::builtins::fea) fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotRequest> {
+pub(in crate::builtins::fea) fn plot_request_from_args(
+    args: &[Value],
+) -> BuiltinResult<FeaPlotRequest> {
     if args.is_empty() {
         return Err(builtin_error(
             PLOT_NAME,
@@ -170,7 +175,7 @@ pub(in crate::builtins::fea) fn plot_request_from_args(args: &[Value]) -> Builti
         run_id: run_id_context_from_value(field).ok_or_else(|| {
             builtin_error(PLOT_NAME, &ERROR_INPUT, "fea.Field is missing run context")
         })?,
-        field_id,
+        field_id: field_id.to_string(),
         sample: super::super::field_access::selection_from_field_object(PLOT_NAME, object)?.sample,
         options,
     })

@@ -483,7 +483,7 @@ fn generator_argument(
             IntValue::U64(value) => GeneratorArgument::UnsignedInteger(*value),
         },
         Value::Num(value) if value.is_finite() => GeneratorArgument::Real(*value),
-        Value::String(value) => GeneratorArgument::Text(value.clone()),
+        Value::String(value) => GeneratorArgument::Text(value.to_string()),
         Value::CharArray(value) if value.rows == 1 => {
             GeneratorArgument::Text(value.data.iter().collect())
         }

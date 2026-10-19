@@ -156,7 +156,7 @@ macro_rules! axis_frame_builtin {
                 .map_err(|error| builtin_error($name, &ERROR_INPUT, error.to_string()))?;
             ensure_frame_classes_registered();
             let mut object = ObjectInstance::new($class);
-            object.properties.insert("frame_id".into(), Value::String(id));
+            object.properties.insert("frame_id".into(), Value::String(id.into()));
             object.properties.insert("origin".into(), origin);
             object.properties.insert($primary.into(), primary_axis);
             object.properties.insert($secondary.into(), secondary_axis);
@@ -226,7 +226,7 @@ pub(crate) fn coordinate_frame_from_value(
         ));
     };
     let string = |name: &str| match object.properties.get(name) {
-        Some(Value::String(value)) if !value.is_empty() => Ok(value.clone()),
+        Some(Value::String(value)) if !value.is_empty() => Ok(value.to_string()),
         _ => Err(builtin_error(
             builtin,
             &ERROR_INPUT,

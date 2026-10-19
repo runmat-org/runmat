@@ -151,10 +151,10 @@ fn page_to_value(page: AnalysisFieldPageResult, sample: Value) -> BuiltinResult<
     let mut object = ObjectInstance::new(super::classes::FEA_FIELD_PAGE_CLASS.to_string());
     object
         .properties
-        .insert("run_id".into(), Value::String(page.run_id));
+        .insert("run_id".into(), Value::String(page.run_id.into()));
     object
         .properties
-        .insert("field_id".into(), Value::String(page.field_id));
+        .insert("field_id".into(), Value::String(page.field_id.into()));
     object.properties.insert("sample".into(), sample);
     object.properties.insert("values".into(), values);
     object

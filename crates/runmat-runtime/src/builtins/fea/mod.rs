@@ -1030,7 +1030,7 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     };
     object
         .properties
-        .insert("run_id".to_string(), Value::String(run_id.clone()));
+        .insert("run_id".to_string(), Value::String(run_id.clone().into()));
     copy_study_context_property(&args[0], &mut object);
     Ok(Value::Object(object))
 }
@@ -1313,7 +1313,7 @@ fn run_id_from_object(object: &ObjectInstance) -> Option<String> {
         .properties
         .get("run_id")
         .and_then(|value| match value {
-            Value::String(run_id) => Some(run_id.clone()),
+            Value::String(run_id) => Some(run_id.to_string()),
             _ => None,
         })
 }
@@ -1396,7 +1396,7 @@ fn copy_run_id_context_property(source: &Value, target: &mut ObjectInstance) {
         target
             .properties
             .entry("run_id".to_string())
-            .or_insert(Value::String(run_id));
+            .or_insert(Value::String(run_id.into()));
     }
 }
 
@@ -1409,7 +1409,6 @@ fn study_context_value(value: &Value) -> Option<Value> {
     }
     object.properties.get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
 }
-
 
 fn run_id_context_from_value(value: &Value) -> Option<String> {
     let Value::Object(object) = value else {
@@ -1434,7 +1433,7 @@ fn field_object(
     let mut object = ObjectInstance::new(FEA_FIELD_CLASS.to_string());
     object.properties.insert(
         "field_id".to_string(),
-        Value::String(descriptor.field_id.clone()),
+        Value::String(descriptor.field_id.clone().into()),
     );
     object.properties.insert(
         "shape".to_string(),
@@ -1448,23 +1447,27 @@ fn field_object(
         .insert("materialized".to_string(), Value::Bool(materialized));
     object.properties.insert(
         "unit".to_string(),
-        Value::String(descriptor.unit.clone().unwrap_or_default()),
+        Value::String(descriptor.unit.clone().unwrap_or_default().into()),
     );
     object.properties.insert(
         "location".to_string(),
-        Value::String(format!("{:?}", descriptor.location).to_ascii_lowercase()),
+        Value::String(
+            format!("{:?}", descriptor.location)
+                .to_ascii_lowercase()
+                .into(),
+        ),
     );
     object.properties.insert(
         "kind".to_string(),
-        Value::String(format!("{:?}", descriptor.kind).to_ascii_lowercase()),
+        Value::String(format!("{:?}", descriptor.kind).to_ascii_lowercase().into()),
     );
     object.properties.insert(
         "family".to_string(),
-        Value::String(descriptor.family.clone()),
+        Value::String(descriptor.family.clone().into()),
     );
     object.properties.insert(
         "quantity".to_string(),
-        Value::String(descriptor.quantity.clone()),
+        Value::String(descriptor.quantity.clone().into()),
     );
     object.properties.insert(
         "statistic".to_string(),
@@ -1475,7 +1478,8 @@ fn field_object(
                     serde_json::to_value(statistic)
                         .ok()
                         .and_then(|value| value.as_str().map(str::to_string))
-                        .unwrap_or_default(),
+                        .unwrap_or_default()
+                        .into(),
                 )
             })
             .unwrap_or_else(empty_double_value),
@@ -1485,7 +1489,7 @@ fn field_object(
         descriptor
             .topology_id
             .as_ref()
-            .map(|value| Value::String(value.clone()))
+            .map(|value| Value::String(value.clone().into()))
             .unwrap_or_else(empty_double_value),
     );
     object.properties.insert(
@@ -1493,7 +1497,7 @@ fn field_object(
         descriptor
             .element_kind
             .as_ref()
-            .map(|value| Value::String(value.clone()))
+            .map(|value| Value::String(value.clone().into()))
             .unwrap_or_else(empty_double_value),
     );
     object.properties.insert(
@@ -1517,7 +1521,11 @@ fn field_object(
     );
     object.properties.insert(
         "storage".to_string(),
-        Value::String(format!("{:?}", descriptor.storage).to_ascii_lowercase()),
+        Value::String(
+            format!("{:?}", descriptor.storage)
+                .to_ascii_lowercase()
+                .into(),
+        ),
     );
     let sample = match descriptor.sample {
         Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(value)) => {
@@ -1763,7 +1771,7 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
         Value::Num(n) => json_number(builtin, *n),
         Value::Int(i) => Ok(int_value_to_json(i)),
         Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
-        Value::String(s) => Ok(serde_json::Value::String(s.clone())),
+        Value::String(s) => Ok(serde_json::Value::String(s.to_string())),
         Value::CharArray(chars) if chars.rows == 1 => {
             Ok(serde_json::Value::String(chars.data.iter().collect()))
         }
@@ -1771,8 +1779,7 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
             array
                 .data
                 .iter()
-                .cloned()
-                .map(serde_json::Value::String)
+                .map(|text| serde_json::Value::String(text.to_string()))
                 .collect(),
         )),
         Value::LogicalArray(array) => nested_array_to_json(builtin, &array.shape, |index| {
@@ -2013,7 +2020,6 @@ fn exact_bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
     }
 }
 
-
 fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
     if let Some(int) = tensor_utils::scalar_integer_value(value) {
         return int.try_to_usize().ok_or_else(|| {
@@ -2062,7 +2068,7 @@ fn string_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
             .iter()
             .map(|item| scalar_string(item, builtin, &ERROR_INPUT))
             .collect(),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array.data.iter().map(ToString::to_string).collect()),
         Value::String(_) | Value::CharArray(_) => {
             Ok(vec![scalar_string(value, builtin, &ERROR_INPUT)?])
         }
@@ -2350,7 +2356,14 @@ fn promote_named_integer_fields(
             }
         }
         (Value::Cell(cell), serde_json::Value::Array(items)) => {
-            for (target, child) in cell.data.iter_mut().zip(items) {
+            let values = cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA integer promotion requires a unique cell backing",
+                )
+            })?;
+            for (target, child) in values.iter_mut().zip(items) {
                 promote_named_integer_fields(
                     builtin,
                     error,
@@ -2475,7 +2488,7 @@ fn promote_json_scalar_kinds(
 ) -> BuiltinResult<()> {
     match (value, json) {
         (target, serde_json::Value::String(value)) => {
-            *target = Value::String(value.clone());
+            *target = Value::String(value.clone().into());
         }
         (target, serde_json::Value::Number(number)) if number.is_u64() => {
             *target = Value::Int(IntValue::U64(
@@ -2508,7 +2521,14 @@ fn promote_json_scalar_kinds(
             }
         }
         (Value::Cell(cell), serde_json::Value::Array(items)) => {
-            for (target, child) in cell.data.iter_mut().zip(items) {
+            let values = cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA integer promotion requires a unique cell backing",
+                )
+            })?;
+            for (target, child) in values.iter_mut().zip(items) {
                 promote_json_scalar_kinds(builtin, error, target, child)?;
             }
         }
@@ -2662,8 +2682,8 @@ fn scalar_string(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(value) => Ok(value.to_string()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].to_string()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         _ => Err(builtin_error(
             builtin,

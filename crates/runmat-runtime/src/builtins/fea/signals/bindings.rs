@@ -170,7 +170,7 @@ impl FrozenStudyGeneratorInventory {
         let mut rows = Vec::with_capacity(self.studies.len());
         for (study_id, inventory) in &self.studies {
             let mut row = StructValue::new();
-            row.insert("study_id", Value::String(study_id.clone()));
+            row.insert("study_id", Value::String(study_id.clone().into()));
             row.insert("bindings", encode_bindings(inventory.bindings())?);
             rows.push(Value::Struct(row));
         }
@@ -237,7 +237,7 @@ impl FrozenStudyGeneratorInventory {
                 )
             })?;
             if decoded
-                .insert(study_id.clone(), decode_bindings(builtin, bindings)?)
+                .insert(study_id.to_string(), decode_bindings(builtin, bindings)?)
                 .is_some()
             {
                 return Err(builtin_error(
@@ -294,7 +294,7 @@ fn encode_bindings(bindings: &[FrozenSignalGenerator]) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(bindings.len());
     for binding in bindings {
         let mut row = StructValue::new();
-        row.insert("signal_id", Value::String(binding.signal_id.0.clone()));
+        row.insert("signal_id", Value::String(binding.signal_id.0.clone().into()));
         row.insert(
             "callable",
             super::callable_to_value("FEA signal", binding.callable.clone())?,
@@ -366,7 +366,7 @@ fn decode_bindings(
                 ));
             };
             Ok(FrozenSignalGenerator {
-                signal_id: SignalId(signal_id.clone()),
+                signal_id: SignalId(signal_id.to_string()),
                 callable,
             })
         })

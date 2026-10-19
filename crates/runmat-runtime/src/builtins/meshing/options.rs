@@ -92,7 +92,7 @@ fn text_set(
 ) -> BuiltinResult<std::collections::BTreeSet<String>> {
     let values = match value {
         Value::String(_) | Value::CharArray(_) => vec![text(builtin, value)?],
-        Value::StringArray(array) => array.data.clone(),
+        Value::StringArray(array) => array.data.iter().map(ToString::to_string).collect(),
         Value::Cell(cell) => cell
             .data
             .iter()
@@ -151,7 +151,7 @@ pub(super) fn parse_force_option(args: &[Value]) -> BuiltinResult<bool> {
 
 pub(super) fn text(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.clone()),
+        Value::String(value) => Ok(value.to_string()),
         Value::CharArray(value) if value.rows == 1 => Ok(value.data.iter().collect()),
         _ => Err(error(builtin, "expected a text scalar")),
     }

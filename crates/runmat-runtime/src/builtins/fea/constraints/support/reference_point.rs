@@ -59,7 +59,7 @@ pub async fn reference_point_from_coordinates_builtin(
     let mut object = ObjectInstance::new(REFERENCE_POINT_CLASS);
     object
         .properties
-        .insert("reference_point_id".into(), Value::String(id));
+        .insert("reference_point_id".into(), Value::String(id.into()));
     object.properties.insert("position".into(), position);
     Ok(Value::Object(object))
 }
@@ -86,7 +86,7 @@ pub(crate) fn reference_point_from_value(
         ));
     }
     let id = match object.properties.get("reference_point_id") {
-        Some(Value::String(value)) if !value.trim().is_empty() => value.clone(),
+        Some(Value::String(value)) if !value.trim().is_empty() => value.to_string(),
         _ => {
             return Err(builtin_error(
                 builtin,

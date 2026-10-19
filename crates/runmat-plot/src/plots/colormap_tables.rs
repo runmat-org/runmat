@@ -2,6 +2,15 @@
 //! turbo, viridis, plasma, inferno and magma are sampled from matplotlib 3.10;
 //! parula uses its ten published anchor colors.
 
+/// Four-decimal RGB samples are color data, not approximations of angle constants.
+const fn rgb_1e4(channels: [u16; 3]) -> [f32; 3] {
+    [
+        channels[0] as f32 / 10_000.0,
+        channels[1] as f32 / 10_000.0,
+        channels[2] as f32 / 10_000.0,
+    ]
+}
+
 pub(crate) const TURBO: [[f32; 3]; 64] = [
     [0.1900, 0.0718, 0.2322],
     [0.2086, 0.1180, 0.3461],
@@ -107,7 +116,7 @@ pub(crate) const VIRIDIS: [[f32; 3]; 64] = [
     [0.1197, 0.6038, 0.5414],
     [0.1197, 0.6185, 0.5363],
     [0.1223, 0.6332, 0.5304],
-    [0.1281, 0.6477, 0.5235],
+    rgb_1e4([1281, 6477, 5235]),
     [0.1373, 0.6623, 0.5156],
     [0.1501, 0.6766, 0.5066],
     [0.1664, 0.6909, 0.4965],
@@ -117,7 +126,7 @@ pub(crate) const VIRIDIS: [[f32; 3]; 64] = [
     [0.2599, 0.7455, 0.4445],
     [0.2889, 0.7584, 0.4284],
     [0.3198, 0.7709, 0.4112],
-    [0.3524, 0.7830, 0.3926],
+    rgb_1e4([3524, 7830, 3926]),
     [0.3952, 0.7975, 0.3678],
     [0.4310, 0.8085, 0.3465],
     [0.4681, 0.8189, 0.3240],
@@ -154,7 +163,7 @@ pub(crate) const PLASMA: [[f32; 3]; 64] = [
     [0.4477, 0.0021, 0.6602],
     [0.4715, 0.0057, 0.6599],
     [0.5007, 0.0141, 0.6571],
-    [0.5236, 0.0245, 0.6529],
+    rgb_1e4([5236, 245, 6529]),
     [0.5462, 0.0390, 0.6470],
     [0.5682, 0.0558, 0.6395],
     [0.5897, 0.0729, 0.6304],
@@ -362,4 +371,23 @@ pub(crate) fn sample(table: &[[f32; 3]], t: f32) -> [f32; 3] {
         a[1] + (b[1] - a[1]) * f,
         a[2] + (b[2] - a[2]) * f,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PLASMA, VIRIDIS};
+
+    #[test]
+    fn fixed_point_samples_preserve_original_channel_bits() {
+        for (actual, original) in [
+            (VIRIDIS[37], ["0.1281", "0.6477", "0.5235"]),
+            (VIRIDIS[47], ["0.3524", "0.7830", "0.3926"]),
+            (PLASMA[17], ["0.5236", "0.0245", "0.6529"]),
+        ] {
+            assert_eq!(
+                actual.map(f32::to_bits),
+                original.map(|channel| channel.parse::<f32>().unwrap().to_bits())
+            );
+        }
+    }
 }

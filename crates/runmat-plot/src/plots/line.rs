@@ -953,8 +953,8 @@ impl LinePlot {
         }
 
         for v in &mut tris {
-            v.position[0] = x_axis.from_px(v.position[0]);
-            v.position[1] = y_axis.from_px(v.position[1]);
+            v.position[0] = x_axis.data_at_px(v.position[0]);
+            v.position[1] = y_axis.data_at_px(v.position[1]);
         }
         tris
     }

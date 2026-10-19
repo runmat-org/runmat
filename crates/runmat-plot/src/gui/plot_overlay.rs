@@ -3542,7 +3542,7 @@ impl PlotOverlay {
         let Some((lo, hi)) = plot_renderer.overlay_color_range_for_axes(axes_index) else {
             return;
         };
-        if !(hi > lo) {
+        if hi.partial_cmp(&lo) != Some(std::cmp::Ordering::Greater) {
             return;
         }
         let tick_len = 4.0 * scale;

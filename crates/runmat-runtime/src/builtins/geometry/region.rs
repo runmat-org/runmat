@@ -150,11 +150,11 @@ pub(crate) fn region_ref_from_value(
         }
     };
     Ok(GeometryRegionRef {
-        geometry_id: string("geometry_id")?,
+        geometry_id: string("geometry_id")?.to_string(),
         geometry_revision,
-        region_id: string("region_id")?,
-        name: string("name")?,
-        tag,
+        region_id: string("region_id")?.to_string(),
+        name: string("name")?.to_string(),
+        tag: tag.map(|text| text.to_string()),
     })
 }
 
@@ -225,22 +225,23 @@ fn region_to_value(asset: &GeometryAsset, region: &Region) -> BuiltinResult<Valu
     let mut object = ObjectInstance::new(GEOMETRY_REGION_CLASS.to_string());
     object.properties.insert(
         "geometry_id".into(),
-        Value::String(asset.geometry_id.clone()),
+        Value::String(asset.geometry_id.clone().into()),
     );
     object.properties.insert(
         "geometry_revision".into(),
         Value::Int(IntValue::U32(asset.revision)),
     );
+    object.properties.insert(
+        "region_id".into(),
+        Value::String(region.region_id.clone().into()),
+    );
     object
         .properties
-        .insert("region_id".into(), Value::String(region.region_id.clone()));
-    object
-        .properties
-        .insert("name".into(), Value::String(region.name.clone()));
+        .insert("name".into(), Value::String(region.name.clone().into()));
     if let Some(tag) = &region.tag {
         object
             .properties
-            .insert("tag".into(), Value::String(tag.clone()));
+            .insert("tag".into(), Value::String(tag.clone().into()));
     }
     Ok(Value::Object(object))
 }
