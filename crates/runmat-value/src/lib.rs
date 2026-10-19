@@ -85,5 +85,5 @@ pub use shared_value_generation::{
 pub use symbolic::{SymbolicExpr, SymbolicFunction};
 pub use trace::ValueTraceWorkspace;
 pub use transient::{validate_no_transient_sequence, TransientValueError};
-pub use utf8_text::{Utf8Text, Utf8TextAdmissionError};
+pub use utf8_text::{Utf8Text, Utf8TextAdmissionError, Utf8TextExactCopy};
 pub use value::Value;

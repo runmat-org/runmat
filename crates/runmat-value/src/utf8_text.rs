@@ -15,6 +15,9 @@ use crate::{
     ExactHostNumericAllocationError,
 };
 
+mod staged_copy;
+pub use staged_copy::Utf8TextExactCopy;
+
 #[derive(Debug)]
 enum Utf8TextInner {
     Owned(String),
@@ -70,8 +73,8 @@ impl Utf8Text {
         match &self.0 {
             Utf8TextInner::Owned(text) => text,
             Utf8TextInner::Exact(bytes) => {
-                // SAFETY: the only exact constructor moves bytes out of a
-                // validated String, and the immutable owner cannot mutate them.
+                // SAFETY: exact constructors retain validated String bytes or
+                // complete an unchanged str copy. This backing is immutable.
                 unsafe { std::str::from_utf8_unchecked(bytes.as_slice()) }
             }
         }
@@ -156,19 +159,28 @@ impl Utf8Text {
 
     /// Copy borrowed UTF-8 directly into an exact retained byte owner. No
     /// temporary String or unclaimed byte vector is materialized.
+    pub fn try_begin_copy_exact<'a>(
+        source: &'a str,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Utf8TextExactCopy<'a>, ExactHostNumericAllocationError> {
+        Utf8TextExactCopy::try_new(source, permit)
+    }
+
+    /// Synchronously drain the same staged exact owner, checkpointing before
+    /// each bounded byte copy rather than constructing a second representation.
     pub fn try_copy_str_exact_with<E>(
         source: &str,
         permit: &dyn ExactHostAllocationPermit,
         mut checkpoint: impl FnMut(usize) -> Result<(), E>,
     ) -> Result<Self, crate::ExactArrayInitializationError<E>> {
-        let source = source.as_bytes();
-        let bytes = ExactArrayStorage::try_initialize(source.len(), permit, |index| {
-            if index % 4096 == 0 {
-                checkpoint(index)?;
-            }
-            Ok(source[index])
-        })?;
-        Ok(Self(Utf8TextInner::Exact(bytes)))
+        use crate::ExactArrayInitializationError::{Allocation, Element};
+
+        let mut copy = Self::try_begin_copy_exact(source, permit).map_err(Allocation)?;
+        while !copy.is_complete() {
+            checkpoint(copy.copied_bytes()).map_err(Element)?;
+            copy.advance(std::num::NonZeroUsize::new(4096).expect("nonzero copy quantum"));
+        }
+        Ok(copy.try_finish().expect("complete staged UTF-8 copy"))
     }
 
     /// Quote the exact UTF-8 owner for a borrowed character sequence while

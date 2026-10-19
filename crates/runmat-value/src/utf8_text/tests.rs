@@ -78,6 +78,56 @@ fn exact_text_and_callable_generation_preserve_physical_owners() {
     drop(alias);
     assert_eq!(live.load(Ordering::SeqCst), 0);
 
+    let source = "Aé𝄞";
+    let staged_bytes = Utf8Text::requested_bytes_for_capacity(source.len()).unwrap();
+    let staged_permit = Permit {
+        limit: staged_bytes,
+        live: live.clone(),
+    };
+    let mut staged = Utf8Text::try_begin_copy_exact(source, &staged_permit).unwrap();
+    assert_eq!(live.load(Ordering::SeqCst), staged_bytes);
+    assert_eq!(staged.advance(std::num::NonZeroUsize::new(2).unwrap()), 2);
+    assert_eq!(staged.copied_bytes(), 2); // inside the UTF-8 encoding of é
+    let mut staged = staged.try_finish().unwrap_err();
+    assert_eq!(staged.advance(std::num::NonZeroUsize::new(2).unwrap()), 2);
+    assert!(!staged.is_complete());
+    assert_eq!(staged.advance(std::num::NonZeroUsize::new(64).unwrap()), 3);
+    let staged = staged.try_finish().unwrap();
+    assert_eq!(staged.as_str(), source);
+    assert!(staged.has_retained_claim());
+    let alias = staged.clone();
+    drop(staged);
+    assert_eq!(live.load(Ordering::SeqCst), staged_bytes);
+    drop(alias);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let mut cancelled = Utf8Text::try_begin_copy_exact(source, &staged_permit).unwrap();
+    cancelled.advance(std::num::NonZeroUsize::new(1).unwrap());
+    drop(cancelled);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let checkpoints = std::cell::RefCell::new(Vec::new());
+    let large = "é".repeat(4097);
+    let bytes = Utf8Text::requested_bytes_for_capacity(large.len()).unwrap();
+    let permit = Permit {
+        limit: bytes,
+        live: live.clone(),
+    };
+    let copied = Utf8Text::try_copy_str_exact_with(&large, &permit, |offset| {
+        checkpoints.borrow_mut().push(offset);
+        Ok::<_, ()>(())
+    })
+    .unwrap();
+    assert_eq!(copied.as_str(), large);
+    assert_eq!(*checkpoints.borrow(), vec![0, 4096, 8192]);
+    drop(copied);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+    assert!(matches!(
+        Utf8Text::try_copy_str_exact_with(&large, &permit, |_| Err::<(), _>("stop")),
+        Err(crate::ExactArrayInitializationError::Element("stop"))
+    ));
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
     let mut denied = String::with_capacity(19);
     denied.push_str("retained");
     let denied_pointer = denied.as_ptr();
