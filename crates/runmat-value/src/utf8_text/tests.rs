@@ -114,4 +114,43 @@ fn exact_text_and_callable_generation_preserve_physical_owners() {
     assert_eq!(live.load(Ordering::SeqCst), quote.requested_bytes);
     drop(generation_alias);
     assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let characters = ['A', 'é', '𝄞'];
+    let (byte_len, quoted) =
+        Utf8Text::requested_bytes_for_chars_with(&characters, |_| Ok::<(), ()>(())).unwrap();
+    assert_eq!(byte_len, "Aé𝄞".len());
+    let unicode_permit = Permit {
+        limit: quoted,
+        live: live.clone(),
+    };
+    let unicode =
+        Utf8Text::try_copy_chars_exact_with(&characters, &unicode_permit, |_| Ok::<(), ()>(()))
+            .unwrap();
+    assert_eq!(unicode.as_str(), "Aé𝄞");
+    assert_eq!(live.load(Ordering::SeqCst), quoted);
+    drop(unicode);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let denied = Utf8Text::try_copy_chars_exact_with(
+        &characters,
+        &Permit {
+            limit: quoted - 1,
+            live: live.clone(),
+        },
+        |_| Ok::<(), ()>(()),
+    );
+    assert!(matches!(
+        denied,
+        Err(crate::ExactArrayInitializationError::Allocation(
+            ExactHostNumericAllocationError::ExceedsPermit
+        ))
+    ));
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let cancelled = Utf8Text::try_copy_chars_exact_with(&characters, &unicode_permit, |_| Err(()));
+    assert!(matches!(
+        cancelled,
+        Err(crate::ExactArrayInitializationError::Element(()))
+    ));
+    assert_eq!(live.load(Ordering::SeqCst), 0);
 }

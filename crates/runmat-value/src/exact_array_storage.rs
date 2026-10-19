@@ -6,6 +6,7 @@
 use std::alloc::Layout;
 use std::fmt;
 use std::ops::Deref;
+use std::sync::OnceLock;
 
 use runmat_execution::resource::ExactShared;
 
@@ -21,7 +22,25 @@ use crate::{
 struct ExactArrayPayload<T> {
     values: Vec<T>,
     // The vector and shared header must retire before their claim refunds.
-    claim: Option<ExactHostAllocationClaim>,
+    claim: OnceLock<ExactHostAllocationClaim>,
+}
+
+fn claim_cell(claim: Option<ExactHostAllocationClaim>) -> OnceLock<ExactHostAllocationClaim> {
+    let cell = OnceLock::new();
+    if let Some(claim) = claim {
+        let _ = cell.set(claim);
+    }
+    cell
+}
+
+impl<T> ExactArrayPayload<T> {
+    fn has_claim(&self) -> bool {
+        self.claim.get().is_some()
+    }
+
+    fn into_parts(self) -> (Vec<T>, Option<ExactHostAllocationClaim>) {
+        (self.values, self.claim.into_inner())
+    }
 }
 
 /// The canonical exact collection backing. Ordinary unbounded construction
@@ -58,6 +77,23 @@ impl fmt::Display for ExactArrayMutationError {
 }
 
 impl std::error::Error for ExactArrayMutationError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExactArrayClaimPromotionError {
+    UnsharedBacking,
+    Allocation(ExactHostNumericAllocationError),
+}
+
+impl fmt::Display for ExactArrayClaimPromotionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsharedBacking => formatter.write_str("claim promotion requires shared backing"),
+            Self::Allocation(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for ExactArrayClaimPromotionError {}
 
 /// The VM's established Value-specialized exact output collection.
 pub type OutputListStorage = ExactArrayStorage<Value>;
@@ -130,7 +166,7 @@ impl<T> ExactArrayStorage<T> {
         Self(ExactArrayStorageInner::SharedOrdinary {
             payload: ExactShared::new(ExactArrayPayload {
                 values,
-                claim: None,
+                claim: OnceLock::new(),
             }),
             len,
         })
@@ -161,6 +197,68 @@ impl<T> ExactArrayStorage<T> {
             .size()
             .checked_add(ExactShared::<ExactArrayPayload<T>>::requested_bytes())
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
+    fn shared_physical_bytes(capacity: usize) -> Result<usize, ExactHostNumericAllocationError> {
+        Layout::array::<T>(capacity)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
+            .size()
+            .checked_add(ExactShared::<ExactArrayPayload<T>>::requested_bytes())
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
+    /// Bytes not yet claimed by this *physical* shared owner. Quoting is
+    /// read-only; another alias may attach the one claim before preparation.
+    pub fn unclaimed_shared_bytes(&self) -> Result<Option<usize>, ExactArrayClaimPromotionError> {
+        match &self.0 {
+            ExactArrayStorageInner::Empty | ExactArrayStorageInner::EmptyExact => Ok(None),
+            ExactArrayStorageInner::OwnedUnbounded(_) => {
+                Err(ExactArrayClaimPromotionError::UnsharedBacking)
+            }
+            ExactArrayStorageInner::SharedOrdinary { payload, .. }
+            | ExactArrayStorageInner::SharedExact { payload, .. } => {
+                if payload.get().has_claim() {
+                    Ok(None)
+                } else {
+                    Self::shared_physical_bytes(payload.get().values.capacity())
+                        .map(Some)
+                        .map_err(ExactArrayClaimPromotionError::Allocation)
+                }
+            }
+        }
+    }
+
+    /// Attach one exact claim to the original immutable shared backing. All
+    /// aliases observe the same claim; a failed reservation leaves the owner
+    /// unchanged, and the final alias retires backing before refunding it.
+    pub fn try_promote_shared_claim(
+        &self,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<(), ExactArrayClaimPromotionError> {
+        match &self.0 {
+            ExactArrayStorageInner::Empty | ExactArrayStorageInner::EmptyExact => Ok(()),
+            ExactArrayStorageInner::OwnedUnbounded(_) => {
+                Err(ExactArrayClaimPromotionError::UnsharedBacking)
+            }
+            ExactArrayStorageInner::SharedOrdinary { payload, .. }
+            | ExactArrayStorageInner::SharedExact { payload, .. } => {
+                if payload.get().has_claim() {
+                    return Ok(());
+                }
+                let bytes = Self::shared_physical_bytes(payload.get().values.capacity())
+                    .map_err(ExactArrayClaimPromotionError::Allocation)?;
+                // Never call an external permit while holding an owner lock.
+                // A concurrent alias may win promotion; its claim is then the
+                // one physical authority and our redundant reservation drops.
+                let claim = match permit.reserve_exact_claim(bytes) {
+                    Ok(claim) => claim,
+                    Err(_error) if payload.get().has_claim() => return Ok(()),
+                    Err(error) => return Err(ExactArrayClaimPromotionError::Allocation(error)),
+                };
+                let _ = payload.get().claim.set(claim);
+                Ok(())
+            }
+        }
     }
 
     /// Adopt an already allocated vector without copying its backing. The
@@ -217,15 +315,18 @@ impl<T> ExactArrayStorage<T> {
             ExactShared::try_new_with(
                 ExactArrayPayload {
                     values,
-                    claim: Some(claim),
+                    claim: claim_cell(Some(claim)),
                 },
                 allocate,
             )
         }
-        .map_err(|payload| ExactArrayAdoptionError {
-            values: payload.values,
-            claim: payload.claim,
-            source: ExactHostNumericAllocationError::AllocationFailed,
+        .map_err(|payload| {
+            let (values, claim) = payload.into_parts();
+            ExactArrayAdoptionError {
+                values,
+                claim,
+                source: ExactHostNumericAllocationError::AllocationFailed,
+            }
         })?;
         Ok(Self(ExactArrayStorageInner::SharedExact { payload, len }))
     }
@@ -249,7 +350,7 @@ impl<T> ExactArrayStorage<T> {
         let values = exact_capacity_vec(count).map_err(Allocation)?;
         let mut payload = ExactShared::try_new(ExactArrayPayload {
             values,
-            claim: Some(claim),
+            claim: claim_cell(Some(claim)),
         })
         .map_err(|_| Allocation(ExactHostNumericAllocationError::AllocationFailed))?;
         // Allocate the header as well as the element backing before asking
@@ -274,14 +375,18 @@ impl<T> ExactArrayStorage<T> {
     }
 
     pub fn has_retained_claim(&self) -> bool {
-        matches!(&self.0, ExactArrayStorageInner::SharedExact { payload, .. } if payload.get().claim.is_some())
+        match &self.0 {
+            ExactArrayStorageInner::SharedOrdinary { payload, .. }
+            | ExactArrayStorageInner::SharedExact { payload, .. } => payload.get().has_claim(),
+            _ => false,
+        }
     }
 
     pub fn is_exact(&self) -> bool {
         matches!(
             &self.0,
             ExactArrayStorageInner::EmptyExact | ExactArrayStorageInner::SharedExact { .. }
-        )
+        ) || self.has_retained_claim()
     }
 
     /// Whether cloning this collection retains the same immutable physical
@@ -317,7 +422,9 @@ impl<T> ExactArrayStorage<T> {
                 values.push(value);
                 Ok(())
             }
-            ExactArrayStorageInner::SharedOrdinary { payload, len } if payload.is_unique() => {
+            ExactArrayStorageInner::SharedOrdinary { payload, len }
+                if payload.is_unique() && !payload.get().has_claim() =>
+            {
                 let values = &mut payload.get_mut_unique().values;
                 values.truncate(*len);
                 values.push(value);
@@ -343,11 +450,14 @@ impl<T> ExactArrayStorage<T> {
                 Err(ExactArrayMutationError::AdmittedStorage)
             }
             ExactArrayStorageInner::SharedOrdinary { payload, len } => {
+                if payload.get().has_claim() {
+                    return Err(ExactArrayMutationError::AdmittedStorage);
+                }
                 if !payload.is_unique() {
                     let values = payload.get().values[..*len].to_vec();
                     *payload = ExactShared::new(ExactArrayPayload {
                         values,
-                        claim: None,
+                        claim: OnceLock::new(),
                     });
                 }
                 Ok(())
@@ -405,12 +515,13 @@ impl<T> ExactArrayStorage<T> {
                 exact: false,
             }),
             ExactArrayStorageInner::SharedOrdinary { payload, len } => match payload.try_unwrap() {
-                Ok(ExactArrayPayload { mut values, claim }) => {
+                Ok(payload) => {
+                    let (mut values, claim) = payload.into_parts();
                     values.truncate(len);
                     Ok(OwnedExactArrayValues {
                         values,
+                        exact: claim.is_some(),
                         claim,
-                        exact: false,
                     })
                 }
                 Err(payload) => Err(Self(ExactArrayStorageInner::SharedOrdinary {
@@ -419,7 +530,8 @@ impl<T> ExactArrayStorage<T> {
                 })),
             },
             ExactArrayStorageInner::SharedExact { payload, len } => match payload.try_unwrap() {
-                Ok(ExactArrayPayload { mut values, claim }) => {
+                Ok(payload) => {
+                    let (mut values, claim) = payload.into_parts();
                     values.truncate(len);
                     Ok(OwnedExactArrayValues {
                         values,
@@ -630,17 +742,23 @@ impl<T> OwnedExactArrayValues<T> {
             }));
         }
         let len = values.len();
-        match ExactShared::try_new(ExactArrayPayload { values, claim }) {
+        match ExactShared::try_new(ExactArrayPayload {
+            values,
+            claim: claim_cell(claim),
+        }) {
             Ok(payload) => Ok(ExactArrayStorage(if exact {
                 ExactArrayStorageInner::SharedExact { payload, len }
             } else {
                 ExactArrayStorageInner::SharedOrdinary { payload, len }
             })),
-            Err(ExactArrayPayload { values, claim }) => Err(Self {
-                values,
-                claim,
-                exact,
-            }),
+            Err(payload) => {
+                let (values, claim) = payload.into_parts();
+                Err(Self {
+                    values,
+                    claim,
+                    exact,
+                })
+            }
         }
     }
 

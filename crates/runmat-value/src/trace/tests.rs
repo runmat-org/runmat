@@ -206,7 +206,7 @@ fn value_tracing_covers_all_nested_container_edges() {
         binding: None,
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
-        captures: vec![Value::Listener(Listener {
+        captures: crate::OutputListStorage::shared_unbounded(vec![Value::Listener(Listener {
             id: 1,
             target: handles[5],
             target_class_name: "TraceEdge".into(),
@@ -214,7 +214,7 @@ fn value_tracing_covers_all_nested_container_edges() {
             callback: handles[6],
             enabled: true,
             valid: true,
-        })],
+        })]),
     }));
     let value = Value::output_list(vec![cell, structures, objects, closure]);
     let mut tracer = RecordingTracer(Vec::new());
@@ -243,7 +243,7 @@ fn nested_closure_traces_each_live_ancestor_activation() {
         binding: None,
         source_role: runmat_types::FunctionSourceRole::Nested,
         source_file: None,
-        captures: Vec::new(),
+        captures: crate::OutputListStorage::empty(),
     }));
     let mut tracer = RecordingTracer(Vec::new());
     closure.trace(&mut tracer);

@@ -47,6 +47,79 @@ impl ExactHostAllocationPermit for Permit {
 }
 
 #[test]
+fn shared_ordinary_promotion_claims_one_original_owner_until_final_alias() {
+    let values = vec![Value::Num(3.0), Value::Num(7.0)];
+    let capacity = values.capacity();
+    let pointer = values.as_ptr();
+    let owner = OutputListStorage::shared_unbounded(values);
+    let alias = owner.clone();
+    let bytes = OutputListStorage::requested_bytes_for_capacity(capacity).unwrap();
+    assert_eq!(owner.unclaimed_shared_bytes().unwrap(), Some(bytes));
+    let live = Arc::new(AtomicUsize::new(0));
+    let denied = Permit {
+        limit: bytes - 1,
+        live: live.clone(),
+    };
+    assert_eq!(
+        owner.try_promote_shared_claim(&denied),
+        Err(ExactArrayClaimPromotionError::Allocation(
+            ExactHostNumericAllocationError::ExceedsPermit
+        ))
+    );
+    assert_eq!(owner.as_ptr(), pointer);
+    assert!(!alias.is_exact());
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+    let permit = Permit {
+        limit: bytes,
+        live: live.clone(),
+    };
+    owner.try_promote_shared_claim(&permit).unwrap();
+    alias.try_promote_shared_claim(&denied).unwrap();
+    assert!(owner.is_exact() && alias.is_exact());
+    assert_eq!(owner.unclaimed_shared_bytes().unwrap(), None);
+    assert_eq!(live.load(Ordering::SeqCst), bytes);
+    drop(owner);
+    assert_eq!(alias.as_ptr(), pointer);
+    assert_eq!(live.load(Ordering::SeqCst), bytes);
+    drop(alias);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn callable_generation_retires_before_aliased_capture_claim() {
+    let closure = crate::Closure::new(
+        "capture_owner".into(),
+        None,
+        runmat_types::FunctionSourceRole::Anonymous,
+        None,
+        vec![Value::Num(9.0)],
+        None,
+    );
+    let capture_alias = closure.captures.clone();
+    let capture_pointer = capture_alias.as_ptr();
+    let capture_bytes = capture_alias.unclaimed_shared_bytes().unwrap().unwrap();
+    let callable = Value::Closure(closure);
+    let quote = crate::SharedValueGeneration::callable_quote(&callable)
+        .unwrap()
+        .unwrap();
+    assert_eq!(quote.retained_claims, 2);
+    let live = Arc::new(AtomicUsize::new(0));
+    let permit = Permit {
+        limit: quote.requested_bytes,
+        live: live.clone(),
+    };
+    let mut input = crate::CallableGenerationInput::new(callable);
+    let generation = crate::SharedValueGeneration::prepare_callable(&mut input, &permit).unwrap();
+    assert_eq!(live.load(Ordering::SeqCst), quote.requested_bytes);
+    assert_eq!(capture_alias.as_ptr(), capture_pointer);
+    drop(generation);
+    assert_eq!(live.load(Ordering::SeqCst), capture_bytes);
+    assert!(capture_alias.is_exact());
+    drop(capture_alias);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn shared_output_backing_and_consumption_preserve_one_physical_claim() {
     let bytes = OutputListStorage::requested_bytes(3).unwrap();
     let permit = Permit {

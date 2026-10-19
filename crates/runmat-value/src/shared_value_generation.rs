@@ -6,10 +6,10 @@
 //! closure activations uncollectible.
 
 use runmat_execution::resource::ExactShared;
-use std::alloc::Layout;
 
 use crate::{
-    ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError, Value,
+    ExactArrayClaimPromotionError, ExactHostAllocationClaim, ExactHostAllocationPermit,
+    ExactHostNumericAllocationError, Value,
 };
 
 #[derive(Debug)]
@@ -52,6 +52,7 @@ pub enum CallableGenerationPrepareError {
     AlreadyConsumedOrReserved,
     NotCallable,
     Allocation(ExactHostNumericAllocationError),
+    CapturePromotion(ExactArrayClaimPromotionError),
 }
 
 impl std::fmt::Display for CallableGenerationPrepareError {
@@ -62,6 +63,7 @@ impl std::fmt::Display for CallableGenerationPrepareError {
             }
             Self::NotCallable => formatter.write_str("input is not a callable value"),
             Self::Allocation(error) => error.fmt(formatter),
+            Self::CapturePromotion(error) => error.fmt(formatter),
         }
     }
 }
@@ -70,6 +72,7 @@ impl std::error::Error for CallableGenerationPrepareError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Allocation(error) => Some(error),
+            Self::CapturePromotion(error) => Some(error),
             Self::AlreadyConsumedOrReserved | Self::NotCallable => None,
         }
     }
@@ -93,15 +96,16 @@ impl SharedValueGeneration {
         .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)
     }
 
-    /// Quote the physical backing moved into one immutable callable
-    /// generation. This includes the shared generation header and the
-    /// callable's own strings and capture-list backing. Captured Values,
-    /// lexical environments, and bound-authority graphs retain their own
-    /// independent allocation and root policies.
+    /// Quote the generation header/name metadata and any unclaimed physical
+    /// capture owner separately. The capture claim attaches to its shared
+    /// backing, surviving generation retirement while aliases remain.
+    /// Captured Values, lexical environments, and bound-authority graphs
+    /// retain their own independent allocation and root policies.
     pub fn callable_quote(
         value: &Value,
     ) -> Result<Option<CallableGenerationQuote>, ExactHostNumericAllocationError> {
         let mut requested = Self::requested_bytes();
+        let mut retained_claims = 1usize;
         let mut add_capacity = |capacity: usize, element: usize| {
             let bytes = capacity
                 .checked_mul(element)
@@ -130,24 +134,32 @@ impl SharedValueGeneration {
                 if let Some(source_file) = &closure.source_file {
                     add_capacity(source_file.len(), 1)?;
                 }
-                let captures = Layout::array::<Value>(closure.captures.capacity())
-                    .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
-                    .size();
-                requested = requested
-                    .checked_add(captures)
-                    .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+                let capture_bytes = closure.captures.unclaimed_shared_bytes().map_err(|error| {
+                    match error {
+                        ExactArrayClaimPromotionError::Allocation(error) => error,
+                        ExactArrayClaimPromotionError::UnsharedBacking => {
+                            unreachable!("constructed closure captures have shared backing")
+                        }
+                    }
+                })?;
+                if let Some(capture_bytes) = capture_bytes {
+                    requested = requested
+                        .checked_add(capture_bytes)
+                        .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+                    retained_claims += 1;
+                }
             }
             _ => return Ok(None),
         }
         Ok(Some(CallableGenerationQuote {
             requested_bytes: requested,
-            retained_claims: 1,
+            retained_claims,
         }))
     }
 
-    /// Move a callable and its quoted shallow backing into one exact shared
-    /// generation. A failed input retains its Value and any issued claim;
-    /// no error allocation or nested child allocation is certified here.
+    /// Promote a Closure's original capture owner, then move callable
+    /// metadata into one exact shared generation. A failed input retains its
+    /// Value and any capture claim; no captured child allocation is certified.
     pub fn prepare_callable(
         input: &mut CallableGenerationInput,
         permit: &dyn ExactHostAllocationPermit,
@@ -162,8 +174,22 @@ impl SharedValueGeneration {
         let quote = Self::callable_quote(value)
             .map_err(CallableGenerationPrepareError::Allocation)?
             .ok_or(CallableGenerationPrepareError::NotCallable)?;
+        if let Value::Closure(closure) = value {
+            closure
+                .captures
+                .try_promote_shared_claim(permit)
+                .map_err(CallableGenerationPrepareError::CapturePromotion)?;
+        }
+        let generation_bytes = if let Value::Closure(_) = value {
+            Self::callable_quote(value)
+                .map_err(CallableGenerationPrepareError::Allocation)?
+                .expect("quoted closure")
+                .requested_bytes
+        } else {
+            quote.requested_bytes
+        };
         let claim = permit
-            .reserve_exact_claim(quote.requested_bytes)
+            .reserve_exact_claim(generation_bytes)
             .map_err(CallableGenerationPrepareError::Allocation)?;
         let value = input.value.take().expect("quoted callable input");
         ExactShared::try_new(SharedValuePayload {

@@ -367,7 +367,7 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![transient()],
+            captures: OutputListStorage::shared_unbounded(vec![transient()]),
         }));
 
         for value in [cell, structure, struct_array, object, object_array, closure] {

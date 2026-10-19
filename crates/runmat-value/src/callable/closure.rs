@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::{LexicalEnvironment, Value};
+use crate::{LexicalEnvironment, OutputListStorage, Value};
 
 use super::CallableInstanceId;
 
@@ -14,7 +14,7 @@ pub struct ClosureData {
     pub source_role: runmat_types::FunctionSourceRole,
     /// Compiler-registered origin retained with the callable across sessions.
     pub source_file: Option<Box<str>>,
-    pub captures: Vec<Value>,
+    pub captures: OutputListStorage,
     /// A live ancestor link for nested functions or anonymous frames carrying
     /// a descendant's shared binding. Anonymous captures remain by value.
     pub lexical_environment: Option<LexicalEnvironment>,
@@ -40,12 +40,22 @@ impl Closure {
             binding,
             source_role,
             source_file: source_file.map(String::into_boxed_str),
-            captures,
+            captures: OutputListStorage::shared_unbounded(captures),
             lexical_environment,
         })
     }
 
-    pub fn from_data(data: ClosureData) -> Self {
+    pub fn from_data(mut data: ClosureData) -> Self {
+        if !data.captures.is_shallow_clone() {
+            let owned = data
+                .captures
+                .try_into_owned()
+                .expect("owned capture storage must transfer uniquely");
+            let values = owned
+                .try_into_unbounded_vec()
+                .expect("ordinary captures must be unclaimed");
+            data.captures = OutputListStorage::shared_unbounded(values);
+        }
         Self {
             data,
             instance: CallableInstanceId::mint(),

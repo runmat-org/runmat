@@ -149,14 +149,72 @@ impl Utf8Text {
     pub fn try_copy_exact_with<E>(
         &self,
         permit: &dyn ExactHostAllocationPermit,
+        checkpoint: impl FnMut(usize) -> Result<(), E>,
+    ) -> Result<Self, crate::ExactArrayInitializationError<E>> {
+        Self::try_copy_str_exact_with(self.as_str(), permit, checkpoint)
+    }
+
+    /// Copy borrowed UTF-8 directly into an exact retained byte owner. No
+    /// temporary String or unclaimed byte vector is materialized.
+    pub fn try_copy_str_exact_with<E>(
+        source: &str,
+        permit: &dyn ExactHostAllocationPermit,
         mut checkpoint: impl FnMut(usize) -> Result<(), E>,
     ) -> Result<Self, crate::ExactArrayInitializationError<E>> {
-        let source = self.as_str().as_bytes();
+        let source = source.as_bytes();
         let bytes = ExactArrayStorage::try_initialize(source.len(), permit, |index| {
             if index % 4096 == 0 {
                 checkpoint(index)?;
             }
             Ok(source[index])
+        })?;
+        Ok(Self(Utf8TextInner::Exact(bytes)))
+    }
+
+    /// Quote the exact UTF-8 owner for a borrowed character sequence while
+    /// fencing long Unicode scans before allocation.
+    pub fn requested_bytes_for_chars_with<E>(
+        chars: &[char],
+        mut checkpoint: impl FnMut(usize) -> Result<(), E>,
+    ) -> Result<(usize, usize), crate::ExactArrayInitializationError<E>> {
+        use crate::ExactArrayInitializationError::{Allocation, Element};
+        let mut byte_len = 0usize;
+        for (index, character) in chars.iter().enumerate() {
+            if index % 4096 == 0 {
+                checkpoint(index).map_err(Element)?;
+            }
+            byte_len = byte_len
+                .checked_add(character.len_utf8())
+                .ok_or(Allocation(ExactHostNumericAllocationError::LayoutOverflow))?;
+        }
+        let requested = Self::requested_bytes_for_capacity(byte_len).map_err(Allocation)?;
+        Ok((byte_len, requested))
+    }
+
+    /// Encode borrowed characters directly into an exact UTF-8 owner. The
+    /// caller quotes this same input first; both scans remain cancellable.
+    pub fn try_copy_chars_exact_with<E>(
+        chars: &[char],
+        permit: &dyn ExactHostAllocationPermit,
+        mut checkpoint: impl FnMut(usize) -> Result<(), E>,
+    ) -> Result<Self, crate::ExactArrayInitializationError<E>> {
+        let (byte_len, _) = Self::requested_bytes_for_chars_with(chars, &mut checkpoint)?;
+        let mut source = chars.iter();
+        let mut encoded = [0u8; 4];
+        let mut encoded_len = 0usize;
+        let mut encoded_index = 0usize;
+        let bytes = ExactArrayStorage::try_initialize(byte_len, permit, |index| {
+            if index % 4096 == 0 {
+                checkpoint(index)?;
+            }
+            if encoded_index == encoded_len {
+                let character = source.next().expect("quoted character byte count");
+                encoded_len = character.encode_utf8(&mut encoded).len();
+                encoded_index = 0;
+            }
+            let byte = encoded[encoded_index];
+            encoded_index += 1;
+            Ok(byte)
         })?;
         Ok(Self(Utf8TextInner::Exact(bytes)))
     }

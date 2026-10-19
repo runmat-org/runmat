@@ -47,10 +47,10 @@ pub use display::{
     DisplayFormatOwner, DisplayFormatSelectionGuard, FormatMode,
 };
 pub use exact_array_storage::{
-    ExactArrayAdoptionError, ExactArrayInitializationError, ExactArrayIntoIter,
-    ExactArrayMutationError, ExactArrayStorage, ExactCharIntoIter, OutputListInitializationError,
-    OutputListIntoIter, OutputListStorage, OwnedExactArrayValues, OwnedOutputListValues,
-    RetainedArrayValue, RetainedArrayValueError,
+    ExactArrayAdoptionError, ExactArrayClaimPromotionError, ExactArrayInitializationError,
+    ExactArrayIntoIter, ExactArrayMutationError, ExactArrayStorage, ExactCharIntoIter,
+    OutputListInitializationError, OutputListIntoIter, OutputListStorage, OwnedExactArrayValues,
+    OwnedOutputListValues, RetainedArrayValue, RetainedArrayValueError,
 };
 pub use exception::{MException, MExceptionParts};
 pub use foreign::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};
