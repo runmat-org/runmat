@@ -19,6 +19,8 @@ use runmat_meshing_core::MeshingCancellationSignal;
 use runmat_meshing_size::metric::MetricFieldRequest;
 
 mod repair;
+mod schedule;
+use schedule::{Next, RefinementStep, RepairStep};
 
 pub(super) struct ConvergedVolumeQuality {
     pub(super) topology: DelaunayVolumeTopology,
@@ -109,12 +111,9 @@ pub(super) fn converge_volume_quality(
         cancellation,
         observer,
     };
-    let mut blocked_repair = None;
+    let mut schedule = schedule::CoupledSchedule::default();
     loop {
-        let before = (refinement_insertions.len(), optimization_mutations.len());
-        let mut refinement_stalled = false;
-        let mut refinement_yielded = false;
-        if state
+        let refinement = if state
             .quality()
             .worst(QualityObjective::Refinement)
             .is_some()
@@ -132,67 +131,64 @@ pub(super) fn converge_volume_quality(
                     remaining_refinement =
                         remaining_refinement.saturating_sub(inserted.len() as u64);
                     refinement_insertions.extend(inserted);
-                    // Rejection described the preceding physical state.
-                    blocked_repair = None;
+                    RefinementStep::Accepted
                 }
-                WorkingRefinementProgress::Yielded => refinement_yielded = true,
-                WorkingRefinementProgress::Blocked => refinement_stalled = true,
+                WorkingRefinementProgress::Yielded => RefinementStep::Yielded,
+                WorkingRefinementProgress::Blocked => RefinementStep::Blocked,
             }
+        } else {
+            RefinementStep::Idle
+        };
+        schedule.refined(refinement);
+        let shape_violation = state.quality().worst(QualityObjective::Shape).is_some();
+        let mut repair_step = None;
+        if schedule.should_repair(refinement, shape_violation) {
+            let repaired = repair.attempt(state, remaining_optimization)?;
+            remaining_optimization =
+                remaining_optimization.saturating_sub(repaired.mutations.len() as u64);
+            let step = if repaired.mutations.is_empty() {
+                RepairStep::Unchanged
+            } else {
+                search.repaired();
+                RepairStep::Changed
+            };
+            optimization_mutations.extend(repaired.mutations);
+            state = repaired.state;
+            schedule.repaired(step, repaired.blocked);
+            repair_step = Some(step);
         }
-        if refinement_stalled || state.quality().worst(QualityObjective::Shape).is_some() {
-            if blocked_repair.is_none() {
-                let repaired = repair.attempt(state, remaining_optimization)?;
-                remaining_optimization =
-                    remaining_optimization.saturating_sub(repaired.mutations.len() as u64);
-                if !repaired.mutations.is_empty() {
-                    search.repaired();
-                }
-                optimization_mutations.extend(repaired.mutations);
-                state = repaired.state;
-                blocked_repair = repaired.blocked;
-            }
-            // A local handoff is not global exhaustion. Give the remaining
-            // unchanged refinement frontier its opportunity before rejecting.
-            if refinement_stalled {
-                if let Some(failure) = blocked_repair.take() {
-                    return Err(repair.reject(failure, Some(Box::new(state))));
-                }
-            }
-        }
-        if state
+        let converged = state
             .quality()
             .worst(QualityObjective::Refinement)
             .is_none()
-            && state.quality().worst(QualityObjective::Shape).is_none()
-        {
-            let (topology, quality) = state
-                .finish(options.sliver, cancellation)
-                .map_err(|failure| sliver_error(failure.into()))?;
-            #[cfg(test)]
-            let lifecycle_counts = prepared.lifecycle_counts();
-            drop(prepared);
-            return Ok(ConvergedVolumeQuality {
-                topology,
-                quality,
-                provenance,
-                refinement_insertions,
-                optimization_mutations,
+            && state.quality().worst(QualityObjective::Shape).is_none();
+        match schedule.next(refinement, repair_step, converged) {
+            Next::Continue => {}
+            Next::Finish => {
+                let (topology, quality) = state
+                    .finish(options.sliver, cancellation)
+                    .map_err(|failure| sliver_error(failure.into()))?;
                 #[cfg(test)]
-                lifecycle_counts,
-            });
-        }
-        if refinement_yielded {
-            continue;
-        }
-        if before == (refinement_insertions.len(), optimization_mutations.len()) {
-            if let Some(failure) = blocked_repair.take() {
-                return Err(repair.reject(failure, Some(Box::new(state))));
+                let lifecycle_counts = prepared.lifecycle_counts();
+                drop(prepared);
+                return Ok(ConvergedVolumeQuality {
+                    topology,
+                    quality,
+                    provenance,
+                    refinement_insertions,
+                    optimization_mutations,
+                    #[cfg(test)]
+                    lifecycle_counts,
+                });
             }
-            return Err(error(
-                DelaunayVolumeMeshStage::Optimization,
-                DelaunayVolumeMeshErrorKind::InvalidQuality,
-                "coupled volume refinement and optimization made no progress",
-            ));
+            Next::Reject(failure) => return Err(repair.reject(failure, Some(Box::new(state)))),
+            Next::NoProgress => {
+                return Err(error(
+                    DelaunayVolumeMeshStage::Optimization,
+                    DelaunayVolumeMeshErrorKind::InvalidQuality,
+                    "coupled volume refinement and optimization made no progress",
+                ))
+            }
         }
     }
 }

@@ -160,3 +160,43 @@ fn cancellation_and_original_candidate_budget_fail_without_a_mesh() {
         );
     }
 }
+
+#[test]
+fn exhausted_insertion_or_repair_pass_budget_fails_without_a_mesh() {
+    for exhausted_refinement in [true, false] {
+        let (topology, provenance) = fixture(false, 0);
+        let request = metric(&provenance, false);
+        let mut options = DelaunayVolumeMeshOptions::default();
+        if exhausted_refinement {
+            options.refinement.maximum_insertions = 0;
+        } else {
+            options.sliver.maximum_passes = 0;
+        }
+        let quality = evaluate_delaunay_volume_quality(
+            &topology,
+            &request,
+            &provenance,
+            options.quality,
+            &NeverCancelled,
+        )
+        .unwrap();
+        let Err(failure) = converge_volume_quality(
+            topology,
+            quality,
+            &request,
+            provenance,
+            &[],
+            options,
+            crate::cdt::volume_mesh::quality_convergence::QualityExecution::without_observer(
+                &NeverCancelled,
+            ),
+        ) else {
+            panic!("a declared budget of zero returned a mesh");
+        };
+        assert_eq!(
+            failure.kind,
+            DelaunayVolumeMeshErrorKind::ResourceLimit,
+            "refinement budget exhausted: {exhausted_refinement}: {failure:?}"
+        );
+    }
+}
