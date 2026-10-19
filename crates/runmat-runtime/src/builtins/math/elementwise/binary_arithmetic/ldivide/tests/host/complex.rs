@@ -20,6 +20,20 @@ fn ldivide_complex_inputs() {
         }
         other => panic!("expected complex tensor, got {other:?}"),
     }
+
+    let scale = f32::from_bits(1);
+    let divisor = ComplexTensor::from_f32(vec![(scale, scale)], vec![1, 1]).unwrap();
+    let numerator = ComplexTensor::from_f32(vec![(scale, 0.0)], vec![1, 1]).unwrap();
+    let Value::ComplexTensor(result) = ldivide_builtin(
+        Value::ComplexTensor(divisor),
+        Value::ComplexTensor(numerator),
+        Vec::new(),
+    )
+    .expect("subnormal complex single ldivide") else {
+        panic!("expected complex single tensor");
+    };
+    let value: (f32, f32) = result.as_f32_slice().unwrap()[0].into();
+    assert_eq!(value, (0.5, -0.5));
 }
 
 #[test]

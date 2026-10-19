@@ -900,7 +900,8 @@ fn dispatch_immediate(
                 debug::trace_load_var(
                     *pc,
                     *index,
-                    &vars.get(*index)
+                    &vars
+                        .get(*index)
                         .expect("loaded private variable slot lies within frame extent"),
                 );
                 stack.try_push_with(|| {

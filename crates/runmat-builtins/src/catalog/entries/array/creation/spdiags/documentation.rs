@@ -28,7 +28,10 @@ BuiltinDocumentationFaq { question: "What happens when `A` is dense in the repla
 BuiltinDocumentationLink { label: "diag", target: BuiltinDocumentationLinkTarget::Documentation("./diag") },
 BuiltinDocumentationLink { label: "full", target: BuiltinDocumentationLinkTarget::Documentation("./full") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "spdiags extraction test", location: "builtins::array::creation::sparse::tests::spdiags_extracts_diagonals_and_ids_with_padding" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "spdiags construction and replacement test", location: "builtins::array::creation::sparse::tests::spdiags_constructs_and_replaces_sparse_diagonals" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

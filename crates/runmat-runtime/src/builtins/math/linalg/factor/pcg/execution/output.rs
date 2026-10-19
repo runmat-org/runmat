@@ -4,6 +4,7 @@ use super::{
     HostAllocationPlan, HostAllocationReceipt, NumericDType, PcgOutcome, PcgValue, RuntimeContext,
     SparseOperatorError, Tensor, Value,
 };
+use runmat_value::{OutputListInitializationError, OutputListStorage};
 
 fn admission(context: Option<&RuntimeContext>, error: HostAllocationError) -> super::RuntimeError {
     map_operator_in_context(SparseOperatorError::Admission(error), context)
@@ -119,6 +120,20 @@ pub(super) fn quote<T: PcgValue>(
             )
             .ok_or_else(|| admission(context, HostAllocationError::Overflow))?;
     }
+    if let Some(count @ 2..=5) = requested {
+        let raw = OutputListStorage::requested_bytes(count)
+            .map_err(|error| admission(context, HostAllocationError::Numeric(error)))?;
+        output = output
+            .checked_add(
+                HostAllocationPlan::retained_exact_output_bytes(
+                    u64::try_from(raw)
+                        .map_err(|_| admission(context, HostAllocationError::Overflow))?,
+                    1,
+                )
+                .map_err(|error| admission(context, error))?,
+            )
+            .ok_or_else(|| admission(context, HostAllocationError::Overflow))?;
+    }
     Ok(PcgQuote {
         main_count,
         residual_count,
@@ -138,7 +153,7 @@ pub(super) fn publish_admitted<T: PcgValue>(
     receipt
         .checkpoint(context)
         .map_err(|error| admission(Some(context), error))?;
-    let (x, history) = receipt
+    let result = receipt
         .with_output_allocation(context, |permit| {
             let x = T::admitted_output(x, permit)?;
             let history = if requested.is_some_and(|count| count >= 5) {
@@ -150,10 +165,32 @@ pub(super) fn publish_admitted<T: PcgValue>(
             } else {
                 None
             };
-            Ok((x, history))
+            if let Some(count @ 2..=5) = requested {
+                let mut x = Some(x);
+                let mut history = history;
+                let list = OutputListStorage::try_initialize(count, permit, |index| {
+                    Ok::<Value, ExactHostNumericAllocationError>(match index {
+                        0 => x.take().expect("solution initialized once"),
+                        1 => Value::Num(f64::from(outcome.flag)),
+                        2 => Value::Num(outcome.relres),
+                        3 => Value::Num(outcome.iterations as f64),
+                        4 => history
+                            .take()
+                            .expect("five outputs prepare residual history"),
+                        _ => unreachable!("pcg validates output count"),
+                    })
+                })
+                .map_err(|error| match error {
+                    OutputListInitializationError::Allocation(error)
+                    | OutputListInitializationError::Element(error) => error,
+                })?;
+                Ok(Value::OutputList(list))
+            } else {
+                Ok(response(x, history, outcome, requested))
+            }
         })
         .map_err(|error| admission(Some(context), error))?;
-    Ok(response(x, history, outcome, requested))
+    Ok(result)
 }
 
 pub(super) fn publish_unbounded<T: PcgValue>(

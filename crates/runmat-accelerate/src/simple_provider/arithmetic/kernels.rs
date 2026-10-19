@@ -4,7 +4,7 @@ use super::Operation;
 // the untouched imaginary lane; multiplying/dividing by a real scalar does not
 // synthesize a complex zero lane (which changes NaN/Infinity and signed zero).
 macro_rules! native {
-    ($name:ident, $float:ty, $complex:ty) => {
+    ($name:ident, $float:ty, $complex:ty, $divide:ident) => {
         pub(super) fn $name(
             (ar, ai): ($float, $float),
             (br, bi): ($float, $float),
@@ -39,8 +39,14 @@ macro_rules! native {
                 },
                 Operation::Div => {
                     if bc {
-                        let quotient = <$complex>::new(ar, ai) / <$complex>::new(br, bi);
-                        (quotient.re, quotient.im)
+                        if [ar, ai, br, bi].into_iter().all(<$float>::is_finite)
+                            && (br != 0.0 || bi != 0.0)
+                        {
+                            runmat_value::$divide((ar, ai), (br, bi))
+                        } else {
+                            let quotient = <$complex>::new(ar, ai) / <$complex>::new(br, bi);
+                            (quotient.re, quotient.im)
+                        }
                     } else if ac {
                         (ar / br, ai / br)
                     } else {
@@ -51,5 +57,5 @@ macro_rules! native {
         }
     };
 }
-native!(single, f32, num_complex::Complex32);
-native!(double, f64, num_complex::Complex64);
+native!(single, f32, num_complex::Complex32, divide_complex_f32);
+native!(double, f64, num_complex::Complex64, divide_complex_f64);

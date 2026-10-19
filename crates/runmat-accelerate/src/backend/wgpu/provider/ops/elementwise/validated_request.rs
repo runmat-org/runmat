@@ -204,6 +204,7 @@ impl WgpuProvider {
         let work = FusedElementwiseWork {
             output_shape,
             len,
+            invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
             representation,
             uniform_abi: Some(abi),
         };

@@ -71,6 +71,20 @@ fn supports_complex_inputs() {
         }
         other => panic!("expected complex tensor, got {other:?}"),
     }
+
+    for magnitude in [1.0e300, 1.0e-300, f64::from_bits(1)] {
+        let values = ComplexTensor::new(vec![(magnitude, 0.0); 3], vec![1, 3]).unwrap();
+        let scalar = ComplexTensor::new(vec![(magnitude, magnitude)], vec![1, 1]).unwrap();
+        let Value::ComplexTensor(out) =
+            mrdivide_builtin(Value::ComplexTensor(values), Value::ComplexTensor(scalar))
+                .expect("complex scalar right division")
+        else {
+            panic!("expected complex tensor")
+        };
+        assert_eq!(out.shape(), [1, 3]);
+        assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F64);
+        assert_eq!(out.materialize_f64(), vec![(0.5, -0.5); 3]);
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

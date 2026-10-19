@@ -24,7 +24,14 @@ BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[
 BuiltinDocumentationLink { label: "rand", target: BuiltinDocumentationLinkTarget::Documentation("./rand") },
 BuiltinDocumentationLink { label: "sprandn", target: BuiltinDocumentationLinkTarget::Documentation("./sprandn") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "sprand pattern test", location: "builtins::array::creation::sparse::tests::sprand_pattern_form_preserves_shape_and_pattern" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "sprand density test", location: "builtins::array::creation::sparse::tests::sprand_density_form_constructs_requested_sparse_shape" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "sprand scalar condition test", location: "builtins::array::creation::sparse::tests::sprand_scalar_rc_form_matches_requested_condition_at_full_density" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "sprand vector condition test", location: "builtins::array::creation::sparse::tests::sprand_vector_rc_form_uses_requested_singular_values" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "sprand condition validation test", location: "builtins::array::creation::sparse::tests::sprand_rc_form_respects_density_and_typename_validation" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "sprand singular-value test", location: "builtins::array::creation::sparse::tests::sprand_rc_vector_shape_preserves_singular_value_without_rotation_cap" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

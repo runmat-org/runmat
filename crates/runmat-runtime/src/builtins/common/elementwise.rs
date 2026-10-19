@@ -623,22 +623,19 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> crate::BuiltinResult<Value
     let host: Result<Value, String> = match (a, b) {
         // Complex scalars
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
-            let denom = br * br + bi * bi;
-            if denom == 0.0 {
+            if *br == 0.0 && *bi == 0.0 {
                 return Ok(Value::Num(f64::NAN));
             }
-            Ok(Value::Complex(
-                (ar * br + ai * bi) / denom,
-                (ai * br - ar * bi) / denom,
-            ))
+            let (re, im) = super::complex_arithmetic::divide_f64((*ar, *ai), (*br, *bi));
+            Ok(Value::Complex(re, im))
         }
         (Value::Complex(ar, ai), Value::Num(s)) => Ok(Value::Complex(ar / s, ai / s)),
         (Value::Num(s), Value::Complex(br, bi)) => {
-            let denom = br * br + bi * bi;
-            if denom == 0.0 {
+            if *br == 0.0 && *bi == 0.0 {
                 return Ok(Value::Num(f64::NAN));
             }
-            Ok(Value::Complex((s * br) / denom, (-s * bi) / denom))
+            let (re, im) = super::complex_arithmetic::divide_f64((*s, 0.0), (*br, *bi));
+            Ok(Value::Complex(re, im))
         }
         // Scalar-scalar case
         (Value::Num(x), Value::Num(y)) => {
@@ -915,27 +912,11 @@ fn divide_scalar_promoted_complex_tensor(
 }
 
 fn divide_complex_value_f64(numerator: (f64, f64), denominator: (f64, f64)) -> (f64, f64) {
-    let divisor = denominator.0 * denominator.0 + denominator.1 * denominator.1;
-    if divisor == 0.0 {
-        (f64::NAN, f64::NAN)
-    } else {
-        (
-            (numerator.0 * denominator.0 + numerator.1 * denominator.1) / divisor,
-            (numerator.1 * denominator.0 - numerator.0 * denominator.1) / divisor,
-        )
-    }
+    super::complex_arithmetic::divide_f64(numerator, denominator)
 }
 
 fn divide_complex_value_f32(numerator: (f32, f32), denominator: (f32, f32)) -> (f32, f32) {
-    let divisor = denominator.0 * denominator.0 + denominator.1 * denominator.1;
-    if divisor == 0.0 {
-        (f32::NAN, f32::NAN)
-    } else {
-        (
-            (numerator.0 * denominator.0 + numerator.1 * denominator.1) / divisor,
-            (numerator.1 * denominator.0 - numerator.0 * denominator.1) / divisor,
-        )
-    }
+    super::complex_arithmetic::divide_f32(numerator, denominator)
 }
 
 /// Regular power operation: A ^ B  

@@ -512,6 +512,7 @@ impl WgpuProvider {
                         FusedElementwiseWork {
                             output_shape: &entry.shape,
                             len: entry.len,
+                            invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                             uniform_abi: Some(if broadcast {
                                 FusionUniformAbi::Broadcast
                             } else {

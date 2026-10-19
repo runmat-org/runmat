@@ -20,6 +20,34 @@ fn rdivide_complex_inputs() {
         }
         other => panic!("expected complex tensor, got {other:?}"),
     }
+
+    for scale in [1.0e200, 1.0e-200, f64::from_bits(1)] {
+        let numerator = ComplexTensor::new(vec![(scale, 0.0), (0.0, scale)], vec![1, 2]).unwrap();
+        let divisor = ComplexTensor::new(vec![(scale, scale); 2], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(result) = rdivide_builtin(
+            Value::ComplexTensor(numerator),
+            Value::ComplexTensor(divisor),
+            Vec::new(),
+        )
+        .expect("finite extreme complex rdivide") else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.shape(), &[1, 2]);
+        for (value, expected) in result
+            .materialize_f64()
+            .iter()
+            .zip([(0.5, -0.5), (0.5, 0.5)])
+        {
+            assert!(
+                (value.0 - expected.0).abs() < 1.0e-14,
+                "scale={scale}: {value:?}"
+            );
+            assert!(
+                (value.1 - expected.1).abs() < 1.0e-14,
+                "scale={scale}: {value:?}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -40,7 +40,18 @@ const CAUGHT_FOLDED_MIN: &str = "x = gpuArray(reshape(single(1:16384),128,128));
 
 fn actual_provider_scope() -> runmat_accelerate_api::ThreadProviderGuard {
     let scope = runmat_accelerate_api::ThreadProviderGuard::set(None);
-    register_wgpu_provider(WgpuProviderOptions::default()).expect("actual WGPU adapter required");
+    let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual WGPU adapter required");
+    // The provider is shared across witnesses. A cancelled invocation may
+    // leave physical completion work after its logical scope has ended.
+    // Establish a clean queue boundary before observing this witness's receipts.
+    block_on(
+        runmat_accelerate_api::AccelProvider::observe_vm_region_queue_tail(
+            provider,
+            runmat_accelerate_api::AccelProvider::device_id(provider),
+        ),
+    )
+    .expect("previous provider queue work must retire before the lifecycle witness");
     scope
 }
 

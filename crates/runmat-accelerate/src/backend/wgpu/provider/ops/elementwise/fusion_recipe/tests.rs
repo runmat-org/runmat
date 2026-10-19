@@ -11,6 +11,7 @@ fn plan(
         &FusedElementwiseWork {
             output_shape: &[len, 1],
             len,
+            invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
             uniform_abi: Some(FusionUniformAbi::Simple),
             representation: FusedElementwiseRepresentation {
                 input_precision: NumericPrecision::F32,

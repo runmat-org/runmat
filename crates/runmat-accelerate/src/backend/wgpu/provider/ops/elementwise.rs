@@ -12,9 +12,8 @@ use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::shaders::classification::classification_shader;
 use crate::backend::wgpu::shaders::elementwise::{
-    complex_binary_broadcast_shader, complex_binary_shader, complex_from_real_imag_shader,
-    complex_from_real_shader, complex_unary_shader, real_unary_shader, round_digits_shader,
-    ComplexBinaryOp, ComplexUnaryOp,
+    complex_from_real_imag_shader, complex_from_real_shader, complex_unary_shader,
+    real_unary_shader, round_digits_shader, ComplexUnaryOp,
 };
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
@@ -27,6 +26,8 @@ use crate::backend::wgpu::types::NumericPrecision;
 
 #[path = "elementwise/broadcast_plan.rs"]
 mod broadcast_plan;
+#[path = "elementwise/complex.rs"]
+mod complex;
 #[path = "elementwise/complex_broadcast.rs"]
 mod complex_broadcast;
 #[path = "elementwise/fusion_recipe.rs"]
@@ -92,9 +93,69 @@ pub(super) struct FusedElementwiseRepresentation {
 pub(super) struct FusedElementwiseWork<'a> {
     pub(super) output_shape: &'a [usize],
     pub(super) len: usize,
+    pub(super) invocation_geometry: ElementwiseInvocationGeometry,
     pub(super) representation: FusedElementwiseRepresentation,
     /// None is the explicitly unprepared arbitrary-shader compatibility path.
     pub(super) uniform_abi: Option<FusionUniformAbi>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ElementwiseInvocationGeometry {
+    OutputLanes,
+    ComplexElements {
+        logical_elements: usize,
+        uniform_abi: FusionUniformAbi,
+    },
+}
+
+impl ElementwiseInvocationGeometry {
+    fn complex_elements(
+        logical_elements: usize,
+        precision: NumericPrecision,
+        uniform_abi: FusionUniformAbi,
+    ) -> Result<Self> {
+        let output_lanes = logical_elements
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("complex division output extent overflows"))?;
+        let words_per_lane = match precision {
+            NumericPrecision::F32 => 1,
+            NumericPrecision::F64 => 2,
+        };
+        let word_count = output_lanes
+            .checked_mul(words_per_lane)
+            .ok_or_else(|| anyhow!("complex division word extent overflows"))?;
+        ensure!(
+            word_count <= u32::MAX as usize,
+            "complex division raw-word address exceeds shader index range"
+        );
+        Ok(Self::ComplexElements {
+            logical_elements,
+            uniform_abi,
+        })
+    }
+
+    fn invocation_len(
+        self,
+        output_lanes: usize,
+        representation: &FusedElementwiseRepresentation,
+        prepared_or_validated: bool,
+    ) -> Result<usize> {
+        match self {
+            Self::OutputLanes => Ok(output_lanes),
+            Self::ComplexElements {
+                logical_elements, ..
+            } => {
+                ensure!(
+                    !prepared_or_validated
+                        && logical_elements.checked_mul(2) == Some(output_lanes)
+                        && representation.output_storage == GpuTensorStorage::ComplexInterleaved
+                        && !representation.logical_output,
+                    "complex-element invocation geometry does not match physical output"
+                );
+                Ok(logical_elements)
+            }
+        }
+    }
 }
 
 enum SingleFusionEvidence<'a> {
@@ -1284,6 +1345,7 @@ impl WgpuProvider {
             FusedElementwiseWork {
                 output_shape: &entry.shape,
                 len: entry.len,
+                invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                 representation: FusedElementwiseRepresentation {
                     input_precision: entry.precision,
                     output_precision: entry.precision,
@@ -1334,6 +1396,7 @@ impl WgpuProvider {
             FusedElementwiseWork {
                 output_shape: &entry_a.shape,
                 len,
+                invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                 uniform_abi: Some(FusionUniformAbi::Simple),
                 representation: FusedElementwiseRepresentation {
                     input_precision: entry_a.precision,
@@ -1667,7 +1730,22 @@ impl WgpuProvider {
         // `get_entry` is the existing precision/class admission owner. Its
         // Unsupported result is certified before the synchronous emitter can
         // allocate, so retain it for Runtime's legitimate host fallback.
-        let _ = (self.get_entry(a)?, self.get_entry(b)?);
+        let raw_a = self.get_entry_raw(a)?;
+        let raw_b = self.get_entry_raw(b)?;
+        let complex_division = op == BinaryOpCode::Div
+            && (self.effective_storage_for_entry(a, &raw_a)
+                == GpuTensorStorage::ComplexInterleaved
+                || self.effective_storage_for_entry(b, &raw_b)
+                    == GpuTensorStorage::ComplexInterleaved);
+        if complex_division {
+            let (entry_a, entry_b) = self.complex_division_inputs(a, b)?;
+            if entry_a.len != 0 && entry_b.len != 0 {
+                self.require_ieee_words(entry_a.precision)
+                    .map_err(ProviderExecutionError::from)?;
+            }
+        } else {
+            let _ = (self.get_entry(a)?, self.get_entry(b)?);
+        }
         // This inherited synchronous floating route can allocate or submit;
         // its unphased errors are never certified pre-effect replay causes.
         self.binary_op_exec(op, a, b)
@@ -1760,7 +1838,6 @@ impl WgpuProvider {
         // The ordinary public integer hooks prepare asynchronously before effects.
         // Internal synchronous users of this routine admit floating storage via
         // get_entry; they cannot create an unvalidated cold integer pipeline.
-        let _ = (self.get_entry(a)?, self.get_entry(b)?);
         let raw_a = self.get_entry_raw(a)?;
         let raw_b = self.get_entry_raw(b)?;
         let storage_a = self.effective_storage_for_entry(a, &raw_a);
@@ -1768,13 +1845,17 @@ impl WgpuProvider {
         if storage_a == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
             || storage_b == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
-            let entry_a = self.get_entry(a)?;
-            let entry_b = self.get_entry(b)?;
+            let (entry_a, entry_b) = if op == crate::backend::wgpu::types::BinaryOpCode::Div {
+                self.complex_division_inputs(a, b)?
+            } else {
+                (self.get_entry(a)?, self.get_entry(b)?)
+            };
             if entry_a.shape != entry_b.shape {
                 return self.complex_binary_broadcast_exec(op, a, b, &entry_a, &entry_b);
             }
             return self.complex_binary_op_exec(op, a, b, &entry_a, &entry_b);
         }
+        let _ = (self.get_entry(a)?, self.get_entry(b)?);
         let entry_a = self.real_floating_entry(a)?;
         let entry_b = self.real_floating_entry(b)?;
         ensure!(
@@ -1982,168 +2063,6 @@ impl WgpuProvider {
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         self.inherit_elementwise_layout(handle, a)
-    }
-
-    fn complex_binary_op_exec(
-        &self,
-        op: crate::backend::wgpu::types::BinaryOpCode,
-        a: &GpuTensorHandle,
-        b: &GpuTensorHandle,
-        entry_a: &super::backend_types::BufferEntry,
-        entry_b: &super::backend_types::BufferEntry,
-    ) -> Result<GpuTensorHandle> {
-        ensure!(
-            entry_a.shape == entry_b.shape,
-            "complex binary operation requires matching logical shapes"
-        );
-        let complex_op = ComplexBinaryOp::try_from_binary_op(op)
-            .ok_or_else(|| anyhow!("binary operation is not supported for complex GPU tensors"))?;
-        let lhs_complex = self.effective_storage_for_entry(a, entry_a)
-            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-        let rhs_complex = self.effective_storage_for_entry(b, entry_b)
-            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-        let logical_len = entry_a
-            .shape
-            .iter()
-            .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
-            .ok_or_else(|| anyhow!("complex binary operation output length overflow"))?;
-        ensure!(
-            !lhs_complex || entry_a.len == logical_len.saturating_mul(2),
-            "complex lhs storage length does not match logical shape"
-        );
-        ensure!(
-            lhs_complex || entry_a.len == logical_len,
-            "real lhs storage length does not match logical shape"
-        );
-        ensure!(
-            !rhs_complex || entry_b.len == logical_len.saturating_mul(2),
-            "complex rhs storage length does not match logical shape"
-        );
-        ensure!(
-            rhs_complex || entry_b.len == logical_len,
-            "real rhs storage length does not match logical shape"
-        );
-        let out_len = logical_len
-            .checked_mul(2)
-            .ok_or_else(|| anyhow!("complex binary operation output length overflow"))?;
-        let handle = if out_len == 0 {
-            let buffer = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-complex-binary-out")
-            })??;
-            self.register_existing_buffer_with_storage(
-                buffer,
-                entry_a.shape.clone(),
-                0,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            )?
-        } else {
-            let shader =
-                complex_binary_shader(complex_op, self.precision, lhs_complex, rhs_complex);
-            self.fused_elementwise_with_telemetry_and_storage_exec(
-                &shader,
-                &[a.clone(), b.clone()],
-                &entry_a.shape,
-                out_len,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            )?
-        };
-        Ok(handle)
-    }
-
-    fn complex_binary_broadcast_exec(
-        &self,
-        op: crate::backend::wgpu::types::BinaryOpCode,
-        a: &GpuTensorHandle,
-        b: &GpuTensorHandle,
-        entry_a: &super::backend_types::BufferEntry,
-        entry_b: &super::backend_types::BufferEntry,
-    ) -> Result<GpuTensorHandle> {
-        let complex_op = ComplexBinaryOp::try_from_binary_op(op)
-            .ok_or_else(|| anyhow!("binary operation is not supported for complex GPU tensors"))?;
-        let lhs_complex = self.effective_storage_for_entry(a, entry_a)
-            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-        let rhs_complex = self.effective_storage_for_entry(b, entry_b)
-            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-
-        let (shape_a, shape_b, out_shape) =
-            complex_broadcast::admit_shapes(&entry_a.shape, &entry_b.shape)?;
-        let rank = out_shape.len();
-
-        let logical_len = out_shape
-            .iter()
-            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| anyhow!("complex broadcast output length overflow"))?;
-        let a_logical_len = shape_a
-            .iter()
-            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| anyhow!("complex broadcast lhs length overflow"))?;
-        let b_logical_len = shape_b
-            .iter()
-            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| anyhow!("complex broadcast rhs length overflow"))?;
-        let expected_a_len = a_logical_len
-            .checked_mul(if lhs_complex { 2 } else { 1 })
-            .ok_or_else(|| anyhow!("complex broadcast lhs length overflow"))?;
-        let expected_b_len = b_logical_len
-            .checked_mul(if rhs_complex { 2 } else { 1 })
-            .ok_or_else(|| anyhow!("complex broadcast rhs length overflow"))?;
-        ensure!(
-            entry_a.len == expected_a_len,
-            "complex broadcast lhs storage length does not match logical shape"
-        );
-        ensure!(
-            entry_b.len == expected_b_len,
-            "complex broadcast rhs storage length does not match logical shape"
-        );
-
-        let out_len = logical_len
-            .checked_mul(2)
-            .ok_or_else(|| anyhow!("complex broadcast output length overflow"))?;
-        if out_len == 0 {
-            let out_buffer = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-complex-bcast-out")
-            })??;
-            return self.register_existing_buffer_with_storage(
-                out_buffer,
-                out_shape,
-                0,
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            );
-        }
-        if out_len > u32::MAX as usize {
-            return Err(gpu_dispatch_length_limit_error(
-                "complex_binary_broadcast",
-                out_len,
-            ));
-        }
-
-        let mut stride_a = vec![0u32; rank];
-        let mut stride_b = vec![0u32; rank];
-        let mut s = 1u64;
-        for i in 0..rank {
-            stride_a[i] = if shape_a[i] == 1 { 0 } else { s as u32 };
-            s = s
-                .checked_mul(shape_a[i] as u64)
-                .ok_or_else(|| anyhow!("complex broadcast lhs stride overflow"))?;
-        }
-        s = 1;
-        for i in 0..rank {
-            stride_b[i] = if shape_b[i] == 1 { 0 } else { s as u32 };
-            s = s
-                .checked_mul(shape_b[i] as u64)
-                .ok_or_else(|| anyhow!("complex broadcast rhs stride overflow"))?;
-        }
-
-        let shader =
-            complex_binary_broadcast_shader(complex_op, self.precision, lhs_complex, rhs_complex);
-        let handle = self.fused_elementwise_exec(
-            &shader,
-            &[a.clone(), b.clone()],
-            &out_shape,
-            out_len,
-            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        )?;
-        Ok(handle)
     }
 
     fn binary_op_broadcast_exec_recorded(
@@ -2379,6 +2298,7 @@ impl WgpuProvider {
             FusedElementwiseWork {
                 output_shape,
                 len,
+                invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                 representation,
                 uniform_abi: None,
             },
@@ -2470,6 +2390,7 @@ impl WgpuProvider {
             FusedElementwiseWork {
                 output_shape,
                 len,
+                invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                 representation: FusedElementwiseRepresentation {
                     input_precision: frame.precision,
                     output_precision: frame.precision,
@@ -2505,9 +2426,15 @@ impl WgpuProvider {
         let FusedElementwiseWork {
             output_shape,
             len,
+            invocation_geometry,
             representation,
             uniform_abi,
         } = work;
+        let dispatch_len = invocation_geometry.invocation_len(
+            len,
+            &representation,
+            validated.is_some() || prepared.is_some(),
+        )?;
         let output_storage = representation.output_storage;
         let validated_frame = validated.map(|(frame, _)| frame);
         if validated_frame.is_none() {
@@ -2598,9 +2525,12 @@ impl WgpuProvider {
                     ensure!(
                         entry.element_type == runmat_accelerate_api::NumericElementType::F32
                             && entry.precision == NumericPrecision::F32
-                            && entry.storage == GpuTensorStorage::Real
+                            && (matches!(
+                                invocation_geometry,
+                                ElementwiseInvocationGeometry::ComplexElements { .. }
+                            ) || entry.storage == GpuTensorStorage::Real)
                             && handle.descriptor().element_type == Some(entry.element_type)
-                            && handle.descriptor().storage == Some(GpuTensorStorage::Real)
+                            && handle.descriptor().storage == Some(entry.storage)
                             && !runmat_accelerate_api::handle_is_logical(handle),
                         "fused typed input does not match its shader ABI"
                     );
@@ -2610,14 +2540,17 @@ impl WgpuProvider {
         };
         let abi = match frozen {
             Some(frozen) => frozen.uniform_abi(),
-            // Legacy shader inspection does not mint a physical recipe/receipt.
-            None => {
-                if shader.contains("out_shape") || shader.contains("a_shape") {
-                    FusionUniformAbi::Broadcast
-                } else {
-                    FusionUniformAbi::Simple
+            None => match invocation_geometry {
+                ElementwiseInvocationGeometry::ComplexElements { uniform_abi, .. } => uniform_abi,
+                // Legacy shader inspection does not mint a physical recipe/receipt.
+                ElementwiseInvocationGeometry::OutputLanes => {
+                    if shader.contains("out_shape") || shader.contains("a_shape") {
+                        FusionUniformAbi::Broadcast
+                    } else {
+                        FusionUniformAbi::Simple
+                    }
                 }
-            }
+            },
         };
         let layouts = if let Some(frame) = validated_frame {
             frame.layouts.clone()
@@ -2841,8 +2774,8 @@ impl WgpuProvider {
         let mut offset_elems = 0usize;
         let mut chunk_index = 0usize;
         let mut last_submission_id = None;
-        while offset_elems < len {
-            let remaining = len - offset_elems;
+        while offset_elems < dispatch_len {
+            let remaining = dispatch_len - offset_elems;
             let chunk_len = remaining.min(chunk_capacity);
 
             log::trace!(
@@ -4703,9 +4636,16 @@ mod tests {
         let add = provider.elem_add(&a, &b).await.expect("complex add");
         let sub = provider.elem_sub(&a, &b).await.expect("complex sub");
         let mul = provider.elem_mul(&a, &b).await.expect("complex mul");
-        let div = provider.elem_div(&a, &b).await.expect("complex div");
+        let div = provider.elem_div(&a, &b).await;
+        let ieee_div_available = provider.ieee_words_available(provider.precision);
+        if !ieee_div_available {
+            let error = div
+                .as_ref()
+                .expect_err("complex f64 division needs IEEE words");
+            assert!(error.is_unsupported());
+        }
 
-        for handle in [&add, &sub, &mul, &div] {
+        for handle in [&add, &sub, &mul] {
             assert_eq!(
                 handle.descriptor().storage,
                 Some(GpuTensorStorage::ComplexInterleaved)
@@ -4719,7 +4659,16 @@ mod tests {
         let add_host = provider.download(&add).await.expect("download add");
         let sub_host = provider.download(&sub).await.expect("download sub");
         let mul_host = provider.download(&mul).await.expect("download mul");
-        let div_host = provider.download(&div).await.expect("download div");
+        let div_host = if ieee_div_available {
+            Some(
+                provider
+                    .download(&div.expect("complex div"))
+                    .await
+                    .expect("download div"),
+            )
+        } else {
+            None
+        };
         assert_eq!(add_host.storage, GpuTensorStorage::ComplexInterleaved);
         assert_eq!(add_host.shape, shape.to_vec());
 
@@ -4752,7 +4701,106 @@ mod tests {
         assert_interleaved_close(&add_host.data, &expected_add);
         assert_interleaved_close(&sub_host.data, &expected_sub);
         assert_interleaved_close(&mul_host.data, &expected_mul);
-        assert_interleaved_close(&div_host.data, &expected_div);
+        if let Some(div_host) = div_host {
+            assert_interleaved_close(&div_host.data, &expected_div);
+        }
+
+        if provider.precision() == runmat_accelerate_api::ProviderPrecision::F64 {
+            let native_f32 = [8.0_f32, f32::from_bits(1)];
+            let divisor_f32 = [0.0_f32, 1.0];
+            let a32 = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&native_f32),
+                    shape: &[1, 1],
+                    storage: GpuTensorStorage::ComplexInterleaved,
+                })
+                .expect("upload native f32 complex lhs on f64 provider");
+            let b32 = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&divisor_f32),
+                    shape: &[1, 1],
+                    storage: GpuTensorStorage::ComplexInterleaved,
+                })
+                .expect("upload native f32 complex rhs on f64 provider");
+            let q32 = provider
+                .elem_div(&a32, &b32)
+                .await
+                .expect("native f32 complex div");
+            assert_eq!(
+                q32.descriptor().element_type,
+                Some(runmat_accelerate_api::NumericElementType::F32)
+            );
+            let q32_host = provider
+                .download(&q32)
+                .await
+                .expect("download native f32 div");
+            assert_eq!(q32_host.data, vec![f32::from_bits(1) as f64, -8.0]);
+            let before_mixed = provider.telemetry_snapshot();
+            let mixed = provider
+                .elem_div(&a32, &b)
+                .await
+                .expect_err("mixed native precision");
+            assert!(mixed.is_unsupported());
+            assert_eq!(provider.telemetry_snapshot(), before_mixed);
+        }
+
+        if !ieee_div_available {
+            return;
+        }
+        // Upload interleaved words directly: constructing complex values by a
+        // prior GPU arithmetic kernel could flush the input subnormal first.
+        let (lhs, rhs, expected) = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F32 => {
+                let lhs = [f32::MAX, f32::from_bits(1), 1.0, 0.0];
+                let rhs = [0.0_f32, 1.0];
+                let a = provider
+                    .upload_numeric(&HostNumericTensorView {
+                        data: HostNumericDataView::F32(&lhs),
+                        shape: &[2, 1],
+                        storage: GpuTensorStorage::ComplexInterleaved,
+                    })
+                    .expect("upload complex f32 boundary lhs");
+                let b = provider
+                    .upload_numeric(&HostNumericTensorView {
+                        data: HostNumericDataView::F32(&rhs),
+                        shape: &[1, 1],
+                        storage: GpuTensorStorage::ComplexInterleaved,
+                    })
+                    .expect("upload complex f32 boundary rhs");
+                (a, b, (f32::from_bits(1) as f64, -(f32::MAX as f64)))
+            }
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                let lhs = [f64::MAX, f64::from_bits(1), 1.0, 0.0];
+                let rhs = [0.0_f64, 1.0];
+                let a = provider
+                    .upload_numeric(&HostNumericTensorView {
+                        data: HostNumericDataView::F64(&lhs),
+                        shape: &[2, 1],
+                        storage: GpuTensorStorage::ComplexInterleaved,
+                    })
+                    .expect("upload complex f64 boundary lhs");
+                let b = provider
+                    .upload_numeric(&HostNumericTensorView {
+                        data: HostNumericDataView::F64(&rhs),
+                        shape: &[1, 1],
+                        storage: GpuTensorStorage::ComplexInterleaved,
+                    })
+                    .expect("upload complex f64 boundary rhs");
+                (a, b, (f64::from_bits(1), -f64::MAX))
+            }
+        };
+        let quotient = provider
+            .elem_div(&lhs, &rhs)
+            .await
+            .expect("boundary broadcast div");
+        let boundary = provider
+            .download(&quotient)
+            .await
+            .expect("download boundary div");
+        assert_eq!(boundary.shape, vec![2, 1]);
+        assert_eq!(boundary.storage, GpuTensorStorage::ComplexInterleaved);
+        assert_eq!(boundary.data[0], expected.0, "retained minor component");
+        assert_eq!(boundary.data[1], expected.1, "finite major component");
     }
 
     #[tokio::test]

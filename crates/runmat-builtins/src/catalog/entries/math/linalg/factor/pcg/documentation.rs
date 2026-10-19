@@ -15,7 +15,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Current boundaries",
         paragraphs: &[
             "Matrix coefficients, vectors, and triangular factors must have matching native floating classes. Mixed coefficient/vector classes, gpuArray inputs, and distributed inputs are not silently converted or transferred. Callable outputs are checked on every application rather than inferred from the first result.",
-            "For matrix-only solves, a finite managed host operation currently admits the single-result tensor, including a one-output assignment. Callable forms still require unbounded host allocation policy until reusable callable metadata has retained exact ownership; managed calls reject those forms before invoking user code. Two or more requested outputs remain unavailable under managed policy until the shared `OutputList` representation gains retained exact metadata ownership; explicitly unbounded calls support up to five outputs.",
+            "Matrix-only solves support finite managed host allocation for up to five outputs. Solver scratch and output backing are admitted before execution. Callable forms currently require unbounded host allocation and are rejected before invoking user code when a managed host policy is active.",
             "The compatibility contract is incomplete. The implemented flags are 0 (converged), 1 (iteration limit), 3 (stagnation), and 4 (breakdown or nonpositive curvature). The complete MATLAB preconditioner-failure flag contract remains an implementation obligation; callback errors and invalid factors are not relabeled as successful solves.",
         ],
     },

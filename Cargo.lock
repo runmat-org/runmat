@@ -7954,6 +7954,7 @@ name = "runmat-value"
 version = "0.6.2"
 dependencies = [
  "indexmap 1.9.3",
+ "libm",
  "num-bigint",
  "num-integer",
  "num-traits",

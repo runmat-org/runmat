@@ -2967,8 +2967,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _offset: isize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow!("tril not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("tril not supported by provider")
     }
 
     /// Apply an upper-triangular mask to the first two dimensions of a tensor.
@@ -2976,8 +2976,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _offset: isize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow!("triu not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("triu not supported by provider")
     }
 
     /// Evaluate a polynomial expressed by `coefficients` at each element in `points`.
@@ -4425,8 +4425,12 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Ok(None)
     }
     /// Compute the Kronecker product of two tensors, matching MATLAB semantics.
-    fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("kron not supported by provider"))
+    fn kron<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _b: &'a GpuTensorHandle,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("kron not supported by provider")
     }
     /// Compute the cross product of 3-element vectors along a matching dimension.
     fn cross(

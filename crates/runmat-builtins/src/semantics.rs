@@ -167,6 +167,9 @@ pub enum ShapeTransformKind {
     Flip,
     Rotate90,
     CircularShift,
+    Diagonal,
+    Kronecker,
+    Triangular(TriangularKind),
     Reshape,
     Permute,
     Repmat,
@@ -180,6 +183,12 @@ pub enum ConcatKind {
     Dimension,
     Horizontal,
     Vertical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TriangularKind {
+    Lower,
+    Upper,
 }
 
 pub fn builtin_semantics_for(function: &BuiltinFunction) -> BuiltinSemantics {

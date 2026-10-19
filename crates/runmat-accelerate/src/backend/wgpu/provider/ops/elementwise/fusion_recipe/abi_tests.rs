@@ -15,6 +15,7 @@ fn typed_uniform_abi_not_shader_identifiers_controls_the_physical_recipe() {
     let work = |abi| FusedElementwiseWork {
         output_shape: &[2, 3],
         len: 6,
+        invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
         representation: representation(GpuTensorStorage::Real),
         uniform_abi: abi,
     };
@@ -79,6 +80,7 @@ fn shape_words_are_exact_for_real_complex_scalar_and_empty_outputs() {
         &FusedElementwiseWork {
             output_shape: &[2, 0, 5],
             len: 0,
+            invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
             representation: complex,
             uniform_abi: Some(FusionUniformAbi::Simple),
         },

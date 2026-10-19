@@ -765,7 +765,7 @@ pub mod shape_rules;
 pub use semantics::{
     builtin_semantics_for, builtin_semantics_for_name, BuiltinAsyncBehavior, BuiltinCompatibility,
     BuiltinEffects, BuiltinEnvironmentEffect, BuiltinPurity, BuiltinSemanticKind, BuiltinSemantics,
-    BuiltinWorkspaceEffect, ConcatKind, ShapeTransformKind,
+    BuiltinWorkspaceEffect, ConcatKind, ShapeTransformKind, TriangularKind,
 };
 
 impl std::fmt::Debug for Constant {

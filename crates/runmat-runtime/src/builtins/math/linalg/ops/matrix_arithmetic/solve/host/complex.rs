@@ -1,5 +1,4 @@
 use nalgebra::DMatrix;
-use num_complex::Complex64;
 use runmat_value::{ComplexTensor, NumericDType};
 
 use crate::BuiltinResult;
@@ -20,11 +19,11 @@ pub(super) fn evaluate(
         _ => None,
     };
     if let Some((scalar, values)) = divisor {
-        let (real, imag) = scalar.materialize_f64()[0];
-        return conversion::scale_complex(
+        return conversion::divide_complex_scalar(
             orientation,
             values,
-            Complex64::new(1.0, 0.0) / Complex64::new(real, imag),
+            scalar,
+            result_dtype(lhs, rhs),
         );
     }
 

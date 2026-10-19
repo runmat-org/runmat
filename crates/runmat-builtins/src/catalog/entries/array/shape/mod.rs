@@ -15,13 +15,19 @@ mod flipud;
 mod rot90;
 mod circshift;
 mod reorder_facts;
+mod diag;
+mod kron;
+mod tril;
+mod triu;
 
 pub use self::circshift::*;
 pub use self::concatenation::*;
+pub use self::diag::*;
 pub use self::flip::*;
 pub use self::fliplr::*;
 pub use self::flipud::*;
 pub use self::ipermute::*;
+pub use self::kron::*;
 pub use self::permute::*;
 pub use self::repmat::*;
 pub use self::reshape::*;
@@ -31,6 +37,8 @@ pub use self::toeplitz::*;
 pub use self::transform_facts::{
     shape_transform_control_supported, shape_transform_input_supported, ArrayShapeTransform,
 };
+pub use self::tril::*;
+pub use self::triu::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(reshape::ENTRIES.iter().copied());
@@ -45,4 +53,8 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(flipud::ENTRIES.iter().copied());
     values.extend(rot90::ENTRIES.iter().copied());
     values.extend(circshift::ENTRIES.iter().copied());
+    values.extend(diag::ENTRIES.iter().copied());
+    values.extend(kron::ENTRIES.iter().copied());
+    values.extend(tril::ENTRIES.iter().copied());
+    values.extend(triu::ENTRIES.iter().copied());
 }

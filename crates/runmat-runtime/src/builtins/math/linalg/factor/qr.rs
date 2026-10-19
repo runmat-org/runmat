@@ -858,22 +858,30 @@ fn householder(column: &mut [Complex64]) -> Complex64 {
     let sign = if alpha_abs == 0.0 {
         Complex64::new(1.0, 0.0)
     } else {
-        alpha / Complex64::new(alpha_abs, 0.0)
+        Complex64::new(alpha.re / alpha_abs, alpha.im / alpha_abs)
     };
     let beta = -sign * Complex64::new(total_norm, 0.0);
     let tau = if beta == Complex64::new(0.0, 0.0) {
         Complex64::new(0.0, 0.0)
     } else {
-        (beta - alpha) / beta
+        Complex64::new(1.0, 0.0)
+            - crate::builtins::common::complex_arithmetic::divide_complex64(alpha, beta)
     };
-    let denom = alpha - beta;
-    if denom == Complex64::new(0.0, 0.0) {
+    // The unscaled difference can overflow even when the reflector and every
+    // stored factor are finite. Form the equivalent tail quotient in units of
+    // the (finite) column norm.
+    let denominator = Complex64::new(
+        alpha.re / total_norm - beta.re / total_norm,
+        alpha.im / total_norm - beta.im / total_norm,
+    );
+    if denominator == Complex64::new(0.0, 0.0) {
         for z in column.iter_mut().skip(1) {
             *z = Complex64::new(0.0, 0.0);
         }
     } else {
         for z in column.iter_mut().skip(1) {
-            *z /= denom;
+            let scaled = Complex64::new(z.re / total_norm, z.im / total_norm);
+            *z = crate::builtins::common::complex_arithmetic::divide_complex64(scaled, denominator);
         }
     }
     column[0] = beta;
@@ -1313,6 +1321,27 @@ pub(crate) mod tests {
         let r = tensor_from_value(eval.r()).materialize_f64();
         assert_eq!(r[0], 1.0e-13);
         assert_eq!(r[3], 2.0e-13);
+
+        let original = Complex64::new(1.0e200, 1.0e200);
+        let mut column = [original, Complex64::new(1.0e200, 0.0)];
+        let tau = householder(&mut column);
+        assert!(tau.re.is_finite() && tau.im.is_finite());
+        assert!(column
+            .iter()
+            .all(|value| value.re.is_finite() && value.im.is_finite()));
+        let reconstructed_tail = (original - column[0]) * column[1];
+        assert!((reconstructed_tail.re / 1.0e200 - 1.0).abs() < 1.0e-12);
+        assert!((reconstructed_tail.im / 1.0e200).abs() < 1.0e-12);
+
+        let mut near_limit = [
+            Complex64::new(1.0e308, 1.0e308),
+            Complex64::new(1.0e308, 0.0),
+        ];
+        let tau = householder(&mut near_limit);
+        assert!(tau.re.is_finite() && tau.im.is_finite());
+        assert!(near_limit
+            .iter()
+            .all(|value| value.re.is_finite() && value.im.is_finite()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

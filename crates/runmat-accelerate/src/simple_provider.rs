@@ -3116,63 +3116,21 @@ fn tensor_from_value(label: &str, value: Value) -> Result<Tensor> {
     }
 }
 
-fn tril_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
-    if data.is_empty() {
-        return Ok(Vec::new());
-    }
-    let rows = shape.first().copied().unwrap_or(1);
-    let cols = shape.get(1).copied().unwrap_or(1);
-    let plane = rows.saturating_mul(cols);
-    if plane == 0 {
-        ensure!(
-            data.is_empty(),
-            "tril: shape/product mismatch ({} vs {})",
-            0,
-            data.len()
-        );
-        return Ok(Vec::new());
-    }
-    let pages = if shape.len() <= 2 {
-        1usize
-    } else {
-        shape[2..].iter().product::<usize>()
-    };
-    if pages == 0 {
-        ensure!(
-            data.is_empty(),
-            "tril: shape/product mismatch ({} vs {})",
-            0,
-            data.len()
-        );
-        return Ok(Vec::new());
-    }
-    let expected = plane
-        .checked_mul(pages)
-        .ok_or_else(|| anyhow!("tril: dimension product overflow"))?;
-    ensure!(
-        expected == data.len(),
-        "tril: shape/product mismatch ({} vs {})",
-        expected,
-        data.len()
-    );
-    let mut out = data.to_vec();
-    for page in 0..pages {
-        let base = page * plane;
-        for col in 0..cols {
-            let col_base = base + col * rows;
-            for row in 0..rows {
-                if (row as isize) - (col as isize) < -offset {
-                    out[col_base + row] = 0.0;
-                }
-            }
-        }
-    }
-    Ok(out)
+#[derive(Clone, Copy)]
+enum TriangularPart {
+    Lower,
+    Upper,
 }
 
-fn triu_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
+fn triangular_data<T: Copy + Default>(
+    label: &'static str,
+    mut data: Vec<T>,
+    shape: &[usize],
+    offset: isize,
+    part: TriangularPart,
+) -> Result<Vec<T>> {
     if data.is_empty() {
-        return Ok(Vec::new());
+        return Ok(data);
     }
     let rows = shape.first().copied().unwrap_or(1);
     let cols = shape.get(1).copied().unwrap_or(1);
@@ -3180,11 +3138,11 @@ fn triu_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
     if plane == 0 {
         ensure!(
             data.is_empty(),
-            "triu: shape/product mismatch ({} vs {})",
+            "{label}: shape/product mismatch ({} vs {})",
             0,
             data.len()
         );
-        return Ok(Vec::new());
+        return Ok(data);
     }
     let pages = if shape.len() <= 2 {
         1usize
@@ -3194,35 +3152,57 @@ fn triu_data(data: &[f64], shape: &[usize], offset: isize) -> Result<Vec<f64>> {
     if pages == 0 {
         ensure!(
             data.is_empty(),
-            "triu: shape/product mismatch ({} vs {})",
+            "{label}: shape/product mismatch ({} vs {})",
             0,
             data.len()
         );
-        return Ok(Vec::new());
+        return Ok(data);
     }
     let expected = plane
         .checked_mul(pages)
-        .ok_or_else(|| anyhow!("triu: dimension product overflow"))?;
+        .ok_or_else(|| anyhow!("{label}: dimension product overflow"))?;
     ensure!(
         expected == data.len(),
-        "triu: shape/product mismatch ({} vs {})",
+        "{label}: shape/product mismatch ({} vs {})",
         expected,
         data.len()
     );
-    let mut out = data.to_vec();
     for page in 0..pages {
         let base = page * plane;
         for col in 0..cols {
             let col_base = base + col * rows;
             for row in 0..rows {
-                let diff = (col as isize) - (row as isize);
-                if diff < offset {
-                    out[col_base + row] = 0.0;
+                let keep = match part {
+                    TriangularPart::Lower => (row as i128) - (col as i128) + (offset as i128) >= 0,
+                    TriangularPart::Upper => (col as i128) - (row as i128) >= offset as i128,
+                };
+                if !keep {
+                    data[col_base + row] = T::default();
                 }
             }
         }
     }
-    Ok(out)
+    Ok(data)
+}
+
+fn triangular_numeric_data(
+    label: &'static str,
+    data: InProcessNumericData,
+    shape: &[usize],
+    offset: isize,
+    part: TriangularPart,
+) -> Result<InProcessNumericData> {
+    match data {
+        InProcessNumericData::F32(values) => Ok(InProcessNumericData::F32(triangular_data(
+            label, values, shape, offset, part,
+        )?)),
+        InProcessNumericData::F64(values) => Ok(InProcessNumericData::F64(triangular_data(
+            label, values, shape, offset, part,
+        )?)),
+        InProcessNumericData::Integer(_) => Err(anyhow!(
+            "{label}: handle metadata disagrees with its native floating storage"
+        )),
+    }
 }
 
 fn circshift_data<T: Copy + Default>(
@@ -5196,17 +5176,53 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
         offset: isize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
+                return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                    runmat_accelerate_api::unsupported_provider_operation(
+                        "tril: provider kernel requires real floating storage",
+                    ),
+                ));
+            }
             let data = {
-                let guard = registry(self.device_id).lock().unwrap();
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("tril: allocation owner is poisoned"))
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
                 guard
                     .get(handle)
                     .cloned()
-                    .ok_or_else(|| anyhow!("tril: unknown tensor handle {}", handle.buffer_id()))?
+                    .ok_or_else(|| anyhow!("tril: unknown tensor handle {}", handle.buffer_id()))
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from)?
             };
-            let masked = tril_data(&data, handle.shape(), offset)?;
-            self.allocate_tensor(masked, handle.shape().to_vec())
+            let masked = triangular_numeric_data(
+                "tril",
+                data,
+                handle.shape(),
+                offset,
+                TriangularPart::Lower,
+            )
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+            let allocated = std::cell::Cell::new(false);
+            self.allocate_produced_observed(
+                masked,
+                handle.shape().to_vec(),
+                GpuTensorStorage::Real,
+                false,
+                Some(&allocated),
+            )
+            .map_err(|error| {
+                let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+                if allocated.get() {
+                    error.after_effect()
+                } else {
+                    error
+                }
+            })
         })
     }
 
@@ -5214,17 +5230,53 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
         offset: isize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_integer_type(handle).is_some()
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
+                return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                    runmat_accelerate_api::unsupported_provider_operation(
+                        "triu: provider kernel requires real floating storage",
+                    ),
+                ));
+            }
             let data = {
-                let guard = registry(self.device_id).lock().unwrap();
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("triu: allocation owner is poisoned"))
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
                 guard
                     .get(handle)
                     .cloned()
-                    .ok_or_else(|| anyhow!("triu: unknown tensor handle {}", handle.buffer_id()))?
+                    .ok_or_else(|| anyhow!("triu: unknown tensor handle {}", handle.buffer_id()))
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from)?
             };
-            let masked = triu_data(&data, handle.shape(), offset)?;
-            self.allocate_tensor(masked, handle.shape().to_vec())
+            let masked = triangular_numeric_data(
+                "triu",
+                data,
+                handle.shape(),
+                offset,
+                TriangularPart::Upper,
+            )
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+            let allocated = std::cell::Cell::new(false);
+            self.allocate_produced_observed(
+                masked,
+                handle.shape().to_vec(),
+                GpuTensorStorage::Real,
+                false,
+                Some(&allocated),
+            )
+            .map_err(|error| {
+                let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+                if allocated.get() {
+                    error.after_effect()
+                } else {
+                    error
+                }
+            })
         })
     }
 
@@ -10017,6 +10069,64 @@ mod tests {
 
         for handle in [single, single_matrix, wide, wide_matrix, extracted] {
             handle.release().expect("release diagonal buffer");
+        }
+    }
+
+    #[test]
+    fn triangular_hooks_preserve_native_real_precision_and_input_ownership() {
+        let provider = InProcessProvider::new();
+        let shape = [2, 3];
+
+        for (input, expected_type, lower, upper) in [
+            (
+                HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+                NumericElementType::F32,
+                HostNumericDataOwned::F32(vec![1.0, 2.0, 0.0, 4.0, 0.0, 0.0]),
+                HostNumericDataOwned::F32(vec![0.0, 0.0, 3.0, 0.0, 5.0, 6.0]),
+            ),
+            (
+                HostNumericDataOwned::F64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+                NumericElementType::F64,
+                HostNumericDataOwned::F64(vec![1.0, 2.0, 0.0, 4.0, 0.0, 0.0]),
+                HostNumericDataOwned::F64(vec![0.0, 0.0, 3.0, 0.0, 5.0, 6.0]),
+            ),
+        ] {
+            let source = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: input.as_view(),
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .expect("native triangular source upload");
+            let lower_handle = block_on(provider.tril(&source, 0)).expect("native tril");
+            let upper_handle = block_on(provider.triu(&source, 1)).expect("native triu");
+
+            assert_eq!(lower_handle.descriptor().element_type, Some(expected_type));
+            assert_eq!(upper_handle.descriptor().element_type, Some(expected_type));
+            assert!(!lower_handle.shares_allocation_with(&source));
+            assert!(!upper_handle.shares_allocation_with(&source));
+            assert_eq!(
+                block_on(provider.download_numeric(&lower_handle))
+                    .expect("native tril download")
+                    .data,
+                lower
+            );
+            assert_eq!(
+                block_on(provider.download_numeric(&upper_handle))
+                    .expect("native triu download")
+                    .data,
+                upper
+            );
+            assert_eq!(
+                block_on(provider.download_numeric(&source))
+                    .expect("native triangular source download")
+                    .data,
+                input
+            );
+
+            for handle in [source, lower_handle, upper_handle] {
+                handle.release().expect("release triangular buffer");
+            }
         }
     }
 

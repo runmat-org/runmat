@@ -46,8 +46,8 @@ pub use display::{
 pub use exception::{MException, MExceptionParts};
 pub use foreign::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};
 pub use numeric::{
-    IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage, NumericStorageView,
-    NumericStorageViewMut,
+    divide_complex_f32, divide_complex_f64, IntValue, IntegerStorage, NumericDType, NumericScalar,
+    NumericStorage, NumericStorageView, NumericStorageViewMut,
 };
 pub use numeric_spacing::{spacing_f32, spacing_f64};
 pub use object::{

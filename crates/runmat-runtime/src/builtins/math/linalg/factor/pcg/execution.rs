@@ -85,6 +85,14 @@ fn validate_vector<'a, T: PcgValue>(
 mod output;
 use output::{publish_admitted, publish_unbounded, quote, PcgQuote};
 mod async_route;
+#[cfg(test)]
+pub(super) fn quoted_f64_plan_for_test(
+    n: usize,
+    maximum_iterations: usize,
+    requested: Option<usize>,
+) -> BuiltinResult<HostAllocationPlan> {
+    Ok(quote::<f64>(n, maximum_iterations, 5, requested, None)?.plan)
+}
 fn run_typed<T: PcgValue>(
     operator: &TypedLinearOperator<'_, T>,
     request: &PcgRequest,
@@ -195,11 +203,6 @@ pub(super) async fn execute(
     }
     let policy = HostAllocationReceipt::policy(context)
         .map_err(|error| map_operator_in_context(SparseOperatorError::Admission(error), context))?;
-    if matches!(policy, HostAllocationPolicy::Managed) && requested.is_some_and(|count| count > 1) {
-        return Err(unsupported(
-            "finite multioutput pcg requires an admitted OutputList owner",
-        ));
-    }
     let requires_async = super::request::is_callable(&request.coefficient)
         || request.first_preconditioner.is_some()
         || request.second_preconditioner.is_some();

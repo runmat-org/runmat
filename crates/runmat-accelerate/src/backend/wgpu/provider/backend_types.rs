@@ -67,8 +67,7 @@ pub struct WgpuProvider {
     pub(super) global_reduce_launch: crate::backend::wgpu::pipelines::FrozenGlobalReductionLaunch,
     pub(super) allocations: OwnerShared<super::allocation_state::AllocationState>,
     pub(super) pipelines: WgpuPipelines,
-    pub(super) f32_real_elementwise:
-        Option<crate::backend::wgpu::pipelines::F32RealElementwisePipelines>,
+    pub(super) f32_real_floating: Option<crate::backend::wgpu::pipelines::F32RealFloatingPipelines>,
     pub(super) ordered_real_mean: Option<crate::backend::wgpu::pipelines::OrderedRealMeanPipelines>,
     pub(super) runtime_device_id: u32,
     #[cfg(not(target_arch = "wasm32"))]

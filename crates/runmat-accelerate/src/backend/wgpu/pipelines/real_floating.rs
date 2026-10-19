@@ -1,10 +1,10 @@
-//! Only the alternate physical F32 kernels needed by real elementwise work.
+//! Alternate native F32 kernels for a provider that prefers F64.
 //! The provider-native bundles remain the fast path; all bundles compile on
 //! first selected use rather than at adapter creation.
 
 use super::*;
 
-pub(crate) struct F32RealElementwisePipelines {
+pub(crate) struct F32RealFloatingPipelines {
     pub(crate) binary: PipelineBundle,
     pub(crate) binary_broadcast: PipelineBundle,
     pub(crate) binary_max: PipelineBundle,
@@ -13,12 +13,16 @@ pub(crate) struct F32RealElementwisePipelines {
     pub(crate) scalar_max: PipelineBundle,
     pub(crate) reduce_nd_mean: PipelineBundle,
     pub(crate) reduce_nd_moments: PipelineBundle,
+    pub(crate) tril: PipelineBundle,
+    pub(crate) triu: PipelineBundle,
+    pub(crate) kron: PipelineBundle,
 }
 
-impl F32RealElementwisePipelines {
+impl F32RealFloatingPipelines {
     pub(crate) fn new(
         access: &runmat_accelerate_api::WgpuDeviceAccess,
         linear_launch: FrozenLinearLaunch,
+        linear_tokens: FrozenShaderTokens,
     ) -> Self {
         Self {
             binary: create_pipeline(
@@ -132,6 +136,46 @@ impl F32RealElementwisePipelines {
                 ],
                 REDUCE_ND_MOMENTS_SHADER_F32,
             ),
+            tril: create_pipeline(
+                access,
+                "runmat-f32-real-tril-layout",
+                "runmat-f32-real-tril-shader",
+                "runmat-f32-real-tril-pipeline",
+                vec![
+                    storage_read_entry(0),
+                    storage_read_write_entry(1),
+                    uniform_entry(2),
+                ],
+                TRIL_SHADER_F32,
+            )
+            .with_linear_launch(linear_tokens),
+            triu: create_pipeline(
+                access,
+                "runmat-f32-real-triu-layout",
+                "runmat-f32-real-triu-shader",
+                "runmat-f32-real-triu-pipeline",
+                vec![
+                    storage_read_entry(0),
+                    storage_read_write_entry(1),
+                    uniform_entry(2),
+                ],
+                TRIU_SHADER_F32,
+            )
+            .with_linear_launch(linear_tokens),
+            kron: create_pipeline(
+                access,
+                "runmat-f32-real-kron-layout",
+                "runmat-f32-real-kron-shader",
+                "runmat-f32-real-kron-pipeline",
+                vec![
+                    storage_read_entry(0),
+                    storage_read_entry(1),
+                    storage_read_write_entry(2),
+                    uniform_entry(3),
+                ],
+                KRON_SHADER_F32,
+            )
+            .with_linear_launch(linear_tokens),
         }
     }
 }

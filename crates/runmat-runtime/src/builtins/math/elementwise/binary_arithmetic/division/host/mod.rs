@@ -79,9 +79,18 @@ fn scalar_divide_value(numerator: &Value, denominator: &Value) -> Option<Value> 
     let denominator = scalar_complex_value(denominator)
         .or_else(|| scalar_real_value(denominator).map(|value| (value, 0.0)))?;
     if numerator.1 != 0.0 || denominator.1 != 0.0 {
-        let quotient =
-            Complex64::new(numerator.0, numerator.1) / Complex64::new(denominator.0, denominator.1);
-        return Some(Value::Complex(quotient.re, quotient.im));
+        let (real, imag) = if [numerator.0, numerator.1, denominator.0, denominator.1]
+            .into_iter()
+            .all(f64::is_finite)
+            && (denominator.0 != 0.0 || denominator.1 != 0.0)
+        {
+            runmat_value::divide_complex_f64(numerator, denominator)
+        } else {
+            let quotient = Complex64::new(numerator.0, numerator.1)
+                / Complex64::new(denominator.0, denominator.1);
+            (quotient.re, quotient.im)
+        };
+        return Some(Value::Complex(real, imag));
     }
     Some(Value::Num(numerator.0 / denominator.0))
 }

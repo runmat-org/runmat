@@ -287,6 +287,16 @@ fn complex_and_real_mixed_storage_match_domain_formulas() {
             single,
             true,
         );
+        for scale in if single {
+            [1.0e30, 1.0e-30, f64::from(f32::from_bits(1))]
+        } else {
+            [1.0e200, 1.0e-200, f64::from_bits(1)]
+        } {
+            let numerator = upload(&provider, &[scale, 0.0], &[1, 1], single, true);
+            let divisor = upload(&provider, &[scale, scale], &[1, 1], single, true);
+            let quotient = binary(&provider, &numerator, &divisor, Operation::Div).unwrap();
+            assert_output(&provider, &quotient, &[1, 1], &[0.5, -0.5], single, true);
+        }
     }
 }
 

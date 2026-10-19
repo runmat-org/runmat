@@ -8,15 +8,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericStorage, SparseTensor,
@@ -29,38 +21,6 @@ use crate::builtins::math::elementwise::integer_arithmetic::{
 
 type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
 const BUILTIN_NAME: &str = "kron";
-
-pub const KRON_ND_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "kron-nd-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "kron with an N-D operand is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:KronNdInputExtension"),
-};
-pub const KRON_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [KRON_ND_EXTENSION];
-const KRON_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Native integer storage remains authoritative; paired integer operands must use the same class and complex integer arithmetic is rejected." },
-    BuiltinIntegerInputCapability { name: "B", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A scalar double may scale an integer operand; other mixed numeric arrays are rejected by the settled integer arithmetic rule." },
-];
-pub const KRON_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor { form: "K = kron(A, B)", inputs: &KRON_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput, overflow: BuiltinIntegerOverflowRule::Saturate, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Integer products preserve the integer class and saturate. Resident fallback gathers authoritative storage without consuming source handles and restores eligible output to the owning provider." }];
-
-fn kron_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { .. } => Type::tensor(),
-        Type::Logical { .. } => Type::tensor(),
-        Type::Num | Type::Int | Type::Bool => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::kron")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -75,7 +35,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Executes entirely on-device when the provider implements `kron`; otherwise the runtime gathers inputs, computes on the host, and re-uploads the result when possible.",
+    notes: "Executes on-device when the provider implements `kron`; a certified pre-effect unsupported result may gather and restore, while operational provider failures are terminal.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::kron")]
@@ -87,71 +47,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     reduction: None,
     emits_nan: false,
     notes: "Kronecker products allocate a fresh dense or CSC sparse result and terminate fusion graphs.",
-};
-
-const KRON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Kronecker product of inputs A and B.",
-}];
-
-const KRON_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left numeric/logical/complex input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right numeric/logical/complex input array.",
-    },
-];
-
-const KRON_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "C = kron(A, B)",
-    inputs: &KRON_INPUTS_A_B,
-    outputs: &KRON_OUTPUT,
-}];
-
-const KRON_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.KRON.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:kron:TooManyInputs"),
-    when: "Extra arguments were supplied after A and B.",
-    message: "kron: too many input arguments",
-};
-
-const KRON_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.KRON.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:kron:UnsupportedInput"),
-    when: "Input values are not numeric/logical/complex arrays.",
-    message: "kron: unsupported input type",
-};
-
-const KRON_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.KRON.INTERNAL",
-    identifier: Some("RunMat:kron:Internal"),
-    when: "Internal conversion/allocation/provider path fails.",
-    message: "kron: internal operation failed",
-};
-
-const KRON_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    KRON_ERROR_TOO_MANY_INPUTS,
-    KRON_ERROR_UNSUPPORTED_INPUT,
-    KRON_ERROR_INTERNAL,
-];
-
-pub const KRON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &KRON_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &KRON_ERRORS,
 };
 
 fn kron_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -183,17 +78,15 @@ enum KronInput {
 
 #[runtime_builtin(
     name = "kron",
-    category = "array/shape",
-    summary = "Compute a Kronecker product; sparse inputs yield a CSC sparse result.",
-    keywords = "kron,kronecker product,tensor product,block matrix,gpu",
-    accel = "custom",
-    type_resolver(kron_type),
-    extensions(KRON_EXTENSIONS),
-    integer_capabilities(KRON_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::array::shape::kron::KRON_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::kron"
 )]
 async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &KRON_DESCRIPTOR,
+        &KRON_ERROR_UNSUPPORTED_INPUT,
+        BUILTIN_NAME,
+    )?;
     if !rest.is_empty() {
         return Err(kron_error(&KRON_ERROR_TOO_MANY_INPUTS));
     }
@@ -222,21 +115,27 @@ async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
     }
     let source = preferred_kron_source(&a, &b);
     if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (&a, &b) {
-        if let Some(mut result) = try_kron_gpu_pair(left, right)? {
-            set_kron_output_provenance(&mut result, left, Some(right))?;
+        if let Some(mut result) = try_kron_gpu_pair(left, right).await? {
+            if let Err(error) = set_kron_output_provenance(&mut result, left, Some(right)) {
+                return Err(gpu_helpers::reject_gpu_output(result, error));
+            }
             return gpu_helpers::resident_gpu_value(result);
         }
     }
     match (&a, &b) {
         (Value::GpuTensor(source), host) => {
-            if let Some(mut result) = try_kron_gpu_host(source, host, true)? {
-                set_kron_output_provenance(&mut result, source, None)?;
+            if let Some(mut result) = try_kron_gpu_host(source, host, true).await? {
+                if let Err(error) = set_kron_output_provenance(&mut result, source, None) {
+                    return Err(gpu_helpers::reject_gpu_output(result, error));
+                }
                 return gpu_helpers::resident_gpu_value(result);
             }
         }
         (host, Value::GpuTensor(source)) => {
-            if let Some(mut result) = try_kron_gpu_host(source, host, false)? {
-                set_kron_output_provenance(&mut result, source, None)?;
+            if let Some(mut result) = try_kron_gpu_host(source, host, false).await? {
+                if let Err(error) = set_kron_output_provenance(&mut result, source, None) {
+                    return Err(gpu_helpers::reject_gpu_output(result, error));
+                }
                 return gpu_helpers::resident_gpu_value(result);
             }
         }
@@ -272,7 +171,7 @@ fn set_kron_output_provenance(
     gpu_helpers::propagate_output_provenance(output, std::iter::once(source).chain(other))
 }
 
-fn try_kron_gpu_pair(
+async fn try_kron_gpu_pair(
     left: &GpuTensorHandle,
     right: &GpuTensorHandle,
 ) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
@@ -305,11 +204,18 @@ fn try_kron_gpu_pair(
     if Some(expected_precision) != runmat_accelerate_api::handle_precision(right) {
         return Ok(None);
     }
-    let output = match owner.kron(left, right) {
+    let output = match owner.kron(left, right).await {
         Ok(output) => output,
-        Err(_) => return Ok(None),
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                kron_error_with_message("kron: provider operation failed", &KRON_ERROR_INTERNAL),
+                error,
+            ));
+        }
     };
-    let valid = output.shape() == expected_shape
+    let valid = output.allocation_lease().validate_live().is_ok()
+        && output.shape() == expected_shape
         && output.device_id() == left.device_id()
         && gpu_helpers::exact_provider_for_handle(&output).is_some_and(|output_owner| {
             runmat_accelerate_api::same_provider_instance(output_owner, owner)
@@ -322,12 +228,18 @@ fn try_kron_gpu_pair(
         && runmat_accelerate_api::handle_integer_type(&output).is_none()
         && !runmat_accelerate_api::handle_is_logical(&output);
     if !valid {
-        return Ok(None);
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            kron_error_with_message(
+                "kron: provider returned malformed or aliased output",
+                &KRON_ERROR_INTERNAL,
+            ),
+        ));
     }
     Ok(Some(output))
 }
 
-fn try_kron_gpu_host(
+async fn try_kron_gpu_host(
     source: &GpuTensorHandle,
     host: &Value,
     source_is_left: bool,
@@ -367,11 +279,18 @@ fn try_kron_gpu_host(
     let Some(owner) = gpu_helpers::exact_provider_for_handle(source) else {
         return Ok(None);
     };
-    let uploaded = match gpu_helpers::upload_tensor(owner, &tensor) {
-        Ok(uploaded) => uploaded,
-        Err(_) => return Ok(None),
+    let expected_shape = if source_is_left {
+        aligned_shapes(source.shape(), tensor.shape())?.2
+    } else {
+        aligned_shapes(tensor.shape(), source.shape())?.2
     };
-    let uploaded_valid = uploaded.device_id() == source.device_id()
+    let uploaded =
+        gpu_helpers::upload_tensor_protecting(owner, &tensor, &[source]).map_err(|mut error| {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })?;
+    let uploaded_valid = uploaded.allocation_lease().validate_live().is_ok()
+        && uploaded.device_id() == source.device_id()
         && gpu_helpers::exact_provider_for_handle(&uploaded).is_some_and(|uploaded_owner| {
             runmat_accelerate_api::same_provider_instance(uploaded_owner, owner)
         })
@@ -382,40 +301,66 @@ fn try_kron_gpu_host(
         && !runmat_accelerate_api::handle_is_logical(&uploaded)
         && !uploaded.shares_allocation_with(source);
     if !uploaded_valid {
-        return Ok(None);
+        return Err(gpu_helpers::reject_gpu_output(
+            uploaded,
+            kron_error_with_message(
+                "kron: provider returned malformed staged input",
+                &KRON_ERROR_INTERNAL,
+            ),
+        ));
     }
-    let expected_shape = if source_is_left {
-        aligned_shapes(source.shape(), uploaded.shape())
-    } else {
-        aligned_shapes(uploaded.shape(), source.shape())
-    };
-    let expected_shape = match expected_shape {
-        Ok((_, _, shape)) => shape,
-        Err(error) => {
-            return Err(error);
-        }
-    };
     let output = if source_is_left {
-        owner.kron(source, &uploaded)
+        owner.kron(source, &uploaded).await
     } else {
-        owner.kron(&uploaded, source)
+        owner.kron(&uploaded, source).await
     };
-    let Some(output) = output.ok() else {
-        return Ok(None);
+    let result = match output {
+        Ok(output) => Ok(Some(output)),
+        Err(error) if error.is_unsupported() => Ok(None),
+        Err(error) => Err(crate::runtime_error::with_provider_execution_source(
+            kron_error_with_message("kron: provider operation failed", &KRON_ERROR_INTERNAL),
+            error,
+        )),
     };
-    let valid = output.shape() == expected_shape
-        && output.device_id() == source.device_id()
-        && gpu_helpers::exact_provider_for_handle(&output).is_some_and(|output_owner| {
-            runmat_accelerate_api::same_provider_instance(output_owner, owner)
-        })
-        && !output.shares_allocation_with(source)
-        && !output.shares_allocation_with(&uploaded)
-        && runmat_accelerate_api::handle_storage(&output)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(&output) == expected_precision
-        && runmat_accelerate_api::handle_integer_type(&output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&output);
-    Ok(valid.then_some(output))
+    let result = result.and_then(|candidate| {
+        let Some(output) = candidate else {
+            return Ok(None);
+        };
+        let valid = output.allocation_lease().validate_live().is_ok()
+            && output.shape() == expected_shape
+            && output.device_id() == source.device_id()
+            && gpu_helpers::exact_provider_for_handle(&output).is_some_and(|output_owner| {
+                runmat_accelerate_api::same_provider_instance(output_owner, owner)
+            })
+            && !output.shares_allocation_with(source)
+            && !output.shares_allocation_with(&uploaded)
+            && runmat_accelerate_api::handle_storage(&output)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_precision(&output) == expected_precision
+            && runmat_accelerate_api::handle_integer_type(&output).is_none()
+            && !runmat_accelerate_api::handle_is_logical(&output);
+        if !valid {
+            return Err(gpu_helpers::reject_gpu_output(
+                output,
+                kron_error_with_message(
+                    "kron: provider returned malformed or aliased output",
+                    &KRON_ERROR_INTERNAL,
+                ),
+            ));
+        }
+        Ok(Some(output))
+    });
+    crate::runtime_error::complete_with_cleanup(result, release_kron_staged(uploaded))
+}
+
+fn release_kron_staged(uploaded: GpuTensorHandle) -> crate::BuiltinResult<()> {
+    uploaded.release().map(|_| ()).map_err(|error| {
+        build_runtime_error(format!("kron: staged operand retirement failed: {error}"))
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier("RunMat:kron:Internal")
+            .with_source(error)
+            .build()
+    })
 }
 
 fn value_shape(value: &Value) -> Option<&[usize]> {
@@ -442,21 +387,21 @@ fn is_integer_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
-fn integer_value_class(value: &Value) -> Option<&'static str> {
+fn integer_value_class(value: &Value) -> Option<NumericDType> {
     match value {
-        Value::Int(value) => Some(value.class_name()),
-        Value::Tensor(tensor) => tensor.integer_storage().map(IntegerStorage::class_name),
-        Value::SparseTensor(tensor) => tensor.integer_storage().map(IntegerStorage::class_name),
+        Value::Int(value) => Some(value.numeric_dtype()),
+        Value::Tensor(tensor) => tensor.integer_storage().map(IntegerStorage::numeric_dtype),
+        Value::SparseTensor(tensor) => tensor.integer_storage().map(IntegerStorage::numeric_dtype),
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_integer_type(handle).map(|ty| match ty {
-                runmat_accelerate_api::IntegerElementType::I8 => "int8",
-                runmat_accelerate_api::IntegerElementType::I16 => "int16",
-                runmat_accelerate_api::IntegerElementType::I32 => "int32",
-                runmat_accelerate_api::IntegerElementType::I64 => "int64",
-                runmat_accelerate_api::IntegerElementType::U8 => "uint8",
-                runmat_accelerate_api::IntegerElementType::U16 => "uint16",
-                runmat_accelerate_api::IntegerElementType::U32 => "uint32",
-                runmat_accelerate_api::IntegerElementType::U64 => "uint64",
+                runmat_accelerate_api::IntegerElementType::I8 => NumericDType::I8,
+                runmat_accelerate_api::IntegerElementType::I16 => NumericDType::I16,
+                runmat_accelerate_api::IntegerElementType::I32 => NumericDType::I32,
+                runmat_accelerate_api::IntegerElementType::I64 => NumericDType::I64,
+                runmat_accelerate_api::IntegerElementType::U8 => NumericDType::U8,
+                runmat_accelerate_api::IntegerElementType::U16 => NumericDType::U16,
+                runmat_accelerate_api::IntegerElementType::U32 => NumericDType::U32,
+                runmat_accelerate_api::IntegerElementType::U64 => NumericDType::U64,
             })
         }
         _ => None,
@@ -1043,7 +988,6 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
     use runmat_value::{IntegerStorage, LogicalArray, Tensor};
 
     #[test]
@@ -1170,15 +1114,6 @@ pub(crate) mod tests {
         };
         assert_eq!(csc.numeric_dtype(), Some(NumericDType::F64));
         assert_eq!(csc.nnz(), 1);
-    }
-
-    #[test]
-    fn kron_type_logical_uses_numeric_result() {
-        let out = kron_type(
-            &[Type::Logical { shape: None }, Type::Logical { shape: None }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::tensor());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

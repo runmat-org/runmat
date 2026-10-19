@@ -1,6 +1,8 @@
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::backend::wgpu::types::UnaryOpCode;
 
+mod complex_division;
+
 fn wgsl_function(source: &str, name: &str) -> String {
     let marker = format!("fn {name}(");
     let start = source
@@ -1087,6 +1089,9 @@ pub(crate) fn complex_binary_shader(
     lhs_complex: bool,
     rhs_complex: bool,
 ) -> String {
+    if op == ComplexBinaryOp::Div {
+        return complex_division::shader(precision, lhs_complex, rhs_complex, false);
+    }
     let ty = match precision {
         NumericPrecision::F64 => "f64",
         NumericPrecision::F32 => "f32",
@@ -1121,9 +1126,7 @@ pub(crate) fn complex_binary_shader(
         ComplexBinaryOp::Mul => {
             "let out_re = (ar * br) - (ai * bi);\n    let out_im = (ar * bi) + (ai * br);"
         }
-        ComplexBinaryOp::Div => {
-            "let scale = max(abs(br), abs(bi));\n    let sr = br / scale;\n    let si = bi / scale;\n    let denom = scale * ((sr * sr) + (si * si));\n    let out_re = ((ar * sr) + (ai * si)) / denom;\n    let out_im = ((ai * sr) - (ar * si)) / denom;"
-        }
+        ComplexBinaryOp::Div => unreachable!("division has its raw-word shader"),
     };
     format!(
         r#"
@@ -1177,6 +1180,9 @@ pub(crate) fn complex_binary_broadcast_shader(
     lhs_complex: bool,
     rhs_complex: bool,
 ) -> String {
+    if op == ComplexBinaryOp::Div {
+        return complex_division::shader(precision, lhs_complex, rhs_complex, true);
+    }
     let ty = match precision {
         NumericPrecision::F64 => "f64",
         NumericPrecision::F32 => "f32",
@@ -1211,9 +1217,7 @@ pub(crate) fn complex_binary_broadcast_shader(
         ComplexBinaryOp::Mul => {
             "let out_re = (ar * br) - (ai * bi);\n    let out_im = (ar * bi) + (ai * br);"
         }
-        ComplexBinaryOp::Div => {
-            "let scale = max(abs(br), abs(bi));\n    let sr = br / scale;\n    let si = bi / scale;\n    let denom = scale * ((sr * sr) + (si * si));\n    let out_re = ((ar * sr) + (ai * si)) / denom;\n    let out_im = ((ai * sr) - (ar * si)) / denom;"
-        }
+        ComplexBinaryOp::Div => unreachable!("division has its raw-word shader"),
     };
     format!(
         r#"

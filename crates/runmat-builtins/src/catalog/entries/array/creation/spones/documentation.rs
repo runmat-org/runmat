@@ -22,7 +22,7 @@ BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[
 BuiltinDocumentationLink { label: "nnz", target: BuiltinDocumentationLinkTarget::Documentation("./nnz") },
 BuiltinDocumentationLink { label: "full", target: BuiltinDocumentationLinkTarget::Documentation("./full") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "spones sparse and dense input test", location: "builtins::array::creation::sparse::tests::spones_preserves_sparse_pattern_and_accepts_dense_gpu_input" }], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

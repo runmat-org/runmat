@@ -373,6 +373,7 @@ async fn diagnose_single_flag_inputs_and_predicates(provider: &'static WgpuProvi
         let work = FusedElementwiseWork {
             output_shape: &[2, 3, 1],
             len: 6,
+            invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
             representation: flag_representation(NumericPrecision::F32, precision),
             uniform_abi: Some(FusionUniformAbi::Broadcast),
         };
@@ -391,6 +392,7 @@ async fn diagnose_single_flag_inputs_and_predicates(provider: &'static WgpuProvi
                 FusedElementwiseWork {
                     output_shape: &[2, 3, 1],
                     len: 6,
+                    invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                     representation: flag_representation(NumericPrecision::F32, precision),
                     uniform_abi: Some(FusionUniformAbi::Broadcast),
                 },

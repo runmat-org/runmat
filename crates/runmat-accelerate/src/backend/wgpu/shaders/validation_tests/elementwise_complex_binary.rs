@@ -18,11 +18,12 @@ const OPS: [ComplexBinaryOp; 4] = [
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn selected_complex_binary_sources_validate_all_operand_classes_and_broadcast_routes() {
     for precision in [NumericPrecision::F32, NumericPrecision::F64] {
-        let caps = match precision {
-            NumericPrecision::F32 => RequiredCaps::None,
-            NumericPrecision::F64 => RequiredCaps::Float64,
-        };
         for op in OPS {
+            let caps = match (precision, op) {
+                (NumericPrecision::F32, _) => RequiredCaps::None,
+                (NumericPrecision::F64, ComplexBinaryOp::Div) => RequiredCaps::Float64Int64,
+                (NumericPrecision::F64, _) => RequiredCaps::Float64,
+            };
             for lhs_complex in [false, true] {
                 for rhs_complex in [false, true] {
                     for (broadcast, source) in [

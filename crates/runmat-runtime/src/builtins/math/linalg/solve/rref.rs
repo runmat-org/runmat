@@ -280,7 +280,6 @@ pub(super) fn rref_real_impl(
         pivot_row += 1;
     }
 
-    zero_small_real(&mut data, tolerance);
     Ok((data, pivots))
 }
 
@@ -315,7 +314,9 @@ pub(super) fn rref_complex_impl(
 
         let pivot = data[index(pivot_row, col, rows)];
         for c in 0..cols {
-            data[index(pivot_row, c, rows)] /= pivot;
+            let slot = index(pivot_row, c, rows);
+            data[slot] =
+                crate::builtins::common::complex_arithmetic::divide_complex64(data[slot], pivot);
         }
 
         for r in 0..rows {
@@ -344,7 +345,6 @@ pub(super) fn rref_complex_impl(
         pivot_row += 1;
     }
 
-    zero_small_complex(&mut data, tolerance);
     Ok((data, pivots))
 }
 
@@ -466,28 +466,6 @@ fn swap_rows_real(data: &mut [f64], rows: usize, cols: usize, a: usize, b: usize
 fn swap_rows_complex(data: &mut [Complex64], rows: usize, cols: usize, a: usize, b: usize) {
     for c in 0..cols {
         data.swap(index(a, c, rows), index(b, c, rows));
-    }
-}
-
-fn zero_small_real(data: &mut [f64], tolerance: f64) {
-    if !tolerance.is_finite() {
-        return;
-    }
-    for value in data {
-        if value.abs() <= tolerance {
-            *value = 0.0;
-        }
-    }
-}
-
-fn zero_small_complex(data: &mut [Complex64], tolerance: f64) {
-    if !tolerance.is_finite() {
-        return;
-    }
-    for value in data {
-        if value.norm() <= tolerance {
-            *value = Complex64::new(0.0, 0.0);
-        }
     }
 }
 
@@ -707,6 +685,38 @@ pub(crate) mod tests {
             Value::Num(pivot) => assert_eq!(*pivot, 1.0),
             other => panic!("expected scalar pivot, got {other:?}"),
         }
+
+        let tiny = f64::from_bits(1);
+        let (real, real_pivots) =
+            rref_real_impl(vec![1.0e300, 0.0, 0.0, tiny], 2, 2, 0.0).expect("exact pivots");
+        assert_eq!(real_pivots, vec![1, 2]);
+        assert_eq!(real, vec![1.0, 0.0, 0.0, 1.0]);
+        let (complex, complex_pivots) = rref_complex_impl(
+            vec![
+                Complex64::new(1.0e300, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(tiny, 0.0),
+            ],
+            2,
+            2,
+            0.0,
+        )
+        .expect("exact complex pivots");
+        assert_eq!(complex_pivots, vec![1, 2]);
+        assert_eq!(
+            complex,
+            vec![
+                Complex64::new(1.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(1.0, 0.0)
+            ]
+        );
+        let (normalized, pivots) =
+            rref_real_impl(vec![1.0e200, 1.0e200], 1, 2, 1.0e185).expect("normalized row");
+        assert_eq!(pivots, vec![1]);
+        assert_eq!(normalized, vec![1.0, 1.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -750,6 +760,19 @@ pub(crate) mod tests {
                 );
             }
             other => panic!("expected complex tensor R, got {other:?}"),
+        }
+
+        for scale in [1.0e200, 1.0e-200] {
+            let row = ComplexTensor::new(vec![(scale, scale), (scale, 0.0)], vec![1, 2]).unwrap();
+            let reduced = rref_builtin(Value::ComplexTensor(row), Vec::new()).expect("scaled rref");
+            match reduced {
+                Value::ComplexTensor(out) => assert_complex_close(
+                    &out.materialize_f64(),
+                    &[(1.0, 0.0), (0.5, -0.5)],
+                    1.0e-12,
+                ),
+                other => panic!("expected scaled complex R, got {other:?}"),
+            }
         }
     }
 

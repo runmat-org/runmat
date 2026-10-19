@@ -194,6 +194,11 @@ fn divide_real_by_complex_storage(
 fn divide_complex_f64(lhs: impl Into<(f64, f64)>, rhs: impl Into<(f64, f64)>) -> (f64, f64) {
     let lhs = lhs.into();
     let rhs = rhs.into();
+    if [lhs.0, lhs.1, rhs.0, rhs.1].into_iter().all(f64::is_finite)
+        && (rhs.0 != 0.0 || rhs.1 != 0.0)
+    {
+        return runmat_value::divide_complex_f64(lhs, rhs);
+    }
     let quotient = Complex64::new(lhs.0, lhs.1) / Complex64::new(rhs.0, rhs.1);
     (quotient.re, quotient.im)
 }
@@ -201,6 +206,11 @@ fn divide_complex_f64(lhs: impl Into<(f64, f64)>, rhs: impl Into<(f64, f64)>) ->
 fn divide_complex_f32(lhs: impl Into<(f32, f32)>, rhs: impl Into<(f32, f32)>) -> (f32, f32) {
     let lhs = lhs.into();
     let rhs = rhs.into();
+    if [lhs.0, lhs.1, rhs.0, rhs.1].into_iter().all(f32::is_finite)
+        && (rhs.0 != 0.0 || rhs.1 != 0.0)
+    {
+        return runmat_value::divide_complex_f32(lhs, rhs);
+    }
     let quotient = Complex32::new(lhs.0, lhs.1) / Complex32::new(rhs.0, rhs.1);
     (quotient.re, quotient.im)
 }

@@ -13,15 +13,7 @@ use crate::builtins::common::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericDType,
@@ -29,235 +21,6 @@ use runmat_value::{
 };
 
 const BUILTIN_NAME: &str = "diag";
-
-const DIAG_SIZE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-explicit-size",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with an explicit output size is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagExplicitSizeExtension"),
-};
-const DIAG_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-vector-option",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with the 'vector' option is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagVectorOptionExtension"),
-};
-const DIAG_CLASS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-output-class",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with an output-class override is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagOutputClassExtension"),
-};
-const DIAG_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-like",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with a 'like' prototype is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagLikeExtension"),
-};
-const DIAG_TRAILING_SINGLETON_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "diag-trailing-singleton-dimensions",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "diag with more than two trailing singleton dimensions is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DiagTrailingSingletonDimensionsExtension"),
-};
-pub const DIAG_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    DIAG_SIZE_EXTENSION,
-    DIAG_VECTOR_EXTENSION,
-    DIAG_CLASS_EXTENSION,
-    DIAG_LIKE_EXTENSION,
-    DIAG_TRAILING_SINGLETON_EXTENSION,
-];
-
-const DIAG_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "v or A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight real integer classes are documented input data and preserve exact class, shape semantics, and values through diagonal construction or extraction.",
-    }];
-const DIAG_INTEGER_OFFSET_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "v or A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer data remains authoritative and is never converted through binary64 during structural placement or extraction.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "k",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The real scalar diagonal number is read exactly from every integer class; integer-valued host double remains accepted and out-of-range values reject before shape arithmetic.",
-    },
-];
-pub const DIAG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "D = diag(integer_v) or x = diag(integer_A)",
-        inputs: &DIAG_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Vector input constructs a same-class diagonal matrix and matrix input extracts a same-class column vector; resident integer data exact-gathers and re-uploads to its owning provider until native integer structural hooks exist.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "D = diag(integer_v,k) or x = diag(integer_A,k)",
-        inputs: &DIAG_INTEGER_OFFSET_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "k controls only diagonal placement or extraction. Host data and controls remain exact; resident integer data preserves class, owner, and residency through exact fallback.",
-    },
-];
-
-fn diag_type(args: &[Type], context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-
-    let vector_len = vector_len_from_type(input);
-    let vector_mode = literal_keyword_at(context, 1).as_deref() == Some("vector")
-        || literal_keyword_at(context, 2).as_deref() == Some("vector");
-    let size_override = literal_size_override(context);
-    let offset = literal_offset(context).unwrap_or(0);
-
-    let mut output_is_logical = matches!(input, Type::Logical { .. } | Type::Bool);
-    for idx in 1..context.literal_args.len() {
-        match literal_keyword_at(context, idx).as_deref() {
-            Some("double") => output_is_logical = false,
-            Some("logical") => output_is_logical = true,
-            _ => {}
-        }
-    }
-
-    let mk_type = |rows: Option<usize>, cols: Option<usize>| {
-        if output_is_logical {
-            Type::Logical {
-                shape: Some(vec![rows, cols]),
-            }
-        } else {
-            Type::Tensor {
-                shape: Some(vec![rows, cols]),
-            }
-        }
-    };
-
-    if vector_mode {
-        if let Some(len) = vector_len {
-            return mk_type(Some(len), Some(1));
-        }
-        return if output_is_logical {
-            Type::logical()
-        } else {
-            Type::tensor()
-        };
-    }
-
-    if let Some((rows, cols)) = size_override {
-        if vector_len.is_some() {
-            return mk_type(Some(rows), Some(cols));
-        }
-    }
-
-    if let Some(len) = vector_len {
-        let shift = offset.unsigned_abs();
-        if let Some(size) = len.checked_add(shift) {
-            return mk_type(Some(size), Some(size));
-        }
-        return if output_is_logical {
-            Type::logical()
-        } else {
-            Type::tensor()
-        };
-    }
-
-    if output_is_logical {
-        Type::logical()
-    } else {
-        Type::tensor()
-    }
-}
-
-fn vector_len_from_type(input: &Type) -> Option<usize> {
-    match input {
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            if shape.len() == 1 {
-                return shape[0];
-            }
-            let rows = shape.first().copied().flatten();
-            let cols = shape.get(1).copied().flatten();
-            match (rows, cols) {
-                (Some(1), Some(c)) => Some(c),
-                (Some(r), Some(1)) => Some(r),
-                _ => None,
-            }
-        }
-        Type::Num | Type::Int | Type::Bool => Some(1),
-        _ => None,
-    }
-}
-
-fn literal_keyword_at(context: &ResolveContext, idx: usize) -> Option<String> {
-    context.literal_string_at(idx)
-}
-
-fn literal_size_override(context: &ResolveContext) -> Option<(usize, usize)> {
-    parse_literal_size(context.literal_vector_at(1).as_deref())
-        .or_else(|| parse_literal_size(context.literal_vector_at(2).as_deref()))
-}
-
-fn parse_literal_size(values: Option<&[LiteralValue]>) -> Option<(usize, usize)> {
-    let values = values?;
-    let dims: Vec<usize> = values
-        .iter()
-        .map(|value| match value {
-            LiteralValue::Number(num) => {
-                if !num.is_finite() {
-                    return None;
-                }
-                let rounded = num.round();
-                if (rounded - num).abs() > 1e-9 || rounded < 0.0 {
-                    return None;
-                }
-                Some(rounded as usize)
-            }
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    match dims.as_slice() {
-        [m] => Some((*m, *m)),
-        [m, n] => Some((*m, *n)),
-        _ => None,
-    }
-}
-
-fn literal_offset(context: &ResolveContext) -> Option<isize> {
-    literal_offset_at(context, 1).or_else(|| literal_offset_at(context, 2))
-}
-
-fn literal_offset_at(context: &ResolveContext, idx: usize) -> Option<isize> {
-    let literal = context.literal_args.get(idx)?;
-    match literal {
-        LiteralValue::Number(value) => {
-            if !value.is_finite() {
-                return None;
-            }
-            let rounded = value.round();
-            if (rounded - value).abs() > f64::EPSILON {
-                return None;
-            }
-            Some(rounded as isize)
-        }
-        LiteralValue::Bool(flag) => Some(if *flag { 1 } else { 0 }),
-        _ => None,
-    }
-}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::diag")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -290,210 +53,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "diag uses provider hooks for supported real/logical gpuArray shape operations and otherwise falls back to the runtime host path.",
 };
 
-const DIAG_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Diagonal matrix or diagonal vector extracted from the input.",
-}];
-
-const DIAG_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar, vector, or matrix.",
-}];
-
-const DIAG_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal offset index.",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_SZ: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "sz",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output matrix size override as [m n] or scalar n.",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_K_SZ: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Diagonal offset index.",
-    },
-    BuiltinParamDescriptor {
-        name: "sz",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output matrix size override as [m n] or scalar n.",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_VECTOR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"vector\""),
-        description: "Vector extraction option ('vector').",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_CLASS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "class",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Output class override ('logical', 'double', or integer class).",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Literal option name ('like').",
-    },
-    BuiltinParamDescriptor {
-        name: "prototype",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value controlling output class/residency.",
-    },
-];
-
-#[allow(dead_code)]
-const DIAG_INPUTS_A_ARGS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input scalar, vector, or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional offset/size/options parsed by diag argument grammar.",
-    },
-];
-
-const DIAG_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "D = diag(v)",
-        inputs: &DIAG_INPUTS_A,
-        outputs: &DIAG_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "D = diag(v, k)",
-        inputs: &DIAG_INPUTS_A_K,
-        outputs: &DIAG_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = diag(A)",
-        inputs: &DIAG_INPUTS_A,
-        outputs: &DIAG_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "x = diag(A, k)",
-        inputs: &DIAG_INPUTS_A_K,
-        outputs: &DIAG_OUTPUT,
-    },
-];
-
-const DIAG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DIAG.INVALID_INPUT",
-    identifier: Some("RunMat:diag:InvalidInput"),
-    when: "Input type, option grammar, size override, or output conversion is invalid.",
-    message: "diag: invalid input argument",
-};
-
-const DIAG_ERROR_INVALID_OFFSET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DIAG.INVALID_OFFSET",
-    identifier: Some("RunMat:diag:InvalidOffset"),
-    when: "Diagonal offset is not a finite integer scalar.",
-    message: "diag: invalid diagonal offset",
-};
-
-const DIAG_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [DIAG_ERROR_INVALID_INPUT, DIAG_ERROR_INVALID_OFFSET];
-
 const MESSAGE_ID_INVALID_INPUT: &BuiltinErrorDescriptor = &DIAG_ERROR_INVALID_INPUT;
 const MESSAGE_ID_INVALID_OFFSET: &BuiltinErrorDescriptor = &DIAG_ERROR_INVALID_OFFSET;
-
-pub const DIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DIAG_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DIAG_ERRORS,
-};
 
 fn diag_error(error: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
@@ -717,16 +278,15 @@ async fn try_parse_size_override(value: &Value) -> BuiltinResult<Option<(usize, 
 
 #[runtime_builtin(
     name = "diag",
-    category = "array/shape",
-    summary = "Create diagonal matrices or extract diagonals.",
-    keywords = "diag,diagonal,matrix",
-    type_resolver(diag_type),
-    descriptor(crate::builtins::array::shape::diag::DIAG_DESCRIPTOR),
-    extensions(crate::builtins::array::shape::diag::DIAG_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::shape::diag::DIAG_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::diag"
 )]
 async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &DIAG_DESCRIPTOR,
+        &DIAG_ERROR_INVALID_INPUT,
+        BUILTIN_NAME,
+    )?;
     ensure_diag_compatibility(&value, &rest)?;
     let parsed = ParsedDiagArgs::parse(rest).await?;
     if let Value::GpuTensor(handle) = value {
@@ -1964,33 +1524,6 @@ mod tests {
     }
 
     #[test]
-    fn diag_type_vector_to_square() {
-        let out = diag_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(4), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(4), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn diag_type_matrix_falls_back_tensor() {
-        let out = diag_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::tensor());
-    }
-
-    #[test]
     fn diag_vector_mode_returns_column_vector() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap());
@@ -3003,7 +2536,7 @@ mod tests {
 
     #[test]
     fn diag_descriptor_declares_only_public_forms_and_integer_contract() {
-        assert_eq!(DIAG_DESCRIPTOR.signatures.len(), 4);
+        assert_eq!(DIAG_DESCRIPTOR.signatures.len(), 9);
         assert_eq!(DIAG_EXTENSIONS.len(), 5);
         assert_eq!(DIAG_INTEGER_CAPABILITIES.len(), 2);
     }

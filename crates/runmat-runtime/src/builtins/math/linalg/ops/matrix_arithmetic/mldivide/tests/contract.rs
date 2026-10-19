@@ -40,6 +40,55 @@ fn divides_scalar_into_matrix() {
         Value::Tensor(out) => assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0]),
         other => panic!("expected tensor result, got {other:?}"),
     }
+
+    // Each quotient is exactly 1/(1+i). A reciprocal-times-payload path
+    // overflows or underflows before the representable result is formed.
+    for magnitude in [1.0e300, 1.0e-300, f64::from_bits(1)] {
+        let scalar = ComplexTensor::new(vec![(magnitude, magnitude)], vec![1, 1]).unwrap();
+        let values = ComplexTensor::new(vec![(magnitude, 0.0); 3], vec![1, 3]).unwrap();
+        let Value::ComplexTensor(out) =
+            mldivide_builtin(Value::ComplexTensor(scalar), Value::ComplexTensor(values))
+                .expect("complex scalar left division")
+        else {
+            panic!("expected complex tensor")
+        };
+        assert_eq!(out.shape(), [1, 3]);
+        assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F64);
+        assert_eq!(out.materialize_f64(), vec![(0.5, -0.5); 3]);
+    }
+
+    for magnitude in [1.0e30_f32, 1.0e-30_f32, f32::from_bits(1)] {
+        let scalar = ComplexTensor::from_f32(vec![(magnitude, magnitude)], vec![1, 1]).unwrap();
+        let values = ComplexTensor::from_f32(vec![(magnitude, 0.0); 3], vec![1, 3]).unwrap();
+        let Value::ComplexTensor(out) =
+            mldivide_builtin(Value::ComplexTensor(scalar), Value::ComplexTensor(values))
+                .expect("single complex scalar left division")
+        else {
+            panic!("expected complex single tensor")
+        };
+        assert_eq!(out.shape(), [1, 3]);
+        assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(
+            out.as_f32_slice()
+                .unwrap()
+                .iter()
+                .map(|x| (x.0, x.1))
+                .collect::<Vec<_>>(),
+            vec![(0.5, -0.5); 3]
+        );
+    }
+
+    let scalar = ComplexTensor::from_f32(vec![(1.0e-30, 1.0e-30)], vec![1, 1]).unwrap();
+    let values = ComplexTensor::new(vec![(1.0e-30_f32 as f64, 0.0); 2], vec![1, 2]).unwrap();
+    let Value::ComplexTensor(out) =
+        mldivide_builtin(Value::ComplexTensor(scalar), Value::ComplexTensor(values))
+            .expect("mixed-class complex scalar left division")
+    else {
+        panic!("expected mixed-class complex tensor")
+    };
+    assert_eq!(out.shape(), [1, 2]);
+    assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(out.materialize_f64(), vec![(0.5, -0.5); 2]);
 }
 
 #[test]

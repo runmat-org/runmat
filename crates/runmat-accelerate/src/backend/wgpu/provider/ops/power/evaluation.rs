@@ -1,6 +1,7 @@
 //! Physical projection and consumption of the existing paired POWER shader.
 use super::super::elementwise::{
-    FrozenFusionRecipe, FusedElementwiseRepresentation, FusedElementwiseWork, FusionUniformAbi,
+    ElementwiseInvocationGeometry, FrozenFusionRecipe, FusedElementwiseRepresentation,
+    FusedElementwiseWork, FusionUniformAbi,
 };
 use super::*;
 use runmat_accelerate_api::{
@@ -69,6 +70,7 @@ impl WgpuProvider {
             &FusedElementwiseWork {
                 output_shape: &shape,
                 len: words,
+                invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                 representation,
                 uniform_abi: Some(FusionUniformAbi::Broadcast),
             },
@@ -125,6 +127,7 @@ impl WgpuProvider {
                 FusedElementwiseWork {
                     output_shape: &prepared.shape,
                     len: prepared.words,
+                    invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                     representation: prepared.representation,
                     uniform_abi: Some(FusionUniformAbi::Broadcast),
                 },

@@ -1612,7 +1612,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         offset: isize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.tril_exec(matrix, offset).await })
     }
 
@@ -1620,7 +1620,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         offset: isize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.triu_exec(matrix, offset).await })
     }
 
@@ -3001,8 +3001,12 @@ impl AccelProvider for WgpuProvider {
             })
     }
 
-    fn kron(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.kron_exec(a, b)
+    fn kron<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.kron_exec(a, b).await })
     }
     fn cross(
         &self,

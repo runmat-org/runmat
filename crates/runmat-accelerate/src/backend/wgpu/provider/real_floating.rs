@@ -78,7 +78,7 @@ impl WgpuProvider {
                     &self.pipelines.binary_max
                 });
             }
-            let alternate = self.f32_real_elementwise.as_ref().ok_or_else(|| {
+            let alternate = self.f32_real_floating.as_ref().ok_or_else(|| {
                 unsupported_provider_operation(
                     "F32 real binary Max kernel is unavailable on this provider",
                 )
@@ -107,7 +107,7 @@ impl WgpuProvider {
                 &self.pipelines.binary
             });
         }
-        let alternate = self.f32_real_elementwise.as_ref().ok_or_else(|| {
+        let alternate = self.f32_real_floating.as_ref().ok_or_else(|| {
             unsupported_provider_operation("F32 real binary kernel is unavailable on this provider")
         })?;
         Ok(if broadcast {
@@ -124,7 +124,7 @@ impl WgpuProvider {
         if precision == self.precision {
             return Ok(&self.pipelines.scalar);
         }
-        self.f32_real_elementwise
+        self.f32_real_floating
             .as_ref()
             .map(|alternate| &alternate.scalar)
             .ok_or_else(|| {
@@ -149,7 +149,7 @@ impl WgpuProvider {
                     &self.pipelines.scalar_max
                 } else {
                     &self
-                        .f32_real_elementwise
+                        .f32_real_floating
                         .as_ref()
                         .ok_or_else(|| {
                             unsupported_provider_operation(
@@ -183,7 +183,7 @@ impl WgpuProvider {
                 &self.pipelines.reduce_nd_mean
             });
         }
-        let alternate = self.f32_real_elementwise.as_ref().ok_or_else(|| {
+        let alternate = self.f32_real_floating.as_ref().ok_or_else(|| {
             unsupported_provider_operation("F32 real N-D reduction kernel is unavailable")
         })?;
         Ok(if moments {

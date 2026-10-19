@@ -458,10 +458,14 @@ impl WgpuProvider {
             global_reduce_launch,
             workgroup_config.matmul_tile,
         );
-        let f32_real_elementwise = (precision == NumericPrecision::F64).then(|| {
-            crate::backend::wgpu::pipelines::F32RealElementwisePipelines::new(
+        let f32_real_floating = (precision == NumericPrecision::F64).then(|| {
+            crate::backend::wgpu::pipelines::F32RealFloatingPipelines::new(
                 &access,
                 linear_launch,
+                crate::backend::wgpu::pipelines::FrozenShaderTokens::new(
+                    linear_launch,
+                    workgroup_config.matmul_tile,
+                ),
             )
         });
         let ordered_real_mean = (precision == NumericPrecision::F64)
@@ -512,7 +516,7 @@ impl WgpuProvider {
             global_reduce_launch,
             allocations,
             pipelines,
-            f32_real_elementwise,
+            f32_real_floating,
             ordered_real_mean,
             runtime_device_id,
             #[cfg(not(target_arch = "wasm32"))]

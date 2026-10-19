@@ -1,8 +1,34 @@
 use super::kernel::{self, PcgSolveInput, PcgWork};
 use crate::builtins::math::linalg::ops::sparse_operator::SparseLinearOperator;
+use crate::context::host_effect::ManagedHostEffectLedger;
+use crate::context::{
+    ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+    RuntimeServicePorts,
+};
 use runmat_value::{ComplexElement, SparseTensor, Tensor, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+struct ManagedParallel(ManagedHostEffectLedger);
+
+impl RuntimeParallelService for ManagedParallel {
+    fn supports(&self, _: ParallelCapability) -> bool {
+        false
+    }
+
+    fn placement_resources(&self) -> RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..RuntimeParallelResources::default()
+        }
+    }
+
+    fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -168,6 +194,41 @@ fn pcg_csc_real_and_hermitian_complex_converge_without_dense_coefficients() {
     let values = solution.as_f64_slice().unwrap();
     assert!((values[0] - 1.0 / 11.0).abs() < 1e-12);
     assert!((values[1] - 7.0 / 11.0).abs() < 1e-12);
+
+    let plan = super::execution::quoted_f64_plan_for_test(2, 2, Some(5)).unwrap();
+    let ledger =
+        ManagedHostEffectLedger::new(plan.scratch_peak_bytes() + plan.retained_output_bytes());
+    let context = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        );
+    let dense = Value::Tensor(Tensor::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap());
+    let rhs = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+    let request = super::request::parse(dense, rhs, Vec::new()).unwrap();
+    let Value::OutputList(outputs) =
+        futures::executor::block_on(super::execution::execute(request, Some(&context), Some(5)))
+            .unwrap()
+    else {
+        panic!("five managed outputs retain an exact list owner");
+    };
+    assert_eq!(outputs.len(), 5);
+    assert!(outputs.has_retained_claim());
+    let Value::Tensor(solution) = &outputs[0] else {
+        panic!("first output is the native solution");
+    };
+    assert!((solution.as_f64_slice().unwrap()[0] - 1.0 / 11.0).abs() < 1e-12);
+    assert_eq!(outputs[1], Value::Num(0.0));
+    let Value::Tensor(history) = &outputs[4] else {
+        panic!("fifth output is residual history");
+    };
+    assert_eq!(history.as_f64_slice().unwrap().len(), 3);
+    let alias = outputs.clone();
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(outputs);
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(alias);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 
     // alpha exceeds f32::MAX here, but alpha * p and the answer are finite.
     // Casting alpha before multiplication would manufacture infinity.

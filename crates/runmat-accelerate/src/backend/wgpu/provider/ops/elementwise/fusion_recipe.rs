@@ -82,6 +82,13 @@ impl FrozenFusionRecipe {
         let shape = work.output_shape;
         let len = work.len;
         let representation = &work.representation;
+        ensure!(
+            matches!(
+                work.invocation_geometry,
+                ElementwiseInvocationGeometry::OutputLanes
+            ),
+            "prepared fusion recipes require output-lane invocation geometry"
+        );
         let uniform_abi = work
             .uniform_abi
             .ok_or_else(|| anyhow!("unprepared compatibility shader has no physical recipe"))?;

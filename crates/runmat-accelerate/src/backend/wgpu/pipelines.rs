@@ -570,7 +570,7 @@ pub struct WgpuPipelines {
 
 #[path = "pipelines/real_floating.rs"]
 mod real_floating;
-pub(crate) use real_floating::F32RealElementwisePipelines;
+pub(crate) use real_floating::F32RealFloatingPipelines;
 
 #[path = "pipelines/ordered_real_mean.rs"]
 mod ordered_real_mean;

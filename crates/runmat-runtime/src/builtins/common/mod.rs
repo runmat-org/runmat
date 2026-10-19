@@ -4,6 +4,7 @@
 pub mod arg_tokens;
 pub(crate) mod binary;
 pub mod broadcast;
+pub(crate) mod complex_arithmetic;
 pub mod concatenation;
 pub(crate) mod control_flow_error;
 pub(crate) mod cooperative_sort;

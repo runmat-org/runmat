@@ -123,6 +123,26 @@ fn four_extrema_defaults_are_pre_effect_unsupported() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn structural_defaults_are_pre_effect_unsupported_and_preserve_the_input() {
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let provider = Defaults;
+    for failure in [
+        ready_default(provider.tril(&input.handle, -1)).unwrap_err(),
+        ready_default(provider.triu(&input.handle, 1)).unwrap_err(),
+        ready_default(provider.kron(&input.handle, &input.handle)).unwrap_err(),
+    ] {
+        assert!(failure.is_unsupported());
+        assert!(!failure.is_after_effect());
+        input.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(input.probe.retirements(), 0);
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn std_defaults_are_pre_effect_unsupported_without_device_work() {
     let owner = TestAllocationOwner::new();
     let input = owner

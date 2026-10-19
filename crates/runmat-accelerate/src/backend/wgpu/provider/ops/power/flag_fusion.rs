@@ -1,6 +1,7 @@
 //! Full-flag emission prerequisite, not a complete POWER domain-probe receipt.
 use super::super::elementwise::{
-    FrozenFusionRecipe, FusedElementwiseRepresentation, FusedElementwiseWork, FusionUniformAbi,
+    ElementwiseInvocationGeometry, FrozenFusionRecipe, FusedElementwiseRepresentation,
+    FusedElementwiseWork, FusionUniformAbi,
 };
 use super::*;
 use crate::backend::wgpu::pipelines::FrozenLinearLaunch;
@@ -99,6 +100,7 @@ impl PowerFlagFusionRecipe {
             &FusedElementwiseWork {
                 output_shape: shape,
                 len,
+                invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                 representation,
                 uniform_abi: Some(FusionUniformAbi::Broadcast),
             },
@@ -259,6 +261,7 @@ impl WgpuProvider {
                 FusedElementwiseWork {
                     output_shape: &recipe.shape,
                     len: recipe.len,
+                    invocation_geometry: ElementwiseInvocationGeometry::OutputLanes,
                     uniform_abi: Some(FusionUniformAbi::Broadcast),
                     representation: flag_representation(
                         recipe.input_precision,

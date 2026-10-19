@@ -16,7 +16,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::common::linalg::matrix_dimensions_for;
+use crate::builtins::common::linalg::{matrix_dimensions_for, one_norm::binary_lu_scale};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -396,9 +396,15 @@ fn cond_two_norm_complex(matrix: &ComplexTensor, rows: usize, cols: usize) -> Bu
 }
 
 fn cond_inverse_based_real(values: &[f64], order: usize, norm: CondNorm) -> BuiltinResult<f64> {
-    let dm = DMatrix::from_column_slice(order, order, values);
+    let mut dm = DMatrix::from_column_slice(order, order, values);
+    let max_component = dm.iter().map(|value| value.abs()).fold(0.0_f64, f64::max);
+    if max_component == 0.0 {
+        return Ok(f64::INFINITY);
+    }
+    let scale = binary_lu_scale(max_component).expect("finite nonzero matrix component");
+    dm.apply(|value| *value /= scale);
+    let norm_a = matrix_norm_real(dm.as_slice(), order, order, norm);
     if let Some(inv) = dm.try_inverse() {
-        let norm_a = matrix_norm_real(values, order, order, norm);
         let norm_inv = matrix_norm_real(inv.as_slice(), order, order, norm);
         let cond = norm_a * norm_inv;
         if cond.is_finite() {
@@ -416,14 +422,25 @@ fn cond_inverse_based_complex(
     order: usize,
     norm: CondNorm,
 ) -> BuiltinResult<f64> {
-    let data: Vec<Complex64> = matrix
-        .materialize_f64()
+    let mut dm = DMatrix::from_iterator(
+        order,
+        order,
+        matrix
+            .materialize_f64()
+            .into_iter()
+            .map(|(re, im)| Complex64::new(re, im)),
+    );
+    let max_component = dm
         .iter()
-        .map(|&(re, im)| Complex64::new(re, im))
-        .collect();
-    let dm = DMatrix::from_column_slice(order, order, &data);
+        .map(|value| value.re.abs().max(value.im.abs()))
+        .fold(0.0_f64, f64::max);
+    if max_component == 0.0 {
+        return Ok(f64::INFINITY);
+    }
+    let scale = binary_lu_scale(max_component).expect("finite nonzero matrix component");
+    dm.apply(|value| *value = Complex64::new(value.re / scale, value.im / scale));
+    let norm_a = matrix_norm_complex(dm.as_slice(), order, order, norm);
     if let Some(inv) = dm.try_inverse() {
-        let norm_a = matrix_norm_complex(&data, order, order, norm);
         let norm_inv = matrix_norm_complex(inv.as_slice(), order, order, norm);
         let cond = norm_a * norm_inv;
         if cond.is_finite() {
@@ -460,10 +477,7 @@ fn matrix_norm_real(data: &[f64], rows: usize, cols: usize, norm: CondNorm) -> f
             }
             max_sum
         }
-        CondNorm::Fro => {
-            let sum_sq: f64 = data.iter().map(|v| v * v).sum();
-            sum_sq.sqrt()
-        }
+        CondNorm::Fro => data.iter().fold(0.0_f64, |norm, value| norm.hypot(*value)),
         CondNorm::Two => unreachable!("matrix_norm_real not used for 2-norm"),
     }
 }
@@ -492,10 +506,9 @@ fn matrix_norm_complex(data: &[Complex64], rows: usize, cols: usize, norm: CondN
             }
             max_sum
         }
-        CondNorm::Fro => {
-            let sum_sq: f64 = data.iter().map(|v| v.norm_sqr()).sum();
-            sum_sq.sqrt()
-        }
+        CondNorm::Fro => data
+            .iter()
+            .fold(0.0_f64, |norm, value| norm.hypot(value.norm())),
         CondNorm::Two => unreachable!("matrix_norm_complex not used for 2-norm"),
     }
 }
@@ -913,6 +926,24 @@ pub(crate) mod tests {
         match result {
             Value::Num(value) => assert!((value - 2.9).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
+        }
+        for scale in [1.0e200, 1.0e-200] {
+            let real = Tensor::new(vec![scale, 0.0, 0.0, scale], vec![2, 2]).unwrap();
+            let complex = ComplexTensor::new(
+                vec![(scale, scale), (0.0, 0.0), (0.0, 0.0), (scale, scale)],
+                vec![2, 2],
+            )
+            .unwrap();
+            for input in [Value::Tensor(real), Value::ComplexTensor(complex)] {
+                let result =
+                    cond_builtin(input, vec![Value::from("fro")]).expect("scaled Frobenius cond");
+                match result {
+                    Value::Num(value) => {
+                        assert!((value - 2.0).abs() < 1.0e-12, "scale={scale}: {value}")
+                    }
+                    other => panic!("expected scalar result, got {other:?}"),
+                }
+            }
         }
     }
 
