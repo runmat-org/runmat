@@ -130,3 +130,21 @@ pub const fn entry(definition: ConstructorEntryDefinition) -> BuiltinCatalogEntr
         suppress_auto_output: false,
     }
 }
+
+/// A constructor that may persist a supplied artifact (for example, a solver
+/// mesh passed to `fea.study`) into the configured analysis artifact store.
+/// The store can be in memory, so filesystem access is an effect, not a
+/// universal capability prerequisite.
+pub const fn artifact_writing_entry(definition: ConstructorEntryDefinition) -> BuiltinCatalogEntry {
+    let mut entry = entry(definition);
+    entry.contract.purity = BuiltinPurity::Impure;
+    entry.contract.semantic_kind = BuiltinSemanticKind::Filesystem;
+    entry.contract.async_behavior = BuiltinAsyncBehavior::NeverSuspends;
+    entry.contract.effects = &[
+        EffectKind::EnvironmentRead,
+        EffectKind::FilesystemWrite,
+        EffectKind::MayThrow,
+    ];
+    entry.contract.capabilities = &[];
+    entry
+}

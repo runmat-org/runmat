@@ -1,6 +1,8 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_PLAN_DESCRIPTOR,
+    doc_links,
+    example_fixtures::{fea_box_model_setup, BOX_STUDY},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     operation_inference::{infer_evidence, FeaEvidenceKind},
@@ -11,43 +13,61 @@ use runmat_types::{CallInference, CallRequest};
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_evidence(request, entry, FeaEvidenceKind::Plan)
 }
-const FIXTURE: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-    id: BuiltinExampleFixtureId { local_name: "planning-study" }, root: BuiltinFilesystemRoot::IsolatedWorkspace,
-    entries: &[
-        BuiltinFilesystemEntry::File { relative_path: "bracket.fea", content: BuiltinFixtureContent::Utf8("version: 1\nkind: study\nid: bracket_static\ngeometry:\n  path: part.stl\n  units: meter\nmodel:\n  profile: linear_static_structural\nrun:\n  backend: cpu\n") },
-        BuiltinFilesystemEntry::File { relative_path: "part.stl", content: BuiltinFixtureContent::Utf8("solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n") },
-    ],
-});
+
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
-    id: "plan-study",
-    title: "Plan without solving",
-    program: "study = fea.load('bracket.fea');\nplan = fea.plan(study);",
+    id: "plan-box-study",
+    title: "See which solver operation a study will run",
+    program: concat!(
+        fea_box_model_setup!(),
+        "study = fea.study(\"box_static\", part, model);\n",
+        "plan = fea.plan(study);",
+    ),
     display_output: None,
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
-    fixture: FIXTURE,
+    fixture: BOX_STUDY,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
-        source:
-            "assert(strcmp(class(plan), 'fea.Plan'));\nassert(~isempty(plan.operation_sequence));",
+        source: "assert(isa(plan, 'fea.Plan'));\nassert(strcmp(plan.study_id, \"box_static\"));\nassert(numel(plan.operation_sequence) >= 1);\nassert(~isempty(plan.study_fingerprint));",
     },
 }];
+
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
-    title: "fea.plan", summary: "Plan a typed FEA study or sweep without solving.",
-    description: "`fea.plan(studyOrSweepOrPath)` validates and plans a typed study, sweep, or `.fea` document, then persists planning evidence.",
-    keywords: &["fea", "plan", "study", "validation"], related: &["fea.validate", "fea.run", "fea.load"],
-    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Exactly one host `.fea` path, `fea.Study`, or `fea.Sweep` is required. Numeric arrays and resident values have no document role.",
-        "Planning resolves model data, validates it, selects a versioned operation sequence, and writes evidence; the solver is not executed.",
-        "A single study and sweep both return `fea.Plan`. Counts, indexes, and revisions remain exact structural integers; estimated physical and timing quantities keep their floating representation.",
-        "Already loaded or STL geometry needs no OCCT. Path resolution of topology-bearing CAD may require the configured importer.",
-    ] }], examples: EXAMPLES,
-    faqs: &[BuiltinDocumentationFaq { question: "Does planning solve the model?", answer: "No. It records the selected operation sequence without running the solver." }],
-    links: &[BuiltinDocumentationLink { label: "FEA solves", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/solves") }],
-    implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/entrypoints.rs") }],
-    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Document plan", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs::fea_load_validate_and_plan_document_workflow" }],
-    notes: &["Filesystem capability covers document/geometry resolution and planning evidence. Distributed object/path operands have no partition-local planner."],
+    title: "fea.plan",
+    summary: "Resolve a study or sweep into the ordered solver operations it will run, without solving.",
+    description: "`plan = fea.plan(study)` returns a `fea.Plan` listing each procedure step with its execution settings and the solver operation selected for it. `fea.plan(sweep)` returns a `fea.SweepPlan` with one plan entry per study.",
+    keywords: &["fea", "plan", "solver", "operation sequence", "study", "sweep", "fingerprint"],
+    related: &["fea.validate", "fea.run", "fea.study", "fea.sweep"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
+            "Planning first applies every `fea.validate` rule. A study with any validation issue fails with `RunMat:fea:OperationFailed` and the message points to `fea.validate` for details; the issue codes are attached to the error.",
+            "For a valid study, each step of the model's procedure sequence is paired with its execution entry (backend, solver options, formulation requirement) and mapped to a supported solver operation such as the linear-static structural solve. The `fea.Plan` holds the study, model, and sequence ids, the ordered `steps`, the `operation_sequence`, a `study_fingerprint` digest of the study content, and the path of a content-addressed plan evidence artifact.",
+            "For a sweep, the `fea.SweepPlan` reports `study_count`, `planned_count`, and `failed_count`, the ordered `plan_entries`, and `failure_entries` whose study indexes are one-based. With the sweep's `FailFast` set to `true`, the first failing study raises an error instead.",
+            "Planning does not mesh or solve, and it does not suspend. The input must be a `fea.Study` or `fea.Sweep` object; `.fea` paths are not accepted.",
+        ] },
+        BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[
+            "Run `fea.plan` after `fea.validate` to confirm the backend and solver operation before committing to `fea.run`. The study fingerprint in the plan matches the one recorded by a later run of the same study.",
+        ] },
+        BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
+            "`RunMat:fea:InvalidInput` reports an argument that is not a `fea.Study` or `fea.Sweep`. `RunMat:fea:OperationFailed` reports an invalid study, an execution plan that does not match the sequence, or a failure to persist plan evidence.",
+        ] },
+    ],
+    examples: EXAMPLES,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "What is the study fingerprint?", answer: "A canonical digest of the study's content: geometry, model, execution plan, and inputs. Planning the same study twice yields the same fingerprint, and the run of that study records it too." },
+        BuiltinDocumentationFaq { question: "Does planning require a mesh?", answer: "No. Planning resolves solver operations from the model and execution plan. Attach a mesh before `fea.run`." },
+    ],
+    links: &[doc_links::SOLVES, doc_links::STUDY_CONTRACTS, doc_links::OPERATION_REFERENCE],
+    implementation: &[doc_links::FEA_ENTRYPOINTS_SOURCE, doc_links::ANALYSIS_OPERATIONS_SOURCE],
+    verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "A linear-static study plans its canonical sequence", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_plan_study_returns_canonical_linear_static_sequence" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Sweep planning returns typed plan entries", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_plan_study_sweep_returns_typed_plan_entries" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Sweep planning continues after a study failure", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_plan_study_sweep_can_continue_on_study_failure" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Plan counts and compare deltas stay exact", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_structural_serializer_preserves_plan_counts_and_compare_deltas" },
+    ],
+    notes: &[],
 });
+
 pub const FEA_PLAN_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -57,8 +77,9 @@ pub const FEA_PLAN_CATALOG_ENTRY: BuiltinCatalogEntry =
         inference: infer,
         integer_capabilities: &[],
         integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
-        effects: OperationEffectProfile::EvidenceWrite,
+        effects: OperationEffectProfile::SynchronousEvidenceWrite,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
     });
+
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_PLAN_CATALOG_ENTRY];

@@ -14,6 +14,18 @@ pub enum OperationEffectProfile {
     ArtifactRead,
     /// Figure creation reads run artifacts and changes graphics state.
     Figure,
+    /// As `EvidenceWrite`, but the operation completes without suspending.
+    SynchronousEvidenceWrite,
+    /// As `ArtifactRead`, but the query completes without suspending.
+    SynchronousArtifactRead,
+    /// As `Figure`, but figure generation completes without suspending.
+    SynchronousFigure,
+}
+
+impl OperationEffectProfile {
+    const fn suspends(self) -> bool {
+        matches!(self, Self::EvidenceWrite | Self::ArtifactRead | Self::Figure)
+    }
 }
 
 pub struct OperationEntryDefinition {
@@ -36,6 +48,40 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
         &'static [EffectKind],
         &'static [CapabilityRequirement],
     ) = match definition.effects {
+        OperationEffectProfile::SynchronousEvidenceWrite => (
+            BuiltinPurity::Impure,
+            BuiltinSemanticKind::Filesystem,
+            &[
+                EffectKind::EnvironmentRead,
+                EffectKind::FilesystemRead,
+                EffectKind::FilesystemWrite,
+                EffectKind::MayThrow,
+            ] as &'static [EffectKind],
+            // Evidence persists to the configured artifact store, which may
+            // be in memory; filesystem access is not a universal prerequisite.
+            &[] as &'static [CapabilityRequirement],
+        ),
+        OperationEffectProfile::SynchronousArtifactRead => (
+            BuiltinPurity::DeterministicReadOnly,
+            BuiltinSemanticKind::Filesystem,
+            &[
+                EffectKind::EnvironmentRead,
+                EffectKind::FilesystemRead,
+                EffectKind::MayThrow,
+            ],
+            &[],
+        ),
+        OperationEffectProfile::SynchronousFigure => (
+            BuiltinPurity::Impure,
+            BuiltinSemanticKind::Plotting,
+            &[
+                EffectKind::EnvironmentRead,
+                EffectKind::FilesystemRead,
+                EffectKind::UserInterface,
+                EffectKind::MayThrow,
+            ],
+            &[CapabilityRequirement::UserInterface],
+        ),
         OperationEffectProfile::EvidenceWrite => (
             BuiltinPurity::Impure,
             BuiltinSemanticKind::Filesystem,
@@ -90,7 +136,11 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
                 definition.inference,
             )),
             compatibility: BuiltinCompatibility::RunMat,
-            async_behavior: BuiltinAsyncBehavior::MaySuspend,
+            async_behavior: if definition.effects.suspends() {
+                BuiltinAsyncBehavior::MaySuspend
+            } else {
+                BuiltinAsyncBehavior::NeverSuspends
+            },
             purity,
             semantic_kind,
             workspace_effect: None,

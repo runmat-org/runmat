@@ -1,6 +1,9 @@
 use super::*;
+use crate::fea_contract::identities::{
+    FEA_OUTPUT_FIELD_CLASS, FEA_STRUCTURAL_FIELD_CLASS, FEA_STUDY_CLASS,
+};
 use crate::fea_contract::{
-    integer::{FEA_FIELD_DESCRIPTOR, FEA_PLOT_DESCRIPTOR, FEA_RESULTS_DESCRIPTOR},
+    descriptors::FEA_RESULTS_DESCRIPTOR,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
 };
 use crate::{
@@ -14,196 +17,207 @@ use runmat_types::{
 fn entry() -> BuiltinCatalogEntry {
     operation_entry::entry(OperationEntryDefinition {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-        name: "fea.field",
-        documentation: BuiltinDocumentation::EMPTY,
-        descriptor: &FEA_FIELD_DESCRIPTOR,
-        inference: |request, entry| infer_result(request, entry, FeaResultKind::Field),
-        integer_capabilities: &[],
-        integer_audit: None,
-        effects: OperationEffectProfile::ArtifactRead,
-        accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        distributed: BuiltinDistributedPolicy::Unsupported,
-    })
-}
-
-#[test]
-fn result_references_do_not_accept_numeric_or_resident_values() {
-    let number = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-        class: NumericClass::Double,
-        domain: NumericDomain::Real,
-    }));
-    assert!(!possible_run_reference(&number, true));
-    let mut unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
-    assert!(possible_run_reference(&unknown, true));
-    unknown.residency = ResidencyFact::Device { provider: None };
-    assert!(!possible_run_reference(&unknown, true));
-
-    let inferred = infer_result(
-        &CallRequest {
-            arguments: vec![number, ValueFact::scalar(ValueKindFact::String)],
-            literals: LiteralContext::new(vec![LiteralValue::Unknown; 2]),
-            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-        },
-        &entry(),
-        FeaResultKind::Field,
-    );
-    assert!(inferred
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-RUN"));
-    assert!(
-        matches!(&inferred.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_FIELD_CLASS)))
-    );
-}
-
-#[test]
-fn result_index_selector_requires_exact_class_and_vector_geometry() {
-    let mut selector = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-        class: NumericClass::Single,
-        domain: NumericDomain::Real,
-    }));
-    assert!(!possible_index_vector(&selector));
-    selector.kind = ValueKindFact::Numeric(NumericFact {
-        class: NumericClass::UInt64,
-        domain: NumericDomain::Real,
-    });
-    selector.shape = ShapeFact::from(vec![Some(2), Some(2)]);
-    assert!(!possible_index_vector(&selector));
-    selector.shape = ShapeFact::from(vec![Some(1), Some(4)]);
-    assert!(possible_index_vector(&selector));
-}
-
-#[test]
-fn result_aliases_share_typed_selector_and_duplicate_diagnostic() {
-    let results_entry = operation_entry::entry(OperationEntryDefinition {
-        provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         name: "fea.results",
         documentation: BuiltinDocumentation::EMPTY,
         descriptor: &FEA_RESULTS_DESCRIPTOR,
         inference: |request, entry| infer_result(request, entry, FeaResultKind::Results),
         integer_capabilities: &[],
         integer_audit: None,
-        effects: OperationEffectProfile::ArtifactRead,
+        effects: OperationEffectProfile::SynchronousArtifactRead,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
-    });
-    let text = ValueFact::scalar(ValueKindFact::String);
-    let inferred = infer_result(
-        &CallRequest {
-            arguments: vec![text; 5],
-            literals: LiteralContext::new(vec![
-                LiteralValue::String("run".into()),
-                LiteralValue::String("FIELDS".into()),
-                LiteralValue::String("stress".into()),
-                LiteralValue::String("Include-Fields".into()),
-                LiteralValue::String("strain".into()),
-            ]),
-            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-        },
-        &results_entry,
-        FeaResultKind::Results,
-    );
-    assert!(inferred
+    })
+}
+
+fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
+    CallRequest {
+        arguments,
+        literals: LiteralContext::new(literals),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    }
+}
+
+fn text() -> ValueFact {
+    ValueFact::scalar(ValueKindFact::String)
+}
+
+fn unknown() -> ValueFact {
+    ValueFact::unknown(DynamicReason::RuntimeValue)
+}
+
+fn infer(kind: FeaResultKind, arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallInference {
+    infer_result(&request(arguments, literals), &entry(), kind)
+}
+
+fn codes(inference: &CallInference) -> Vec<&str> {
+    inference
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-DUPLICATE"));
-    assert!(!inferred
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-SELECTOR"));
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect()
+}
+
+fn output_class(inference: &CallInference) -> Option<String> {
+    match &inference.outputs[0].kind {
+        ValueKindFact::Object(object) => object.runtime_class.as_ref().map(ToString::to_string),
+        _ => None,
+    }
 }
 
 #[test]
-fn plot_rejects_known_numeric_field_and_invalid_option_value() {
-    let plot_entry = operation_entry::entry(OperationEntryDefinition {
-        provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-        name: "fea.plot",
-        documentation: BuiltinDocumentation::EMPTY,
-        descriptor: &FEA_PLOT_DESCRIPTOR,
-        inference: |request, entry| infer_result(request, entry, FeaResultKind::Plot),
-        integer_capabilities: &[],
-        integer_audit: None,
-        effects: OperationEffectProfile::Figure,
-        accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        distributed: BuiltinDistributedPolicy::Unsupported,
-    });
-    let run = object_result(FEA_RUN_RESULT_CLASS);
-    let numeric = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-        class: NumericClass::Double,
-        domain: NumericDomain::Real,
-    }));
-    let invalid_field = infer_result(
-        &CallRequest {
-            arguments: vec![run.clone(), numeric.clone()],
-            literals: LiteralContext::new(vec![LiteralValue::Unknown; 2]),
-            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-        },
-        &plot_entry,
-        FeaResultKind::Plot,
+fn results_accepts_run_references_and_typed_selectors() {
+    let valid = infer(
+        FeaResultKind::Results,
+        vec![
+            object_fact(FEA_STEP_RUN_RESULT_CLASS),
+            text(),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Include-Field-Values".into()),
+            LiteralValue::Unknown,
+        ],
     );
-    assert!(invalid_field
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-PLOT-FIELD"));
-    let invalid_option = infer_result(
-        &CallRequest {
-            arguments: vec![run, ValueFact::scalar(ValueKindFact::String), numeric],
-            literals: LiteralContext::new(vec![
-                LiteralValue::Unknown,
-                LiteralValue::String("Field_Id".into()),
-                LiteralValue::Unknown,
-            ]),
-            outputs: OutputSelection::new(RequestedOutputCount::Exactly(0)),
-        },
-        &plot_entry,
-        FeaResultKind::Plot,
-    );
-    assert!(invalid_option
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-PLOT-OPTION"));
+    assert!(valid.diagnostics.is_empty(), "{:?}", valid.diagnostics);
+    assert_eq!(output_class(&valid).as_deref(), Some("fea.Results"));
 
-    let dynamic_name = infer_result(
-        &CallRequest {
-            arguments: vec![
-                object_result(FEA_RUN_RESULT_CLASS),
-                ValueFact::scalar(ValueKindFact::String),
-                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                    class: NumericClass::Double,
-                    domain: NumericDomain::Real,
-                })),
-            ],
-            literals: LiteralContext::new(vec![LiteralValue::Unknown; 3]),
-            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-        },
-        &plot_entry,
-        FeaResultKind::Plot,
+    let invalid = infer(
+        FeaResultKind::Results,
+        vec![
+            object_fact(FEA_RESULTS_CLASS),
+            text(),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("IncludeElectromagneticResults".into()),
+            LiteralValue::Unknown,
+        ],
     );
-    assert!(!dynamic_name
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-PLOT-CONTEXT" || d.code == "RM-CATALOG-FEA-PLOT-FIELD"));
+    assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-RESULTS-OPTIONS"));
+    assert!(codes(&invalid).contains(&"RM-CATALOG-FEA-OPTION"));
 
-    for context in [FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS] {
-        let invalid_prefix = infer_result(
-            &CallRequest {
-                arguments: vec![
-                    object_result(context),
-                    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                        class: NumericClass::Double,
-                        domain: NumericDomain::Real,
-                    })),
-                    ValueFact::scalar(ValueKindFact::String),
-                    ValueFact::scalar(ValueKindFact::String),
-                ],
-                literals: LiteralContext::new(vec![LiteralValue::Unknown; 4]),
-                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
-            },
-            &plot_entry,
-            FeaResultKind::Plot,
-        );
-        assert!(invalid_prefix.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "RM-CATALOG-FEA-PLOT-FIELD" && diagnostic.argument == Some(1)
-        }));
-    }
+    let arity = infer(FeaResultKind::Results, vec![], vec![]);
+    assert!(codes(&arity).contains(&"RM-CATALOG-FEA-ARITY"));
+
+    let dynamic = infer(FeaResultKind::Results, vec![unknown()], vec![LiteralValue::Unknown]);
+    assert!(dynamic.diagnostics.is_empty(), "{:?}", dynamic.diagnostics);
+}
+
+#[test]
+fn field_requires_typed_selector_and_frequency_sample() {
+    let valid = infer(
+        FeaResultKind::Field,
+        vec![
+            object_fact(FEA_RESULTS_CLASS),
+            object_fact(FEA_STRUCTURAL_FIELD_CLASS),
+            object_fact(FEA_FREQUENCY_CLASS),
+        ],
+        vec![LiteralValue::Unknown; 3],
+    );
+    assert!(valid.diagnostics.is_empty(), "{:?}", valid.diagnostics);
+    assert_eq!(output_class(&valid).as_deref(), Some("fea.Field"));
+
+    let text_selector = infer(
+        FeaResultKind::Field,
+        vec![text(), text()],
+        vec![LiteralValue::Unknown, LiteralValue::String("stress".into())],
+    );
+    assert!(codes(&text_selector).contains(&"RM-CATALOG-FEA-FIELD-SELECTOR"));
+
+    let wrong_sample = infer(
+        FeaResultKind::Field,
+        vec![text(), object_fact(FEA_OUTPUT_FIELD_CLASS), text()],
+        vec![LiteralValue::Unknown; 3],
+    );
+    assert!(codes(&wrong_sample).contains(&"RM-CATALOG-FEA-SAMPLE"));
+
+    let arity = infer(FeaResultKind::Field, vec![text()], vec![LiteralValue::Unknown]);
+    assert!(codes(&arity).contains(&"RM-CATALOG-FEA-ARITY"));
+
+    let dynamic = infer(
+        FeaResultKind::Field,
+        vec![unknown(), unknown()],
+        vec![LiteralValue::Unknown; 2],
+    );
+    assert!(dynamic.diagnostics.is_empty(), "{:?}", dynamic.diagnostics);
+}
+
+#[test]
+fn field_page_step_result_and_compare_validate_shapes() {
+    let page = infer(
+        FeaResultKind::FieldPage,
+        vec![object_fact(FEA_FIELD_CLASS), unknown(), unknown()],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(0.0),
+            LiteralValue::Unknown,
+        ],
+    );
+    assert!(codes(&page).contains(&"RM-CATALOG-FEA-PAGE-BOUND"));
+    assert_eq!(output_class(&page).as_deref(), Some("fea.FieldPage"));
+    let wrong_field = infer(
+        FeaResultKind::FieldPage,
+        vec![object_fact(FEA_RESULTS_CLASS)],
+        vec![LiteralValue::Unknown],
+    );
+    assert!(codes(&wrong_field).contains(&"RM-CATALOG-FEA-FIELD"));
+
+    let step = infer(
+        FeaResultKind::StepResult,
+        vec![object_fact(FEA_RUN_RESULT_CLASS), text()],
+        vec![LiteralValue::Unknown, LiteralValue::String("static".into())],
+    );
+    assert!(step.diagnostics.is_empty(), "{:?}", step.diagnostics);
+    assert_eq!(output_class(&step).as_deref(), Some("fea.StepRunResult"));
+    let step_text = infer(
+        FeaResultKind::StepResult,
+        vec![text(), text()],
+        vec![LiteralValue::Unknown; 2],
+    );
+    assert!(codes(&step_text).contains(&"RM-CATALOG-FEA-RUN"));
+
+    let compare = infer(
+        FeaResultKind::Compare,
+        vec![text(), ValueFact::scalar(ValueKindFact::Logical)],
+        vec![LiteralValue::Unknown; 2],
+    );
+    assert!(codes(&compare).contains(&"RM-CATALOG-FEA-RUN-ID"));
+    assert_eq!(output_class(&compare).as_deref(), Some("fea.Compare"));
+}
+
+#[test]
+fn plot_and_mesh_overloads_peel_display_options() {
+    let plot = infer(
+        FeaResultKind::Plot,
+        vec![object_fact(FEA_FIELD_CLASS), text(), text()],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Overlay".into()),
+            LiteralValue::String("cad".into()),
+        ],
+    );
+    assert!(plot.diagnostics.is_empty(), "{:?}", plot.diagnostics);
+    let study_context = infer(
+        FeaResultKind::Plot,
+        vec![object_fact(FEA_STUDY_CLASS), text()],
+        vec![LiteralValue::Unknown, LiteralValue::String("run".into())],
+    );
+    assert!(codes(&study_context).contains(&"RM-CATALOG-FEA-PLOT-CONTEXT"));
+    assert!(codes(&study_context).contains(&"RM-CATALOG-FEA-ARITY"));
+    let mesh = infer(
+        FeaResultKind::Mesh,
+        vec![
+            object_fact(FEA_RUN_RESULT_CLASS),
+            text(),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Edges".into()),
+            LiteralValue::Unknown,
+        ],
+    );
+    assert!(mesh.diagnostics.is_empty(), "{:?}", mesh.diagnostics);
 }

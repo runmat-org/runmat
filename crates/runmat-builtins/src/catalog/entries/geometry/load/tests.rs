@@ -90,3 +90,87 @@ fn load_preserves_typed_asset_and_rejects_numeric_path() {
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-GEOMETRY-LOAD-PATH"));
     assert!(!invalid.diagnostics.is_empty());
 }
+
+fn load_request(
+    arguments: Vec<ValueFact>,
+    literals: Vec<runmat_types::LiteralValue>,
+) -> CallRequest {
+    CallRequest {
+        arguments,
+        literals: LiteralContext::new(literals),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    }
+}
+
+fn load_codes(arguments: Vec<ValueFact>, literals: Vec<runmat_types::LiteralValue>) -> Vec<String> {
+    inference::infer(
+        &load_request(arguments, literals),
+        &GEOMETRY_LOAD_CATALOG_ENTRY,
+    )
+    .diagnostics
+    .into_iter()
+    .map(|diagnostic| diagnostic.code)
+    .collect()
+}
+
+#[test]
+fn units_option_accepts_supported_spellings() {
+    use runmat_types::LiteralValue;
+    let text = || ValueFact::scalar(ValueKindFact::String);
+    for unit in ["m", "MM", "in", "Millimetres", "inches"] {
+        let found = load_codes(
+            vec![text(), text(), text()],
+            vec![
+                LiteralValue::String("part.brep".into()),
+                LiteralValue::String("Units".into()),
+                LiteralValue::String(unit.into()),
+            ],
+        );
+        assert!(found.is_empty(), "{unit}: {found:?}");
+    }
+    // Dynamic option values cannot be checked statically and must not error.
+    let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
+    assert!(load_codes(vec![text(), unknown.clone(), unknown], vec![]).is_empty());
+}
+
+#[test]
+fn units_option_rejects_bad_pairs_names_values_and_repeats() {
+    use runmat_types::LiteralValue;
+    let text = || ValueFact::scalar(ValueKindFact::String);
+    assert!(load_codes(vec![text(), text()], vec![])
+        .contains(&"RM-CATALOG-GEOMETRY-LOAD-ARITY".to_string()));
+    assert!(load_codes(
+        vec![text(), text(), text()],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Scale".into()),
+            LiteralValue::String("mm".into()),
+        ],
+    )
+    .contains(&"RM-CATALOG-GEOMETRY-LOAD-OPTION".to_string()));
+    assert!(load_codes(
+        vec![text(), text(), text()],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Units".into()),
+            LiteralValue::String("ft".into()),
+        ],
+    )
+    .contains(&"RM-CATALOG-GEOMETRY-LOAD-UNITS".to_string()));
+    assert!(load_codes(
+        vec![text(), text(), ValueFact::scalar(ValueKindFact::Logical)],
+        vec![],
+    )
+    .contains(&"RM-CATALOG-GEOMETRY-LOAD-UNITS".to_string()));
+    assert!(load_codes(
+        vec![text(), text(), text(), text(), text()],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Units".into()),
+            LiteralValue::String("mm".into()),
+            LiteralValue::String("units".into()),
+            LiteralValue::String("m".into()),
+        ],
+    )
+    .contains(&"RM-CATALOG-GEOMETRY-LOAD-OPTION".to_string()));
+}

@@ -1,52 +1,34 @@
+//! Signature and error descriptors for the FEA operation surface. The runtime
+//! re-exports these values; it does not declare its own copies.
+
 use super::parameters::{
-    COMPARE_INPUTS, DOMAIN_INPUTS, FIELD_INPUTS, INTERFACE_INPUTS, IN_AUTHOR_STUDY_ARGS, IN_INPUT,
-    IN_PATH, IN_STUDY_ARGS, IN_VARIADIC_ARGS, LOAD_CASE_INPUTS, MATERIAL_ASSIGNMENT_INPUTS,
-    MATERIAL_INPUTS, MODEL_INPUTS, OUT_ANY, PLOT_CONTEXT_INPUTS, PLOT_STUDY_INPUTS, RESULTS_INPUTS,
-    RUN_OPTIONS_INPUTS, STEP_INPUTS, SWEEP_INPUTS, TRENDS_INPUTS,
+    COMPARE_INPUTS, FIELD_INPUTS, FIELD_PAGE_INPUTS, IN_INPUT, IN_STUDY_ARGS, IN_VARIADIC_ARGS,
+    MATERIAL_ASSIGNMENT_INPUTS, MATERIAL_INPUTS, MESH_CONTEXT_INPUTS, MODEL_INPUTS, OUT_ANY, PLOT_CONTEXT_INPUTS,
+    RESULTS_INPUTS, STEP_RESULT_INPUTS, SWEEP_INPUTS, TRENDS_INPUTS,
 };
 use crate::BuiltinCompletionPolicy;
 use crate::BuiltinDescriptor;
 use crate::BuiltinErrorDescriptor;
 use crate::BuiltinOutputMode;
-use crate::BuiltinParamArity;
-use crate::BuiltinParamDescriptor;
-use crate::BuiltinParamType;
 use crate::BuiltinSignatureDescriptor;
 
-pub const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "doc = fea.load(path)",
-    inputs: &IN_PATH,
-    outputs: &OUT_ANY,
-}];
-pub const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "document = fea.study(path)",
-        inputs: &IN_PATH,
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "study = fea.study(id, geometry, Name, Value, ...)",
-        inputs: &IN_STUDY_ARGS,
-        outputs: &OUT_ANY,
-    },
-];
-pub const AUTHOR_STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "study = fea.authorStudy(id, geometry, meshAuthoringSummary, Name, Value, ...)",
-    inputs: &IN_AUTHOR_STUDY_ARGS,
+pub const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "study = fea.study(id, geometry, model, Name, Value, ...)",
+    inputs: &IN_STUDY_ARGS,
     outputs: &OUT_ANY,
 }];
 pub const VALIDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "result = fea.validate(studyOrSweepOrPath)",
+    label: "result = fea.validate(studyOrSweep)",
     inputs: &IN_INPUT,
     outputs: &OUT_ANY,
 }];
 pub const PLAN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "plan = fea.plan(studyOrSweepOrPath)",
+    label: "plan = fea.plan(study)",
     inputs: &IN_INPUT,
     outputs: &OUT_ANY,
 }];
 pub const RUN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "run = fea.run(studyOrSweepOrPath)",
+    label: "run = fea.run(studyOrSweep)",
     inputs: &IN_INPUT,
     outputs: &OUT_ANY,
 }];
@@ -67,108 +49,45 @@ pub const MATERIAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatu
 }];
 pub const MATERIAL_ASSIGNMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
     [BuiltinSignatureDescriptor {
-        label: "assignment = fea.materialAssignment(region, material, Name, Value, ...)",
+        label: "assignment = fea.materialAssignment(target, material, Name, Value, ...)",
         inputs: &MATERIAL_ASSIGNMENT_INPUTS,
         outputs: &OUT_ANY,
     }];
-pub const LOAD_CASE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "load = fea.loadCase(id, region, kind, Name, Value, ...)",
-    inputs: &LOAD_CASE_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub const DOMAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "domain = fea.domain(kind, Name, Value, ...)",
-    inputs: &DOMAIN_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub const INTERFACE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "interface = fea.interface(id, primaryRegion, secondaryRegion, Name, Value, ...)",
-    inputs: &INTERFACE_INPUTS,
-    outputs: &OUT_ANY,
-}];
 pub const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "component = fea.component(args, ...)",
     inputs: &IN_VARIADIC_ARGS,
     outputs: &OUT_ANY,
 }];
-pub const STEP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "step = fea.step(id, kind)",
-    inputs: &STEP_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub const RUN_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "options = fea.runOptions(solver, Name, Value, ...)",
-    inputs: &RUN_OPTIONS_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub const BOUNDARY_CONDITION_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Boundary-condition id.",
-    },
-    BuiltinParamDescriptor {
-        name: "region",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target region id.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Boundary-condition kind.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Numeric fields required by the selected kind.",
-    },
-];
-pub const BOUNDARY_CONDITION_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "bc = fea.boundaryCondition(id, region, kind, Name, Value, ...)",
-        inputs: &BOUNDARY_CONDITION_INPUTS,
-        outputs: &OUT_ANY,
-    }];
 pub const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "results = fea.results(runOrRunId, Name, Value, ...)",
     inputs: &RESULTS_INPUTS,
     outputs: &OUT_ANY,
 }];
 pub const FIELD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.field(resultsOrRunOrRunId, fieldId)",
+    label: "field = fea.field(resultsOrRun, fieldSelector, sample)",
     inputs: &FIELD_INPUTS,
     outputs: &OUT_ANY,
 }];
-pub const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "fea.plot(runOrResultsOrField, [fieldId], Name, Value, ...)",
-        inputs: &PLOT_CONTEXT_INPUTS,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "fea.plot(study, runId, [fieldId], Name, Value, ...)",
-        inputs: &PLOT_STUDY_INPUTS,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "figure = fea.plot(runOrResultsOrField, [fieldId], Name, Value, ...)",
-        inputs: &PLOT_CONTEXT_INPUTS,
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "figure = fea.plot(study, runId, [fieldId], Name, Value, ...)",
-        inputs: &PLOT_STUDY_INPUTS,
-        outputs: &OUT_ANY,
-    },
-];
+pub const FIELD_PAGE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "page = fea.fieldPage(field, start, count)",
+    inputs: &FIELD_PAGE_INPUTS,
+    outputs: &OUT_ANY,
+}];
+pub const STEP_RESULT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "stepRun = fea.stepResult(run, stepId)",
+    inputs: &STEP_RESULT_INPUTS,
+    outputs: &OUT_ANY,
+}];
+pub const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "figure = plot(field, Name, Value, ...)",
+    inputs: &PLOT_CONTEXT_INPUTS,
+    outputs: &OUT_ANY,
+}];
+pub const MESH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "figure = mesh(runOrResultsOrField, Name, Value, ...)",
+    inputs: &MESH_CONTEXT_INPUTS,
+    outputs: &OUT_ANY,
+}];
 pub const COMPARE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "comparison = fea.compare(baselineRunId, candidateRunId)",
     inputs: &COMPARE_INPUTS,
@@ -180,12 +99,6 @@ pub const TRENDS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignature
     outputs: &OUT_ANY,
 }];
 
-pub const ERROR_LOAD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEA.BUILTIN.LOAD_FAILED",
-    identifier: Some("RunMat:fea:LoadFailed"),
-    when: "A .fea document cannot be read, parsed, or resolved.",
-    message: "fea: failed to load FEA document",
-};
 pub const ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FEA.BUILTIN.INVALID_INPUT",
     identifier: Some("RunMat:fea:InvalidInput"),
@@ -204,102 +117,42 @@ pub const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "An FEA object or operation result cannot be converted to a RunMat value.",
     message: "fea: internal error",
 };
-pub const ERRORS: [BuiltinErrorDescriptor; 4] =
-    [ERROR_LOAD, ERROR_INPUT, ERROR_OPERATION, ERROR_INTERNAL];
+pub const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INPUT, ERROR_OPERATION, ERROR_INTERNAL];
 
-pub const FEA_LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_STUDY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STUDY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_AUTHOR_STUDY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &AUTHOR_STUDY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_VALIDATE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &VALIDATE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_PLAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PLAN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_RUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RUN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_SWEEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SWEEP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_MODEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MODEL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_MATERIAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MATERIAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MATERIAL_ASSIGNMENT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_LOAD_CASE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOAD_CASE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_DOMAIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DOMAIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_INTERFACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INTERFACE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COMPONENT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_STEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STEP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_RUN_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RUN_OPTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
+const fn public(signatures: &'static [BuiltinSignatureDescriptor]) -> BuiltinDescriptor {
+    BuiltinDescriptor {
+        signatures,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::Public,
+        errors: &ERRORS,
+    }
+}
+
+const fn method_only(signatures: &'static [BuiltinSignatureDescriptor]) -> BuiltinDescriptor {
+    BuiltinDescriptor {
+        signatures,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::MethodOnly,
+        errors: &ERRORS,
+    }
+}
+
+pub const FEA_STUDY_DESCRIPTOR: BuiltinDescriptor = public(&STUDY_SIGNATURES);
+pub const FEA_VALIDATE_DESCRIPTOR: BuiltinDescriptor = public(&VALIDATE_SIGNATURES);
+pub const FEA_PLAN_DESCRIPTOR: BuiltinDescriptor = public(&PLAN_SIGNATURES);
+pub const FEA_RUN_DESCRIPTOR: BuiltinDescriptor = public(&RUN_SIGNATURES);
+pub const FEA_SWEEP_DESCRIPTOR: BuiltinDescriptor = public(&SWEEP_SIGNATURES);
+pub const FEA_MODEL_DESCRIPTOR: BuiltinDescriptor = public(&MODEL_SIGNATURES);
+pub const FEA_MATERIAL_DESCRIPTOR: BuiltinDescriptor = public(&MATERIAL_SIGNATURES);
+pub const FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR: BuiltinDescriptor =
+    public(&MATERIAL_ASSIGNMENT_SIGNATURES);
+/// Shared descriptor for generic typed FEA component constructors.
+pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = public(&COMPONENT_SIGNATURES);
+pub const FEA_RESULTS_DESCRIPTOR: BuiltinDescriptor = public(&RESULTS_SIGNATURES);
+pub const FEA_FIELD_DESCRIPTOR: BuiltinDescriptor = public(&FIELD_SIGNATURES);
+pub const FEA_FIELD_PAGE_DESCRIPTOR: BuiltinDescriptor = public(&FIELD_PAGE_SIGNATURES);
+pub const FEA_STEP_RESULT_DESCRIPTOR: BuiltinDescriptor = public(&STEP_RESULT_SIGNATURES);
+pub const FEA_PLOT_DESCRIPTOR: BuiltinDescriptor = method_only(&PLOT_SIGNATURES);
+pub const FEA_MESH_DESCRIPTOR: BuiltinDescriptor = method_only(&MESH_SIGNATURES);
+pub const FEA_COMPARE_DESCRIPTOR: BuiltinDescriptor = public(&COMPARE_SIGNATURES);
+pub const FEA_TRENDS_DESCRIPTOR: BuiltinDescriptor = public(&TRENDS_SIGNATURES);

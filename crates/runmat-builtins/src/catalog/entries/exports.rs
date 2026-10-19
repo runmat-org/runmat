@@ -21,6 +21,7 @@ pub use super::introspection::*;
 pub use super::io::*;
 pub use super::logical::*;
 pub use super::math::*;
+pub use super::meshing::*;
 pub use super::parallel::*;
 pub use super::plotting::*;
 pub use super::resources::*;

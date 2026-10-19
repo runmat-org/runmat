@@ -1,7 +1,9 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
-    example_fixtures::CLOSED_CUBE_STUDY,
-    integer::{FEA_RESULTS_DESCRIPTOR, FEA_RESULTS_INTEGER_CAPABILITIES},
+    descriptors::FEA_RESULTS_DESCRIPTOR,
+    doc_links,
+    example_fixtures::{fea_box_run_setup, BOX_STUDY},
+    integer::FEA_RESULTS_INTEGER_CAPABILITIES,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     result_inference::{infer_result, FeaResultKind},
 };
@@ -11,33 +13,77 @@ use runmat_types::{CallInference, CallRequest};
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_result(request, entry, FeaResultKind::Results)
 }
-const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
-    id: "query-run", title: "Read persisted results from a run",
-    program: "study = fea.load('cube.fea');\nrun = fea.run(study);\nresults = fea.results(run, 'IncludeDiagnostics', false);",
-    display_output: None, compatibility: BuiltinExampleCompatibility::RunMat,
-    harness: BuiltinExampleHarness::NativeFilesystem, fixture: CLOSED_CUBE_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
-    verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(results), 'fea.Results'));\nassert(strcmp(results.run_id, run.run_id));" },
-}];
+
+const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "results-from-run",
+        title: "Open the results of a solved study",
+        program: concat!(fea_box_run_setup!(), "results = fea.results(run);"),
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BOX_STUDY,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isa(results, 'fea.Results'));\nassert(strcmp(results.run_id, run.steps(1).run_id));\nassert(results.summary.field_count > 0);",
+        },
+    },
+    BuiltinExample {
+        id: "results-by-run-id",
+        title: "Reopen results by run id, metadata only",
+        program: concat!(
+            fea_box_run_setup!(),
+            "runId = run.steps(1).run_id;\n",
+            "results = fea.results(runId, \"IncludeFieldValues\", false, \"IncludeDiagnostics\", true);",
+        ),
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BOX_STUDY,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isa(results, 'fea.Results'));\nassert(strcmp(results.run_id, runId));",
+        },
+    },
+];
+
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
-    title: "fea.results", summary: "Query a persisted FEA run for post-processing.",
-    description: "`fea.results(runOrRunId, Name, Value, ...)` returns a typed `fea.Results` projection. A lone existing `fea.Results` object is returned unchanged.",
-    keywords: &["fea", "results", "fields", "modes", "snapshots"], related: &["fea.run", "fea.field", "fea.plot"],
-    sections: &[BuiltinDocumentationSection { heading: "Inputs and selectors", paragraphs: &[
-        "The first input is a host run-id text scalar, one-run `fea.RunResult`, or an existing `fea.Results` with no additional options. A sweep result is queried through one of its per-study run ids.",
-        "Fields/IncludeFields and DiagnosticCodes accept text scalars, string arrays, or text cells. Inclusion flags accept logical scalars or exact numeric zero/one; other values and resident controls reject before artifact lookup.",
-        "ModeIndices and TransientSnapshotIndices are positive one-based structural vectors. All eight integer classes and integral doubles are accepted exactly; zero, negative, fractional, nonfinite, out-of-range, matrix-shaped, and resident selectors reject before lookup.",
-        "Omitted lists mean no filtering; omitted mode/snapshot selectors include every available item; inclusion flags default true. Field values and other physics quantities stay binary64, while shapes, counts, indexes, byte sizes, iterations, and fingerprints retain typed integers.",
-        "Stored device field references are returned as metadata, not executed or gathered. Artifact retrieval is host-side and needs no OCCT importer.",
-    ] }, BuiltinDocumentationSection { heading: "Options", paragraphs: &[
-        "Fields/IncludeFields, IncludeFieldValues/FieldValues, IncludeDiagnostics, DiagnosticCodes, IncludeModalResults, ModeIndices, IncludeTransientResults, TransientSnapshotIndices, IncludeNonlinearResults, and IncludeElectromagneticResults are supported.",
-    ] }], examples: EXAMPLES,
-    faqs: &[BuiltinDocumentationFaq { question: "Are result indexes zero-based?", answer: "No. Mode and snapshot selectors use one-based script indexes and are translated once at the host artifact boundary." }],
-    links: &[BuiltinDocumentationLink { label: "FEA operation reference", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/operation-reference") }],
-    implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/results/constructors.rs") }],
-    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Result query and field", location: "crates/runmat-runtime/src/builtins/fea/tests/results_and_plotting.rs::fea_results_field_exposes_values_metadata_and_plot_context" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Exact selector boundary", location: "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" }],
-    notes: &["Result selectors are host structural or text values; execution-owned distributed arrays are not accepted as selectors."],
+    title: "fea.results",
+    summary: "Load the persisted results of an FEA run for post-processing.",
+    description: "`results = fea.results(run)` loads the results of a single-step `fea.RunResult` or a `fea.StepRunResult`; `fea.results(runId)` loads them by persisted run id. Name/value options select which fields, diagnostics, modes, snapshots, and nonlinear details to include.",
+    keywords: &["fea", "results", "post-processing", "run id", "fields", "diagnostics", "modes", "snapshots"],
+    related: &["fea.run", "fea.stepResult", "fea.field", "fea.fieldPage", "fea.compare"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
+            "The first argument identifies one solved procedure step: a run id string, a `fea.StepRunResult`, or a `fea.RunResult` with exactly one step. A multi-step `fea.RunResult` is rejected; select a step with `run.step(stepId)`. A `fea.SweepRunResult` is rejected; pick one of its `run_entries`. Passing an existing `fea.Results` with no options returns it unchanged.",
+            "The returned `fea.Results` carries the run identity, field descriptors, fields, modal, thermal, transient, nonlinear, and structural-frequency results when present, diagnostics, run status, quality and publication reasons, provenance, a `summary`, and the `run_id`. When the input carried its study, the study is kept so later `fea.field`, `plot`, and `mesh` calls can reach the geometry.",
+            "Options (names are case-insensitive, punctuation ignored, each at most once): `IncludeFields` (alias `Fields`) takes a string, char row, or cell of field ids or unique dotted suffixes; `IncludeFieldValues` (alias `FieldValues`) chooses whether field values are materialized or only described; `IncludeDiagnostics`, `IncludeModalResults`, `IncludeTransientResults`, and `IncludeNonlinearResults` toggle those sections; `DiagnosticCodes` filters diagnostics by code; `ModeIndices` and `TransientSnapshotIndices` select modes and snapshots.",
+            "Toggles accept a logical scalar or an exact numeric 0 or 1. Mode and snapshot selectors are one-based vectors of positive integers in any integer or double class; order and duplicates are preserved. The `summary.available_mode_indices` list is also one-based.",
+            "Counts, indexes, shapes, and fingerprints in the result stay exact integers; physical values stay double precision.",
+        ] },
+        BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[
+            "Call `fea.results` on what `fea.run` returned, or on a saved run id in a later session. Pass the results to `fea.field` with a typed selector to extract one field, then page through it with `fea.fieldPage` or plot it with `plot(field)`.",
+        ] },
+        BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
+            "`RunMat:fea:InvalidInput` reports a missing run reference, a multi-step run or a sweep run, an unsupported or repeated option, a non-logical toggle, or a selector index that is zero, negative, fractional, or a matrix. `RunMat:fea:OperationFailed` reports a run id that is not in the artifact store or results that cannot be read.",
+        ] },
+    ],
+    examples: EXAMPLES,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Are mode indices zero- or one-based?", answer: "One-based, like all RunMat indexing. `\"ModeIndices\", [1 2 3]` selects the first three modes, and `summary.available_mode_indices` is one-based too." },
+        BuiltinDocumentationFaq { question: "How do I get results for one step of a multi-step study?", answer: "Select the step first with `run.step(\"stepId\")` or `fea.stepResult(run, \"stepId\")`, then call `fea.results` on it." },
+        BuiltinDocumentationFaq { question: "Can I load results without their field values?", answer: "Yes. Pass `\"IncludeFieldValues\", false` to get descriptors and metadata only, then read values on demand with `fea.field` and `fea.fieldPage`." },
+    ],
+    links: &[doc_links::EVIDENCE, doc_links::OUTPUTS_AND_FIELDS, doc_links::OPERATION_REFERENCE],
+    implementation: &[doc_links::FEA_ENTRYPOINTS_SOURCE],
+    verification: &[
+        doc_links::RESULTS_FIELD_PAGE_TEST,
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Snapshot selectors translate once from one-based indexes", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_results_translates_successful_snapshot_selectors_once" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Result selectors are exact one-based vectors and flags are zero or one", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_result_selectors_are_exact_one_based_vectors_and_flags_are_zero_one" },
+    ],
+    notes: &[],
 });
+
 pub const FEA_RESULTS_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -47,8 +93,9 @@ pub const FEA_RESULTS_CATALOG_ENTRY: BuiltinCatalogEntry =
         inference: infer,
         integer_capabilities: &FEA_RESULTS_INTEGER_CAPABILITIES,
         integer_audit: None,
-        effects: OperationEffectProfile::ArtifactRead,
+        effects: OperationEffectProfile::SynchronousArtifactRead,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
     });
+
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_RESULTS_CATALOG_ENTRY];

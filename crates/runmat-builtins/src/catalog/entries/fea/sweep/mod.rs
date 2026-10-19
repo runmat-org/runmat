@@ -2,6 +2,8 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition, ConstructorEntryDefinition},
     constructor_inference::{infer_constructor, FeaConstructorKind},
     descriptors::FEA_SWEEP_DESCRIPTOR,
+    doc_links,
+    example_fixtures::{fea_box_model_setup, BOX_STUDY},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
 };
 use crate::*;
@@ -10,32 +12,66 @@ use runmat_types::{CallInference, CallRequest};
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_constructor(request, entry, FeaConstructorKind::Sweep)
 }
-const FIXTURE: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-    id: BuiltinExampleFixtureId { local_name: "triangle-stl" }, root: BuiltinFilesystemRoot::IsolatedWorkspace,
-    entries: &[BuiltinFilesystemEntry::File { relative_path: "part.stl", content: BuiltinFixtureContent::Utf8("solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n") }],
-});
+
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
-    id: "two-studies", title: "Continue after failed studies", program: "geom = geometry.load('part.stl');\nstudyA = fea.study('variant_a', geom, 'Profile', 'linear_static_structural');\nstudyB = fea.study('variant_b', geom, 'Profile', 'linear_static_structural');\nsweep = fea.sweep('variants', {studyA, studyB}, 'FailFast', false);",
-    display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem,
-    fixture: FIXTURE, requirements: BuiltinExampleRequirements::NONE,
-    verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(sweep), 'fea.Sweep'));" },
+    id: "two-material-sweep",
+    title: "Sweep the same box over two materials",
+    program: concat!(
+        fea_box_model_setup!(),
+        "steelStudy = fea.study(\"box_steel\", part, model);\n",
+        "aluminum = fea.material(\"aluminum\", \"YoungsModulusPa\", 68.9e9, \"PoissonRatio\", 0.33, \"MassDensityKgPerM3\", 2700);\n",
+        "aluminumBody = fea.materialAssignment(fea.PropertyRegionTarget.solid(geometry.region(part, \"solid_000001\")), aluminum);\n",
+        "aluminumModel = fea.model(\"box_aluminum_model\", part, \"Materials\", {aluminum}, \"MaterialAssignments\", {aluminumBody}, ...\n",
+        "    \"Constraints\", {support}, \"Signals\", {tipForce}, \"Excitations\", {tipLoad}, ...\n",
+        "    \"ExcitationCases\", {service}, \"Steps\", {staticStep});\n",
+        "aluminumStudy = fea.study(\"box_aluminum\", part, aluminumModel);\n",
+        "sweep = fea.sweep(\"box_materials\", {steelStudy, aluminumStudy}, \"FailFast\", false);",
+    ),
+    display_output: None,
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::NativeFilesystem,
+    fixture: BOX_STUDY,
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Assertions {
+        source: "assert(isa(sweep, 'fea.Sweep'));\nassert(strcmp(sweep.sweep_id, \"box_materials\"));\nassert(sweep.fail_fast == false);",
+    },
 }];
+
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
-    title: "fea.sweep", summary: "Create a deterministic FEA study sweep.",
-    description: "`fea.sweep(id, studies, Name, Value, ...)` creates a `fea.Sweep` from one study or a cell array of studies.",
-    keywords: &["fea", "sweep", "studies", "fail fast"], related: &["fea.study", "fea.validate", "fea.plan", "fea.run"],
-    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Required inputs are a text sweep id and one `fea.Study` or cell array of `fea.Study` objects.",
-        "FailFast is the only option. It defaults to true and accepts a logical scalar; numeric and resident controls reject before construction.",
-        "Direct integers have no study/id role and FailFast is logical-only. Public study counts and indexes stay exact typed integers.",
-        "Construction is host-side and does not execute providers or intrinsically require native OCCT.",
-    ] }], examples: EXAMPLES,
-    faqs: &[BuiltinDocumentationFaq { question: "Does creating a sweep run its studies?", answer: "No. Pass the typed definition to `fea.validate`, `fea.plan`, or `fea.run`." }],
-    links: &[BuiltinDocumentationLink { label: "FEA solves", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/solves") }],
-    implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/study.rs") }],
-    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Sweep constructor", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "FEA VM execution", location: "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" }],
-    notes: &["Study objects and their geometry ownership are not execution-owned distributed arrays; the constructor rejects distributed handles."],
+    title: "fea.sweep",
+    summary: "Group FEA studies into one ordered sweep that validates, plans, and runs together.",
+    description: "`sweep = fea.sweep(id, studies)` creates a `fea.Sweep` from one `fea.Study` or a cell array of studies. `fea.sweep(id, studies, \"FailFast\", false)` keeps running the remaining studies after one fails.",
+    keywords: &["fea", "sweep", "parametric", "design study", "batch", "studies"],
+    related: &["fea.study", "fea.validate", "fea.plan", "fea.run", "fea.results"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
+            "A sweep is an ordered list of complete studies under one sweep id. Study order is preserved: validation entries, plan entries, run entries, and failure indexes all follow the order of the `studies` argument, never worker completion order.",
+            "Each study must be a `fea.Study`, either passed alone or as elements of a cell array. Every study id must be unique within the sweep; repeating a study (or two studies with the same id) is rejected.",
+            "`FailFast` is a logical scalar and defaults to `true`, which stops the sweep at the first failed study. With `false`, RunMat records the failure and continues with the remaining studies. Failure indexes reported by `fea.plan` and `fea.run` are one-based positions in the `studies` list.",
+            "Construction is a pure, in-memory operation. It does not mesh, validate, or solve; those happen in `fea.validate`, `fea.plan`, and `fea.run`. Generated input signals bound to each study travel with the sweep so a later run materializes exactly the inputs each study was built with.",
+        ] },
+        BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[
+            "Build each case with `fea.study`, then pass the sweep to `fea.validate` (returns `fea.SweepValidation`), `fea.plan` (returns `fea.SweepPlan`), or `fea.run` (returns `fea.SweepRunResult`). Each successful run entry carries its own run id for `fea.results` and `fea.compare`.",
+        ] },
+        BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
+            "`RunMat:fea:InvalidInput` reports a non-text id, a value that is not a `fea.Study`, a duplicated study id, a non-logical `FailFast`, or any option other than `FailFast`.",
+        ] },
+    ],
+    examples: EXAMPLES,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "What does FailFast change?", answer: "With the default `true`, the sweep stops at the first failed study. With `false`, every study is attempted and failures are collected with their one-based study index." },
+        BuiltinDocumentationFaq { question: "Can a sweep mix different geometries or physics?", answer: "Yes. Each element is a complete study with its own geometry, model, and execution plan; only the study ids must be unique." },
+    ],
+    links: &[doc_links::SWEEPS, doc_links::STUDY_CONTRACTS, doc_links::USING_FEA],
+    implementation: &[doc_links::FEA_MODELING_SOURCE],
+    verification: &[
+        doc_links::STUDY_AND_SWEEP_CONSTRUCTION_TEST,
+        doc_links::SWEEP_CLASSES_TEST,
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Sweep failures cross to one-based public indexes", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_sweep_failures_cross_to_one_based_public_indices" },
+    ],
+    notes: &[],
 });
+
 pub const FEA_SWEEP_CATALOG_ENTRY: BuiltinCatalogEntry =
     catalog_entry::entry(ConstructorEntryDefinition {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -48,4 +84,5 @@ pub const FEA_SWEEP_CATALOG_ENTRY: BuiltinCatalogEntry =
         filesystem_read: false,
         distributed: BuiltinDistributedPolicy::Unsupported,
     });
+
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_SWEEP_CATALOG_ENTRY];
