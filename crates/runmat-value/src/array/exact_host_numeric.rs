@@ -21,10 +21,14 @@ mod complex;
 mod integer;
 mod integer_complex;
 mod logical;
+mod sparse;
 pub use complex::ExactHostComplexTensorAllocation;
 use integer::{allocate_integer, integer_layout, ExactIntegerStorage};
 pub use integer_complex::ExactHostIntegerComplexTensorAllocation;
 pub use logical::ExactHostLogicalTensorAllocation;
+pub use sparse::{
+    ExactHostSparseClass, ExactHostSparseTensorAllocation, PreparedExactSparseTensor,
+};
 
 macro_rules! integer_slice_mut {
     ($self:expr, $variant:ident) => {

@@ -1,30 +1,44 @@
 use std::fmt;
 use std::ops::Deref;
 
+use crate::Utf8Text;
+
 use super::CallableInstanceId;
 
 /// A named handle's spelling is semantic data; its instance is separate,
 /// process-local identity used only to retain one physical callback proxy.
 #[derive(Clone, Debug)]
 pub struct NamedFunctionHandle {
-    name: String,
+    name: Utf8Text,
     instance: CallableInstanceId,
 }
 
 impl NamedFunctionHandle {
     pub fn new(name: String) -> Self {
         Self {
-            name,
+            name: Utf8Text::new(name),
             instance: CallableInstanceId::mint(),
         }
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        self.name.as_str()
     }
 
-    pub fn into_name(self) -> String {
+    pub(crate) fn name_capacity(&self) -> usize {
+        self.name.capacity()
+    }
+
+    pub(crate) fn name_has_retained_claim(&self) -> bool {
+        self.name.has_retained_claim()
+    }
+
+    pub fn into_text_owner(self) -> Utf8Text {
         self.name
+    }
+
+    pub fn into_name_unbounded(self) -> String {
+        self.name.into_string_unbounded()
     }
 
     pub fn instance_id(&self) -> CallableInstanceId {
@@ -33,10 +47,10 @@ impl NamedFunctionHandle {
 }
 
 impl Deref for NamedFunctionHandle {
-    type Target = String;
+    type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        &self.name
+        self.name.as_str()
     }
 }
 

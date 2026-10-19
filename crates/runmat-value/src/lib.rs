@@ -7,12 +7,13 @@ mod foreign;
 mod numeric;
 mod numeric_spacing;
 mod object;
-mod output_list_storage;
+mod exact_array_storage;
 mod sequence;
 mod shared_value_generation;
 pub mod symbolic;
 mod trace;
 mod transient;
+mod utf8_text;
 mod value;
 
 pub use aggregate::{
@@ -25,12 +26,14 @@ pub use array::{
     ComplexTensor, ComplexTensorAdmission, ExactHostAllocationClaim, ExactHostAllocationPermit,
     ExactHostAllocationReservation, ExactHostComplexTensorAllocation,
     ExactHostIntegerComplexTensorAllocation, ExactHostLogicalTensorAllocation,
-    ExactHostNumericAllocation, ExactHostNumericAllocationError, ExactHostTensor2dAllocation,
-    ExactHostTensorAllocation, HostAllocationProvenance, HostAllocationRelease, HostComplexBuffer,
-    HostCopyMetrics, HostCopyReason, HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer,
-    HostShapeInput, IntegerComplexStorage, LogicalArray, NumericTensorAdmission, SharedShape,
-    SharedShapeIntoIter, SparseCscValidation, SparseTensor, StringArray, SymbolicArray, Tensor,
-    ValidatedComplexTensorParts, ValidatedNumericTensorParts, ValidatedSparseCscParts,
+    ExactHostNumericAllocation, ExactHostNumericAllocationError, ExactHostSparseClass,
+    ExactHostSparseTensorAllocation, ExactHostTensor2dAllocation, ExactHostTensorAllocation,
+    HostAllocationProvenance, HostAllocationRelease, HostComplexBuffer, HostCopyMetrics,
+    HostCopyReason, HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer, HostShapeInput,
+    IntegerComplexStorage, LogicalArray, NumericTensorAdmission, PreparedExactSparseTensor,
+    SharedShape, SharedShapeIntoIter, SparseCscValidation, SparseTensor, StringArray,
+    SymbolicArray, Tensor, ValidatedComplexTensorParts, ValidatedNumericTensorParts,
+    ValidatedSparseCscParts,
 };
 pub use callable::{
     BoundFunctionAuthority, BoundFunctionBinding, BoundFunctionHandle, BoundFunctionHandleData,
@@ -42,6 +45,12 @@ pub use callable::{
 pub use display::{
     format_number, get_display_format, select_display_format_owner, set_display_format,
     DisplayFormatOwner, DisplayFormatSelectionGuard, FormatMode,
+};
+pub use exact_array_storage::{
+    ExactArrayAdoptionError, ExactArrayInitializationError, ExactArrayIntoIter,
+    ExactArrayMutationError, ExactArrayStorage, ExactCharIntoIter, OutputListInitializationError,
+    OutputListIntoIter, OutputListStorage, OwnedExactArrayValues, OwnedOutputListValues,
+    RetainedArrayValue, RetainedArrayValueError,
 };
 pub use exception::{MException, MExceptionParts};
 pub use foreign::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};
@@ -63,16 +72,17 @@ pub use object::{
     SelectedReceiverMethodDeclaration, SelectedReceiverPropertyDeclaration,
     ValidatedObjectArrayParts,
 };
-pub use output_list_storage::{
-    OutputListInitializationError, OutputListIntoIter, OutputListStorage, OwnedOutputListValues,
-};
 pub use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 pub use sequence::{
     validate_output_count, ValueSequence, ValueSequenceError, ValueSequenceKind,
     MAX_VALUE_SEQUENCE_OUTPUTS,
 };
-pub use shared_value_generation::SharedValueGeneration;
+pub use shared_value_generation::{
+    CallableGenerationInput, CallableGenerationPrepareError, CallableGenerationQuote,
+    SharedValueGeneration,
+};
 pub use symbolic::{SymbolicExpr, SymbolicFunction};
 pub use trace::ValueTraceWorkspace;
 pub use transient::{validate_no_transient_sequence, TransientValueError};
+pub use utf8_text::{Utf8Text, Utf8TextAdmissionError};
 pub use value::Value;

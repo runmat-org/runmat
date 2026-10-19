@@ -55,13 +55,19 @@ impl From<bool> for Value {
 
 impl From<String> for Value {
     fn from(s: String) -> Self {
-        Value::String(s)
+        Value::string(s)
     }
 }
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
-        Value::String(s.to_string())
+        Value::string(s)
+    }
+}
+
+impl From<Utf8Text> for Value {
+    fn from(text: Utf8Text) -> Self {
+        Value::String(text)
     }
 }
 
@@ -112,10 +118,10 @@ impl TryFrom<&Value> for String {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::String(s) => Ok(s.clone()),
+            Value::String(s) => Ok(s.as_str().to_owned()),
             Value::StringArray(sa) => {
                 if sa.data.len() == 1 {
-                    Ok(sa.data[0].clone())
+                    Ok(sa.data[0].as_str().to_owned())
                 } else {
                     Err("cannot convert string array to scalar string".to_string())
                 }
@@ -157,7 +163,7 @@ impl TryFrom<&Value> for Vec<Value> {
     type Error = String;
     fn try_from(v: &Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Cell(c) => Ok(c.data.clone()),
+            Value::Cell(c) => Ok(c.data().to_vec()),
             _ => Err(format!("cannot convert {v:?} to Vec<Value>")),
         }
     }

@@ -2,10 +2,10 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharArray {
-    pub data: Vec<char>,
+    pub data: ExactArrayStorage<char>,
     /// Full MATLAB-visible shape vector. Character payloads retain their
     /// historical row-major layout within each 2-D page.
-    pub shape: Vec<usize>,
+    pub shape: SharedShape,
     /// Cached row count for 2-D interop; equals `shape[0]` when present.
     pub rows: usize,
     /// Cached column count for 2-D interop; equals `shape[1]` when present,
@@ -14,12 +14,25 @@ pub struct CharArray {
 }
 
 impl CharArray {
+    /// Authenticate cached two-dimensional geometry and every page against
+    /// the canonical shape before a consumer reuses or transforms the owner.
+    pub fn validate_layout(&self) -> Result<(), String> {
+        let expected = total_len(&self.shape)
+            .ok_or_else(|| "Char data shape exceeds platform limits".to_string())?;
+        if expected != self.data.len() || shape_rows_cols(&self.shape) != (self.rows, self.cols) {
+            return Err("Character shape, cache, and payload disagree".into());
+        }
+        Ok(())
+    }
+
     pub fn new_row(s: &str) -> Self {
+        let data: Vec<char> = s.chars().collect();
+        let cols = data.len();
         CharArray {
-            data: s.chars().collect(),
-            shape: vec![1, s.chars().count()],
+            data: ExactArrayStorage::shared_unbounded(data),
+            shape: SharedShape::new_unmanaged(vec![1, cols]),
             rows: 1,
-            cols: s.chars().count(),
+            cols,
         }
     }
     pub fn new(data: Vec<char>, rows: usize, cols: usize) -> Result<Self, String> {
@@ -38,6 +51,53 @@ impl CharArray {
         }
         let (rows, cols) = shape_rows_cols(&shape);
         Ok(CharArray {
+            data: ExactArrayStorage::shared_unbounded(data),
+            shape: SharedShape::new_unmanaged(shape),
+            rows,
+            cols,
+        })
+    }
+
+    /// Publish already admitted payload and shape without a second backing.
+    /// The producer must have reserved both owners before its first effect.
+    pub fn from_admitted(
+        data: ExactArrayStorage<char>,
+        shape: SharedShape,
+    ) -> Result<Self, String> {
+        if !data.is_exact() || !shape.is_admitted() {
+            return Err("Character payload and shape require exact admission".into());
+        }
+        let expected = total_len(&shape)
+            .ok_or_else(|| "Char data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
+            return Err("Character payload length does not match admitted shape".into());
+        }
+        let (rows, cols) = shape_rows_cols(&shape);
+        Ok(Self {
+            data,
+            shape,
+            rows,
+            cols,
+        })
+    }
+
+    pub fn data(&self) -> &[char] {
+        self.data.as_slice()
+    }
+
+    /// Mutate only a unique, fixed-length owner. Exact aliases refuse.
+    pub fn try_data_mut_unique(&mut self) -> Option<&mut [char]> {
+        self.data.try_as_mut_slice_unique()
+    }
+
+    pub fn into_owned_data(self) -> Result<OwnedExactArrayValues<char>, Self> {
+        let Self {
+            data,
+            shape,
+            rows,
+            cols,
+        } = self;
+        data.try_into_owned().map_err(|data| Self {
             data,
             shape,
             rows,
@@ -77,23 +137,20 @@ impl CharArray {
         Self::new_with_shape(row_major, normalized)
     }
     pub fn to_column_major(&self) -> Vec<char> {
-        let rows = self.rows;
-        let cols = self.cols;
-        let pages = if self.shape.len() <= 2 {
-            1
-        } else {
-            self.shape[2..].iter().product()
-        };
-        let mut column_major = Vec::with_capacity(self.data.len());
-        for page in 0..pages {
-            let page_offset = page * rows * cols;
-            for col in 0..cols {
-                for row in 0..rows {
-                    column_major.push(self.data[page_offset + row * cols + col]);
-                }
-            }
-        }
-        column_major
+        self.iter_column_major().collect()
+    }
+
+    /// Visit MATLAB linear order without materializing a second character
+    /// payload. The array retains its backing for the iterator's lifetime.
+    pub fn iter_column_major(&self) -> impl ExactSizeIterator<Item = char> + '_ {
+        let page_len = self.rows * self.cols;
+        (0..self.data.len()).map(move |linear| {
+            let page = linear / page_len.max(1);
+            let within_page = linear % page_len.max(1);
+            let row = within_page % self.rows.max(1);
+            let col = within_page / self.rows.max(1);
+            self.data[page * page_len + row * self.cols + col]
+        })
     }
     pub fn shape(&self) -> &[usize] {
         &self.shape

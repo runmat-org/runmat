@@ -158,19 +158,24 @@ impl AlignedStorage {
     }
 }
 
-pub(super) fn prepare_arguments(
+pub(super) fn prepare_arguments<A: super::call::InvocationArguments + ?Sized>(
     symbol: &str,
     parameters: &[Parameter],
-    values: &[Value],
+    values: &A,
     metadata: &NativeLibraryMetadata,
     callbacks: &std::collections::BTreeMap<usize, *mut c_void>,
     pointers: &std::collections::BTreeMap<usize, *mut c_void>,
 ) -> Result<Vec<ArgumentSlot>, InvocationError> {
     parameters
         .iter()
-        .zip(values)
         .enumerate()
-        .map(|(index, (parameter, value))| {
+        .map(|(index, parameter)| {
+            let value = values.get(index).ok_or_else(|| InvocationError::Argument {
+                symbol: symbol.to_owned(),
+                argument: index + 1,
+                name: parameter.name.clone(),
+                message: "borrowed invocation argument is unavailable".into(),
+            })?;
             prepare_argument(
                 symbol, index, parameter, value, metadata, callbacks, pointers,
             )
@@ -586,7 +591,7 @@ pub(super) fn pointee_value(slot: &PointeeSlot, scalar: NativeScalar) -> Result<
                 .position(|byte| *byte == 0)
                 .unwrap_or(bytes.len());
             String::from_utf8(bytes[..end].to_vec())
-                .map(Value::String)
+                .map(Value::string)
                 .map_err(|error| format!("native string is not UTF-8: {error}"))
         }
         PointeeSlot::Structure(_) => Err("structured output decoding is handled separately".into()),

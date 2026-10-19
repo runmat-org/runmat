@@ -11,6 +11,49 @@ use super::outputs::{decode_output_parameters, decode_return, return_slot, Retur
 use super::pointer::PointerBinding;
 use super::InvocationError;
 
+/// Read-only invocation arguments. `get(i)` must return the same Value for
+/// every `i < len()` throughout one synchronous invocation. A missing
+/// declared argument receives an argument error before the foreign symbol is
+/// called; callers must uphold stable repeated reads themselves.
+/// A selected Runtime call may comprise
+/// separately rooted routing, immutable captures, and supplied values; the
+/// C ABI only needs indexed borrows during this synchronous invocation.
+pub trait InvocationArguments {
+    fn len(&self) -> usize;
+    fn get(&self, index: usize) -> Option<&Value>;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl InvocationArguments for [Value] {
+    fn len(&self) -> usize {
+        <[Value]>::len(self)
+    }
+    fn get(&self, index: usize) -> Option<&Value> {
+        <[Value]>::get(self, index)
+    }
+}
+
+impl InvocationArguments for Vec<Value> {
+    fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+    fn get(&self, index: usize) -> Option<&Value> {
+        self.as_slice().get(index)
+    }
+}
+
+impl<const N: usize> InvocationArguments for [Value; N] {
+    fn len(&self) -> usize {
+        N
+    }
+    fn get(&self, index: usize) -> Option<&Value> {
+        self.as_slice().get(index)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum InvocationValue {
     Value(Value),
@@ -42,10 +85,10 @@ pub fn invoke_symbol_with_callbacks(
     invoke_symbol_with_bindings(library, prototype, arguments, metadata, callbacks, &[])
 }
 
-pub fn invoke_symbol_with_bindings(
+pub fn invoke_symbol_with_bindings<A: InvocationArguments + ?Sized>(
     library: &LoadedLibrary,
     prototype: &SymbolPrototype,
-    arguments: &[Value],
+    arguments: &A,
     metadata: &NativeLibraryMetadata,
     callbacks: &[CallbackBinding<'_>],
     pointers: &[PointerBinding<'_>],

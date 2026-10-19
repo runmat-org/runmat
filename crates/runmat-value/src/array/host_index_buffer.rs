@@ -16,6 +16,10 @@ pub struct HostIndexBuffer {
 }
 
 impl HostIndexBuffer {
+    pub(crate) const fn exact_metadata_bytes() -> usize {
+        HostBuffer::<HostData<usize>>::exact_metadata_bytes()
+    }
+
     pub fn new(values: Vec<usize>) -> Self {
         Self {
             storage: HostBuffer::new(HostData::from_vec(values)),
@@ -33,6 +37,16 @@ impl HostIndexBuffer {
 
     pub fn len(&self) -> usize {
         self.storage.get().as_slice().len()
+    }
+
+    pub(crate) fn try_adopt_exact(
+        allocation: AdoptedHostAllocation,
+        len: usize,
+    ) -> Result<Self, String> {
+        let storage = HostData::try_adopt(allocation, len).map_err(|(_, detail)| detail)?;
+        let storage = HostBuffer::try_new_exact(storage)
+            .map_err(|_| "exact index owner allocation failed".to_string())?;
+        Ok(Self { storage })
     }
 
     pub fn is_empty(&self) -> bool {

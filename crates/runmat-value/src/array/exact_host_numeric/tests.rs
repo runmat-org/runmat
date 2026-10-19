@@ -63,6 +63,119 @@ fn integer_charge(payload_and_shape: usize) -> usize {
 }
 
 #[test]
+fn exact_sparse_csc_keeps_original_claims_until_final_value_drop() {
+    use std::num::NonZeroUsize;
+
+    for class in [
+        ExactHostSparseClass::Logical,
+        ExactHostSparseClass::Numeric(NumericDType::F32),
+        ExactHostSparseClass::Numeric(NumericDType::F64),
+        ExactHostSparseClass::Numeric(NumericDType::I8),
+        ExactHostSparseClass::Numeric(NumericDType::I16),
+        ExactHostSparseClass::Numeric(NumericDType::I32),
+        ExactHostSparseClass::Numeric(NumericDType::I64),
+        ExactHostSparseClass::Numeric(NumericDType::U8),
+        ExactHostSparseClass::Numeric(NumericDType::U16),
+        ExactHostSparseClass::Numeric(NumericDType::U32),
+        ExactHostSparseClass::Numeric(NumericDType::U64),
+        ExactHostSparseClass::Complex(NumericDType::F32),
+        ExactHostSparseClass::Complex(NumericDType::F64),
+    ] {
+        let charged =
+            ExactHostSparseTensorAllocation::requested_bytes_for_dimensions(class, 2, 1, 1)
+                .expect("CSC quote");
+        let quota = permit(charged);
+        let mut allocation =
+            ExactHostSparseTensorAllocation::new(class, 2, 1, 1, &quota).expect("admitted CSC");
+        assert_eq!(quota.retained.load(Ordering::SeqCst), charged);
+        assert_eq!(
+            quota.claims.load(Ordering::SeqCst),
+            class.retained_claim_count()
+        );
+        allocation.set_col_ptr(0, 0).unwrap();
+        allocation.set_col_ptr(1, 1).unwrap();
+        allocation.set_row_index(0, 1).unwrap();
+        let expected_numeric = match class {
+            ExactHostSparseClass::Logical => None,
+            ExactHostSparseClass::Numeric(dtype) => {
+                let scalar = match dtype {
+                    NumericDType::F32 => NumericScalar::F32(1.25),
+                    NumericDType::F64 => NumericScalar::F64(1.25),
+                    NumericDType::I8 => NumericScalar::I8(i8::MIN),
+                    NumericDType::I16 => NumericScalar::I16(i16::MIN),
+                    NumericDType::I32 => NumericScalar::I32(i32::MIN),
+                    NumericDType::I64 => NumericScalar::I64(i64::MIN),
+                    NumericDType::U8 => NumericScalar::U8(u8::MAX),
+                    NumericDType::U16 => NumericScalar::U16(u16::MAX),
+                    NumericDType::U32 => NumericScalar::U32(u32::MAX),
+                    NumericDType::U64 => NumericScalar::U64(u64::MAX),
+                };
+                allocation.set_numeric_value(0, scalar).unwrap();
+                Some(scalar)
+            }
+            ExactHostSparseClass::Complex(_) => {
+                allocation.set_complex_value(0, 2.0, -3.0).unwrap();
+                None
+            }
+        };
+        let mut validation = allocation.into_validation().expect("owned CSC validation");
+        while !validation.advance(NonZeroUsize::new(1).unwrap()).unwrap() {}
+        let sparse = validation.into_tensor().expect("validated CSC");
+        assert_eq!((sparse.rows, sparse.cols), (2, 1));
+        assert_eq!(&sparse.col_ptrs[..], &[0, 1]);
+        assert_eq!(&sparse.row_indices[..], &[1]);
+        if let Some(expected) = expected_numeric {
+            assert_eq!(sparse.numeric_value_at(0), Some(expected));
+        } else if matches!(class, ExactHostSparseClass::Complex(_)) {
+            assert_eq!(
+                sparse.complex_value_at(0),
+                Some(crate::ComplexElement(2.0, -3.0))
+            );
+        }
+        let alias = sparse.clone();
+        assert_eq!(sparse.col_ptrs.as_ptr(), alias.col_ptrs.as_ptr());
+        assert_eq!(sparse.row_indices.as_ptr(), alias.row_indices.as_ptr());
+        assert_eq!(quota.retained.load(Ordering::SeqCst), charged);
+        drop(sparse);
+        assert_eq!(quota.retained.load(Ordering::SeqCst), charged);
+        drop(alias);
+        assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+        assert_eq!(quota.claims.load(Ordering::SeqCst), 0);
+        let denied = permit(charged - 1);
+        assert!(ExactHostSparseTensorAllocation::new(class, 2, 1, 1, &denied).is_err());
+        assert_eq!(denied.retained.load(Ordering::SeqCst), 0);
+    }
+    assert!(
+        ExactHostSparseTensorAllocation::requested_bytes_for_dimensions(
+            ExactHostSparseClass::Logical,
+            1,
+            usize::MAX,
+            0
+        )
+        .is_err()
+    );
+
+    // CSC physical storage depends on the short pointer array and nnz, not
+    // on the mathematical dense rows × cols product.
+    let class = ExactHostSparseClass::Logical;
+    let charged =
+        ExactHostSparseTensorAllocation::requested_bytes_for_dimensions(class, usize::MAX, 2, 0)
+            .unwrap();
+    let quota = permit(charged);
+    let mut allocation =
+        ExactHostSparseTensorAllocation::new(class, usize::MAX, 2, 0, &quota).unwrap();
+    for column in 0..=2 {
+        allocation.set_col_ptr(column, 0).unwrap();
+    }
+    let mut validation = allocation.into_validation().unwrap();
+    while !validation.advance(NonZeroUsize::new(1).unwrap()).unwrap() {}
+    let sparse = validation.into_tensor().unwrap();
+    assert_eq!((sparse.rows, sparse.cols, sparse.nnz()), (usize::MAX, 2, 0));
+    drop(sparse);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn failed_release_metadata_allocation_refunds_the_retained_claim() {
     let quota = permit(32);
     let reservation = quota.reserve_exact_claim(32).expect("owned claim");
@@ -881,6 +994,75 @@ fn adopted_rust_vecs_keep_payload_and_shape_backings_until_exact_claim_refund() 
     ));
     assert_eq!(refused.retained.load(Ordering::SeqCst), 0);
     assert_eq!(refused.claims.load(Ordering::SeqCst), 0);
+
+    let mut integers = Vec::with_capacity(5);
+    integers.extend([1_u64 << 63, u64::MAX]);
+    let integer_pointer = integers.as_ptr();
+    let integer_shape = vec![1, 2];
+    let integer_charge = ExactHostTensorAllocation::adopted_requested_bytes(
+        NumericDType::U64,
+        integers.capacity(),
+        integer_shape.capacity(),
+    )
+    .unwrap();
+    let integer_quota = permit(integer_charge);
+    let integer = ExactHostTensorAllocation::adopt_u64_vec(integers, integer_shape, &integer_quota)
+        .expect("adopt exact U64 Vec");
+    let IntegerStorage::U64(integer_values) = integer.integer_storage().expect("integer") else {
+        panic!("preserve U64 class");
+    };
+    assert_eq!(integer_values.as_ptr(), integer_pointer);
+    assert_eq!(integer_values.as_slice(), &[1_u64 << 63, u64::MAX]);
+    drop(integer);
+    assert_eq!(integer_quota.retained.load(Ordering::SeqCst), 0);
+
+    let mut logical_values = Vec::with_capacity(6);
+    logical_values.extend([0_u8, 1]);
+    let logical_pointer = logical_values.as_ptr();
+    let logical_shape = vec![1, 2];
+    let logical_charge = ExactHostLogicalTensorAllocation::adopted_requested_bytes(
+        logical_values.capacity(),
+        logical_shape.capacity(),
+    )
+    .unwrap();
+    let logical_quota = permit(logical_charge);
+    let logical = ExactHostLogicalTensorAllocation::adopt_u8_vec(
+        logical_values,
+        logical_shape,
+        &logical_quota,
+    )
+    .expect("adopt logical Vec");
+    assert_eq!(logical.data.as_slice().as_ptr(), logical_pointer);
+    drop(logical);
+    assert_eq!(logical_quota.retained.load(Ordering::SeqCst), 0);
+
+    let mut interleaved = Vec::with_capacity(8);
+    interleaved.extend([1.0_f32, -2.0, 3.0, 4.0]);
+    let complex_pointer = interleaved.as_ptr();
+    let complex_shape = vec![1, 2];
+    let complex_charge = ExactHostComplexTensorAllocation::adopted_requested_bytes(
+        NumericDType::F32,
+        interleaved.capacity(),
+        complex_shape.capacity(),
+    )
+    .unwrap();
+    let complex_quota = permit(complex_charge);
+    let complex = ExactHostComplexTensorAllocation::adopt_f32_interleaved_vec(
+        interleaved,
+        complex_shape,
+        &complex_quota,
+    )
+    .expect("adopt interleaved complex Vec");
+    assert_eq!(
+        complex
+            .as_f32_slice()
+            .expect("complex F32")
+            .as_ptr()
+            .cast::<f32>(),
+        complex_pointer
+    );
+    drop(complex);
+    assert_eq!(complex_quota.retained.load(Ordering::SeqCst), 0);
 }
 
 #[test]
