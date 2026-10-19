@@ -86,7 +86,7 @@ pub(crate) fn reconcile_resource_request(
     }
     let mut actual_accelerators = BTreeMap::<&str, u64>::new();
     for usage in &actual.scheduler.accelerator_millis {
-        let total = actual_accelerators.entry(&usage.class).or_default();
+        let total = actual_accelerators.entry(usage.class.as_str()).or_default();
         *total = total
             .checked_add(usage.device_millis)
             .ok_or(ResourcePlanningError::Overflow("actual accelerator time"))?;
@@ -96,7 +96,7 @@ pub(crate) fn reconcile_resource_request(
         let millis = u64::from(accelerator.count)
             .checked_mul(request.max_wall_millis)
             .ok_or(ResourcePlanningError::Overflow("planned accelerator time"))?;
-        let total = planned_accelerators.entry(&accelerator.class).or_default();
+        let total = planned_accelerators.entry(accelerator.class.as_str()).or_default();
         *total = total
             .checked_add(millis)
             .ok_or(ResourcePlanningError::Overflow("planned accelerator time"))?;

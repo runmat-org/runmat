@@ -1,10 +1,12 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
 use crate::builtins::fea::constraints::support::frame::coordinate_frame_from_value;
 use crate::builtins::fea::values::{
     finite_numeric_scalar, finite_numeric_vector, finite_numeric_vector3,
+};
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
 };
 use runmat_analysis_core::{
     DirectionalCombination, ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy,
@@ -459,7 +461,9 @@ fn schemas() -> [Schema; 14] {
 pub(super) fn ensure_spectrum_policy_classes_registered() {
     static PORTABLE: Once = Once::new();
     static RUNTIME: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(AXIS_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            AXIS_CLASS,
+        ));
     PORTABLE.call_once(|| {
         for (class_name, type_identity, _) in schemas() {
             crate::execution::value_codec::register_immutable_value_class(
@@ -477,44 +481,12 @@ pub(super) fn ensure_spectrum_policy_classes_registered() {
     });
     RUNTIME.ensure(|| {
         for (class_name, _, methods) in schemas() {
-            register_class(class_name, methods);
+            register_value_class(
+                class_name,
+                immutable_properties(VALUE_FIELDS),
+                static_methods(methods.iter().copied()),
+            );
         }
-    });
-}
-
-fn register_class(class_name: &str, methods: &[(&str, &str)]) {
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: class_name.into(),
-        parent: None,
-        properties: HashMap::from([(
-            "value".into(),
-            crate::class_registry::RuntimeProperty {
-                name: "value".into(),
-                is_static: false,
-                is_constant: true,
-                is_dependent: false,
-                get_access: MemberAccess::Public,
-                set_access: MemberAccess::Private,
-                default_value: None,
-            },
-        )]),
-        methods: methods
-            .iter()
-            .map(|(name, builtin)| {
-                (
-                    (*name).into(),
-                    crate::class_registry::RuntimeMethod {
-                        name: (*name).into(),
-                        is_static: true,
-                        is_abstract: false,
-                        is_sealed: false,
-                        access: MemberAccess::Public,
-                        function_name: (*builtin).into(),
-                        implicit_class_argument: None,
-                    },
-                )
-            })
-            .collect(),
     });
 }
 

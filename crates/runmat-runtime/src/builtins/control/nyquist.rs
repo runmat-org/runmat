@@ -95,13 +95,21 @@ async fn render_plot(_response: &solver::NyquistResponse) -> BuiltinResult<()> {
 
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
     let rows = data.len();
-    Tensor::new(data, vec![rows, 1])
-        .map(Value::Tensor)
-        .map_err(|err| {
-            control_error(
-                BUILTIN_NAME,
-                "RunMat:nyquist:Internal",
-                format!("nyquist: failed to materialize response: {err}"),
-            )
-        })
+    shaped_tensor(data, vec![rows, 1])
+}
+
+#[cfg(feature = "plot-core")]
+fn row_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
+    let columns = data.len();
+    shaped_tensor(data, vec![1, columns])
+}
+
+fn shaped_tensor(data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
+    Tensor::new(data, shape).map(Value::Tensor).map_err(|err| {
+        control_error(
+            BUILTIN_NAME,
+            "RunMat:nyquist:Internal",
+            format!("nyquist: failed to materialize response: {err}"),
+        )
+    })
 }

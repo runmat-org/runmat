@@ -169,9 +169,6 @@ impl CadOverlayState {
             occupied.push(rect);
             let color = annotation_color(annotation.color);
             painter.rect_filled(rect, 3.0 * scale, theme.strip_bg.gamma_multiply(0.94));
-            #[cfg(not(target_arch = "wasm32"))]
-            painter.rect_stroke(rect, 3.0 * scale, egui::Stroke::new(1.0, color));
-            #[cfg(target_arch = "wasm32")]
             painter.rect_stroke(
                 rect,
                 3.0 * scale,

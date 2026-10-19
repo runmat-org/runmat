@@ -6,6 +6,10 @@ use crate::builtins::fea::values::{
     finite_numeric_scalar, finite_numeric_vector, finite_numeric_vector3,
     finite_numeric_vector3_samples,
 };
+use crate::class_registry::declaration::{
+    immutable_property, register_value_class, static_methods,
+};
+use crate::class_registry::RuntimeProperty;
 use runmat_analysis_core::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, ElectricCharge,
     ElectricChargeDensity, ElectricCurrentDensity, Force, HeatGenerationDensity, MassFlowRate,
@@ -14,7 +18,8 @@ use runmat_analysis_core::{
     SignalRepresentation, SignalShape, SignalValue, TabulatedSignal, TabulatedSignalDomain,
     Traction, VolumeFlowRate,
 };
-use runmat_execution::value::CallableValue;
+use runmat_execution::value::{CallableOwner, CallableValue};
+use runmat_types::{MemberAccess, MemberName};
 
 pub(super) const DISPLACEMENT_SIGNAL_CLASS: &str = "fea.DisplacementSignal";
 pub(super) const ROTATION_SIGNAL_CLASS: &str = "fea.RotationSignal";
@@ -539,13 +544,14 @@ pub(super) fn physical_signal_from_value(
             "expected a typed FEA signal object",
         ));
     };
-    let expected_quantity = signal_class_quantity(&object.class_name).ok_or_else(|| {
-        builtin_error(
-            builtin,
-            &ERROR_INPUT,
-            format!("unsupported FEA signal class `{}`", object.class_name),
-        )
-    })?;
+    let expected_quantity =
+        signal_class_quantity(object.class_name.display_name()).ok_or_else(|| {
+            builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("unsupported FEA signal class `{}`", object.class_name),
+            )
+        })?;
     let mut public_object = object.clone();
     public_object.properties.remove(FROZEN_GENERATOR_PROPERTY);
     let payload: SignalObject = object_payload(
@@ -613,7 +619,7 @@ fn frozen_generator_from_value(
     callable
         .validate_identity()
         .map_err(|error| builtin_error(builtin, &ERROR_INPUT, error.to_string()))?;
-    if !callable.owner_identity.starts_with("bound:") {
+    if !matches!(callable.owner, CallableOwner::Bound(_)) {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -703,7 +709,9 @@ pub(super) fn ensure_signal_classes_registered() {
     knots::ensure_signal_knot_class_registered();
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(DISPLACEMENT_SIGNAL_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            DISPLACEMENT_SIGNAL_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         for (class_name, type_identity, _, _) in signal_schemas() {
             crate::execution::value_codec::register_immutable_value_class(
@@ -723,26 +731,16 @@ pub(super) fn ensure_signal_classes_registered() {
     });
     RUNTIME_CLASSES.ensure(|| {
         for (class_name, _, method_name, builtin_name) in signal_schemas() {
-            let mut methods =
-                HashMap::from([(method_name.into(), static_method(method_name, builtin_name))]);
-            methods.insert(
-                "fromTimeSamples".into(),
-                static_method("fromTimeSamples", time_sample_builtin(class_name)),
+            register_value_class(
+                class_name,
+                signal_properties(),
+                static_methods([
+                    (method_name, builtin_name),
+                    ("fromTimeSamples", time_sample_builtin(class_name)),
+                    ("fromTimeKnots", time_knot_builtin(class_name)),
+                    ("fromFunction", callable::callable_builtin(class_name)),
+                ]),
             );
-            methods.insert(
-                "fromTimeKnots".into(),
-                static_method("fromTimeKnots", time_knot_builtin(class_name)),
-            );
-            methods.insert(
-                "fromFunction".into(),
-                static_method("fromFunction", callable::callable_builtin(class_name)),
-            );
-            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.into(),
-                parent: None,
-                properties: signal_properties(),
-                methods,
-            });
         }
     });
 }
@@ -831,47 +829,18 @@ fn validate_signal_object(object: &ObjectInstance) -> Result<(), String> {
     Ok(())
 }
 
-fn signal_properties() -> HashMap<String, crate::class_registry::RuntimeProperty> {
-    let mut properties = immutable_properties(SIGNAL_FIELDS);
-    properties
-        .get_mut(FROZEN_GENERATOR_PROPERTY)
-        .expect("frozen generator property is registered")
-        .get_access = MemberAccess::Private;
-    properties
-}
-
-fn immutable_properties(
-    fields: &[&str],
-) -> HashMap<String, crate::class_registry::RuntimeProperty> {
-    fields
+fn signal_properties() -> HashMap<MemberName, RuntimeProperty> {
+    SIGNAL_FIELDS
         .iter()
         .map(|field| {
-            (
-                (*field).into(),
-                crate::class_registry::RuntimeProperty {
-                    name: (*field).into(),
-                    is_static: false,
-                    is_constant: true,
-                    is_dependent: false,
-                    get_access: MemberAccess::Public,
-                    set_access: MemberAccess::Private,
-                    default_value: None,
-                },
-            )
+            let get_access = if *field == FROZEN_GENERATOR_PROPERTY {
+                MemberAccess::Private
+            } else {
+                MemberAccess::Public
+            };
+            immutable_property(field, get_access)
         })
         .collect()
-}
-
-fn static_method(method: &str, builtin: &str) -> crate::class_registry::RuntimeMethod {
-    crate::class_registry::RuntimeMethod {
-        name: method.into(),
-        is_static: true,
-        is_abstract: false,
-        is_sealed: false,
-        access: MemberAccess::Public,
-        function_name: builtin.into(),
-        implicit_class_argument: None,
-    }
 }
 
 type SignalSchema = (&'static str, &'static str, &'static str, &'static str);

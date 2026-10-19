@@ -5,6 +5,9 @@ use super::*;
 use crate::analysis::value_admission::{
     admit_borrowed_real64, AdmittedReal64Array, AnalysisValueAdmissionPolicy,
 };
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 
 pub(super) const DISPLACEMENT_CLASS: &str = "fea.Displacement";
 pub(super) const ROTATION_CLASS: &str = "fea.Rotation";
@@ -589,7 +592,9 @@ vector_quantity_builtin!(
 pub(super) fn ensure_quantity_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(DISPLACEMENT_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            DISPLACEMENT_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         for (class_name, type_identity, fields) in quantity_schemas() {
             crate::execution::value_codec::register_immutable_value_class(
@@ -609,12 +614,11 @@ pub(super) fn ensure_quantity_classes_registered() {
     });
     RUNTIME_CLASSES.ensure(|| {
         for (class_name, _, fields) in quantity_schemas() {
-            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.into(),
-                parent: None,
-                properties: immutable_properties(fields),
-                methods: quantity_methods(class_name),
-            });
+            register_value_class(
+                class_name,
+                immutable_properties(fields),
+                quantity_methods(class_name),
+            );
         }
     });
 }
@@ -704,29 +708,7 @@ fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]);
     ]
 }
 
-fn immutable_properties(
-    fields: &[&str],
-) -> HashMap<String, crate::class_registry::RuntimeProperty> {
-    fields
-        .iter()
-        .map(|field| {
-            (
-                (*field).into(),
-                crate::class_registry::RuntimeProperty {
-                    name: (*field).into(),
-                    is_static: false,
-                    is_constant: true,
-                    is_dependent: false,
-                    get_access: MemberAccess::Public,
-                    set_access: MemberAccess::Private,
-                    default_value: None,
-                },
-            )
-        })
-        .collect()
-}
-
-fn quantity_methods(class_name: &str) -> HashMap<String, crate::class_registry::RuntimeMethod> {
+fn quantity_methods(class_name: &str) -> HashMap<MethodName, RuntimeMethod> {
     let names: &[(&str, &str)] = match class_name {
         DISPLACEMENT_CLASS => &[
             ("meters", "fea.Displacement.meters"),
@@ -799,42 +781,28 @@ fn quantity_methods(class_name: &str) -> HashMap<String, crate::class_registry::
         }
         _ => unreachable!("quantity schemas contain only known classes"),
     };
-    names
-        .iter()
-        .map(|(name, function_name)| {
-            (
-                (*name).into(),
-                crate::class_registry::RuntimeMethod {
-                    name: (*name).into(),
-                    is_static: true,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: MemberAccess::Public,
-                    function_name: (*function_name).into(),
-                    implicit_class_argument: None,
-                },
-            )
-        })
-        .collect()
+    static_methods(names.iter().copied())
 }
 
 fn validate_quantity_object(object: &ObjectInstance) -> Result<(), String> {
     let fields = quantity_schemas()
         .into_iter()
-        .find(|(class_name, _, _)| *class_name == object.class_name)
+        .find(|(class_name, _, _)| *class_name == object.class_name.display_name())
         .map(|(_, _, fields)| fields)
         .ok_or_else(|| format!("unknown FEA quantity class `{}`", object.class_name))?;
     let Some(value) = object.properties.get(fields[0]) else {
         return Err(format!("{} is missing `{}`", object.class_name, fields[0]));
     };
-    if object.class_name == POSITION_CLASS || object.class_name == TRANSLATION_CLASS {
+    if object.class_name.display_name() == POSITION_CLASS
+        || object.class_name.display_name() == TRANSLATION_CLASS
+    {
         finite_numeric_vector3("FEA vector quantity", value, "components")
             .map(|_| ())
             .map_err(|error| error.message().to_string())
     } else {
         let value = finite_numeric_scalar("FEA quantity", value, fields[0])
             .map_err(|error| error.message().to_string())?;
-        validate_quantity_range(&object.class_name, value)
+        validate_quantity_range(object.class_name.display_name(), value)
     }
 }
 
@@ -882,7 +850,7 @@ pub(super) fn quantity_to_value(
     validate_quantity_range(class_name, value)
         .map_err(|message| builtin_error(builtin, &ERROR_INPUT, message))?;
     ensure_quantity_classes_registered();
-    let mut object = ObjectInstance::new(class_name.into());
+    let mut object = ObjectInstance::new(class_name);
     object.properties.insert(field.into(), Value::Num(value));
     Ok(Value::Object(object))
 }
@@ -893,7 +861,7 @@ fn vector_quantity_to_value(
     coordinates: [f64; 3],
 ) -> BuiltinResult<Value> {
     ensure_quantity_classes_registered();
-    let mut object = ObjectInstance::new(class_name.into());
+    let mut object = ObjectInstance::new(class_name);
     let tensor = Tensor::new_2d(coordinates.to_vec(), 1, 3).map_err(|error| {
         builtin_error(
             builtin,
@@ -920,7 +888,7 @@ pub(super) fn quantity_scalar(
             format!("expected {class_name}"),
         ));
     };
-    if object.class_name != class_name {
+    if object.class_name.display_name() != class_name {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -958,7 +926,7 @@ fn vector_quantity(
             format!("expected {class_name}"),
         ));
     };
-    if object.class_name != class_name {
+    if object.class_name.display_name() != class_name {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -1017,7 +985,7 @@ pub(super) fn finite_numeric_vector3(
             format!("{label} must be a 1-by-3 or 3-by-1 real numeric vector"),
         ));
     };
-    if tensor.shape != [1, 3] && tensor.shape != [3, 1] {
+    if tensor.shape() != [1, 3] && tensor.shape() != [3, 1] {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -1055,9 +1023,9 @@ pub(super) fn finite_numeric_vector(
             format!("{label} must be a real numeric row or column vector"),
         ));
     };
-    if tensor.shape.len() != 2
-        || (tensor.shape[0] != 1 && tensor.shape[1] != 1)
-        || tensor.shape[0].saturating_mul(tensor.shape[1]) == 0
+    if tensor.shape().len() != 2
+        || (tensor.shape()[0] != 1 && tensor.shape()[1] != 1)
+        || tensor.shape()[0].saturating_mul(tensor.shape()[1]) == 0
     {
         return Err(builtin_error(
             builtin,
@@ -1094,7 +1062,7 @@ pub(super) fn finite_numeric_vector3_samples(
             format!("{label} must be an N-by-3 or 3-by-N real numeric matrix"),
         ));
     };
-    let [rows, columns] = tensor.shape.as_slice() else {
+    let [rows, columns] = tensor.shape() else {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,

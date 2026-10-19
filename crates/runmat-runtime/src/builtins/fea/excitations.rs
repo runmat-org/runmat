@@ -4,6 +4,9 @@ use std::sync::Once;
 use super::*;
 use crate::builtins::fea::constraints::require_geometry_binding;
 use crate::builtins::geometry::region::region_ref_from_value;
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use runmat_analysis_core::{
     AnalysisExcitation, ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution,
     ExcitationId, ExcitationKinematics, ProjectionRequirement,
@@ -710,7 +713,7 @@ pub(super) fn bound_excitation_vec_from_value(
                     ),
                 ));
             };
-            let class_name = excitation_class_name(&object.class_name).ok_or_else(|| {
+            let class_name = excitation_class_name(object.class_name.display_name()).ok_or_else(|| {
                 builtin_error(
                     builtin,
                     &ERROR_INPUT,
@@ -764,9 +767,7 @@ fn action_class(action: &ExcitationAction) -> &'static str {
         ExcitationAction::AcousticPressure(_)
         | ExcitationAction::AcousticIncidentPressure(_)
         | ExcitationAction::NormalVelocity(_)
-        | ExcitationAction::VolumeVelocity(_) => {
-            ACOUSTIC_EXCITATION_CLASS
-        }
+        | ExcitationAction::VolumeVelocity(_) => ACOUSTIC_EXCITATION_CLASS,
         ExcitationAction::InletVelocity(_)
         | ExcitationAction::MassFlow(_)
         | ExcitationAction::WallMotion(_) => FLUID_EXCITATION_CLASS,
@@ -776,7 +777,9 @@ fn action_class(action: &ExcitationAction) -> &'static str {
 pub(super) fn ensure_excitation_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(STRUCTURAL_EXCITATION_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            STRUCTURAL_EXCITATION_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         for (class_name, type_identity) in excitation_schemas() {
             crate::execution::value_codec::register_immutable_value_class(
@@ -807,32 +810,21 @@ pub(super) fn ensure_excitation_classes_registered() {
     });
     RUNTIME_CLASSES.ensure(|| {
         for (class_name, _) in excitation_schemas() {
-            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.into(),
-                parent: None,
-                properties: immutable_properties(EXCITATION_FIELDS),
-                methods: excitation_methods(class_name),
-            });
+            register_value_class(
+                class_name,
+                immutable_properties(EXCITATION_FIELDS),
+                excitation_methods(class_name),
+            );
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: EXCITATION_CASE_CLASS.into(),
-            parent: None,
-            properties: immutable_properties(CASE_FIELDS),
-            methods: HashMap::from([
-                (
-                    "always".into(),
-                    static_method("always", "fea.ExcitationCase.always"),
-                ),
-                (
-                    "duringSteps".into(),
-                    static_method("duringSteps", "fea.ExcitationCase.duringSteps"),
-                ),
-                (
-                    "mutuallyExclusive".into(),
-                    static_method("mutuallyExclusive", "fea.ExcitationCase.mutuallyExclusive"),
-                ),
+        register_value_class(
+            EXCITATION_CASE_CLASS,
+            immutable_properties(CASE_FIELDS),
+            static_methods([
+                ("always", "fea.ExcitationCase.always"),
+                ("duringSteps", "fea.ExcitationCase.duringSteps"),
+                ("mutuallyExclusive", "fea.ExcitationCase.mutuallyExclusive"),
             ]),
-        });
+        );
     });
 }
 
@@ -853,7 +845,7 @@ fn excitation_schemas() -> [(&'static str, &'static str); 6] {
     ]
 }
 
-fn excitation_methods(class_name: &str) -> HashMap<String, crate::class_registry::RuntimeMethod> {
+fn excitation_methods(class_name: &str) -> HashMap<MethodName, RuntimeMethod> {
     let methods: &[(&str, &str)] = match class_name {
         STRUCTURAL_EXCITATION_CLASS => &[
             ("force", "fea.StructuralExcitation.force"),
@@ -895,44 +887,7 @@ fn excitation_methods(class_name: &str) -> HashMap<String, crate::class_registry
         ],
         _ => unreachable!("excitation schemas contain only known classes"),
     };
-    methods
-        .iter()
-        .map(|(name, builtin)| ((*name).into(), static_method(name, builtin)))
-        .collect()
-}
-
-fn immutable_properties(
-    fields: &[&str],
-) -> HashMap<String, crate::class_registry::RuntimeProperty> {
-    fields
-        .iter()
-        .map(|field| {
-            (
-                (*field).into(),
-                crate::class_registry::RuntimeProperty {
-                    name: (*field).into(),
-                    is_static: false,
-                    is_constant: true,
-                    is_dependent: false,
-                    get_access: MemberAccess::Public,
-                    set_access: MemberAccess::Private,
-                    default_value: None,
-                },
-            )
-        })
-        .collect()
-}
-
-fn static_method(name: &str, builtin: &str) -> crate::class_registry::RuntimeMethod {
-    crate::class_registry::RuntimeMethod {
-        name: name.into(),
-        is_static: true,
-        is_abstract: false,
-        is_sealed: false,
-        access: MemberAccess::Public,
-        function_name: builtin.into(),
-        implicit_class_argument: None,
-    }
+    static_methods(methods.iter().copied())
 }
 
 fn validate_excitation_object(object: &ObjectInstance) -> Result<(), String> {
@@ -989,7 +944,7 @@ mod tests {
 
     fn region() -> Value {
         ensure_region_class_registered();
-        let mut object = ObjectInstance::new(GEOMETRY_REGION_CLASS.into());
+        let mut object = ObjectInstance::new(GEOMETRY_REGION_CLASS);
         object
             .properties
             .insert("geometry_id".into(), Value::String("geom".into()));

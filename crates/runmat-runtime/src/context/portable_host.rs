@@ -48,7 +48,7 @@ impl PortableConsoleHost {
 }
 
 impl RuntimeHostService for PortableConsoleHost {
-    fn console(&self, stream: ConsoleStream, text: String) {
+    fn console(&self, stream: ConsoleStream, text: crate::console::ConsoleText) {
         if self.failure.borrow().is_some() {
             return;
         }
@@ -58,7 +58,7 @@ impl RuntimeHostService for PortableConsoleHost {
             .ok_or_else(|| "console capture already sealed".to_string())
             .and_then(|capture| {
                 capture
-                    .push(stream, text)
+                    .push(stream, text.as_str().to_owned())
                     .map_err(|error| error.to_string())
             });
         let result = result.and_then(|()| {
@@ -114,7 +114,7 @@ impl RuntimeHostService for PortableConsoleHost {
 /// imply a complete transcript. Other noninteractive policy is identical.
 pub struct NonCapturingPortableHost;
 impl RuntimeHostService for NonCapturingPortableHost {
-    fn console(&self, _stream: ConsoleStream, _text: String) {}
+    fn console(&self, _stream: ConsoleStream, _text: crate::console::ConsoleText) {}
     fn owns_console_retention(&self) -> bool {
         true
     }

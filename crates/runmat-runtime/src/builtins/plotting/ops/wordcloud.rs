@@ -912,6 +912,7 @@ fn render_wordcloud(data: WordCloudData, options: WordCloudOptions) -> BuiltinRe
         PlotRenderOptions {
             grid: false,
             axis_equal: true,
+            ..Default::default()
         },
         move |figure, axes| {
             *axes_out.borrow_mut() = Some(axes);

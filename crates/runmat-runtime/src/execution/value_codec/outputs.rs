@@ -60,7 +60,7 @@ pub fn decode_inline_outputs(
         .iter()
         .map(decode_inline_value)
         .collect::<Result<Vec<_>, _>>()
-        .map(Value::OutputList)
+        .map(Value::output_list)
 }
 
 #[cfg(test)]

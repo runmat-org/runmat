@@ -1,9 +1,10 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use super::super::*;
-use super::{register_runtime_class, static_method};
 use crate::builtins::fea::values::{position_meters, POSITION_CLASS};
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use runmat_analysis_core::{Position, ReferencePoint};
 
@@ -55,7 +56,7 @@ pub async fn reference_point_from_coordinates_builtin(
     validate_id("fea.ReferencePoint.fromCoordinates", &id)?;
     position_meters("fea.ReferencePoint.fromCoordinates", &position)?;
     ensure_reference_point_class_registered();
-    let mut object = ObjectInstance::new(REFERENCE_POINT_CLASS.into());
+    let mut object = ObjectInstance::new(REFERENCE_POINT_CLASS);
     object
         .properties
         .insert("reference_point_id".into(), Value::String(id));
@@ -74,7 +75,7 @@ pub(crate) fn reference_point_from_value(
             format!("expected {REFERENCE_POINT_CLASS}"),
         ));
     };
-    if object.class_name != REFERENCE_POINT_CLASS {
+    if object.class_name.display_name() != REFERENCE_POINT_CLASS {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -110,7 +111,9 @@ pub(crate) fn reference_point_from_value(
 pub(super) fn ensure_reference_point_class_registered() {
     static PORTABLE_SCHEMA: Once = Once::new();
     static RUNTIME_CLASS: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(REFERENCE_POINT_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            REFERENCE_POINT_CLASS,
+        ));
     PORTABLE_SCHEMA.call_once(|| {
         register_immutable_value_class(ImmutableValueClassSchema {
             class_name: REFERENCE_POINT_CLASS,
@@ -123,13 +126,10 @@ pub(super) fn ensure_reference_point_class_registered() {
         .unwrap_or_else(|error| panic!("failed to register typed reference point: {error}"));
     });
     RUNTIME_CLASS.ensure(|| {
-        register_runtime_class(
+        register_value_class(
             REFERENCE_POINT_CLASS,
-            REFERENCE_POINT_FIELDS,
-            HashMap::from([(
-                "fromCoordinates".into(),
-                static_method("fromCoordinates", "fea.ReferencePoint.fromCoordinates"),
-            )]),
+            immutable_properties(REFERENCE_POINT_FIELDS),
+            static_methods([("fromCoordinates", "fea.ReferencePoint.fromCoordinates")]),
         );
     });
 }
@@ -141,7 +141,7 @@ fn validate_reference_point_object(object: &ObjectInstance) -> Result<(), String
     );
     let position_valid = matches!(
         object.properties.get("position"),
-        Some(Value::Object(value)) if value.class_name == POSITION_CLASS
+        Some(Value::Object(value)) if value.class_name.display_name() == POSITION_CLASS
     );
     if !id_valid || !position_valid {
         return Err(

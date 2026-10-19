@@ -144,7 +144,7 @@ pub async fn target_path(positions: Value) -> BuiltinResult<Value> {
             "positions must be an N-by-3 host numeric matrix",
         ));
     };
-    let shape = &tensor.shape;
+    let shape = &tensor.shape();
     if shape.len() != 2 || shape[1] != 3 || shape[0] < 2 {
         return Err(builtin_error(
             NAME,

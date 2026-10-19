@@ -261,7 +261,12 @@ impl Driver {
                     reason,
                 });
                 for task_id in tasks {
-                    self.cancel_task(task_id, now_millis, &mut actions)?;
+                    self.cancel_task(
+                        task_id,
+                        now_millis,
+                        crate::TaskCancellationCause::Task { task_id, reason },
+                        &mut actions,
+                    )?;
                 }
             }
             DriverCommand::Tick { now_millis } => {

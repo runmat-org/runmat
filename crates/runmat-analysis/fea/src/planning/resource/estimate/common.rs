@@ -35,7 +35,7 @@ pub(super) fn validate_common(
     }
     let mut accelerator_classes = std::collections::BTreeSet::new();
     for accelerator in &input.worker.accelerators {
-        if accelerator.class.trim().is_empty()
+        if accelerator.class.as_str().trim().is_empty()
             || accelerator.count == 0
             || accelerator.memory_bytes_each.0 == 0
             || !accelerator_classes.insert(accelerator.class.as_str())

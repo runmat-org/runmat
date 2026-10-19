@@ -1,4 +1,4 @@
-use crate::task::{AttemptRecord, AttemptSuccess, ResultCommit, TaskRecord};
+use crate::task::{AttemptRecord, ResultCommit, TaskRecord};
 use crate::{RunnerError, RunnerResult};
 use runmat_execution::identity::AttemptId;
 use runmat_execution::state::{AttemptState, TaskState};
@@ -108,17 +108,13 @@ pub(crate) fn validate_commit(task: &TaskRecord, history: &[&AttemptRecord]) -> 
     }
     if attempt.terminal.as_ref().is_none_or(|terminal| {
         terminal.disposition != crate::task::AttemptDisposition::Succeeded
-            || terminal.resources != commit.resources
+            || terminal.resources.as_deref() != commit.result.resources()
     }) {
         return Err(RunnerError::Invalid(
             "commit differs from original terminal attempt evidence".into(),
         ));
     }
-    let success = AttemptSuccess {
-        outputs: commit.outputs.clone(),
-        result_objects: commit.result_objects.clone(),
-        resources: commit.resources.clone(),
-    };
+    let success = commit.result.clone();
     success
         .validate_against(&attempt.request)
         .map_err(RunnerError::Invalid)?;

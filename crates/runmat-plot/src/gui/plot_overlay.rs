@@ -1452,9 +1452,6 @@ impl PlotOverlay {
                     .into_iter();
             for (i, cell_rect) in rects.iter().enumerate() {
                 let cell_rect = Self::positioned_axes_outer_rect(*cell_rect, plot_renderer, i);
-                let cam = plot_renderer
-                    .axes_camera(i)
-                    .unwrap_or_else(|| plot_renderer.camera());
                 let panel_layout = panel_layouts
                     .next()
                     .expect("one panel layout per subplot cell");

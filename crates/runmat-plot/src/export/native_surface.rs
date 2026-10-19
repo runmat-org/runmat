@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use runmat_accelerate_api::{WgpuDeviceAccess, WgpuEmission};
 use std::{any::Any, panic};
 
@@ -85,8 +86,7 @@ pub struct NativeSurfaceCameraState {
 /// or reconstruct layout, so text, antialiasing, and all overlays are preserved.
 pub struct PresentedFrame {
     texture: wgpu::Texture,
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    access: runmat_accelerate_api::WgpuDeviceAccess,
 }
 
 impl PresentedFrame {
@@ -97,44 +97,48 @@ impl PresentedFrame {
     pub async fn rgba(&self) -> Result<Vec<u8>, String> {
         let (width, height) = self.size();
         let stride = (width * 4).div_ceil(256) * 256;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("presented frame readback"),
-            size: u64::from(stride) * u64::from(height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("presented frame readback"),
-            });
-        encoder.copy_texture_to_buffer(
-            crate::wgpu_compat::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            crate::wgpu_compat::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: crate::wgpu_compat::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(stride),
-                    rows_per_image: Some(height),
-                },
-            },
-            self.texture.size(),
-        );
-        self.queue.submit(Some(encoder.finish()));
-        let slice = buffer.slice(..);
-        map_read_async(&self.device, &slice).await?;
-        let data = slice.get_mapped_range();
+        let byte_len = stride as usize * height as usize;
+        let buffer = self
+            .access
+            .with_shared(|emission| {
+                let buffer = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("presented frame readback"),
+                    size: byte_len as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("presented frame readback"),
+                        });
+                encoder.copy_texture_to_buffer(
+                    crate::wgpu_compat::TexelCopyTextureInfo {
+                        texture: &self.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    crate::wgpu_compat::TexelCopyBufferInfo {
+                        buffer: &buffer,
+                        layout: crate::wgpu_compat::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(stride),
+                            rows_per_image: Some(height),
+                        },
+                    },
+                    self.texture.size(),
+                );
+                emission.queue().submit(Some(encoder.finish()));
+                buffer
+            })
+            .map_err(|error| error.to_string())?;
+        let data = crate::gpu::util::readback_bytes(&self.access, &buffer, byte_len).await?;
         let mut rgba = Vec::with_capacity((width * height * 4) as usize);
         for row in data.chunks_exact(stride as usize) {
             rgba.extend_from_slice(&row[..(width * 4) as usize]);
         }
-        drop(data);
-        buffer.unmap();
         if matches!(
             self.texture.format(),
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
@@ -210,18 +214,15 @@ impl NativeSurfaceRenderContext {
     /// Keep the final native output on the GPU; CPU readback is deferred until
     /// an actual overlay handoff. Never overwrite a frame held by a reader.
     pub fn retain_presented_frame(&mut self, source: &wgpu::Texture) {
-        let device = self.renderer.wgpu_renderer.device.clone();
-        let queue = self.renderer.wgpu_renderer.queue.clone();
-        let frame = self
-            .presented_frame
-            .take()
-            .filter(|frame| {
-                Arc::strong_count(frame) == 1
-                    && frame.texture.size() == source.size()
-                    && frame.texture.format() == source.format()
-            })
-            .unwrap_or_else(|| {
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
+        let access = self.renderer.wgpu_renderer.access.clone();
+        let reusable = self.presented_frame.take().filter(|frame| {
+            Arc::strong_count(frame) == 1
+                && frame.texture.size() == source.size()
+                && frame.texture.format() == source.format()
+        });
+        let retained = access.with_shared(|emission| {
+            let frame = reusable.unwrap_or_else(|| {
+                let texture = emission.device().create_texture(&wgpu::TextureDescriptor {
                     label: Some("completed native frame"),
                     size: source.size(),
                     mip_level_count: 1,
@@ -233,30 +234,35 @@ impl NativeSurfaceRenderContext {
                 });
                 Arc::new(PresentedFrame {
                     texture,
-                    device: device.clone(),
-                    queue: queue.clone(),
+                    access: access.clone(),
                 })
             });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("retain native frame"),
+            let mut encoder =
+                emission
+                    .device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("retain native frame"),
+                    });
+            encoder.copy_texture_to_texture(
+                crate::wgpu_compat::TexelCopyTextureInfo {
+                    texture: source,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                crate::wgpu_compat::TexelCopyTextureInfo {
+                    texture: &frame.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                source.size(),
+            );
+            emission.queue().submit(Some(encoder.finish()));
+            frame
         });
-        encoder.copy_texture_to_texture(
-            crate::wgpu_compat::TexelCopyTextureInfo {
-                texture: source,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            crate::wgpu_compat::TexelCopyTextureInfo {
-                texture: &frame.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            source.size(),
-        );
-        queue.submit(Some(encoder.finish()));
-        self.presented_frame = Some(frame);
+        // A gate failure leaves no stale frame: readers must not observe it.
+        self.presented_frame = retained.ok();
     }
 
     pub fn presented_frame(&self) -> Option<Arc<PresentedFrame>> {

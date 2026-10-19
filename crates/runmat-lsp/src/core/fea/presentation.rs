@@ -75,6 +75,7 @@ fn type_pattern_name(pattern: &OperationTypePattern) -> String {
         OperationTypePattern::Style => "style".to_string(),
         OperationTypePattern::PropertyName => "property_name".to_string(),
         OperationTypePattern::PropertyValue => "property_value".to_string(),
+        OperationTypePattern::Callable => "callable".to_string(),
         OperationTypePattern::Analysis(value) => format!("analysis<{value:?}>"),
         OperationTypePattern::List(value) => format!("list<{}>", type_pattern_name(value)),
     }

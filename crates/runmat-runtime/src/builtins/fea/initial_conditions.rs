@@ -1,9 +1,11 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
 use crate::builtins::fea::constraints::require_geometry_binding;
 use crate::builtins::geometry::region::region_ref_from_value;
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use runmat_analysis_core::{
     InitialCondition, InitialConditionTarget, InitialConditionValue, InitialValue, PhysicalSignal,
     SignalId, SignalShape,
@@ -160,7 +162,7 @@ fn target_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<(Option<(String, u32)>, InitialConditionTarget)> {
-    if matches!(value, Value::Object(object) if object.class_name == TARGET_CLASS) {
+    if matches!(value, Value::Object(object) if object.class_name.display_name() == TARGET_CLASS) {
         let target: WholeModelTarget = object_payload(builtin, value, TARGET_CLASS)?;
         if !target.whole_model {
             return Err(builtin_error(
@@ -357,16 +359,17 @@ pub(super) fn initial_condition_vec_from_value(
                     "initial-condition cells may contain only typed objects",
                 ));
             };
-            let class_name = condition_class(&object.class_name).ok_or_else(|| {
-                builtin_error(
-                    builtin,
-                    &ERROR_INPUT,
-                    format!(
-                        "unsupported FEA initial-condition class `{}`",
-                        object.class_name
-                    ),
-                )
-            })?;
+            let class_name =
+                condition_class(object.class_name.display_name()).ok_or_else(|| {
+                    builtin_error(
+                        builtin,
+                        &ERROR_INPUT,
+                        format!(
+                            "unsupported FEA initial-condition class `{}`",
+                            object.class_name
+                        ),
+                    )
+                })?;
             object_payload(builtin, value, class_name)
         })
         .collect()
@@ -387,7 +390,9 @@ fn condition_class(class_name: &str) -> Option<&'static str> {
 pub(super) fn ensure_initial_condition_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(TARGET_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            TARGET_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         crate::execution::value_codec::register_immutable_value_class(
             crate::execution::value_codec::ImmutableValueClassSchema {
@@ -415,13 +420,17 @@ pub(super) fn ensure_initial_condition_classes_registered() {
         }
     });
     RUNTIME_CLASSES.ensure(|| {
-        register_class(
+        register_value_class(
             TARGET_CLASS,
-            TARGET_FIELDS,
-            &[("wholeModel", "fea.InitialConditionTarget.wholeModel")],
+            immutable_properties(TARGET_FIELDS),
+            static_methods([("wholeModel", "fea.InitialConditionTarget.wholeModel")]),
         );
         for (class_name, _, methods) in condition_schemas() {
-            register_class(class_name, CONDITION_FIELDS, methods);
+            register_value_class(
+                class_name,
+                immutable_properties(CONDITION_FIELDS),
+                static_methods(methods.iter().copied()),
+            );
         }
     });
 }
@@ -483,47 +492,6 @@ fn condition_schemas() -> [ConditionSchema; 6] {
     ]
 }
 
-fn register_class(class_name: &str, fields: &[&str], methods: &[(&str, &str)]) {
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: class_name.into(),
-        parent: None,
-        properties: fields
-            .iter()
-            .map(|field| {
-                (
-                    (*field).into(),
-                    crate::class_registry::RuntimeProperty {
-                        name: (*field).into(),
-                        is_static: false,
-                        is_constant: true,
-                        is_dependent: false,
-                        get_access: MemberAccess::Public,
-                        set_access: MemberAccess::Private,
-                        default_value: None,
-                    },
-                )
-            })
-            .collect(),
-        methods: methods
-            .iter()
-            .map(|(name, builtin)| {
-                (
-                    (*name).into(),
-                    crate::class_registry::RuntimeMethod {
-                        name: (*name).into(),
-                        is_static: true,
-                        is_abstract: false,
-                        is_sealed: false,
-                        access: MemberAccess::Public,
-                        function_name: (*builtin).into(),
-                        implicit_class_argument: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>(),
-    });
-}
-
 fn validate_target_object(object: &ObjectInstance) -> Result<(), String> {
     if matches!(
         object.properties.get("whole_model"),
@@ -563,7 +531,7 @@ mod tests {
 
     fn region() -> Value {
         ensure_region_class_registered();
-        let mut object = ObjectInstance::new(GEOMETRY_REGION_CLASS.into());
+        let mut object = ObjectInstance::new(GEOMETRY_REGION_CLASS);
         object
             .properties
             .insert("geometry_id".into(), Value::String("geom".into()));

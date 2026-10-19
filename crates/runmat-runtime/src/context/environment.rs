@@ -64,7 +64,7 @@ impl super::RuntimeContext {
         let environment = EnvironmentState::from_snapshot(entries)?;
         Ok(Self::with_environment_state(
             execution,
-            cancellation,
+            runmat_execution::CancellationToken::from_shared(cancellation),
             environment,
         ))
     }

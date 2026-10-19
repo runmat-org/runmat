@@ -321,7 +321,7 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
     }) as FeaProgressHandler);
     runmat_analysis_fea::replace_fea_progress_context(runmat_analysis_fea::FeaProgressContext {
         handler,
-        cancellation: crate::interrupt::current_cancellation()
+        cancellation: crate::interrupt::current_interrupt()
             .map(runmat_analysis_fea::FeaCancellationToken::from_token)
             .unwrap_or_default(),
         attempt_id: None,

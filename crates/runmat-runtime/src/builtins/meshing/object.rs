@@ -2,13 +2,15 @@ use std::collections::{BTreeMap, HashMap};
 
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshArtifact};
-use runmat_types::MemberAccess;
+use runmat_types::MethodName;
 use runmat_value::{IntegerStorage, ObjectInstance, StructValue, Tensor, Value};
 
 use super::{
     error, BOUNDARY_FACES_NAME, ELEMENTS_NAME, EVIDENCE_NAME, GENERATE_NAME, MESH_METHOD_NAME,
     NODES_NAME, QUALITY_NAME, REGIONS_NAME, SAVE_NAME,
 };
+use crate::class_registry::declaration::{instance_methods, register_value_class};
+use crate::class_registry::RuntimeMethod;
 use crate::BuiltinResult;
 
 pub const MESH_CLASS: &str = "meshing.Mesh";
@@ -18,7 +20,9 @@ const EVIDENCE_PROPERTY: &str = "__runmat_meshing_evidence_cbor";
 const REGION_MAP_PROPERTY: &str = "__runmat_meshing_region_map_json";
 
 static MESHING_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(MESH_CLASS);
+    crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+        MESH_CLASS,
+    ));
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct MeshPayload {
@@ -224,7 +228,7 @@ pub(super) fn payload_from_value(
     let Value::Object(object) = value else {
         return Err(error(builtin, "expected a meshing.Mesh"));
     };
-    if object.class_name != MESH_CLASS {
+    if object.class_name.display_name() != MESH_CLASS {
         return Err(error(builtin, format!("expected {MESH_CLASS}")));
     }
     let artifact =
@@ -300,23 +304,13 @@ pub(crate) fn execution_output_from_value(
 
 fn ensure_classes_registered() {
     MESHING_CLASSES_REGISTERED.ensure(|| {
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: MESH_CLASS.to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: mesh_methods(),
-        });
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: EVIDENCE_CLASS.to_string(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: HashMap::new(),
-        });
+        register_value_class(MESH_CLASS, HashMap::new(), mesh_methods());
+        register_value_class(EVIDENCE_CLASS, HashMap::new(), HashMap::new());
     });
 }
 
-fn mesh_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [
+fn mesh_methods() -> HashMap<MethodName, RuntimeMethod> {
+    instance_methods([
         ("mesh", MESH_METHOD_NAME),
         ("save", SAVE_NAME),
         ("nodes", NODES_NAME),
@@ -325,23 +319,7 @@ fn mesh_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
         ("regions", REGIONS_NAME),
         ("quality", QUALITY_NAME),
         ("evidence", EVIDENCE_NAME),
-    ]
-    .into_iter()
-    .map(|(name, function_name)| {
-        (
-            name.to_string(),
-            crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
-                is_static: false,
-                is_abstract: false,
-                is_sealed: false,
-                access: MemberAccess::Public,
-                function_name: function_name.to_string(),
-                implicit_class_argument: None,
-            },
-        )
-    })
-    .collect()
+    ])
 }
 
 fn digest_hex(bytes: &[u8; 32]) -> String {

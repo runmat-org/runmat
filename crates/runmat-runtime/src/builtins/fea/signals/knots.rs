@@ -1,4 +1,7 @@
 use super::*;
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 
 pub(super) const SIGNAL_KNOT_CLASS: &str = "fea.SignalKnot";
 const SIGNAL_KNOT_FIELDS: &[&str] = &["knot"];
@@ -684,7 +687,9 @@ time_knots_builtin!(
 pub(super) fn ensure_signal_knot_class_registered() {
     static PORTABLE_SCHEMA: Once = Once::new();
     static RUNTIME_CLASS: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(SIGNAL_KNOT_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            SIGNAL_KNOT_CLASS,
+        ));
     PORTABLE_SCHEMA.call_once(|| {
         crate::execution::value_codec::register_immutable_value_class(
             crate::execution::value_codec::ImmutableValueClassSchema {
@@ -699,18 +704,14 @@ pub(super) fn ensure_signal_knot_class_registered() {
         .unwrap_or_else(|error| panic!("failed to register immutable signal knot: {error}"));
     });
     RUNTIME_CLASS.ensure(|| {
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: SIGNAL_KNOT_CLASS.into(),
-            parent: None,
-            properties: immutable_properties(SIGNAL_KNOT_FIELDS),
-            methods: HashMap::from([
-                (
-                    "continuous".into(),
-                    static_method("continuous", "fea.SignalKnot.continuous"),
-                ),
-                ("jump".into(), static_method("jump", "fea.SignalKnot.jump")),
+        register_value_class(
+            SIGNAL_KNOT_CLASS,
+            immutable_properties(SIGNAL_KNOT_FIELDS),
+            static_methods([
+                ("continuous", "fea.SignalKnot.continuous"),
+                ("jump", "fea.SignalKnot.jump"),
             ]),
-        })
+        )
     });
 }
 

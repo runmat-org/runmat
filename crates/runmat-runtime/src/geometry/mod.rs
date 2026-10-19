@@ -10,6 +10,8 @@ use runmat_geometry_io::{
     import::GeometryImportError, import_geometry_with_context, GeometryFormat,
     GeometryImportContext, GeometryImportOptions,
 };
+#[cfg(feature = "plot-core")]
+use runmat_geometry_core::{AssemblyNode, DiagnosticSeverity};
 use runmat_geometry_ops::{compute_stats, find_region, GeometryStats, QueryError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;

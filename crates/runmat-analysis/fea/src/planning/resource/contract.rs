@@ -225,7 +225,7 @@ pub struct WorkerResourcePolicy {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcceleratorRequirement {
-    pub class: String,
+    pub class: runmat_execution::resource::AcceleratorClass,
     pub count: u16,
     pub memory_bytes_each: ByteCount,
 }
@@ -235,7 +235,9 @@ impl From<&AcceleratorRequirement> for AcceleratorRequest {
         Self {
             class: value.class.clone(),
             count: value.count,
-            memory_bytes_each: value.memory_bytes_each.0,
+            minimum_allocation_bytes: value.memory_bytes_each.0,
+            provider: None,
+            required_features: Default::default(),
         }
     }
 }

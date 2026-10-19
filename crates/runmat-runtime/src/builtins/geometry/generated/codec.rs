@@ -93,7 +93,7 @@ fn validate_product_object(
 
 fn object_value(class_name: &str, bytes: Vec<u8>) -> BuiltinResult<Value> {
     ensure_classes_registered();
-    let mut object = ObjectInstance::new(class_name.into());
+    let mut object = ObjectInstance::new(class_name);
     object.properties.insert(
         CONTRACT_PROPERTY.into(),
         Value::Tensor(
@@ -112,7 +112,7 @@ fn object_bytes(value: &Value, class_name: &str, builtin: &'static str) -> Built
 }
 
 fn object_contract_bytes(object: &ObjectInstance, class_name: &str) -> Result<Vec<u8>, String> {
-    if object.class_name != class_name || object.properties.len() != 1 {
+    if object.class_name.display_name() != class_name || object.properties.len() != 1 {
         return Err(format!("expected one immutable {class_name} value"));
     }
     let Some(Value::Tensor(contract)) = object.properties.get(CONTRACT_PROPERTY) else {
@@ -121,7 +121,7 @@ fn object_contract_bytes(object: &ObjectInstance, class_name: &str) -> Result<Ve
     let Some(IntegerStorage::U8(bytes)) = contract.integer_storage() else {
         return Err(format!("{class_name} contract must be uint8"));
     };
-    if contract.shape != [bytes.len(), 1] {
+    if contract.shape() != [bytes.len(), 1] {
         return Err(format!("{class_name} contract has an invalid shape"));
     }
     Ok(bytes.clone())

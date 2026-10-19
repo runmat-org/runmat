@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-
-use runmat_types::MemberAccess;
 use runmat_value::{ObjectInstance, Value};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::*;
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 
 pub(super) const VALUE_FIELD: &[&str] = &["value"];
 
@@ -54,44 +54,11 @@ pub(super) fn register_immutable_class(
     )
     .unwrap_or_else(|error| panic!("failed to register {class_name}: {error}"));
 
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: class_name.into(),
-        parent: None,
-        properties: fields
-            .iter()
-            .map(|name| {
-                (
-                    (*name).into(),
-                    crate::class_registry::RuntimeProperty {
-                        name: (*name).into(),
-                        is_static: false,
-                        is_constant: true,
-                        is_dependent: false,
-                        get_access: MemberAccess::Public,
-                        set_access: MemberAccess::Private,
-                        default_value: None,
-                    },
-                )
-            })
-            .collect(),
-        methods: methods
-            .iter()
-            .map(|(name, builtin)| {
-                (
-                    (*name).into(),
-                    crate::class_registry::RuntimeMethod {
-                        name: (*name).into(),
-                        is_static: true,
-                        is_abstract: false,
-                        is_sealed: false,
-                        access: MemberAccess::Public,
-                        function_name: (*builtin).into(),
-                        implicit_class_argument: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>(),
-    });
+    register_value_class(
+        class_name,
+        immutable_properties(fields),
+        static_methods(methods.iter().copied()),
+    );
 }
 
 fn validate_immutable_value(object: &ObjectInstance) -> Result<(), String> {

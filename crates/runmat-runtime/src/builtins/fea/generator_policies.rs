@@ -1,8 +1,10 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
 use crate::builtins::fea::values::{finite_numeric_scalar, finite_numeric_vector};
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use runmat_analysis_core::{GeneratorDomain, SignalSamplingPolicy};
 
 pub(super) const DOMAIN_CLASS: &str = "fea.SignalDomain";
@@ -405,7 +407,9 @@ pub(super) fn sampling_from_value(
 pub(super) fn ensure_generator_policy_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(DOMAIN_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            DOMAIN_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         for (class_name, type_identity, fields) in [
             (DOMAIN_CLASS, "runmat.fea.signal-domain", DOMAIN_FIELDS),
@@ -431,65 +435,24 @@ pub(super) fn ensure_generator_policy_classes_registered() {
         }
     });
     RUNTIME_CLASSES.ensure(|| {
-        register_policy_class(
+        register_value_class(
             DOMAIN_CLASS,
-            DOMAIN_FIELDS,
-            &[
+            immutable_properties(DOMAIN_FIELDS),
+            static_methods([
                 ("time", "fea.SignalDomain.time"),
                 ("frequency", "fea.SignalDomain.frequency"),
                 ("studyParameter", "fea.SignalDomain.studyParameter"),
-            ],
+            ]),
         );
-        register_policy_class(
+        register_value_class(
             SAMPLING_CLASS,
-            SAMPLING_FIELDS,
-            &[
+            immutable_properties(SAMPLING_FIELDS),
+            static_methods([
                 ("uniform", "fea.SignalSampling.uniform"),
                 ("adaptive", "fea.SignalSampling.adaptive"),
                 ("canonicalPoints", "fea.SignalSampling.canonicalPoints"),
-            ],
+            ]),
         );
-    });
-}
-
-fn register_policy_class(class_name: &str, fields: &[&str], methods: &[(&str, &str)]) {
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: class_name.into(),
-        parent: None,
-        properties: fields
-            .iter()
-            .map(|field| {
-                (
-                    (*field).into(),
-                    crate::class_registry::RuntimeProperty {
-                        name: (*field).into(),
-                        is_static: false,
-                        is_constant: true,
-                        is_dependent: false,
-                        get_access: MemberAccess::Public,
-                        set_access: MemberAccess::Private,
-                        default_value: None,
-                    },
-                )
-            })
-            .collect(),
-        methods: methods
-            .iter()
-            .map(|(name, builtin)| {
-                (
-                    (*name).into(),
-                    crate::class_registry::RuntimeMethod {
-                        name: (*name).into(),
-                        is_static: true,
-                        is_abstract: false,
-                        is_sealed: false,
-                        access: MemberAccess::Public,
-                        function_name: (*builtin).into(),
-                        implicit_class_argument: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>(),
     });
 }
 

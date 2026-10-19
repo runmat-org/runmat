@@ -8,9 +8,9 @@ use runmat_builtins::{
 };
 use runmat_geometry_core::{GeometryAsset, Region};
 use runmat_macros::runtime_builtin;
-use runmat_types::MemberAccess;
 use runmat_value::{IntValue, ObjectInstance, Value};
 
+use crate::class_registry::declaration::{immutable_properties, register_value_class};
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -113,7 +113,7 @@ pub(crate) fn region_ref_from_value(
             format!("expected {GEOMETRY_REGION_CLASS}"),
         ));
     };
-    if object.class_name != GEOMETRY_REGION_CLASS {
+    if object.class_name.display_name() != GEOMETRY_REGION_CLASS {
         return Err(region_error(
             builtin,
             format!(
@@ -259,31 +259,15 @@ pub(crate) fn ensure_region_class_registered() {
         .unwrap_or_else(|error| panic!("failed to register {GEOMETRY_REGION_CLASS}: {error}"));
     });
     static RUNTIME_CLASS: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(GEOMETRY_REGION_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            GEOMETRY_REGION_CLASS,
+        ));
     RUNTIME_CLASS.ensure(|| {
-        let properties = GEOMETRY_REGION_FIELDS
-            .iter()
-            .map(|name| {
-                (
-                    (*name).to_string(),
-                    crate::class_registry::RuntimeProperty {
-                        name: (*name).to_string(),
-                        is_static: false,
-                        is_constant: true,
-                        is_dependent: false,
-                        get_access: MemberAccess::Public,
-                        set_access: MemberAccess::Private,
-                        default_value: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: GEOMETRY_REGION_CLASS.to_string(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-        });
+        register_value_class(
+            GEOMETRY_REGION_CLASS,
+            immutable_properties(GEOMETRY_REGION_FIELDS),
+            HashMap::new(),
+        );
     });
 }
 

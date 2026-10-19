@@ -194,18 +194,19 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
     // Resolve every model before mutating graphics state. A malformed later
     // system must not leave a partially rendered root-locus plot behind.
     let mut prepared = Vec::with_capacity(systems.len());
+    let mut focus = Vec::new();
     for (system, style) in systems {
         let model = DynamicModel::from_value_async(system).await?;
         let eval = RootLocus::compute(&model.tf, gains.clone())?;
+        if gains.is_none() {
+            focus.extend(eval.focus_points(&model.tf));
+        }
         prepared.push((eval, style));
     }
     let mut first = true;
     let mut hold_guard = HoldOffGuard::new();
     for (eval, style) in prepared {
         render_root_locus_plot(&eval, style.as_ref()).await?;
-        if gains.is_none() {
-            focus.extend(eval.focus_points(&model.tf));
-        }
         if first {
             first = false;
             let _ = crate::call_builtin_async("hold", &[Value::from("on")]).await;
@@ -458,11 +459,15 @@ impl RootLocus {
 
     /// Open-loop poles and zeros, breakaway points (double roots at the critical gains) and the
     /// points where a branch crosses the imaginary axis.
+    #[cfg(feature = "plot-core")]
     fn focus_points(&self, model: &TfModel) -> Vec<Complex64> {
-        let mut points: Vec<Complex64> = self.poles.iter().chain(self.zeros.iter()).copied().collect();
+        let physical = model.physical_polynomials();
+        let (numerator, denominator) = (physical.numerator(), physical.denominator());
+        let mut points: Vec<Complex64> =
+            self.poles.iter().chain(self.zeros.iter()).copied().collect();
         let scale = points.iter().map(|p| p.norm()).fold(1.0_f64, f64::max);
-        for gain in critical_gains(model) {
-            let Ok(roots) = roots_for_gain(model, gain, self.branches) else {
+        for gain in critical_gains(numerator, denominator) {
+            let Ok(roots) = roots_for_gain(numerator, denominator, gain, self.branches) else {
                 continue;
             };
             for (idx, root) in roots.iter().enumerate() {

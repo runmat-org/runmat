@@ -6,7 +6,8 @@ pub(super) fn render_zero_pole_plot(data: ZeroPoleData) -> BuiltinResult<Value> 
     let handles_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(bool, usize, usize)>::new()));
     let handles_slot = std::rc::Rc::clone(&handles_out);
     let opts = PlotRenderOptions {
-        title: "Zero-Pole Plot",
+        // MATLAB labels zplane axes but adds no title (DEF-31).
+        title: "",
         x_label: "Real Part",
         y_label: "Imaginary Part",
         grid: true,

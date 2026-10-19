@@ -1,9 +1,11 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
 use crate::builtins::fea::values::{
     quantity_scalar, RAYLEIGH_MASS_COEFFICIENT_CLASS, RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS,
+};
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
 };
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 
@@ -117,7 +119,7 @@ pub(super) fn mechanical_damping_from_value(
             "Damping must be a typed fea.MechanicalDamping value",
         ));
     };
-    if object.class_name != MECHANICAL_DAMPING_CLASS {
+    if object.class_name.display_name() != MECHANICAL_DAMPING_CLASS {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -166,7 +168,7 @@ fn damping_object(
     stiffness_coefficient: Option<Value>,
 ) -> BuiltinResult<Value> {
     ensure_damping_class_registered();
-    let mut object = ObjectInstance::new(MECHANICAL_DAMPING_CLASS.into());
+    let mut object = ObjectInstance::new(MECHANICAL_DAMPING_CLASS);
     object
         .properties
         .insert(KIND.into(), Value::String(kind.into()));
@@ -184,7 +186,9 @@ fn damping_object(
 pub(super) fn ensure_damping_class_registered() {
     static PORTABLE_SCHEMA: Once = Once::new();
     static RUNTIME_CLASS: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(MECHANICAL_DAMPING_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            MECHANICAL_DAMPING_CLASS,
+        ));
     PORTABLE_SCHEMA.call_once(|| {
         register_immutable_value_class(ImmutableValueClassSchema {
             class_name: MECHANICAL_DAMPING_CLASS,
@@ -197,47 +201,14 @@ pub(super) fn ensure_damping_class_registered() {
         .unwrap_or_else(|error| panic!("failed to register mechanical damping class: {error}"));
     });
     RUNTIME_CLASS.ensure(|| {
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: MECHANICAL_DAMPING_CLASS.into(),
-            parent: None,
-            properties: FIELDS
-                .iter()
-                .map(|field| {
-                    (
-                        (*field).into(),
-                        crate::class_registry::RuntimeProperty {
-                            name: (*field).into(),
-                            is_static: false,
-                            is_constant: true,
-                            is_dependent: false,
-                            get_access: MemberAccess::Public,
-                            set_access: MemberAccess::Private,
-                            default_value: None,
-                        },
-                    )
-                })
-                .collect(),
-            methods: [
+        register_value_class(
+            MECHANICAL_DAMPING_CLASS,
+            immutable_properties(FIELDS),
+            static_methods([
                 ("undamped", "fea.MechanicalDamping.undamped"),
                 ("rayleigh", "fea.MechanicalDamping.rayleigh"),
-            ]
-            .into_iter()
-            .map(|(name, function_name)| {
-                (
-                    name.into(),
-                    crate::class_registry::RuntimeMethod {
-                        name: name.into(),
-                        is_static: true,
-                        is_abstract: false,
-                        is_sealed: false,
-                        access: MemberAccess::Public,
-                        function_name: function_name.into(),
-                        implicit_class_argument: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>(),
-        });
+            ]),
+        );
     });
 }
 
@@ -256,11 +227,11 @@ fn validate_damping_object(object: &ObjectInstance) -> Result<(), String> {
         "rayleigh" => {
             let mass = object.properties.get(MASS_COEFFICIENT);
             let stiffness = object.properties.get(STIFFNESS_COEFFICIENT);
-            if !matches!(mass, Some(Value::Object(value)) if value.class_name == RAYLEIGH_MASS_COEFFICIENT_CLASS)
+            if !matches!(mass, Some(Value::Object(value)) if value.class_name.display_name() == RAYLEIGH_MASS_COEFFICIENT_CLASS)
             {
                 return Err("Rayleigh damping requires a typed fea.RayleighMassCoefficient".into());
             }
-            if !matches!(stiffness, Some(Value::Object(value)) if value.class_name == RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS)
+            if !matches!(stiffness, Some(Value::Object(value)) if value.class_name.display_name() == RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS)
             {
                 return Err(
                     "Rayleigh damping requires a typed fea.RayleighStiffnessCoefficient".into(),

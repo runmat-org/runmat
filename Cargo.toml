@@ -35,7 +35,6 @@ members = [
     "crates/runmat-lsp",
     "crates/runmat-cli",
     "crates/runmat-server-client",
-    "crates/runmat-public-ids",
     "crates/runmat-core",
     "crates/runmat-build-identity",
     "crates/runmat-time",
@@ -172,7 +171,6 @@ runmat-process-host = { version = "=0.6.2", path = "crates/runmat-process-host" 
 runmat-static-analysis = { version = "=0.6.2", path = "crates/runmat-static-analysis" }
 runmat-canonical-codec = { version = "=0.6.2", path = "crates/runmat-canonical-codec" }
 runmat-server-client = { version = "=0.6.2", path = "crates/runmat-server-client" }
-runmat-public-ids = { version = "=0.6.2", path = "crates/runmat-public-ids" }
 runmat-node-agent = { version = "=0.6.2", path = "crates/runmat-node-agent" }
 runmat-accelerate = { version = "=0.6.2", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.6.2", path = "crates/runmat-accelerate-api" }

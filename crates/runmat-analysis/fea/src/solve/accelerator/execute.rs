@@ -53,14 +53,13 @@ pub fn solve_prepared_accelerator_system(
             initial_values[index] = right_hand_side[index];
         }
     }
-    let mut initial = match provider.upload_numeric(&HostNumericTensorView {
+    let initial = match provider.upload_numeric(&HostNumericTensorView {
         data: HostNumericDataView::F64(&initial_values),
         shape: &shape,
         storage: GpuTensorStorage::Real,
     }) {
         Ok(initial) => Some(initial),
         Err(error) => {
-            let _ = provider.free(&rhs);
             return Err(AcceleratorAdapterError::preparation(error.to_string()));
         }
     };
@@ -88,17 +87,13 @@ pub fn solve_prepared_accelerator_system(
         let result = futures::executor::block_on(provider.sparse_krylov_solve(&request))
             .map_err(|error| AcceleratorAdapterError::execution(error.to_string()))?;
         if let Err(error) = result.validate(request, &prepared.capability) {
-            if let Some(solution) = &result.solution {
-                let _ = provider.free(solution);
-            }
             return Err(AcceleratorAdapterError::execution(error.to_string()));
         }
         Ok::<_, AcceleratorAdapterError>(result)
     })();
-    let _ = provider.free(&rhs);
-    if let Some(initial) = initial.take() {
-        let _ = provider.free(&initial);
-    }
+    // Device buffers are released by their RAII handles.
+    drop(rhs);
+    drop(initial);
     let result = result?;
     if result.termination == SparseKrylovTermination::Cancelled {
         let evidence = AcceleratorSolveEvidence::Cancelled {
@@ -131,7 +126,6 @@ pub fn solve_prepared_accelerator_system(
     })?;
     let downloaded = futures::executor::block_on(provider.download_numeric(solution_handle))
         .map_err(|error| AcceleratorAdapterError::execution(error.to_string()));
-    let _ = provider.free(solution_handle);
     let downloaded = downloaded?;
     let HostNumericDataOwned::F64(solution) = downloaded.data else {
         return Err(AcceleratorAdapterError::acceptance(

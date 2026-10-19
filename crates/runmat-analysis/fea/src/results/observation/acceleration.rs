@@ -1,17 +1,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_accelerate_api::{
-    AccelProvider, DenseReductionOperation, DenseReductionRequest, GpuTensorHandle,
-    GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
-    ProviderCancellationToken, ProviderCostQuery, ProviderElementType, ProviderFeasibilityQuery,
-    ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation,
-    ProviderResidency, ProviderStorage, ProviderWorkload, GOVERNED_DENSE_REDUCTION_OPERATION,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorView, ProviderElementType,
 };
 use runmat_analysis_core::{ExtremaTiePolicy, SpatialReduction};
 use runmat_canonical_codec::encode_contract;
-use runmat_execution::{
-    identity::AttemptId, resource::AcceleratorRequest, CandidatePreparationState, Digest,
-};
+use runmat_execution::{identity::AttemptId, resource::AcceleratorRequest, Digest};
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +16,10 @@ use crate::{
 };
 
 use super::{
-    acceleration_evidence::ObservationAccelerationEvidence,
+    acceleration_evidence::{
+        ObservationAccelerationEvidence, ObservationExtremum, ObservationProviderReduction,
+        OBSERVATION_PROVIDER_REDUCTION_SCHEMA_VERSION,
+    },
     contract::{shape_component_count, OBSERVATION_LIMITS},
     distributed::validate_observation_partition_input,
     distributed_numeric::select_values,
@@ -58,7 +56,7 @@ pub(super) struct ObservationProviderAccelerationInput<'a> {
 
 struct GovernedExtremaInput<'a> {
     observation: &'a super::ResolvedObservation,
-    operation: DenseReductionOperation,
+    operation: ObservationExtremum,
     indices: &'a [usize],
     entities: Vec<ObservationEntity>,
 }
@@ -120,7 +118,7 @@ pub(crate) fn evaluate_observation_partition_with_provider(
         .allocation
         .validate()
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    if execution.allocation.count != 1 || execution.allocation.memory_bytes_each == 0 {
+    if execution.allocation.count != 1 || execution.allocation.minimum_allocation_bytes == 0 {
         return Err(ObservationError::Invalid(
             "governed observation acceleration requires one bounded accelerator allocation".into(),
         ));
@@ -147,48 +145,23 @@ pub(crate) fn evaluate_observation_partition_with_provider(
     let input_bytes = checked_bytes(selected.len())?;
     let result_download_bytes = 16_u64;
     let required_device_bytes = governed_extrema_device_resident_bytes(selected.len())?;
-    if execution.allocation.memory_bytes_each < required_device_bytes {
+    if execution.allocation.minimum_allocation_bytes < required_device_bytes {
         return Err(ObservationError::Limit(
             "governed observation accelerator memory",
         ));
     }
-    let feasibility = dense_reduction_feasibility(&shape)?;
     let capability = execution.provider.capability_snapshot();
-    if !execution
-        .provider
-        .query_feasibility(&feasibility)
-        .is_supported()
-        || capability.revision == 0
+    if capability.revision == 0
         || capability.device.device_id != execution.provider.device_id()
         || !capability.concurrency.transactional_results
         || !capability.element_types.contains(&ProviderElementType::F64)
-        || !capability.supports_operation(
-            &ProviderOperationIdentity::new(GOVERNED_DENSE_REDUCTION_OPERATION),
-            ProviderOperationFamily::Reduction,
-        )
     {
         return Err(ObservationError::Unsupported(
-            "active provider cannot execute exact-f64 governed observation extrema",
+            "active provider cannot execute exact-f64 observation extrema",
         ));
     }
-    let cost = execution
-        .provider
-        .estimate_cost(&ProviderCostQuery {
-            operation: feasibility,
-            preparation: CandidatePreparationState::Cold,
-            required_upload_bytes: input_bytes,
-            required_download_bytes: result_download_bytes,
-            downstream_materialization: true,
-        })
-        .ok_or(ObservationError::Unsupported(
-            "active provider cannot estimate governed observation extrema",
-        ))?;
-    if cost.cost.checked_total_ns().is_none() {
-        return Err(ObservationError::Invalid(
-            "provider observation cost estimate overflows".into(),
-        ));
-    }
-
+    let attempt_id = observation_attempt_id(partition.identity.digest());
+    let started = std::time::Instant::now();
     let input = execution
         .provider
         .upload_numeric(&HostNumericTensorView {
@@ -197,46 +170,42 @@ pub(crate) fn evaluate_observation_partition_with_provider(
             storage: GpuTensorStorage::Real,
         })
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    let mut handles = ProviderHandles::new(execution.provider);
-    handles.track(&input);
-    let cancellation =
-        ProviderCancellationToken::from_token(progress::cancellation_token().shared_token());
-    let request = DenseReductionRequest {
-        input: &input,
-        operation: governed.operation,
-        attempt_id: observation_attempt_id(partition.identity.digest()),
-        input_identity: selected_values_identity,
-        provider_capability_schema_version: capability.schema_version,
-        provider_capability_revision: capability.revision,
-        cancellation: &cancellation,
-    };
-    let result = futures::executor::block_on(execution.provider.execute_dense_reduction(&request))
-        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    handles.track(&result.values);
-    if let Some(indices) = &result.indices {
-        handles.track(indices);
-    }
-    result
-        .validate(request, &capability)
-        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-    let value = download_scalar(execution.provider, &result.values)?;
-    let index = download_scalar(
-        execution.provider,
-        result.indices.as_ref().ok_or(ObservationError::Identity(
-            "accelerated extrema omitted its canonical index",
-        ))?,
-    )?;
+    // Reduce the entity axis (zero-based dimension 1); the provider returns the
+    // first canonical index on ties, matching ExtremaTiePolicy::FirstCanonical.
+    let reduced = futures::executor::block_on(match governed.operation {
+        ObservationExtremum::Minimum => execution.provider.reduce_min_dim(&input, 1),
+        ObservationExtremum::Maximum => execution.provider.reduce_max_dim(&input, 1),
+    })
+    .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+    let value = download_scalar(execution.provider, &reduced.values)?;
+    let index = download_scalar(execution.provider, &reduced.indices)?;
+    let execution_ns = u64::try_from(started.elapsed().as_nanos())
+        .unwrap_or(u64::MAX)
+        .max(1);
     let index = exact_one_based_index(index, selected.len())?;
     if selected[index] != value {
         return Err(ObservationError::Identity(
             "accelerated extrema value and selected source disagree",
         ));
     }
+    let provider_evidence = ObservationProviderReduction {
+        schema_version: OBSERVATION_PROVIDER_REDUCTION_SCHEMA_VERSION,
+        attempt_id,
+        input_identity: selected_values_identity,
+        provider_device_id: capability.device.device_id,
+        provider_capability_schema_version: capability.schema_version,
+        provider_capability_revision: capability.revision,
+        operation: governed.operation,
+        input_bytes,
+        output_bytes: result_download_bytes,
+        dispatches: 1,
+        execution_ns,
+    };
     let evidence = ObservationAccelerationEvidence::new(
         execution.resource_plan,
         selected_values_identity,
         execution.allocation.clone(),
-        result.evidence,
+        provider_evidence,
         input_bytes,
         result_download_bytes,
         2,
@@ -281,8 +250,8 @@ fn governed_extrema_input<'a>(
         return Ok(None);
     }
     let operation = match reduction.spatial {
-        SpatialReduction::Minimum => DenseReductionOperation::Minimum { dimension: 1 },
-        SpatialReduction::Maximum => DenseReductionOperation::Maximum { dimension: 1 },
+        SpatialReduction::Minimum => ObservationExtremum::Minimum,
+        SpatialReduction::Maximum => ObservationExtremum::Maximum,
         _ => return Ok(None),
     };
     let (indices, entities) = match &partition.target {
@@ -317,37 +286,6 @@ fn governed_extrema_input<'a>(
         indices,
         entities,
     }))
-}
-
-fn dense_reduction_feasibility(
-    shape: &[usize; 2],
-) -> Result<ProviderFeasibilityQuery, ObservationError> {
-    let shape = shape
-        .iter()
-        .map(|extent| u64::try_from(*extent).map_err(|_| ObservationError::Limit("provider shape")))
-        .collect::<Result<Vec<_>, _>>()?;
-    let representation = |residency| ProviderRepresentation {
-        element_type: ProviderElementType::F64,
-        storage: ProviderStorage::DenseReal,
-        layout: ProviderLayout::ColumnMajorContiguous,
-        shape: shape.clone(),
-        residency,
-    };
-    let scalar_output = ProviderRepresentation {
-        shape: vec![1, 1],
-        ..representation(ProviderResidency::Device)
-    };
-    Ok(ProviderFeasibilityQuery {
-        operation: ProviderOperationIdentity::new(GOVERNED_DENSE_REDUCTION_OPERATION),
-        family: ProviderOperationFamily::Reduction,
-        inputs: vec![representation(ProviderResidency::Device)],
-        outputs: vec![scalar_output.clone(), scalar_output],
-        workload: ProviderWorkload {
-            elements: shape.iter().copied().try_fold(1_u64, u64::checked_mul),
-            flops: None,
-            batch: Some(1),
-        },
-    })
 }
 
 fn download_scalar(
@@ -431,30 +369,4 @@ fn observation_attempt_id(partition: Digest) -> AttemptId {
         partition.bytes(),
         &sequence.to_be_bytes(),
     ])
-}
-
-struct ProviderHandles<'a> {
-    provider: &'a dyn AccelProvider,
-    handles: Vec<GpuTensorHandle>,
-}
-
-impl<'a> ProviderHandles<'a> {
-    fn new(provider: &'a dyn AccelProvider) -> Self {
-        Self {
-            provider,
-            handles: Vec::with_capacity(3),
-        }
-    }
-
-    fn track(&mut self, handle: &GpuTensorHandle) {
-        self.handles.push(handle.clone());
-    }
-}
-
-impl Drop for ProviderHandles<'_> {
-    fn drop(&mut self) {
-        for handle in self.handles.iter().rev() {
-            let _ = self.provider.free(handle);
-        }
-    }
 }

@@ -1,13 +1,36 @@
-use runmat_accelerate_api::{
-    DenseReductionExecutionEvidence, DenseReductionOperation,
-    DENSE_REDUCTION_EVIDENCE_SCHEMA_VERSION,
-};
 use runmat_canonical_codec::encode_contract;
-use runmat_execution::{resource::AcceleratorRequest, Digest};
+use runmat_execution::{identity::AttemptId, resource::AcceleratorRequest, Digest};
 use serde::{Deserialize, Serialize};
 
 use super::{contract::OBSERVATION_LIMITS, ObservationError};
 use crate::planning::resource::FeaResourcePlanIdentity;
+
+pub const OBSERVATION_PROVIDER_REDUCTION_SCHEMA_VERSION: u16 = 2;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationExtremum {
+    Minimum,
+    Maximum,
+}
+
+/// One resident provider extremum over the selected values, as observed by the
+/// FEA caller: device and capability binding, exact transfer sizes, and time.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationProviderReduction {
+    pub schema_version: u16,
+    pub attempt_id: AttemptId,
+    pub input_identity: Digest,
+    pub provider_device_id: u32,
+    pub provider_capability_schema_version: u16,
+    pub provider_capability_revision: u64,
+    pub operation: ObservationExtremum,
+    pub input_bytes: u64,
+    pub output_bytes: u64,
+    pub dispatches: u32,
+    pub execution_ns: u64,
+}
 
 /// Canonical encoded-size ceiling for one governed dense-reduction evidence record. The record
 /// contains only fixed-width fields plus one accelerator class bounded by `AcceleratorRequest`.
@@ -41,7 +64,7 @@ pub struct ObservationAccelerationEvidence {
     pub resource_plan: FeaResourcePlanIdentity,
     pub selected_values_identity: Digest,
     pub allocation: AcceleratorRequest,
-    pub provider: DenseReductionExecutionEvidence,
+    pub provider: ObservationProviderReduction,
     pub input_upload_bytes: u64,
     pub result_download_bytes: u64,
     pub terminal_synchronizations: u32,
@@ -55,7 +78,7 @@ struct ObservationAccelerationEvidenceWire {
     resource_plan: FeaResourcePlanIdentity,
     selected_values_identity: Digest,
     allocation: AcceleratorRequest,
-    provider: DenseReductionExecutionEvidence,
+    provider: ObservationProviderReduction,
     input_upload_bytes: u64,
     result_download_bytes: u64,
     terminal_synchronizations: u32,
@@ -86,13 +109,13 @@ impl ObservationAccelerationEvidence {
         resource_plan: FeaResourcePlanIdentity,
         selected_values_identity: Digest,
         allocation: AcceleratorRequest,
-        provider: DenseReductionExecutionEvidence,
+        provider: ObservationProviderReduction,
         input_upload_bytes: u64,
         result_download_bytes: u64,
         terminal_synchronizations: u32,
     ) -> Result<Self, ObservationError> {
         let mut evidence = Self {
-            schema_version: 1,
+            schema_version: OBSERVATION_PROVIDER_REDUCTION_SCHEMA_VERSION,
             identity: ObservationAccelerationEvidenceIdentity(Digest::sha256([])),
             resource_plan,
             selected_values_identity,
@@ -111,24 +134,14 @@ impl ObservationAccelerationEvidence {
         self.allocation
             .validate()
             .map_err(|error| ObservationError::Invalid(error.to_string()))?;
-        let operation_is_extrema = matches!(
-            self.provider.operation,
-            DenseReductionOperation::Minimum { .. } | DenseReductionOperation::Maximum { .. }
-        );
-        if self.schema_version != 1
-            || self.provider.schema_version != DENSE_REDUCTION_EVIDENCE_SCHEMA_VERSION
+        if self.schema_version != OBSERVATION_PROVIDER_REDUCTION_SCHEMA_VERSION
+            || self.provider.schema_version != OBSERVATION_PROVIDER_REDUCTION_SCHEMA_VERSION
             || self.provider.input_identity != self.selected_values_identity
-            || !operation_is_extrema
+            || self.provider.provider_capability_revision == 0
             || self.allocation.count != 1
-            || self.allocation.memory_bytes_each == 0
-            || self.provider.used_host_fallback
-            || self.provider.cancellation_observed
-            || self.provider.cancellation_checks == 0
+            || self.allocation.minimum_allocation_bytes == 0
             || self.provider.dispatches == 0
             || self.provider.execution_ns == 0
-            || self.provider.host_upload_bytes != 0
-            || self.provider.host_download_bytes != 0
-            || self.provider.host_synchronizations != 0
             || self.input_upload_bytes != self.provider.input_bytes
             || self.result_download_bytes != self.provider.output_bytes
             || self.terminal_synchronizations != 2
@@ -155,7 +168,7 @@ impl ObservationAccelerationEvidence {
             .ok_or(ObservationError::Limit(
                 "observation accelerator resident bytes",
             ))?;
-        if self.allocation != *allocation || resident_bytes > allocation.memory_bytes_each {
+        if self.allocation != *allocation || resident_bytes > allocation.minimum_allocation_bytes {
             return Err(ObservationError::Identity(
                 "observation accelerator evidence differs from its admitted allocation",
             ));
@@ -297,7 +310,7 @@ impl ObservationAccelerationSummary {
         .is_ok();
         if self.schema_version != 1
             || self.allocation.count != 1
-            || self.allocation.memory_bytes_each == 0
+            || self.allocation.minimum_allocation_bytes == 0
             || self.operations.is_empty()
             || !evidence_is_unique
             || !plans_are_unique

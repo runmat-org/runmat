@@ -5,13 +5,16 @@ mod metadata;
 pub(crate) mod primitives;
 pub(crate) mod regions;
 
+use std::collections::HashMap;
 use std::sync::Once;
 
 use runmat_builtins::{
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, ResolveContext, Type,
 };
-use runmat_types::MemberAccess;
+use runmat_types::{MemberAccess, MemberName};
 
+use crate::class_registry::declaration::{immutable_property, register_value_class};
+use crate::class_registry::RuntimeProperty;
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 
 pub const GEOMETRY_FEATURE_CLASS: &str = "geometry.Feature";
@@ -82,39 +85,47 @@ pub(crate) fn ensure_classes_registered() {
         }
     });
     static FEATURE: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(GEOMETRY_FEATURE_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            GEOMETRY_FEATURE_CLASS,
+        ));
     static GENERATED: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(GENERATED_GEOMETRY_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            GENERATED_GEOMETRY_CLASS,
+        ));
     static REGION: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(GEOMETRY_REGION_OUTPUT_CLASS);
-    FEATURE.ensure(|| register_runtime_class(GEOMETRY_FEATURE_CLASS));
-    GENERATED.ensure(|| register_runtime_class(GENERATED_GEOMETRY_CLASS));
-    REGION.ensure(|| register_runtime_class(GEOMETRY_REGION_OUTPUT_CLASS));
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            GEOMETRY_REGION_OUTPUT_CLASS,
+        ));
+    FEATURE.ensure(|| {
+        register_value_class(
+            GEOMETRY_FEATURE_CLASS,
+            contract_properties(),
+            HashMap::new(),
+        )
+    });
+    GENERATED.ensure(|| {
+        register_value_class(
+            GENERATED_GEOMETRY_CLASS,
+            contract_properties(),
+            HashMap::new(),
+        )
+    });
+    REGION.ensure(|| {
+        register_value_class(
+            GEOMETRY_REGION_OUTPUT_CLASS,
+            contract_properties(),
+            HashMap::new(),
+        )
+    });
 }
 
-fn register_runtime_class(class_name: &'static str) {
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: class_name.into(),
-        properties: CONTRACT_FIELDS
-            .iter()
-            .map(|name| {
-                (
-                    (*name).into(),
-                    crate::class_registry::RuntimeProperty {
-                        name: (*name).into(),
-                        is_static: false,
-                        is_constant: true,
-                        is_dependent: false,
-                        get_access: MemberAccess::Private,
-                        set_access: MemberAccess::Private,
-                        default_value: None,
-                    },
-                )
-            })
-            .collect(),
-        methods: Default::default(),
-        parent: None,
-    });
+/// Contract payload fields are internal to the class; they are never read as
+/// public properties.
+fn contract_properties() -> HashMap<MemberName, RuntimeProperty> {
+    CONTRACT_FIELDS
+        .iter()
+        .map(|field| immutable_property(field, MemberAccess::Private))
+        .collect()
 }
 
 #[cfg(test)]

@@ -76,7 +76,7 @@ pub(crate) fn infer_rvalue(
         }
         MirRvalue::ExternalFuture { .. } => ValueFact::scalar(ValueKindFact::Execution(
             runmat_types::ExecutionFact::Future {
-                output: Box::new(dynamic_value()),
+                output: runmat_types::ValueSequenceFact::dynamic(),
                 state: runmat_types::FutureStateFact::Lazy,
             },
         )),

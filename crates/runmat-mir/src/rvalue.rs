@@ -148,7 +148,7 @@ impl MirRvalue {
             }),
             MirRvalue::SubscriptChain(chain) => chain.contains_contextual_end(),
             MirRvalue::Call(call) => call.args.iter().any(MirCallArg::contains_contextual_end),
-            MirRvalue::Future { args, .. } => {
+            MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
                 args.iter().any(MirCallArg::contains_contextual_end)
             }
             _ => false,
@@ -186,7 +186,7 @@ impl MirRvalue {
                     argument.visit_direct_expression_regions_dyn(visitor);
                 }
             }
-            MirRvalue::Future { args, .. } => {
+            MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
                 for argument in args {
                     argument.visit_direct_expression_regions_dyn(visitor);
                 }
@@ -224,7 +224,7 @@ impl MirRvalue {
                     argument.visit_direct_expression_steps_dyn(visitor);
                 }
             }
-            MirRvalue::Future { args, .. } => {
+            MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
                 for argument in args {
                     argument.visit_direct_expression_steps_dyn(visitor);
                 }
@@ -363,7 +363,7 @@ fn visit_rvalue_operands(
             visitor(base);
             visitor(member);
         }
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for argument in args {
                 if descend_expression_regions {
                     argument.visit_operands(&mut *visitor);
@@ -443,7 +443,7 @@ fn visit_rvalue_operands_mut(value: &mut MirRvalue, visitor: &mut dyn FnMut(&mut
             visitor(base);
             visitor(member);
         }
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for argument in args {
                 argument.visit_operands_mut(&mut *visitor);
             }
@@ -600,7 +600,7 @@ fn visit_rvalue_sequences(
                 }
             }
         }
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for argument in args {
                 if descend_regions {
                     argument.visit_sequence_locals(visitor);

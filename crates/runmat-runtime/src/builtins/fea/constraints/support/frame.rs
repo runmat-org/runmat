@@ -2,8 +2,11 @@ use std::collections::HashMap;
 use std::sync::Once;
 
 use super::super::*;
-use super::{direction_from_value, register_runtime_class, static_method};
+use super::direction_from_value;
 use crate::builtins::fea::values::position_meters;
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use runmat_analysis_core::{
     validate_coordinate_frame, AxialFrame, CartesianFrame, Position, SphericalFrame,
@@ -77,7 +80,7 @@ macro_rules! simple_frame_builtin {
                         )]
         pub async fn $function() -> BuiltinResult<Value> {
             ensure_frame_classes_registered();
-            Ok(Value::Object(ObjectInstance::new($class.into())))
+            Ok(Value::Object(ObjectInstance::new($class)))
         }
     };
 }
@@ -152,7 +155,7 @@ macro_rules! axis_frame_builtin {
             validate_coordinate_frame(&frame)
                 .map_err(|error| builtin_error($name, &ERROR_INPUT, error.to_string()))?;
             ensure_frame_classes_registered();
-            let mut object = ObjectInstance::new($class.into());
+            let mut object = ObjectInstance::new($class);
             object.properties.insert("frame_id".into(), Value::String(id));
             object.properties.insert("origin".into(), origin);
             object.properties.insert($primary.into(), primary_axis);
@@ -239,7 +242,7 @@ pub(crate) fn coordinate_frame_from_value(
             )
         })
     };
-    let frame = match object.class_name.as_str() {
+    let frame = match object.class_name.display_name() {
         GLOBAL_FRAME_CLASS => CoordinateFrame::Global,
         MATERIAL_FRAME_CLASS => CoordinateFrame::Material,
         ELEMENT_FRAME_CLASS => CoordinateFrame::Element,
@@ -278,7 +281,9 @@ pub(crate) fn coordinate_frame_from_value(
 pub(super) fn ensure_frame_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(COORDINATE_FRAME_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            COORDINATE_FRAME_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         for (class_name, identity, fields, validate) in [
             (
@@ -345,12 +350,12 @@ pub(super) fn ensure_frame_classes_registered() {
             (CYLINDRICAL_FRAME_CLASS, AXIAL_FIELDS),
             (SPHERICAL_FRAME_CLASS, SPHERICAL_FIELDS),
         ] {
-            register_runtime_class(class_name, fields, HashMap::new());
+            register_value_class(class_name, immutable_properties(fields), HashMap::new());
         }
-        register_runtime_class(
+        register_value_class(
             COORDINATE_FRAME_CLASS,
-            EMPTY_FIELDS,
-            [
+            immutable_properties(EMPTY_FIELDS),
+            static_methods([
                 ("globalFrame", "fea.CoordinateFrame.globalFrame"),
                 ("material", "fea.CoordinateFrame.material"),
                 ("element", "fea.CoordinateFrame.element"),
@@ -361,10 +366,7 @@ pub(super) fn ensure_frame_classes_registered() {
                 ("cartesian", "fea.CoordinateFrame.cartesian"),
                 ("cylindrical", "fea.CoordinateFrame.cylindrical"),
                 ("spherical", "fea.CoordinateFrame.spherical"),
-            ]
-            .into_iter()
-            .map(|(name, function)| (name.into(), static_method(name, function)))
-            .collect(),
+            ]),
         );
     });
 }

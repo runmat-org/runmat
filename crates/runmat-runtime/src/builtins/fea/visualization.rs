@@ -218,7 +218,7 @@ pub(super) fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotReq
             "plot requires an fea.Field",
         ));
     };
-    if object.class_name != FEA_FIELD_CLASS {
+    if object.class_name.display_name() != FEA_FIELD_CLASS {
         return Err(builtin_error(
             PLOT_NAME,
             &ERROR_INPUT,

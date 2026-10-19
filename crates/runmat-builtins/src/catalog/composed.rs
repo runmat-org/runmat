@@ -77,6 +77,10 @@ pub fn compose_operation_catalog(
     for entry in builtin_catalog_entries() {
         insert_operation(&mut operations, standard_operation(entry)?)?;
     }
+    let mut standard = operations
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<OperationIdentity>>();
 
     let mut extension_ids = BTreeSet::new();
     let mut ordered_extensions = extensions.iter().collect::<Vec<_>>();
@@ -90,6 +94,12 @@ pub fn compose_operation_catalog(
         let mut extension_operations = extension.operations.to_vec();
         extension_operations.sort_unstable_by(|left, right| left.identity.cmp(&right.identity));
         for operation in extension_operations {
+            // Analysis-language operations shadow a same-named standard builtin
+            // (e.g. FEA `union` is geometry, not set union); extensions still
+            // compose with each other under the ordinary conflict rules.
+            if standard.remove(&operation.identity) {
+                operations.remove(&operation.identity);
+            }
             insert_operation(&mut operations, operation)?;
         }
     }
@@ -102,7 +112,9 @@ pub fn compose_operation_catalog(
         operation
             .overloads
             .sort_unstable_by(|left, right| left.identity.cmp(&right.identity));
-        validate_operation(operation)?;
+        // Standard builtins resolve overloads at run time (MATLAB semantics);
+        // analysis-language operations must be statically unambiguous.
+        validate_operation(operation, !standard.contains(&operation.identity))?;
     }
     let fingerprint = catalog_fingerprint(&operations)?;
     Ok(ComposedOperationCatalog {
@@ -142,7 +154,10 @@ fn insert_operation(
     Ok(())
 }
 
-fn validate_operation(operation: &OperationFacts) -> Result<(), OperationCatalogCompositionError> {
+fn validate_operation(
+    operation: &OperationFacts,
+    statically_resolved: bool,
+) -> Result<(), OperationCatalogCompositionError> {
     let name = operation.identity.to_string();
     if operation.category.trim().is_empty() {
         return Err(OperationCatalogCompositionError::MissingCategory(name));
@@ -176,6 +191,9 @@ fn validate_operation(operation: &OperationFacts) -> Result<(), OperationCatalog
             });
         }
     }
+    if !statically_resolved {
+        return Ok(());
+    }
     for (index, left) in operation.overloads.iter().enumerate() {
         for right in &operation.overloads[index + 1..] {
             let shares_frontend = left
@@ -204,7 +222,8 @@ fn standard_operation(
         .descriptor
         .signatures
         .iter()
-        .map(|signature| standard_overload(entry, signature))
+        .enumerate()
+        .map(|(ordinal, signature)| standard_overload(entry, ordinal, signature))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(OperationFacts {
         identity,
@@ -216,9 +235,12 @@ fn standard_operation(
 
 fn standard_overload(
     entry: &BuiltinCatalogEntry,
+    ordinal: usize,
     signature: &BuiltinSignatureDescriptor,
 ) -> Result<OperationOverloadFacts, OperationCatalogCompositionError> {
-    let overload_identity = format!("{}:{}", entry.identity.name, signature.label);
+    // Signature labels are documentation and may repeat; the ordinal keeps the
+    // overload identity unique and stable for the declared signature order.
+    let overload_identity = format!("{}#{ordinal}:{}", entry.identity.name, signature.label);
     let identity = OperationOverloadIdentity::new(overload_identity).map_err(|error| {
         OperationCatalogCompositionError::InvalidStandardIdentity(error.to_string())
     })?;
@@ -354,6 +376,26 @@ mod tests {
             error,
             OperationCatalogCompositionError::DuplicateOverload { .. }
         ));
+    }
+
+    #[test]
+    fn analysis_operations_shadow_same_named_standard_builtins() {
+        // `envelope` is both a standard signal builtin and an FEA output operation.
+        let standard = compose_operation_catalog(&[]).unwrap();
+        assert!(standard
+            .operations()
+            .iter()
+            .any(|operation| operation.identity.as_str() == "envelope"));
+        let shadowed =
+            compose_operation_catalog(&[extension("analysis-output", "envelope", "envelope:fea")])
+                .unwrap();
+        let envelope = shadowed
+            .operations()
+            .iter()
+            .find(|operation| operation.identity.as_str() == "envelope")
+            .unwrap();
+        assert_eq!(envelope.overloads.len(), 1);
+        assert_eq!(envelope.overloads[0].identity.as_str(), "envelope:fea");
     }
 
     #[test]

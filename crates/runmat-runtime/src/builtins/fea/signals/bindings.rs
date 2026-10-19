@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
-use runmat_execution::value::{InlineValue, ValuePayload};
+use runmat_execution::value::{CallableOwner, InlineValue, ValuePayload};
 use runmat_value::{CellArray, StructValue};
 
 pub(in crate::builtins::fea) const FROZEN_GENERATORS_PROPERTY: &str = "frozen_generators";
@@ -113,7 +113,7 @@ impl FrozenGeneratorInventory {
                 .callable
                 .validate_identity()
                 .map_err(|error| builtin_error(builtin, &ERROR_INPUT, error.to_string()))?;
-            if !binding.callable.owner_identity.starts_with("bound:")
+            if !matches!(binding.callable.owner, CallableOwner::Bound(_))
                 || binding.callable.qualified_name != generator.invocation.callable.display_name()
             {
                 return Err(builtin_error(
@@ -272,7 +272,7 @@ impl FrozenStudyGeneratorInventory {
         value: Option<&Value>,
         studies: &[crate::analysis::AnalysisStudySpec],
     ) -> BuiltinResult<Self> {
-        let mut carrier = ObjectInstance::new("runmat.internal.fea.sweep-bindings".into());
+        let mut carrier = ObjectInstance::new("runmat.internal.fea.sweep-bindings");
         if let Some(value) = value {
             carrier
                 .properties

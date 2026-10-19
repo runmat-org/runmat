@@ -651,7 +651,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
                 };
                 Ok(AwaitAction::ExecuteFuture {
                     handle: future,
-                    call: Box::new(call),
+                    call,
                 })
             }
             FutureState::Running => Err(ExecutionServiceError::Failed(
