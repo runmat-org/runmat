@@ -1,5 +1,4 @@
 use anyhow::{anyhow, ensure};
-use serde::{Deserialize, Serialize};
 
 use crate::GpuTensorHandle;
 
@@ -65,14 +64,14 @@ impl SparsePreconditionerApplyRequest<'_> {
         validate_preconditioner_owner(self.preconditioner, provider_device_id)?;
         validate_dense_owner(self.input, provider_device_id)?;
         ensure!(
-            self.input.shape
+            self.input.shape()
                 == [usize::try_from(self.preconditioner.descriptor.dimension)
                     .map_err(|_| anyhow!("sparse preconditioner dimension does not fit usize"))?],
             "sparse preconditioner input shape does not match its matrix"
         );
         ensure!(
-            self.input.descriptor.element_type == Some(self.preconditioner.descriptor.element_type)
-                && self.input.descriptor.storage == Some(self.preconditioner.descriptor.storage),
+            self.input.descriptor().element_type == Some(self.preconditioner.descriptor.element_type)
+                && self.input.descriptor().storage == Some(self.preconditioner.descriptor.storage),
             "sparse preconditioner input representation does not match its matrix"
         );
         Ok(())
@@ -150,8 +149,7 @@ impl SparseKrylovRequest<'_> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SparseKrylovResult {
     pub solution: Option<GpuTensorHandle>,
     pub termination: SparseKrylovTermination,

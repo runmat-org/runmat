@@ -117,11 +117,11 @@ pub(super) fn validate_dense_owner(
     provider_device_id: u32,
 ) -> anyhow::Result<()> {
     ensure!(
-        handle.device_id == provider_device_id,
+        handle.device_id() == provider_device_id,
         "dense vector belongs to a different provider"
     );
     ensure!(
-        handle.descriptor.element_type.is_some() && handle.descriptor.storage.is_some(),
+        handle.descriptor().element_type.is_some() && handle.descriptor().storage.is_some(),
         "dense vector is missing its durable numeric descriptor"
     );
     Ok(())
@@ -134,14 +134,14 @@ pub(super) fn ensure_vector_matches_matrix(
     operation: &str,
 ) -> anyhow::Result<()> {
     ensure!(
-        handle.shape
+        handle.shape()
             == [usize::try_from(expected_length)
                 .map_err(|_| anyhow!("{operation} length does not fit usize"))?],
         "{operation} shape does not match the sparse operator"
     );
     ensure!(
-        handle.descriptor.element_type == Some(matrix.element_type)
-            && handle.descriptor.storage == Some(matrix.storage),
+        handle.descriptor().element_type == Some(matrix.element_type)
+            && handle.descriptor().storage == Some(matrix.storage),
         "{operation} representation does not match the sparse operator"
     );
     Ok(())
