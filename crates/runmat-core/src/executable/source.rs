@@ -91,7 +91,7 @@ async fn canonical_access_path(path: &Path) -> Result<PathBuf, String> {
     {
         // Browser providers use rooted virtual paths; `Path::is_absolute` is
         // false for every path on wasm32-unknown-unknown (no prefix grammar).
-        if !runmat_filesystem::FsPathNamespace::VirtualRooted.is_absolute(path)
+        if !crate::diagnostic_path::host_path_is_absolute(path)
             || path
                 .components()
                 .any(|component| matches!(component, std::path::Component::ParentDir))

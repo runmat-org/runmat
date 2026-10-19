@@ -67,7 +67,7 @@ use facts::{function_output_arities, mir_local_fact_count_for_entrypoint};
 
 fn source_lookup_cwd(source_name: &str) -> Option<PathBuf> {
     let source_path = PathBuf::from(source_name);
-    if source_path.is_absolute() {
+    if crate::diagnostic_path::host_path_is_absolute(&source_path) {
         return source_path
             .parent()
             .map(Path::to_path_buf)
