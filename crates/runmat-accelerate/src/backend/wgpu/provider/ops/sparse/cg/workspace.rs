@@ -1,35 +1,34 @@
-use std::sync::Arc;
-
 use anyhow::{anyhow, ensure};
-use wgpu::util::DeviceExt;
+use runmat_accelerate_api::{WgpuBufferOwner, WgpuEmission};
 
 use super::super::super::{NumericPrecision, WgpuProvider};
 
 pub(super) struct CgWorkspace {
-    pub(super) solution: Arc<wgpu::Buffer>,
-    pub(super) residual: Arc<wgpu::Buffer>,
-    pub(super) preconditioned: Arc<wgpu::Buffer>,
-    pub(super) direction: Arc<wgpu::Buffer>,
-    pub(super) product: Arc<wgpu::Buffer>,
-    pub(super) residual_squared: Arc<wgpu::Buffer>,
-    pub(super) rho: Arc<wgpu::Buffer>,
-    pub(super) denominator: Arc<wgpu::Buffer>,
-    pub(super) dot_partials: Arc<wgpu::Buffer>,
-    pub(super) state: Arc<wgpu::Buffer>,
+    pub(super) solution: WgpuBufferOwner,
+    pub(super) residual: WgpuBufferOwner,
+    pub(super) preconditioned: WgpuBufferOwner,
+    pub(super) direction: WgpuBufferOwner,
+    pub(super) product: WgpuBufferOwner,
+    pub(super) residual_squared: WgpuBufferOwner,
+    pub(super) rho: WgpuBufferOwner,
+    pub(super) denominator: WgpuBufferOwner,
+    pub(super) dot_partials: WgpuBufferOwner,
+    pub(super) state: WgpuBufferOwner,
     pub(super) state_size: u64,
 }
 
 impl CgWorkspace {
     pub(super) fn allocate(
         provider: &WgpuProvider,
+        emission: &WgpuEmission<'_>,
         dimension: usize,
         reduction_groups: u32,
         relative_tolerance: f64,
         absolute_tolerance: f64,
         max_iterations: u32,
     ) -> anyhow::Result<Self> {
-        let vector = |label| provider.create_storage_buffer_checked(dimension, label);
-        let scalar = |label| provider.create_storage_buffer_checked(1, label);
+        let vector = |label| provider.create_storage_buffer_checked(emission, dimension, label);
+        let scalar = |label| provider.create_storage_buffer_checked(emission, 1, label);
         let state_bytes = state_bytes(
             provider.precision,
             relative_tolerance,
@@ -37,19 +36,12 @@ impl CgWorkspace {
             max_iterations,
         );
         let state_size = state_bytes.len() as u64;
-        ensure!(
-            state_size <= super::super::storage_binding_limit(provider),
-            "sparse CG state exceeds the WGPU storage binding limit"
-        );
-        let state = Arc::new(provider.device_ref().create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("runmat-sparse-cg-state"),
-                contents: &state_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-            },
-        ));
+        let state = super::super::readback_source(
+            provider,
+            emission,
+            "runmat-sparse-cg-state",
+            &state_bytes,
+        )?;
         Ok(Self {
             solution: vector("runmat-sparse-cg-solution")?,
             residual: vector("runmat-sparse-cg-residual")?,
@@ -60,6 +52,7 @@ impl CgWorkspace {
             rho: scalar("runmat-sparse-cg-rho")?,
             denominator: scalar("runmat-sparse-cg-denominator")?,
             dot_partials: provider.create_storage_buffer_checked(
+                emission,
                 reduction_groups as usize,
                 "runmat-sparse-cg-dot-partials",
             )?,

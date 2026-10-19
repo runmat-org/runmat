@@ -303,21 +303,19 @@ pub(super) fn read_f64_vector(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> anyhow::Result<Vec<f64>> {
     ensure!(
-        handle.device_id == device_id,
+        handle.device_id() == device_id,
         "sparse vector belongs to a different provider"
     );
     ensure!(
-        handle.descriptor.element_type == Some(NumericElementType::F64)
-            && handle.descriptor.storage == Some(GpuTensorStorage::Real),
+        handle.descriptor().element_type == Some(NumericElementType::F64)
+            && handle.descriptor().storage == Some(GpuTensorStorage::Real),
         "in-process sparse provider requires real f64 vectors"
     );
-    match super::numeric_registry()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .get(&handle.buffer_id)
-        .cloned()
-    {
-        Some(super::InProcessNumericData::F64(values)) => Ok(values),
+    let registry = super::numeric_registry()
+        .lock_for(device_id)
+        .map_err(|_| anyhow!("sparse vector allocation owner is poisoned"))?;
+    match registry.get(handle) {
+        Some(super::InProcessNumericData::F64(values)) => Ok(values.clone()),
         Some(_) => Err(anyhow!(
             "sparse vector storage does not match its descriptor"
         )),

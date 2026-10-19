@@ -1,9 +1,11 @@
-use std::sync::Arc;
+use runmat_accelerate_api::WgpuEmission;
 
 use super::super::super::{BufferEntry, WgpuProvider};
+use super::super::dispatch;
 use super::super::storage::{DeviceSparseMatrix, DeviceSparsePreconditioner};
-use super::pipelines::{ComputeStage, SparseCgPipelines};
+use super::pipelines::SparseCgPipelines;
 use super::workspace::CgWorkspace;
+use crate::backend::wgpu::dispatch::observation::ProfiledEncoder;
 
 pub(super) struct CgInputs<'a> {
     pub(super) matrix: &'a DeviceSparseMatrix,
@@ -14,12 +16,13 @@ pub(super) struct CgInputs<'a> {
 
 pub(super) fn encode_initialization(
     provider: &WgpuProvider,
-    encoder: &mut wgpu::CommandEncoder,
+    emission: &WgpuEmission<'_>,
+    encoder: &mut ProfiledEncoder<'_>,
     pipelines: &SparseCgPipelines,
     inputs: CgInputs<'_>,
     workspace: &CgWorkspace,
     vector_groups: u32,
-) {
+) -> anyhow::Result<()> {
     if let Some(initial_guess) = inputs.initial_guess {
         encoder.copy_buffer_to_buffer(
             initial_guess.buffer.as_ref(),
@@ -32,7 +35,7 @@ pub(super) fn encode_initialization(
         encoder.clear_buffer(workspace.solution.as_ref(), 0, None);
     }
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.spmv,
         "runmat-sparse-cg-initial-spmv",
@@ -45,9 +48,9 @@ pub(super) fn encode_initialization(
             workspace.state.as_ref(),
         ],
         vector_groups,
-    );
+    )?;
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.initialize_vectors,
         "runmat-sparse-cg-initialize-vectors",
@@ -61,27 +64,29 @@ pub(super) fn encode_initialization(
             workspace.state.as_ref(),
         ],
         vector_groups,
-    );
+    )?;
     encode_dot(
         provider,
+        emission,
         encoder,
         pipelines,
         workspace.residual.as_ref(),
         workspace.residual.as_ref(),
         workspace.residual_squared.as_ref(),
         workspace,
-    );
+    )?;
     encode_dot(
         provider,
+        emission,
         encoder,
         pipelines,
         workspace.residual.as_ref(),
         workspace.preconditioned.as_ref(),
         workspace.rho.as_ref(),
         workspace,
-    );
+    )?;
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.initialize_state,
         "runmat-sparse-cg-initialize-state",
@@ -91,20 +96,22 @@ pub(super) fn encode_initialization(
             workspace.state.as_ref(),
         ],
         1,
-    );
+    )?;
+    Ok(())
 }
 
 pub(super) fn encode_iteration(
     provider: &WgpuProvider,
-    encoder: &mut wgpu::CommandEncoder,
+    emission: &WgpuEmission<'_>,
+    encoder: &mut ProfiledEncoder<'_>,
     pipelines: &SparseCgPipelines,
     matrix: &DeviceSparseMatrix,
     preconditioner: &DeviceSparsePreconditioner,
     workspace: &CgWorkspace,
     vector_groups: u32,
-) {
+) -> anyhow::Result<()> {
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.spmv,
         "runmat-sparse-cg-spmv",
@@ -117,26 +124,27 @@ pub(super) fn encode_iteration(
             workspace.state.as_ref(),
         ],
         vector_groups,
-    );
+    )?;
     encode_dot(
         provider,
+        emission,
         encoder,
         pipelines,
         workspace.direction.as_ref(),
         workspace.product.as_ref(),
         workspace.denominator.as_ref(),
         workspace,
-    );
+    )?;
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.alpha,
         "runmat-sparse-cg-alpha",
         &[workspace.denominator.as_ref(), workspace.state.as_ref()],
         1,
-    );
+    )?;
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.update_solution_residual,
         "runmat-sparse-cg-update-solution-residual",
@@ -148,18 +156,19 @@ pub(super) fn encode_iteration(
             workspace.state.as_ref(),
         ],
         vector_groups,
-    );
+    )?;
     encode_dot(
         provider,
+        emission,
         encoder,
         pipelines,
         workspace.residual.as_ref(),
         workspace.residual.as_ref(),
         workspace.residual_squared.as_ref(),
         workspace,
-    );
+    )?;
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.apply_preconditioner,
         "runmat-sparse-cg-apply-preconditioner",
@@ -170,18 +179,19 @@ pub(super) fn encode_iteration(
             workspace.state.as_ref(),
         ],
         vector_groups,
-    );
+    )?;
     encode_dot(
         provider,
+        emission,
         encoder,
         pipelines,
         workspace.residual.as_ref(),
         workspace.preconditioned.as_ref(),
         workspace.rho.as_ref(),
         workspace,
-    );
+    )?;
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.update_state,
         "runmat-sparse-cg-update-state",
@@ -191,9 +201,9 @@ pub(super) fn encode_iteration(
             workspace.state.as_ref(),
         ],
         1,
-    );
+    )?;
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.update_direction,
         "runmat-sparse-cg-update-direction",
@@ -203,20 +213,22 @@ pub(super) fn encode_iteration(
             workspace.state.as_ref(),
         ],
         vector_groups,
-    );
+    )?;
+    Ok(())
 }
 
 fn encode_dot(
     provider: &WgpuProvider,
-    encoder: &mut wgpu::CommandEncoder,
+    emission: &WgpuEmission<'_>,
+    encoder: &mut ProfiledEncoder<'_>,
     pipelines: &SparseCgPipelines,
     left: &wgpu::Buffer,
     right: &wgpu::Buffer,
     output: &wgpu::Buffer,
     workspace: &CgWorkspace,
-) {
+) -> anyhow::Result<()> {
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.dot_partials,
         "runmat-sparse-cg-dot-partials",
@@ -227,9 +239,9 @@ fn encode_dot(
             workspace.state.as_ref(),
         ],
         vector_groups(provider, left),
-    );
+    )?;
     dispatch(
-        provider,
+        emission,
         encoder,
         &pipelines.dot_finalize,
         "runmat-sparse-cg-dot-finalize",
@@ -239,7 +251,8 @@ fn encode_dot(
             workspace.state.as_ref(),
         ],
         1,
-    );
+    )?;
+    Ok(())
 }
 
 fn vector_groups(provider: &WgpuProvider, buffer: &wgpu::Buffer) -> u32 {
@@ -249,36 +262,4 @@ fn vector_groups(provider: &WgpuProvider, buffer: &wgpu::Buffer) -> u32 {
         .div_ceil(u64::from(provider.workgroup_config.scalar.max(1)))
         .try_into()
         .expect("validated sparse vector dispatch fits u32")
-}
-
-fn dispatch(
-    provider: &WgpuProvider,
-    encoder: &mut wgpu::CommandEncoder,
-    stage: &ComputeStage,
-    label: &'static str,
-    buffers: &[&wgpu::Buffer],
-    groups: u32,
-) {
-    let entries = buffers
-        .iter()
-        .enumerate()
-        .map(|(binding, buffer)| wgpu::BindGroupEntry {
-            binding: binding as u32,
-            resource: buffer.as_entire_binding(),
-        })
-        .collect::<Vec<_>>();
-    let bind_group = Arc::new(provider.device_ref().create_bind_group(
-        &wgpu::BindGroupDescriptor {
-            label: Some(label),
-            layout: stage.layout.as_ref(),
-            entries: &entries,
-        },
-    ));
-    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-        label: Some(label),
-        timestamp_writes: None,
-    });
-    pass.set_pipeline(&stage.pipeline);
-    pass.set_bind_group(0, bind_group.as_ref(), &[]);
-    pass.dispatch_workgroups(groups, 1, 1);
 }

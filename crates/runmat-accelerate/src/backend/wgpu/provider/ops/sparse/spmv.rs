@@ -1,6 +1,3 @@
-use std::borrow::Cow;
-use std::sync::Arc;
-
 use anyhow::{anyhow, ensure};
 use runmat_accelerate_api::{
     AccelProviderFuture, GpuTensorHandle, GpuTensorStorage, SparseFeasibilityQuery,
@@ -8,11 +5,6 @@ use runmat_accelerate_api::{
 };
 
 use super::super::{BufferUsageClass, NumericBufferRegistration, WgpuProvider};
-
-pub(crate) struct SparseSpmvPipeline {
-    layout: Arc<wgpu::BindGroupLayout>,
-    pipeline: wgpu::ComputePipeline,
-}
 
 pub(crate) fn execute<'a>(
     provider: &'a WgpuProvider,
@@ -53,49 +45,39 @@ pub(crate) fn execute<'a>(
         );
         let row_count = usize::try_from(matrix.pattern.descriptor.rows)
             .map_err(|_| anyhow!("sparse row count exceeds host address space"))?;
-        let output_buffer =
-            provider.create_storage_buffer_checked(row_count, "runmat-sparse-spmv-output")?;
-        if row_count > 0 {
-            let pipeline = pipeline(provider);
-            let bind_group = provider
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-sparse-spmv-bind-group"),
-                    layout: pipeline.layout.as_ref(),
-                    entries: &[
-                        binding(0, matrix.pattern.row_offsets.as_ref()),
-                        binding(1, matrix.pattern.column_indices.as_ref()),
-                        binding(2, matrix.values.as_ref()),
-                        binding(3, input.buffer.as_ref()),
-                        binding(4, output_buffer.as_ref()),
-                    ],
-                });
-            let workgroup_size = provider.workgroup_config.scalar.max(1);
-            let groups = u32::try_from(row_count)
-                .ok()
-                .and_then(|rows| rows.checked_add(workgroup_size - 1))
-                .map(|rows| rows / workgroup_size)
-                .ok_or_else(|| anyhow!("sparse SpMV dispatch count exceeds WGPU limits"))?;
-            ensure!(
-                groups <= provider.adapter_limits.max_compute_workgroups_per_dimension,
-                "sparse SpMV dispatch exceeds the adapter workgroup limit"
-            );
-            let mut encoder =
-                provider
-                    .device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let groups = super::dispatch_groups(provider, row_count)?;
+        let output_buffer = provider.with_emission(|emission, pending| {
+            let output_buffer = provider.create_storage_buffer_checked(
+                emission,
+                row_count,
+                "runmat-sparse-spmv-output",
+            )?;
+            if row_count > 0 {
+                let mut encoder = pending.profiled_encoder(
+                    emission,
+                    &wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-sparse-spmv-encoder"),
-                    });
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("runmat-sparse-spmv-pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&pipeline.pipeline);
-                pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(groups, 1, 1);
+                    },
+                );
+                super::dispatch(
+                    emission,
+                    &mut encoder,
+                    &provider.sparse_pipelines.spmv,
+                    "runmat-sparse-spmv-pass",
+                    &[
+                        matrix.pattern.row_offsets.as_ref(),
+                        matrix.pattern.column_indices.as_ref(),
+                        matrix.values.as_ref(),
+                        input.buffer.as_ref(),
+                        output_buffer.as_ref(),
+                    ],
+                    groups,
+                )?;
+                provider.submit(emission, pending, encoder)?;
             }
-            provider.submit(encoder);
+            anyhow::Ok(output_buffer)
+        })??;
+        if row_count > 0 {
             provider.record_kernel_launch_basic(
                 "sparse_spmv",
                 &[
@@ -103,11 +85,14 @@ pub(crate) fn execute<'a>(
                     ("columns", matrix.pattern.descriptor.columns),
                     ("nnz", matrix.pattern.descriptor.nnz),
                 ],
-                &[("workgroup_size", u64::from(workgroup_size))],
+                &[(
+                    "workgroup_size",
+                    u64::from(provider.workgroup_config.scalar.max(1)),
+                )],
             );
         }
         let allocated_bytes = output_buffer.size();
-        Ok(provider.register_numeric_buffer(
+        provider.register_numeric_buffer(
             output_buffer,
             NumericBufferRegistration {
                 shape: vec![row_count],
@@ -117,72 +102,11 @@ pub(crate) fn execute<'a>(
                 allocated_bytes,
                 usage: BufferUsageClass::Generic,
             },
-        ))
+        )
     })
 }
 
-fn pipeline(provider: &WgpuProvider) -> Arc<SparseSpmvPipeline> {
-    let mut cache = provider
-        .sparse_pipelines
-        .spmv
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    cache
-        .get_or_insert_with(|| Arc::new(create_pipeline(provider)))
-        .clone()
-}
-
-fn create_pipeline(provider: &WgpuProvider) -> SparseSpmvPipeline {
-    let entries = [
-        crate::backend::wgpu::bindings::storage_read_entry(0),
-        crate::backend::wgpu::bindings::storage_read_entry(1),
-        crate::backend::wgpu::bindings::storage_read_entry(2),
-        crate::backend::wgpu::bindings::storage_read_entry(3),
-        crate::backend::wgpu::bindings::storage_read_write_entry(4),
-    ];
-    let layout = Arc::new(provider.device_ref().create_bind_group_layout(
-        &wgpu::BindGroupLayoutDescriptor {
-            label: Some("runmat-sparse-spmv-layout"),
-            entries: &entries,
-        },
-    ));
-    let pipeline_layout =
-        provider
-            .device_ref()
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("runmat-sparse-spmv-pipeline-layout"),
-                bind_group_layouts: &[layout.as_ref()],
-                push_constant_ranges: &[],
-            });
-    let source = shader_source(
-        provider.precision.as_str(),
-        provider.workgroup_config.scalar.max(1),
-    );
-    let module = provider
-        .device_ref()
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("runmat-sparse-spmv-shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Owned(source)),
-        });
-    let pipeline = provider.device_ref().create_compute_pipeline(
-        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor!(
-            label: Some("runmat-sparse-spmv-pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &module,
-            entry_point: "main",
-        ),
-    );
-    SparseSpmvPipeline { layout, pipeline }
-}
-
-fn binding(binding: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
-    wgpu::BindGroupEntry {
-        binding,
-        resource: buffer.as_entire_binding(),
-    }
-}
-
-fn shader_source(scalar: &str, workgroup_size: u32) -> String {
+pub(super) fn shader_source(scalar: &str, workgroup_size: u32) -> String {
     format!(
         r#"
 struct IndexBuffer {{ data: array<u32>, }};

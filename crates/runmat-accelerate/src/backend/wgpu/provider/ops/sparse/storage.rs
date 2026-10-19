@@ -8,26 +8,27 @@ use runmat_accelerate_api::{
     validate_sparse_values, GpuTensorStorage, HostCsrPatternView, HostNumericDataView,
     HostNumericTensorView, SparseMatrixDescriptor, SparseMatrixHandle, SparsePatternDescriptor,
     SparsePatternHandle, SparsePreconditionerDescriptor, SparsePreconditionerHandle,
+    WgpuBufferOwner,
 };
 
-use super::{feasibility, numeric_element_type, upload_bytes, upload_u32};
+use super::{feasibility, numeric_element_type, upload_operand};
 
 pub(in crate::backend::wgpu::provider) struct DeviceCsrPattern {
     pub(super) descriptor: SparsePatternDescriptor,
-    pub(super) row_offsets: Arc<wgpu::Buffer>,
-    pub(super) column_indices: Arc<wgpu::Buffer>,
+    pub(super) row_offsets: WgpuBufferOwner,
+    pub(super) column_indices: WgpuBufferOwner,
 }
 
 pub(in crate::backend::wgpu::provider) struct DeviceSparseMatrix {
     pub(super) pattern: Arc<DeviceCsrPattern>,
     pub(super) descriptor: SparseMatrixDescriptor,
-    pub(super) values: Arc<wgpu::Buffer>,
+    pub(super) values: WgpuBufferOwner,
 }
 
 pub(in crate::backend::wgpu::provider) struct DeviceSparsePreconditioner {
     pub(super) descriptor: SparsePreconditionerDescriptor,
     pub(super) pattern: SparsePatternDescriptor,
-    pub(super) inverse_diagonal: Arc<wgpu::Buffer>,
+    pub(super) inverse_diagonal: WgpuBufferOwner,
 }
 
 #[derive(Default)]
@@ -62,7 +63,9 @@ impl Drop for SparseTransientReservation<'_> {
 impl SparseState {
     /// Sparse handle identities are provider-local and never alias dense allocations.
     pub(in crate::backend::wgpu::provider) fn next_id(&self) -> u64 {
-        self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+        self.next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1
     }
 
     fn lock(&self) -> MutexGuard<'_, SparseStorage> {
@@ -122,10 +125,28 @@ impl SparseState {
             .map(|value| u32::try_from(*value))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| anyhow!("sparse column index exceeds WGPU u32 indexing"))?;
+        let (row_offsets, column_indices) = provider.with_emission(|emission, _| {
+            anyhow::Ok((
+                upload_operand(
+                    provider,
+                    emission,
+                    "runmat-sparse-row-offsets",
+                    bytemuck::cast_slice(&row_offsets),
+                    4,
+                )?,
+                upload_operand(
+                    provider,
+                    emission,
+                    "runmat-sparse-column-indices",
+                    bytemuck::cast_slice(&column_indices),
+                    4,
+                )?,
+            ))
+        })??;
         let pattern = Arc::new(DeviceCsrPattern {
             descriptor,
-            row_offsets: upload_u32(provider, "runmat-sparse-row-offsets", &row_offsets)?,
-            column_indices: upload_u32(provider, "runmat-sparse-column-indices", &column_indices)?,
+            row_offsets,
+            column_indices,
         });
         ensure!(
             self.lock().patterns.insert(pattern_id, pattern).is_none(),
@@ -184,15 +205,19 @@ impl SparseState {
             resident_pattern.descriptor == pattern.descriptor,
             "sparse pattern handle descriptor does not match resident storage"
         );
-        let matrix = Arc::new(DeviceSparseMatrix {
-            pattern: resident_pattern,
-            descriptor,
-            values: upload_bytes(
+        let values = provider.with_emission(|emission, _| {
+            upload_operand(
                 provider,
+                emission,
                 "runmat-sparse-values",
                 bytes,
                 descriptor.element_type.element_size() as u64,
-            )?,
+            )
+        })??;
+        let matrix = Arc::new(DeviceSparseMatrix {
+            pattern: resident_pattern,
+            descriptor,
+            values,
         });
         ensure!(
             storage.matrices.insert(matrix_id, matrix).is_none(),
@@ -331,13 +356,6 @@ impl SparseState {
                 bytes.saturating_add(preconditioner.inverse_diagonal.size())
             });
         persistent_bytes.saturating_add(self.transient_bytes.load(Ordering::Acquire))
-    }
-
-    pub(in crate::backend::wgpu::provider) fn clear(&self) {
-        let mut storage = self.lock();
-        storage.preconditioners.clear();
-        storage.matrices.clear();
-        storage.patterns.clear();
     }
 }
 

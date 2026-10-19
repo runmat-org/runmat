@@ -67,6 +67,4 @@ pub enum SparseKrylovTermination {
 pub enum SparseProviderLossReason {
     Unknown,
     Destroyed,
-    Dropped,
-    CallbackReplaced,
 }

@@ -1,4 +1,3 @@
-#[cfg(feature = "wgpu")]
 use super::fusion::fusion_operation_token;
 use crate::fusion::FusionKind;
 use runmat_accelerate_api::{

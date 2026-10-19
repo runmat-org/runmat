@@ -24,7 +24,7 @@ pub(in crate::simple_provider) fn spmv<'a>(
         let matrix = provider.sparse.matrix(provider.device_id, request.matrix)?;
         let input = read_f64_vector(provider.device_id, request.input)?;
         let output = multiply(&matrix, &input)?;
-        Ok(provider.allocate_tensor(output, vec![matrix.pattern.descriptor.rows as usize]))
+        provider.allocate_tensor(output, vec![matrix.pattern.descriptor.rows as usize])
     })
 }
 
@@ -57,7 +57,7 @@ pub(in crate::simple_provider) fn apply_preconditioner<'a>(
             .preconditioner(provider.device_id, request.preconditioner)?;
         let input = read_f64_vector(provider.device_id, request.input)?;
         let output = apply_jacobi(&preconditioner, &input)?;
-        Ok(provider.allocate_tensor(output, request.input.shape.clone()))
+        provider.allocate_tensor(output, request.input.shape().to_vec())
     })
 }
 
@@ -143,7 +143,7 @@ pub(in crate::simple_provider) fn krylov_solve<'a>(
         let solution = if cancelled {
             None
         } else {
-            Some(provider.allocate_tensor(outcome.solution, vec![dimension as usize]))
+            Some(provider.allocate_tensor(outcome.solution, vec![dimension as usize])?)
         };
         let result = SparseKrylovResult {
             solution,

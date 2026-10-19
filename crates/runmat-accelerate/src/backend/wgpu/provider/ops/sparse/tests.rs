@@ -226,7 +226,8 @@ fn sparse_admission_is_exact_and_side_effect_free() {
         }
     ));
     let snapshot = provider.capability_snapshot();
-    assert_eq!(snapshot.revision, 4);
+    // Revision 23 is the F64 provider without IEEE-word reductions.
+    assert!(matches!(snapshot.revision, 22 | 23));
     snapshot
         .sparse
         .expect("WGPU sparse capability envelope")
@@ -383,7 +384,7 @@ fn sparse_spmv_covers_multiple_workgroups_without_host_staging() {
         transpose: SparseTranspose::None,
     }))
     .expect("execute multi-workgroup sparse SpMV");
-    assert_eq!(output.shape, vec![rows]);
+    assert_eq!(output.shape(), [rows]);
     assert_eq!(download_vector(provider, &output), input_values);
 }
 
@@ -452,7 +453,7 @@ fn empty_sparse_matrix_preserves_zero_shape_and_physical_accounting() {
         transpose: SparseTranspose::None,
     }))
     .expect("execute empty sparse SpMV");
-    assert_eq!(output.shape, vec![0]);
+    assert_eq!(output.shape(), [0]);
     assert!(download_vector(provider, &output).is_empty());
 }
 
@@ -489,8 +490,8 @@ fn sparse_jacobi_is_prepared_and_applied_on_device() {
     assert!((values[0] - 2.0).abs() < 1.0e-5);
     assert!((values[1] - 3.0).abs() < 1.0e-5);
 
-    provider.free(&output).expect("release Jacobi output");
-    provider.free(&input).expect("release Jacobi input");
+    drop(output);
+    drop(input);
     provider
         .free_sparse_preconditioner(&preconditioner)
         .expect("release Jacobi preconditioner");
@@ -588,9 +589,9 @@ fn sparse_cg_keeps_iteration_work_resident_and_returns_bound_evidence() {
     assert!((values[0] - 1.0 / 11.0).abs() < 1.0e-4);
     assert!((values[1] - 7.0 / 11.0).abs() < 1.0e-4);
 
-    provider.free(solution).expect("release CG solution");
-    provider.free(&initial).expect("release initial guess");
-    provider.free(&rhs).expect("release RHS");
+    drop(result);
+    drop(initial);
+    drop(rhs);
     provider
         .free_sparse_preconditioner(&preconditioner)
         .expect("release preconditioner");
@@ -677,8 +678,8 @@ fn exact_f64_sparse_cg_is_executed_or_rejected_by_adapter_capability() {
     assert!((values[0] - 1.0 / 11.0).abs() < 1.0e-12);
     assert!((values[1] - 7.0 / 11.0).abs() < 1.0e-12);
 
-    provider.free(solution).expect("release exact-f64 solution");
-    provider.free(&rhs).expect("release exact-f64 RHS");
+    drop(result);
+    drop(rhs);
     provider
         .free_sparse_preconditioner(&preconditioner)
         .expect("release exact-f64 preconditioner");
@@ -758,10 +759,8 @@ fn sparse_cg_matches_a_representative_multi_workgroup_reference() {
     let rhs_squared = rhs_values.iter().map(|value| value * value).sum::<f64>();
     assert!((residual_squared / rhs_squared).sqrt() < 2.0e-5);
 
-    provider
-        .free(solution)
-        .expect("release representative solution");
-    provider.free(&rhs).expect("release representative RHS");
+    drop(result);
+    drop(rhs);
     provider
         .free_sparse_preconditioner(&preconditioner)
         .expect("release representative preconditioner");
@@ -817,10 +816,8 @@ fn sparse_cg_reports_iteration_limit_and_numerical_breakdown() {
         SparseKrylovTermination::MaximumIterations
     );
     assert_eq!(limited.iterations, 1);
-    provider
-        .free(limited.solution.as_ref().expect("limited solution"))
-        .expect("release limited solution");
-    provider.free(&rhs).expect("release limited RHS");
+    drop(limited.solution.expect("limited solution"));
+    drop(rhs);
     provider
         .free_sparse_preconditioner(&preconditioner)
         .expect("release limited preconditioner");
@@ -870,10 +867,8 @@ fn sparse_cg_reports_iteration_limit_and_numerical_breakdown() {
         SparseKrylovTermination::NumericalBreakdown
     );
     assert_eq!(breakdown.iterations, 0);
-    provider
-        .free(breakdown.solution.as_ref().expect("breakdown solution"))
-        .expect("release breakdown solution");
-    provider.free(&rhs).expect("release breakdown RHS");
+    drop(breakdown.solution.expect("breakdown solution"));
+    drop(rhs);
     provider
         .free_sparse_preconditioner(&preconditioner)
         .expect("release breakdown preconditioner");
@@ -951,7 +946,7 @@ fn sparse_cg_observes_cancellation_after_resident_work_begins() {
     assert!(result.evidence.host_synchronizations < 257);
     assert_eq!(provider.sparse.resident_bytes(), persistent_bytes);
 
-    provider.free(&rhs).expect("release cancellation RHS");
+    drop(rhs);
     provider
         .free_sparse_preconditioner(&preconditioner)
         .expect("release cancellation preconditioner");
@@ -1041,7 +1036,7 @@ fn sparse_cg_reports_provider_loss_after_resident_work_begins() {
     assert_eq!(provider.sparse.resident_bytes(), persistent_bytes);
     assert!(!provider.placement_resources().lost);
 
-    provider.free(&rhs).expect("release provider-loss RHS");
+    drop(rhs);
     provider
         .free_sparse_preconditioner(&preconditioner)
         .expect("release provider-loss preconditioner");

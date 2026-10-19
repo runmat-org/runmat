@@ -248,6 +248,15 @@ fn inprocess_sparse_admission_is_exact_costed_and_side_effect_free() {
             downstream_materialization: false,
         })
         .is_some());
+    assert!(provider
+        .estimate_sparse_cost(&SparseCostQuery {
+            operation: query,
+            preparation: CandidatePreparationState::Unknown,
+            required_upload_bytes: 0,
+            required_download_bytes: 0,
+            downstream_materialization: false,
+        })
+        .is_none());
     assert!(matches!(
         provider.query_sparse_feasibility(&SparseFeasibilityQuery {
             element_type: NumericElementType::F32,
