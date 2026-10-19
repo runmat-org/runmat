@@ -12,8 +12,8 @@ use runmat_analysis_core::{
 use super::*;
 use crate::builtins::fea::study_policies::observation as policy;
 use crate::builtins::fea::study_values::{
-    from_typed_value, nonempty_id, object_or_cell, register_immutable_class, to_typed_value,
-    TypedStudyValue, VALUE_FIELD,
+    from_typed_value, nonempty_id, object_or_cell, register_immutable_runtime_classes,
+    register_immutable_schemas, to_typed_value, ImmutableStudyClass, TypedStudyValue, VALUE_FIELD,
 };
 use crate::builtins::geometry::region::region_ref_from_value;
 
@@ -130,174 +130,181 @@ pub(super) use storage::{
 #[cfg(test)]
 pub(super) use targets::target_whole;
 
+const OBSERVATION_STUDY_CLASSES: [ImmutableStudyClass; 12] = [
+    ImmutableStudyClass {
+        class_name: TARGET_CLASS,
+        type_identity: "runmat.fea.observation-target",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("boundary", "fea.ObservationTarget.boundary"),
+            ("volume", "fea.ObservationTarget.volume"),
+            ("point", "fea.ObservationTarget.point"),
+            ("path", "fea.ObservationTarget.path"),
+            ("interface", "fea.ObservationTarget.interface"),
+            ("port", "fea.ObservationTarget.port"),
+            ("connector", "fea.ObservationTarget.connector"),
+            ("constraint", "fea.ObservationTarget.constraint"),
+            ("wholeModel", "fea.ObservationTarget.wholeModel"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: SAMPLING_CLASS,
+        type_identity: "runmat.fea.sampling-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("finalSample", "fea.SamplingPolicy.finalSample"),
+            (
+                "everyAcceptedIncrement",
+                "fea.SamplingPolicy.everyAcceptedIncrement",
+            ),
+            ("timeSeconds", "fea.SamplingPolicy.timeSeconds"),
+            (
+                "timeIntervalSeconds",
+                "fea.SamplingPolicy.timeIntervalSeconds",
+            ),
+            ("frequencyHertz", "fea.SamplingPolicy.frequencyHertz"),
+            (
+                "frequencyIntervalHertz",
+                "fea.SamplingPolicy.frequencyIntervalHertz",
+            ),
+            ("loadFactors", "fea.SamplingPolicy.loadFactors"),
+            (
+                "loadFactorInterval",
+                "fea.SamplingPolicy.loadFactorInterval",
+            ),
+            (
+                "studyParameterValues",
+                "fea.SamplingPolicy.studyParameterValues",
+            ),
+            ("modeIndices", "fea.SamplingPolicy.modeIndices"),
+            ("event", "fea.SamplingPolicy.event"),
+            ("adaptive", "fea.SamplingPolicy.adaptive"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: EVENT_CLASS,
+        type_identity: "runmat.fea.observation-event",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("firstYield", "fea.ObservationEvent.firstYield"),
+            (
+                "contactStatusChange",
+                "fea.ObservationEvent.contactStatusChange",
+            ),
+            ("peakResponse", "fea.ObservationEvent.peakResponse"),
+            (
+                "convergenceFailure",
+                "fea.ObservationEvent.convergenceFailure",
+            ),
+            (
+                "accuracyCriterionCrossing",
+                "fea.ObservationEvent.accuracyCriterionCrossing",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: REDUCTION_CLASS,
+        type_identity: "runmat.fea.reduction-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("none", "fea.ReductionPolicy.none"),
+            ("new", "fea.ReductionPolicy.new"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: PRECISION_CLASS,
+        type_identity: "runmat.fea.signal-precision",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("real32", "fea.SignalPrecision.real32"),
+            ("real64", "fea.SignalPrecision.real64"),
+            ("complex64", "fea.SignalPrecision.complex64"),
+            ("complex128", "fea.SignalPrecision.complex128"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: COMPRESSION_CLASS,
+        type_identity: "runmat.fea.compression-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("lossless", "fea.CompressionPolicy.lossless"),
+            ("errorBounded", "fea.CompressionPolicy.errorBounded"),
+            ("none", "fea.CompressionPolicy.none"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: RETENTION_CLASS,
+        type_identity: "runmat.fea.retention-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("canonical", "fea.RetentionPolicy.canonical"),
+            (
+                "untilDependentsComplete",
+                "fea.RetentionPolicy.untilDependentsComplete",
+            ),
+            ("latestSamples", "fea.RetentionPolicy.latestSamples"),
+            ("explicitSamples", "fea.RetentionPolicy.explicitSamples"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STORAGE_CLASS,
+        type_identity: "runmat.fea.observation-storage",
+        fields: STORAGE_FIELDS,
+        methods: &[("new", "fea.ObservationStorage.new")],
+    },
+    ImmutableStudyClass {
+        class_name: COST_CLASS,
+        type_identity: "runmat.fea.observation-cost",
+        fields: COST_FIELDS,
+        methods: &[("new", "fea.ObservationCost.new")],
+    },
+    ImmutableStudyClass {
+        class_name: CADENCE_CLASS,
+        type_identity: "runmat.fea.monitor-cadence",
+        fields: VALUE_FIELD,
+        methods: &[
+            (
+                "acceptedIncrements",
+                "fea.MonitorCadence.acceptedIncrements",
+            ),
+            ("wallSeconds", "fea.MonitorCadence.wallSeconds"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STOP_CLASS,
+        type_identity: "runmat.fea.monitor-stop-condition",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("none", "fea.MonitorStopCondition.none"),
+            ("lessThan", "fea.MonitorStopCondition.lessThan"),
+            ("greaterThan", "fea.MonitorStopCondition.greaterThan"),
+            (
+                "absoluteChangeBelow",
+                "fea.MonitorStopCondition.absoluteChangeBelow",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: OBSERVATION_CLASS,
+        type_identity: "runmat.fea.observation",
+        fields: OBSERVATION_FIELDS,
+        methods: &[
+            ("field", "fea.Observation.field"),
+            ("history", "fea.Observation.history"),
+            ("probe", "fea.Observation.probe"),
+            ("reduction", "fea.Observation.reduction"),
+            ("diagnostic", "fea.Observation.diagnostic"),
+            ("monitor", "fea.Observation.monitor"),
+        ],
+    },
+];
+
 pub(super) fn ensure_observation_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
-            TARGET_CLASS,
-            "runmat.fea.observation-target",
-            VALUE_FIELD,
-            &[
-                ("boundary", "fea.ObservationTarget.boundary"),
-                ("volume", "fea.ObservationTarget.volume"),
-                ("point", "fea.ObservationTarget.point"),
-                ("path", "fea.ObservationTarget.path"),
-                ("interface", "fea.ObservationTarget.interface"),
-                ("port", "fea.ObservationTarget.port"),
-                ("connector", "fea.ObservationTarget.connector"),
-                ("constraint", "fea.ObservationTarget.constraint"),
-                ("wholeModel", "fea.ObservationTarget.wholeModel"),
-            ],
-        );
-        register_immutable_class(
-            SAMPLING_CLASS,
-            "runmat.fea.sampling-policy",
-            VALUE_FIELD,
-            &[
-                ("finalSample", "fea.SamplingPolicy.finalSample"),
-                (
-                    "everyAcceptedIncrement",
-                    "fea.SamplingPolicy.everyAcceptedIncrement",
-                ),
-                ("timeSeconds", "fea.SamplingPolicy.timeSeconds"),
-                (
-                    "timeIntervalSeconds",
-                    "fea.SamplingPolicy.timeIntervalSeconds",
-                ),
-                ("frequencyHertz", "fea.SamplingPolicy.frequencyHertz"),
-                (
-                    "frequencyIntervalHertz",
-                    "fea.SamplingPolicy.frequencyIntervalHertz",
-                ),
-                ("loadFactors", "fea.SamplingPolicy.loadFactors"),
-                (
-                    "loadFactorInterval",
-                    "fea.SamplingPolicy.loadFactorInterval",
-                ),
-                (
-                    "studyParameterValues",
-                    "fea.SamplingPolicy.studyParameterValues",
-                ),
-                ("modeIndices", "fea.SamplingPolicy.modeIndices"),
-                ("event", "fea.SamplingPolicy.event"),
-                ("adaptive", "fea.SamplingPolicy.adaptive"),
-            ],
-        );
-        register_immutable_class(
-            EVENT_CLASS,
-            "runmat.fea.observation-event",
-            VALUE_FIELD,
-            &[
-                ("firstYield", "fea.ObservationEvent.firstYield"),
-                (
-                    "contactStatusChange",
-                    "fea.ObservationEvent.contactStatusChange",
-                ),
-                ("peakResponse", "fea.ObservationEvent.peakResponse"),
-                (
-                    "convergenceFailure",
-                    "fea.ObservationEvent.convergenceFailure",
-                ),
-                (
-                    "accuracyCriterionCrossing",
-                    "fea.ObservationEvent.accuracyCriterionCrossing",
-                ),
-            ],
-        );
-        register_immutable_class(
-            REDUCTION_CLASS,
-            "runmat.fea.reduction-policy",
-            VALUE_FIELD,
-            &[
-                ("none", "fea.ReductionPolicy.none"),
-                ("new", "fea.ReductionPolicy.new"),
-            ],
-        );
-        register_immutable_class(
-            PRECISION_CLASS,
-            "runmat.fea.signal-precision",
-            VALUE_FIELD,
-            &[
-                ("real32", "fea.SignalPrecision.real32"),
-                ("real64", "fea.SignalPrecision.real64"),
-                ("complex64", "fea.SignalPrecision.complex64"),
-                ("complex128", "fea.SignalPrecision.complex128"),
-            ],
-        );
-        register_immutable_class(
-            COMPRESSION_CLASS,
-            "runmat.fea.compression-policy",
-            VALUE_FIELD,
-            &[
-                ("lossless", "fea.CompressionPolicy.lossless"),
-                ("errorBounded", "fea.CompressionPolicy.errorBounded"),
-                ("none", "fea.CompressionPolicy.none"),
-            ],
-        );
-        register_immutable_class(
-            RETENTION_CLASS,
-            "runmat.fea.retention-policy",
-            VALUE_FIELD,
-            &[
-                ("canonical", "fea.RetentionPolicy.canonical"),
-                (
-                    "untilDependentsComplete",
-                    "fea.RetentionPolicy.untilDependentsComplete",
-                ),
-                ("latestSamples", "fea.RetentionPolicy.latestSamples"),
-                ("explicitSamples", "fea.RetentionPolicy.explicitSamples"),
-            ],
-        );
-        register_immutable_class(
-            STORAGE_CLASS,
-            "runmat.fea.observation-storage",
-            STORAGE_FIELDS,
-            &[("new", "fea.ObservationStorage.new")],
-        );
-        register_immutable_class(
-            COST_CLASS,
-            "runmat.fea.observation-cost",
-            COST_FIELDS,
-            &[("new", "fea.ObservationCost.new")],
-        );
-        register_immutable_class(
-            CADENCE_CLASS,
-            "runmat.fea.monitor-cadence",
-            VALUE_FIELD,
-            &[
-                (
-                    "acceptedIncrements",
-                    "fea.MonitorCadence.acceptedIncrements",
-                ),
-                ("wallSeconds", "fea.MonitorCadence.wallSeconds"),
-            ],
-        );
-        register_immutable_class(
-            STOP_CLASS,
-            "runmat.fea.monitor-stop-condition",
-            VALUE_FIELD,
-            &[
-                ("none", "fea.MonitorStopCondition.none"),
-                ("lessThan", "fea.MonitorStopCondition.lessThan"),
-                ("greaterThan", "fea.MonitorStopCondition.greaterThan"),
-                (
-                    "absoluteChangeBelow",
-                    "fea.MonitorStopCondition.absoluteChangeBelow",
-                ),
-            ],
-        );
-        register_immutable_class(
-            OBSERVATION_CLASS,
-            "runmat.fea.observation",
-            OBSERVATION_FIELDS,
-            &[
-                ("field", "fea.Observation.field"),
-                ("history", "fea.Observation.history"),
-                ("probe", "fea.Observation.probe"),
-                ("reduction", "fea.Observation.reduction"),
-                ("diagnostic", "fea.Observation.diagnostic"),
-                ("monitor", "fea.Observation.monitor"),
-            ],
-        );
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(FEA_OBSERVATION_TARGET_CLASS);
+    SCHEMAS.call_once(|| register_immutable_schemas(&OBSERVATION_STUDY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| {
+        register_immutable_runtime_classes(&OBSERVATION_STUDY_CLASSES);
     });
 }

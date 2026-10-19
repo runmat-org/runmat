@@ -36,11 +36,38 @@ pub(super) fn from_typed_value<T: DeserializeOwned>(
     Ok(wrapped.value)
 }
 
-pub(super) fn register_immutable_class(
+/// One immutable study-value class: its portable codec schema and its static
+/// constructor methods.
+pub(super) struct ImmutableStudyClass {
+    pub(super) class_name: &'static str,
+    pub(super) type_identity: &'static str,
+    pub(super) fields: &'static [&'static str],
+    pub(super) methods: &'static [(&'static str, &'static str)],
+}
+
+/// Register the process-global portable codec schemas once per process.
+pub(super) fn register_immutable_schemas(classes: &[ImmutableStudyClass]) {
+    for class in classes {
+        register_immutable_schema(class.class_name, class.type_identity, class.fields);
+    }
+}
+
+/// Register the runtime classes in the current class registry. Callers guard
+/// this with a `ClassRegistration` so every fresh registry receives them.
+pub(super) fn register_immutable_runtime_classes(classes: &[ImmutableStudyClass]) {
+    for class in classes {
+        register_value_class(
+            class.class_name,
+            immutable_properties(class.fields),
+            static_methods(class.methods.iter().copied()),
+        );
+    }
+}
+
+fn register_immutable_schema(
     class_name: &'static str,
     type_identity: &'static str,
     fields: &'static [&'static str],
-    methods: &[(&'static str, &'static str)],
 ) {
     crate::execution::value_codec::register_immutable_value_class(
         crate::execution::value_codec::ImmutableValueClassSchema {
@@ -53,7 +80,15 @@ pub(super) fn register_immutable_class(
         },
     )
     .unwrap_or_else(|error| panic!("failed to register {class_name}: {error}"));
+}
 
+pub(super) fn register_immutable_class(
+    class_name: &'static str,
+    type_identity: &'static str,
+    fields: &'static [&'static str],
+    methods: &[(&'static str, &'static str)],
+) {
+    register_immutable_schema(class_name, type_identity, fields);
     register_value_class(
         class_name,
         immutable_properties(fields),

@@ -10,8 +10,8 @@ use super::*;
 use crate::builtins::fea::observations::study_outputs;
 use crate::builtins::fea::study_policies::sequence as policy;
 use crate::builtins::fea::study_values::{
-    from_typed_value, nonempty_id, object_or_cell, register_immutable_class, to_typed_value,
-    VALUE_FIELD,
+    from_typed_value, nonempty_id, object_or_cell, register_immutable_runtime_classes,
+    register_immutable_schemas, to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
 use crate::class_registry::declaration::{register_value_class, static_methods};
 use runmat_builtins::fea_contract::study_types::{
@@ -631,75 +631,82 @@ pub(super) fn sequence_from_value(
     object_payload(name, value, SEQUENCE_CLASS)
 }
 
+const SEQUENCE_STUDY_CLASSES: [ImmutableStudyClass; 8] = [
+    ImmutableStudyClass {
+        class_name: INDEPENDENT_DOMAIN_CLASS,
+        type_identity: "runmat.fea.independent-domain",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("staticDomain", "fea.IndependentDomain.staticDomain"),
+            ("timeSeconds", "fea.IndependentDomain.timeSeconds"),
+            ("frequencyHertz", "fea.IndependentDomain.frequencyHertz"),
+            ("loadFactor", "fea.IndependentDomain.loadFactor"),
+            ("eigenvalue", "fea.IndependentDomain.eigenvalue"),
+            ("studyParameter", "fea.IndependentDomain.studyParameter"),
+            ("responseSpectra", "fea.IndependentDomain.responseSpectra"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: RESTART_POLICY_CLASS,
+        type_identity: "runmat.fea.restart-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("fresh", "fea.RestartPolicy.fresh"),
+            (
+                "continueFromCompletedState",
+                "fea.RestartPolicy.continueFromCompletedState",
+            ),
+            ("resumeCheckpoint", "fea.RestartPolicy.resumeCheckpoint"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STATE_INPUT_CLASS,
+        type_identity: "runmat.fea.state-input",
+        fields: STATE_INPUT_FIELDS,
+        methods: &[
+            ("initialConditions", "fea.StateInput.initialConditions"),
+            ("upstream", "fea.StateInput.upstream"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STATE_OUTPUT_CLASS,
+        type_identity: "runmat.fea.state-output",
+        fields: STATE_OUTPUT_FIELDS,
+        methods: &[("new", "fea.StateOutput.new")],
+    },
+    ImmutableStudyClass {
+        class_name: DEPENDENCY_CLASS,
+        type_identity: "runmat.fea.sequence-dependency",
+        fields: DEPENDENCY_FIELDS,
+        methods: &[("new", "fea.SequenceDependency.new")],
+    },
+    ImmutableStudyClass {
+        class_name: TRANSITION_CLASS,
+        type_identity: "runmat.fea.state-transition",
+        fields: TRANSITION_FIELDS,
+        methods: &[("new", "fea.StateTransition.new")],
+    },
+    ImmutableStudyClass {
+        class_name: BRANCH_CLASS,
+        type_identity: "runmat.fea.sequence-branch",
+        fields: BRANCH_FIELDS,
+        methods: &[("new", "fea.SequenceBranch.new")],
+    },
+    ImmutableStudyClass {
+        class_name: SEQUENCE_CLASS,
+        type_identity: "runmat.fea.analysis-sequence",
+        fields: SEQUENCE_FIELDS,
+        methods: &[("new", "fea.AnalysisSequence.new")],
+    },
+];
+
 pub(super) fn ensure_sequence_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
-            INDEPENDENT_DOMAIN_CLASS,
-            "runmat.fea.independent-domain",
-            VALUE_FIELD,
-            &[
-                ("staticDomain", "fea.IndependentDomain.staticDomain"),
-                ("timeSeconds", "fea.IndependentDomain.timeSeconds"),
-                ("frequencyHertz", "fea.IndependentDomain.frequencyHertz"),
-                ("loadFactor", "fea.IndependentDomain.loadFactor"),
-                ("eigenvalue", "fea.IndependentDomain.eigenvalue"),
-                ("studyParameter", "fea.IndependentDomain.studyParameter"),
-                ("responseSpectra", "fea.IndependentDomain.responseSpectra"),
-            ],
-        );
-        register_immutable_class(
-            RESTART_POLICY_CLASS,
-            "runmat.fea.restart-policy",
-            VALUE_FIELD,
-            &[
-                ("fresh", "fea.RestartPolicy.fresh"),
-                (
-                    "continueFromCompletedState",
-                    "fea.RestartPolicy.continueFromCompletedState",
-                ),
-                ("resumeCheckpoint", "fea.RestartPolicy.resumeCheckpoint"),
-            ],
-        );
-        register_immutable_class(
-            STATE_INPUT_CLASS,
-            "runmat.fea.state-input",
-            STATE_INPUT_FIELDS,
-            &[
-                ("initialConditions", "fea.StateInput.initialConditions"),
-                ("upstream", "fea.StateInput.upstream"),
-            ],
-        );
-        register_immutable_class(
-            STATE_OUTPUT_CLASS,
-            "runmat.fea.state-output",
-            STATE_OUTPUT_FIELDS,
-            &[("new", "fea.StateOutput.new")],
-        );
-        register_immutable_class(
-            DEPENDENCY_CLASS,
-            "runmat.fea.sequence-dependency",
-            DEPENDENCY_FIELDS,
-            &[("new", "fea.SequenceDependency.new")],
-        );
-        register_immutable_class(
-            TRANSITION_CLASS,
-            "runmat.fea.state-transition",
-            TRANSITION_FIELDS,
-            &[("new", "fea.StateTransition.new")],
-        );
-        register_immutable_class(
-            BRANCH_CLASS,
-            "runmat.fea.sequence-branch",
-            BRANCH_FIELDS,
-            &[("new", "fea.SequenceBranch.new")],
-        );
-        register_immutable_class(
-            SEQUENCE_CLASS,
-            "runmat.fea.analysis-sequence",
-            SEQUENCE_FIELDS,
-            &[("new", "fea.AnalysisSequence.new")],
-        );
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(FEA_INDEPENDENT_DOMAIN_CLASS);
+    SCHEMAS.call_once(|| register_immutable_schemas(&SEQUENCE_STUDY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| {
+        register_immutable_runtime_classes(&SEQUENCE_STUDY_CLASSES);
         register_value_class(
             PROCEDURE_STEP_CLASS,
             HashMap::new(),
