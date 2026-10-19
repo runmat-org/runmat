@@ -4,7 +4,10 @@ mod obj;
 mod ply;
 mod stl;
 
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,

@@ -1080,8 +1080,7 @@ pub async fn atomic_create_new_async(
     path: impl AsRef<Path>,
     bytes: impl AsRef<[u8]>,
 ) -> io::Result<AtomicCreateResult> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.atomic_create_new(&resolved, bytes.as_ref()).await
 }
 

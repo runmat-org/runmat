@@ -1168,7 +1168,7 @@ impl WgpuRenderer {
             PipelineType::AnnotationStroke => {
                 if self.annotation_stroke_pipeline.is_none() {
                     self.annotation_stroke_pipeline =
-                        Some(self.create_annotation_stroke_pipeline());
+                        Some(self.create_annotation_stroke_pipeline(emission));
                 }
             }
             PipelineType::Triangles => {
@@ -1294,15 +1294,18 @@ impl WgpuRenderer {
         )
     }
 
-    fn create_annotation_stroke_pipeline(&self) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+    fn create_annotation_stroke_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Geometry Annotation Stroke Shader"),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::ANNOTATION_STROKE.into()),
             });
-        let layout = self
-            .device
+        let layout = emission
+            .device()
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Geometry Annotation Stroke Pipeline Layout"),
                 bind_group_layouts: &[
@@ -1311,7 +1314,7 @@ impl WgpuRenderer {
                 ],
                 push_constant_ranges: &[],
             });
-        self.device.create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
+        emission.device().create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
             label: Some("Geometry Annotation Stroke Pipeline"),
             layout: Some(&layout),
             vertex: crate::wgpu_compat::wgpu_vertex_state!(&shader, "vs_main", &[Vertex::desc()]),

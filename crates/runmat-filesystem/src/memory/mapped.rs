@@ -28,6 +28,7 @@ pub(super) fn open(
                 bytes,
                 readonly,
                 identity,
+                ..
             }) => {
                 if writable && *readonly {
                     return Err(io::Error::new(

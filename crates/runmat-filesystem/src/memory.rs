@@ -33,7 +33,6 @@ enum MemoryEntry {
         bytes: Arc<Vec<u8>>,
         readonly: bool,
         revision: String,
-    },
         identity: Arc<AtomicU64>,
     },
 }
