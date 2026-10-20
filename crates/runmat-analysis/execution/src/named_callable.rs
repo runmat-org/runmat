@@ -70,13 +70,12 @@ pub fn prepare_named_callable_descriptor(
         ));
     }
     let executable_bytes = executable.canonical_bytes()?;
-    let entrypoint = usize::try_from(admission.function.0).map_err(|_| {
-        AnalysisBridgeError::Invalid("callable function identity exceeds this host".into())
-    })?;
+    // The typed callable selects the function; the recipe names the unit's own
+    // entrypoint, which artifact admission checks against the unit identity.
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: admission.program_revision.clone(),
-        entrypoint: entrypoint.to_string(),
+        entrypoint: identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: 1,
             owned_work: None,
