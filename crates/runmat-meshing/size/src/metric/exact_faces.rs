@@ -1,4 +1,6 @@
 //! Shared constant-face resolution for surface consumers and boundary traces.
+//! Entity-local contributions with a support are excluded here; consumers grade them by
+//! distance through `local_sources` and `evaluate_graded`.
 use super::*;
 use crate::{grading::grade_metric_evaluations, incidence::TopologyMetricIncidence};
 use runmat_geometry_core::{ExactBRepTopology, GeometryEvaluationControl, GeometryEvaluationError};
@@ -69,7 +71,7 @@ impl ResolvedMetricField {
         let mut faces = BTreeMap::new();
         for face in &topology.faces {
             checkpoint()?;
-            let evaluation = self.resolve(&incidence.incident_face_entities(face))?;
+            let evaluation = self.resolve_constant(&incidence.incident_face_entities(face))?;
             if faces.insert(face.id.clone(), evaluation).is_some() {
                 return Err(MetricContractError::invalid(
                     "exact face inventory",

@@ -45,6 +45,7 @@ fn curve_boundary_trace_satisfies_every_adjacent_fine_face_before_surface_execut
             .collect::<BTreeSet<_>>();
         let required = MetricTensor3::isotropic_length_m(0.05).unwrap();
         let request = MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(1.).unwrap(),
             maximum_grading_ratio: 1.3,

@@ -20,7 +20,10 @@ use super::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedCurveMetricField {
     by_edge: BTreeMap<PersistentEntityId, EdgeMetricRecord>,
+    /// Uniform face sizing; each face's entity-local sources are graded at the query point.
     face_metrics: Vec<ResolvedMetricEvaluation>,
+    face_local: Vec<Vec<runmat_meshing_size::metric::LocalMetricSource>>,
+    resolver: ResolvedMetricField,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,9 +167,36 @@ impl ResolvedCurveMetricField {
                 .consume_allocation_bytes(slots)
                 .map_err(control_error)?;
         }
+        let mut face_local = Vec::with_capacity(topology.faces.len());
+        for face in &topology.faces {
+            let local = resolver
+                .local_sources(&incidence.incident_face_entities(face))
+                .map_err(|error| {
+                    SharedCurveError::invalid_request(
+                        "boundary face local metric",
+                        error.to_string(),
+                    )
+                })?;
+            if let Some(control) = control {
+                let bytes = (local.capacity() as u64)
+                    .checked_mul(
+                        std::mem::size_of::<runmat_meshing_size::metric::LocalMetricSource>()
+                            as u64,
+                    )
+                    .ok_or_else(|| {
+                        SharedCurveError::invalid_request("face local metric", "storage overflow")
+                    })?;
+                control
+                    .consume_allocation_bytes(bytes)
+                    .map_err(control_error)?;
+            }
+            face_local.push(local);
+        }
         Ok(Self {
             by_edge: records,
             face_metrics: face_metrics.into_values().collect(),
+            face_local,
+            resolver,
         })
     }
 }
@@ -208,9 +238,16 @@ impl CurveMetricField for ResolvedCurveMetricField {
             .directional_density(query.unit_tangent)
             .map_err(failure)?;
         for face in &record.faces {
+            let face_metric = self
+                .resolver
+                .evaluate_graded(
+                    self.face_metrics[*face].metric,
+                    &self.face_local[*face],
+                    query.point_m,
+                )
+                .map_err(failure)?;
             density = density.max(
-                self.face_metrics[*face]
-                    .metric
+                face_metric
                     .directional_density(query.unit_tangent)
                     .map_err(failure)?,
             );

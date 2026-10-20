@@ -16,10 +16,16 @@ use std::collections::BTreeMap;
 pub(super) struct FaceMetricReference<'a> {
     pub face: &'a runmat_geometry_core::ExactFace,
     pub world_transform: runmat_geometry_core::GeometryTransform,
+    /// Graded uniform part of the face sizing.
     pub metric: ResolvedMetricEvaluation,
+    /// Entity-local sources graded from `metric` at each evaluated point.
+    pub local: Vec<runmat_meshing_size::metric::LocalMetricSource>,
+    /// Every source that can act on the face, uniform or graded.
+    pub provenance: ResolvedMetricEvaluation,
 }
 pub(crate) struct PreparedFaceMetricValidation<'a> {
     reference: BTreeMap<PersistentEntityId, FaceMetricReference<'a>>,
+    resolver: ResolvedMetricField,
 }
 impl<'a> PreparedFaceMetricValidation<'a> {
     pub(crate) fn new(
@@ -27,7 +33,8 @@ impl<'a> PreparedFaceMetricValidation<'a> {
         request: &MetricFieldRequest,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<Self, ExactFaceMetricError> {
-        let mut resolved = resolve_face_metrics(topology, request, control)?;
+        let (resolver, mut resolved) = resolve_face_metrics(topology, request, control)?;
+        let incidence = TopologyMetricIncidence::new(topology);
         let transforms =
             runmat_geometry_core::model::PreparedOccurrenceTransforms::new(topology, control)
                 .map_err(control_error)?;
@@ -44,16 +51,31 @@ impl<'a> PreparedFaceMetricValidation<'a> {
                     "independent reference missing face",
                 )
             })?;
+            let incident = incidence.incident_face_entities(face);
+            let request_error = |error: runmat_meshing_size::metric::MetricContractError| {
+                ExactFaceMetricError::new(
+                    ExactFaceMetricErrorKind::InvalidRequest,
+                    Some(&face.id),
+                    error.to_string(),
+                )
+            };
+            let local = resolver.local_sources(&incident).map_err(request_error)?;
+            let provenance = resolver.resolve(&incident).map_err(request_error)?;
             reference.insert(
                 face.id.clone(),
                 FaceMetricReference {
                     face,
                     world_transform,
                     metric,
+                    local,
+                    provenance,
                 },
             );
         }
-        Ok(Self { reference })
+        Ok(Self {
+            reference,
+            resolver,
+        })
     }
 
     pub(crate) fn validate(
@@ -66,6 +88,7 @@ impl<'a> PreparedFaceMetricValidation<'a> {
         super::validate::validate_prepared_face_metric_evaluation(
             evaluation,
             &self.reference,
+            &self.resolver,
             parameterization,
             evaluator,
             control,
@@ -77,7 +100,10 @@ fn resolve_face_metrics(
     request: &MetricFieldRequest,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<
-    BTreeMap<PersistentEntityId, runmat_meshing_size::metric::ResolvedMetricEvaluation>,
+    (
+        ResolvedMetricField,
+        BTreeMap<PersistentEntityId, runmat_meshing_size::metric::ResolvedMetricEvaluation>,
+    ),
     ExactFaceMetricError,
 > {
     checkpoint(control)?;
@@ -116,7 +142,7 @@ fn resolve_face_metrics(
         .map(|face| {
             checkpoint(control)?;
             resolver
-                .resolve(&incidence.incident_face_entities(face))
+                .resolve_constant(&incidence.incident_face_entities(face))
                 .map(|metric| (face.id.clone(), metric))
                 .map_err(|error| {
                     ExactFaceMetricError::new(
@@ -139,7 +165,7 @@ fn resolve_face_metrics(
             error.to_string(),
         )
     })?;
-    Ok(by_face)
+    Ok((resolver, by_face))
 }
 
 fn checkpoint(control: &dyn GeometryEvaluationControl) -> Result<(), ExactFaceMetricError> {

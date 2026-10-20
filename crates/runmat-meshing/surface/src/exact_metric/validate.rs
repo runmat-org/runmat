@@ -46,6 +46,7 @@ pub(super) fn validate_prepared_face_metric_evaluation(
         PersistentEntityId,
         super::prepared_validation::FaceMetricReference<'_>,
     >,
+    resolver: &runmat_meshing_size::metric::ResolvedMetricField,
     parameterization: &ExactFaceChartParameterization,
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
@@ -120,16 +121,21 @@ pub(super) fn validate_prepared_face_metric_evaluation(
         ));
     }
 
-    let expected = &record.metric;
-    let sizing_metric = independent_pullback(expected.metric, expected_u, expected_v);
+    let expected = &record.provenance;
+    let local_metric = resolver
+        .evaluate_graded(record.metric.metric, &record.local, expected_point)
+        .map_err(|error| invalid(&face.id, error.to_string()))?;
+    let sizing_metric = independent_pullback(local_metric, expected_u, expected_v);
     sizing_metric
         .validate()
         .map_err(|reason| invalid(&face.id, format!("invalid sizing pullback: {reason}")))?;
     if evaluation.sizing_metric != sizing_metric
         || evaluation.provenance.active_sources != expected.active_sources
         || evaluation.provenance.applied_contribution_count != expected.applied_contribution_count
-        || evaluation.provenance.clipped_contribution_count != expected.clipped_contribution_count
-        || evaluation.provenance.rejected_contribution_count != expected.rejected_contribution_count
+        || evaluation.provenance.clipped_contribution_count
+            != record.metric.clipped_contribution_count
+        || evaluation.provenance.rejected_contribution_count
+            != record.metric.rejected_contribution_count
     {
         return Err(invalid(
             &face.id,

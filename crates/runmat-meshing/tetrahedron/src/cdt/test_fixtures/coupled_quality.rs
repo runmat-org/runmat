@@ -138,6 +138,7 @@ pub(in crate::cdt) fn metric(
     scoped: bool,
 ) -> MetricFieldRequest {
     let mut request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.5).unwrap(),
         maximum_grading_ratio: 1.5,
