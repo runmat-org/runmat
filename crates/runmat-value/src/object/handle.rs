@@ -1,9 +1,9 @@
+use crate::SharedClassIdentity;
 use runmat_gc_api::GcHandle;
-use runmat_types::ClassIdentity;
 
 #[derive(Debug, Clone)]
 pub struct HandleRef {
-    pub class_name: ClassIdentity,
+    pub class_name: SharedClassIdentity,
     pub target: GcHandle,
     pub valid: bool,
 }

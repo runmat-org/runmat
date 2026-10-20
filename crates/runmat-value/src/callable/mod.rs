@@ -1,6 +1,7 @@
 mod binding;
 mod bound_handle;
 mod closure;
+mod metadata;
 mod instance;
 mod lexical_environment;
 mod named;

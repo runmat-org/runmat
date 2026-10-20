@@ -171,11 +171,25 @@ fn callable_generation_retires_before_aliased_capture_claim() {
     let capture_alias = closure.captures.clone();
     let capture_pointer = capture_alias.as_ptr();
     let capture_bytes = capture_alias.unclaimed_shared_bytes().unwrap().unwrap();
+    let name_alias = closure.function_name.clone();
+    let name_pointer = name_alias.as_str().as_ptr();
+    let name_bytes = name_alias.unclaimed_bytes().unwrap().unwrap();
+    let data_alias = closure.clone();
+    let data_bytes = crate::Closure::resolved_header_bytes();
     let callable = Value::Closure(closure);
     let quote = crate::SharedValueGeneration::callable_quote(&callable)
         .unwrap()
         .unwrap();
-    assert_eq!(quote.retained_claims, 2);
+    // Generation, immutable callable data, name text and capture slots are
+    // four distinct original physical owners, not one carrier certificate.
+    assert_eq!(
+        quote.retained_claims,
+        1 + 1 + usize::from(name_bytes != 0) + usize::from(capture_bytes != 0)
+    );
+    assert_eq!(
+        quote.requested_bytes,
+        crate::SharedValueGeneration::requested_bytes() + data_bytes + name_bytes + capture_bytes
+    );
     let live = Arc::new(AtomicUsize::new(0));
     let permit = Permit {
         limit: quote.requested_bytes,
@@ -186,6 +200,21 @@ fn callable_generation_retires_before_aliased_capture_claim() {
     assert_eq!(live.load(Ordering::SeqCst), quote.requested_bytes);
     assert_eq!(capture_alias.as_ptr(), capture_pointer);
     drop(generation);
+    assert_eq!(
+        live.load(Ordering::SeqCst),
+        data_bytes + name_bytes + capture_bytes
+    );
+    assert_eq!(data_alias.function_name.as_str().as_ptr(), name_pointer);
+    assert_eq!(data_alias.captures.as_ptr(), capture_pointer);
+    // Explicit data detachment clones only canonical child owners. The old
+    // Data header retires while those original child claims remain live.
+    let detached = data_alias.into_data();
+    assert_eq!(live.load(Ordering::SeqCst), name_bytes + capture_bytes);
+    assert_eq!(detached.function_name.as_str().as_ptr(), name_pointer);
+    assert_eq!(detached.captures.as_ptr(), capture_pointer);
+    drop(detached);
+    assert_eq!(live.load(Ordering::SeqCst), name_bytes + capture_bytes);
+    drop(name_alias);
     assert_eq!(live.load(Ordering::SeqCst), capture_bytes);
     assert!(capture_alias.is_exact());
     drop(capture_alias);

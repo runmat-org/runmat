@@ -39,6 +39,35 @@ pub enum MemmapFormatPresentationState {
     Cell { columns: usize },
 }
 
+impl MemmapReceiverState {
+    pub(super) fn retained_physical_bytes(
+        &self,
+    ) -> Result<usize, crate::ExactHostNumericAllocationError> {
+        use crate::ExactHostNumericAllocationError::LayoutOverflow;
+        use std::alloc::Layout;
+
+        let mut bytes = Layout::array::<MemmapFieldState>(self.fields.capacity())
+            .map_err(|_| LayoutOverflow)?
+            .size();
+        for field in &self.fields {
+            bytes = bytes
+                .checked_add(field.name.as_ref().map_or(0, String::capacity))
+                .and_then(|bytes| {
+                    Layout::array::<usize>(field.shape.capacity())
+                        .ok()
+                        .and_then(|layout| bytes.checked_add(layout.size()))
+                })
+                .ok_or(LayoutOverflow)?;
+        }
+        if matches!(self.authority, MemmapReceiverAuthority::Detached(_)) {
+            bytes = bytes
+                .checked_add(std::mem::size_of::<Value>())
+                .ok_or(LayoutOverflow)?;
+        }
+        Ok(bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,7 +115,11 @@ mod tests {
                 }],
                 format_presentation: MemmapFormatPresentationState::TypeName,
             });
-        let mut clone = original.clone();
+        let mut clone = original
+            .clone()
+            .into_unbounded_builder()
+            .expect("ordinary alias admits an explicit replacement generation")
+            .finish();
         clone.memmap_receiver_mut().unwrap().writable = true;
         assert!(!original.memmap_receiver().unwrap().writable);
         let MemmapReceiverAuthority::Opened(cloned) = &clone.memmap_receiver().unwrap().authority
@@ -125,7 +158,11 @@ mod tests {
         original.for_each_native_value(|value| visited.push(value.clone()));
         assert_eq!(visited, vec![snapshot.clone()]);
 
-        let mut clone = original.clone();
+        let mut clone = original
+            .clone()
+            .into_unbounded_builder()
+            .expect("ordinary alias admits an explicit replacement generation")
+            .finish();
         let MemmapReceiverAuthority::Detached(cloned) =
             &mut clone.memmap_receiver_mut().unwrap().authority
         else {

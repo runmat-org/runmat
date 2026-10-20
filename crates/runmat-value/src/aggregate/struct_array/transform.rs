@@ -1,12 +1,18 @@
 use super::{column_major_strides, total_len, StructArray};
-use indexmap::IndexMap;
+use crate::UnboundedOrderedMapBuilder;
 
 impl StructArray {
-    pub fn reshape(self, shape: Vec<usize>) -> Result<Self, String> {
-        Self::from_columns(self.fields, shape)
+    pub fn reshape_unbounded(self, shape: Vec<usize>) -> Result<Self, String> {
+        if total_len(&shape)? != self.len() {
+            return Err("structure array reshape must preserve element count".into());
+        }
+        Ok(Self {
+            fields: self.fields,
+            shape: shape.into(),
+        })
     }
 
-    pub fn permute(self, order: &[usize]) -> Result<Self, String> {
+    pub fn permute_unbounded(self, order: &[usize]) -> Result<Self, String> {
         let effective_rank = self
             .shape
             .iter()
@@ -16,7 +22,7 @@ impl StructArray {
             return Err("structure array permutation must name every existing dimension".into());
         }
         validate_permutation(order)?;
-        let mut source_shape = self.shape.clone();
+        let mut source_shape = self.shape.to_vec();
         source_shape.truncate(effective_rank);
         source_shape.resize(order.len(), 1);
         let output_shape = order
@@ -29,7 +35,7 @@ impl StructArray {
         })
     }
 
-    pub fn flip(self, dimension: usize) -> Result<Self, String> {
+    pub fn flip_unbounded(self, dimension: usize) -> Result<Self, String> {
         let extent = self
             .shape
             .get(dimension)
@@ -38,7 +44,7 @@ impl StructArray {
         if extent <= 1 || self.is_empty() {
             return Ok(self);
         }
-        let shape = self.shape.clone();
+        let shape = self.shape.to_vec();
         let stride = column_major_strides(&shape)?[dimension];
         self.reorder(shape, |index, _| {
             let coordinate = index / stride % extent;
@@ -47,9 +53,9 @@ impl StructArray {
         })
     }
 
-    pub fn circular_shift(self, shifts: &[isize]) -> Result<Self, String> {
+    pub fn circular_shift_unbounded(self, shifts: &[isize]) -> Result<Self, String> {
         let rank = self.shape.len().max(shifts.len());
-        let mut shape = self.shape.clone();
+        let mut shape = self.shape.to_vec();
         shape.resize(rank, 1);
         let strides = column_major_strides(&shape)?;
         self.reorder(shape.clone(), |index, _| {
@@ -70,9 +76,9 @@ impl StructArray {
         })
     }
 
-    pub fn tile(&self, repetitions: &[usize]) -> Result<Self, String> {
+    pub fn tile_unbounded(&self, repetitions: &[usize]) -> Result<Self, String> {
         let rank = self.shape.len().max(repetitions.len()).max(2);
-        let mut source_shape = self.shape.clone();
+        let mut source_shape = self.shape.to_vec();
         source_shape.resize(rank, 1);
         let mut reps = repetitions.to_vec();
         reps.resize(rank, 1);
@@ -87,14 +93,14 @@ impl StructArray {
             .collect::<Result<Vec<_>, _>>()?;
         let output_len = total_len(&output_shape)?;
         let strides = column_major_strides(&source_shape)?;
-        let mut fields = IndexMap::with_capacity(self.fields.len());
+        let mut fields = UnboundedOrderedMapBuilder::with_capacity(self.fields.len());
         for (name, values) in &self.fields {
             let mut output = Vec::with_capacity(output_len);
             for index in 0..output_len {
                 let source = tiled_source(index, &output_shape, &source_shape, &strides)?;
                 output.push(values[source].clone());
             }
-            fields.insert(name.clone(), output);
+            fields.insert(name.to_owned(), output);
         }
         Self::from_columns(fields, output_shape)
     }
@@ -109,8 +115,7 @@ impl StructArray {
             return Err("structure array reorder must preserve element count".into());
         }
         let fields = self
-            .fields
-            .into_iter()
+            .into_columns_unbounded()
             .map(|(name, values)| {
                 let mut source = values.into_iter().map(Some).collect::<Vec<_>>();
                 let values = (0..length)
@@ -125,7 +130,7 @@ impl StructArray {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok((name, values))
             })
-            .collect::<Result<IndexMap<_, _>, String>>()?;
+            .collect::<Result<UnboundedOrderedMapBuilder<_>, String>>()?;
         Self::from_columns(fields, shape)
     }
 }

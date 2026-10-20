@@ -29,7 +29,7 @@ impl Drop for ForeignLease {
 /// Opaque live foreign-runtime reference. The host registry owns the actual
 /// resource; the generation fences stale handles after host/session restart.
 #[derive(Debug, Clone)]
-pub struct ForeignRef {
+pub struct ForeignRefData {
     pub host_identity: String,
     pub handle: u64,
     pub generation: u64,
@@ -37,7 +37,19 @@ pub struct ForeignRef {
     pub ownership: ForeignOwnership,
     pub affinity: ForeignAffinity,
     pub lifetime: ForeignLifetime,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForeignRef {
+    data: crate::immutable_metadata::ImmutableMetadata<ForeignRefData>,
     lease: Option<Arc<ForeignLease>>,
+}
+
+impl std::ops::Deref for ForeignRef {
+    type Target = ForeignRefData;
+    fn deref(&self) -> &Self::Target {
+        self.data.get()
+    }
 }
 
 /// Non-owning identity for an existing managed foreign reference.
@@ -47,13 +59,7 @@ pub struct ForeignRef {
 /// clone cannot release a resource that another clone still owns.
 #[derive(Debug, Clone)]
 pub struct WeakForeignRef {
-    host_identity: String,
-    handle: u64,
-    generation: u64,
-    type_identity: ForeignTypeIdentity,
-    ownership: ForeignOwnership,
-    affinity: ForeignAffinity,
-    lifetime: ForeignLifetime,
+    data: crate::immutable_metadata::ImmutableMetadata<ForeignRefData>,
     lease: Weak<ForeignLease>,
 }
 
@@ -99,13 +105,15 @@ impl ForeignRef {
         lease: Option<Arc<ForeignLease>>,
     ) -> Self {
         Self {
-            host_identity: key.host_identity,
-            handle: key.handle,
-            generation: key.generation,
-            type_identity,
-            ownership,
-            affinity,
-            lifetime,
+            data: crate::immutable_metadata::ImmutableMetadata::new(ForeignRefData {
+                host_identity: key.host_identity,
+                handle: key.handle,
+                generation: key.generation,
+                type_identity,
+                ownership,
+                affinity,
+                lifetime,
+            }),
             lease,
         }
     }
@@ -139,28 +147,39 @@ impl ForeignRef {
 
     pub fn downgrade(&self) -> Option<WeakForeignRef> {
         Some(WeakForeignRef {
-            host_identity: self.host_identity.clone(),
-            handle: self.handle,
-            generation: self.generation,
-            type_identity: self.type_identity.clone(),
-            ownership: self.ownership,
-            affinity: self.affinity,
-            lifetime: self.lifetime,
+            data: self.data.clone(),
             lease: Arc::downgrade(self.lease.as_ref()?),
         })
+    }
+
+    fn payload_bytes(
+        data: &ForeignRefData,
+    ) -> Result<usize, crate::ExactHostNumericAllocationError> {
+        data.host_identity
+            .capacity()
+            .checked_add(data.type_identity.family.capacity())
+            .and_then(|bytes| bytes.checked_add(data.type_identity.name.capacity()))
+            .ok_or(crate::ExactHostNumericAllocationError::LayoutOverflow)
+    }
+    /// Exact metadata only: the registry's independent lease/release authority
+    /// is not certified by this claim and remains owned by that registry.
+    pub fn metadata_unclaimed_bytes(
+        &self,
+    ) -> Result<Option<usize>, crate::ExactHostNumericAllocationError> {
+        self.data.unclaimed_bytes(Self::payload_bytes)
+    }
+    pub fn try_promote_metadata(
+        &self,
+        permit: &dyn crate::ExactHostAllocationPermit,
+    ) -> Result<(), crate::ExactHostNumericAllocationError> {
+        self.data.promote(permit, Self::payload_bytes)
     }
 }
 
 impl WeakForeignRef {
     pub fn upgrade(&self) -> Option<ForeignRef> {
         Some(ForeignRef {
-            host_identity: self.host_identity.clone(),
-            handle: self.handle,
-            generation: self.generation,
-            type_identity: self.type_identity.clone(),
-            ownership: self.ownership,
-            affinity: self.affinity,
-            lifetime: self.lifetime,
+            data: self.data.clone(),
             lease: Some(self.lease.upgrade()?),
         })
     }
@@ -224,8 +243,17 @@ mod tests {
         assert!(current.is_same_resource(&current.clone()));
         assert!(!current.is_same_resource(&reference(4)));
 
-        let mut different_host = current.clone();
-        different_host.host_identity = "host-b".into();
+        let different_host = ForeignRef::detached(
+            ForeignResourceKey {
+                host_identity: "host-b".into(),
+                handle: current.handle,
+                generation: current.generation,
+            },
+            current.type_identity.clone(),
+            current.ownership,
+            current.affinity,
+            current.lifetime,
+        );
         assert!(!current.is_same_resource(&different_host));
     }
 
@@ -250,6 +278,18 @@ mod tests {
         );
         let weak = reference.downgrade().unwrap();
         let upgraded = weak.upgrade().unwrap();
+        assert_eq!(
+            reference.host_identity.as_ptr(),
+            upgraded.host_identity.as_ptr()
+        );
+        assert_eq!(
+            reference.type_identity.family.as_ptr(),
+            upgraded.type_identity.family.as_ptr()
+        );
+        assert_eq!(
+            reference.type_identity.name.as_ptr(),
+            upgraded.type_identity.name.as_ptr()
+        );
         drop(reference);
         assert_eq!(release.0.load(Ordering::Relaxed), 0);
         drop(upgraded);

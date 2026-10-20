@@ -40,7 +40,7 @@ pub fn validate_no_transient_sequence(value: &Value) -> Result<(), TransientValu
             result
         }
         Value::Object(object) => {
-            validate_values(object.properties.values())?;
+            validate_values(object.properties().values())?;
             let mut result = Ok(());
             object.for_each_native_value(|value| {
                 if result.is_ok() {

@@ -52,22 +52,22 @@ pub enum Value {
     // Function handle with compiler/session semantic identity.
     BoundFunctionHandle(BoundFunctionHandle),
     Closure(Closure),
-    ClassRef(runmat_types::ClassIdentity),
+    ClassRef(SharedClassIdentity),
     MException(MException),
     /// Lazy executable work owned by the active runtime execution service.
-    Future(runmat_execution::FutureHandle),
+    Future(SharedFutureHandle),
     /// Scheduled work owned by the active runtime execution service.
-    Task(runmat_execution::TaskHandle),
+    Task(SharedTaskHandle),
     /// Execution pool capability owned by an execution service.
     Pool(runmat_execution::PoolHandle),
     /// Durable batch execution capability.
-    Job(runmat_execution::JobHandle),
+    Job(SharedJobHandle),
     /// A distributed array whose partitions remain owned by an execution
     /// service. The handle carries identity and fencing, never array payloads.
-    Distributed(Box<runmat_execution::DistributedValueHandle>),
+    Distributed(SharedDistributedHandle),
     /// Per-rank values retained by an SPMD gang. Entries are resolved through
     /// the owning execution service rather than embedded in the language value.
-    Composite(Box<runmat_execution::CompositeHandle>),
+    Composite(SharedCompositeHandle),
     /// Opaque resource owned by a foreign runtime host and fenced by generation.
     Foreign(ForeignRef),
 }

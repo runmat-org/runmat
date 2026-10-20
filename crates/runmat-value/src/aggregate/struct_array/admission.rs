@@ -1,6 +1,7 @@
 use super::StructArray;
-use crate::{StructValue, Value};
-use indexmap::{IndexMap, IndexSet};
+use crate::UnboundedOrderedMapBuilder;
+use crate::Value;
+use indexmap::IndexSet;
 use std::num::NonZeroUsize;
 
 #[derive(Clone, Copy)]
@@ -22,8 +23,8 @@ pub struct StructArrayAdmission {
     length: usize,
     names: Option<indexmap::set::IntoIter<String>>,
     current: Option<(String, Vec<Value>)>,
-    fields: Option<IndexMap<String, Vec<Value>>>,
-    scalar_fields: Option<IndexMap<String, Value>>,
+    fields: Option<UnboundedOrderedMapBuilder<Vec<Value>>>,
+    scalar_fields: Option<crate::UnboundedStructValueBuilder>,
     phase: Phase,
     value: Option<Value>,
 }
@@ -96,9 +97,12 @@ impl StructArrayAdmission {
                         self.field_names = None;
                         self.names = Some(std::mem::take(&mut self.unique_names).into_iter());
                         if self.length == 1 {
-                            self.scalar_fields = Some(IndexMap::with_capacity(field_count));
+                            self.scalar_fields = Some(
+                                crate::UnboundedStructValueBuilder::with_capacity(field_count),
+                            );
                         } else {
-                            self.fields = Some(IndexMap::with_capacity(field_count));
+                            self.fields =
+                                Some(UnboundedOrderedMapBuilder::with_capacity(field_count));
                         }
                         self.phase = Phase::Repack;
                         completed += 1;
@@ -126,14 +130,15 @@ impl StructArrayAdmission {
             }
             let shape = std::mem::take(&mut self.shape);
             self.value = Some(if self.length == 1 {
-                Value::Struct(StructValue {
-                    fields: self.scalar_fields.take().expect("scalar fields"),
-                })
+                Value::Struct(self.scalar_fields.take().expect("scalar fields").finish())
             } else {
-                Value::StructArray(StructArray {
-                    fields: self.fields.take().expect("array fields"),
-                    shape,
-                })
+                Value::StructArray(
+                    StructArray::publish_columns_unbounded(
+                        self.fields.take().expect("array fields"),
+                        shape,
+                    )
+                    .expect("validated array columns"),
+                )
             });
             self.phase = Phase::Complete;
             return;

@@ -51,6 +51,31 @@ impl<T> ExactArrayStorageBuilder<T> {
             .map_or(&[], |payload| &payload.get().values)
     }
 
+    /// Edit only initialized elements in this unique, unpublished backing.
+    pub fn initialized_mut(&mut self) -> &mut [T] {
+        self.payload
+            .as_mut()
+            .map_or(&mut [], |payload| &mut payload.get_mut_unique().values)
+    }
+
+    /// Remove an initialized element without reallocating the final backing.
+    pub fn remove_initialized(&mut self, index: usize) -> Option<T> {
+        let payload = self.payload.as_mut()?;
+        let values = &mut payload.get_mut_unique().values;
+        (index < values.len()).then(|| values.remove(index))
+    }
+
+    /// Publish the current prefix, retaining the original capacity claim.
+    pub fn finish_initialized(mut self) -> ExactArrayStorage<T> {
+        let len = self.initialized().len();
+        match self.payload.take() {
+            Some(payload) => {
+                ExactArrayStorage(ExactArrayStorageInner::SharedExact { payload, len })
+            }
+            None => ExactArrayStorage(ExactArrayStorageInner::EmptyExact),
+        }
+    }
+
     /// Move one already-owned element into its final slot. An overfull push
     /// returns that same element without modifying the admitted owner.
     pub fn try_push(&mut self, value: T) -> Result<(), T> {

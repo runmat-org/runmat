@@ -8,41 +8,48 @@ impl StructArray {
             .get_index(index)
             .map(|(_, values)| values.as_slice())
     }
-
     pub fn for_each_value(&self, mut visitor: impl FnMut(&Value)) {
-        self.fields.values().flatten().for_each(&mut visitor);
+        self.fields
+            .values()
+            .flat_map(|values| values.iter())
+            .for_each(&mut visitor);
     }
-
-    pub fn for_each_value_mut(&mut self, mut visitor: impl FnMut(&mut Value)) {
-        self.fields.values_mut().flatten().for_each(&mut visitor);
-    }
-
     pub fn any_value(&self, mut predicate: impl FnMut(&Value) -> bool) -> bool {
-        self.fields.values().flatten().any(&mut predicate)
+        self.fields
+            .values()
+            .flat_map(|values| values.iter())
+            .any(&mut predicate)
     }
-
-    /// Visits every value with its field name and column-major linear index.
-    pub fn try_for_each_indexed_value_mut<E>(
+    /// Explicit ordinary replacement; published aliases are never mutated.
+    pub fn for_each_value_mut_unbounded(&mut self, mut visitor: impl FnMut(&mut Value)) {
+        let shape = self.shape.to_vec();
+        let mut fields = self.clone().into_columns_unbounded().collect::<Vec<_>>();
+        for (_, values) in &mut fields {
+            values.iter_mut().for_each(&mut visitor);
+        }
+        *self = Self::publish_columns_unbounded(fields, shape).expect("validated original schema");
+    }
+    pub fn try_for_each_indexed_value_mut_unbounded<E>(
         &mut self,
         mut visitor: impl FnMut(&str, usize, &mut Value) -> Result<(), E>,
     ) -> Result<(), E> {
-        for (name, values) in &mut self.fields {
+        let shape = self.shape.to_vec();
+        let mut fields = self.clone().into_columns_unbounded().collect::<Vec<_>>();
+        for (name, values) in &mut fields {
             for (index, value) in values.iter_mut().enumerate() {
                 visitor(name, index, value)?;
             }
         }
+        *self = Self::publish_columns_unbounded(fields, shape).expect("validated original schema");
         Ok(())
     }
-
-    /// Applies a fallible owned transformation to every field value while
-    /// preserving array shape and the exact ordered field schema.
-    pub fn try_map_values<E>(
+    pub fn try_map_values_unbounded<E>(
         self,
         mut transform: impl FnMut(Value) -> Result<Value, E>,
     ) -> Result<Self, E> {
+        let shape = self.shape.to_vec();
         let fields = self
-            .fields
-            .into_iter()
+            .into_columns_unbounded()
             .map(|(name, values)| {
                 values
                     .into_iter()
@@ -50,29 +57,28 @@ impl StructArray {
                     .collect::<Result<Vec<_>, _>>()
                     .map(|values| (name, values))
             })
-            .collect::<Result<_, _>>()?;
-        Ok(Self {
-            fields,
-            shape: self.shape,
-        })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::publish_columns_unbounded(fields, shape)
+            .expect("transformation preserves field lengths"))
     }
-
-    pub async fn try_map_values_async<E, F, Fut>(self, mut transform: F) -> Result<Self, E>
+    pub async fn try_map_values_async_unbounded<E, F, Fut>(
+        self,
+        mut transform: F,
+    ) -> Result<Self, E>
     where
         F: FnMut(Value) -> Fut,
         Fut: Future<Output = Result<Value, E>>,
     {
-        let mut fields = indexmap::IndexMap::with_capacity(self.fields.len());
-        for (name, values) in self.fields {
+        let shape = self.shape.to_vec();
+        let mut fields = Vec::with_capacity(self.fields.len());
+        for (name, values) in self.into_columns_unbounded() {
             let mut mapped = Vec::with_capacity(values.len());
             for value in values {
                 mapped.push(transform(value).await?);
             }
-            fields.insert(name, mapped);
+            fields.push((name, mapped));
         }
-        Ok(Self {
-            fields,
-            shape: self.shape,
-        })
+        Ok(Self::publish_columns_unbounded(fields, shape)
+            .expect("transformation preserves field lengths"))
     }
 }

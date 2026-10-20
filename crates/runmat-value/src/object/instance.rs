@@ -1,397 +1,311 @@
 use super::{
-    ContainersMapStorage, DynamicPropertyDef, GraphicsReceiverRef, MemmapReceiverAuthority,
-    MemmapReceiverState, SelectedObjectClassFacts,
+    DynamicPropertyDef, ObjectPayload, SelectedObjectClassFacts, SharedObjectPayload,
+    UnboundedObjectBuilder,
 };
-use crate::{ForeignRef, Value};
-use runmat_gc_api::{Trace, Tracer};
+use crate::{ExactHostAllocationPermit, ExactHostNumericAllocationError, ExactOrderedMap, Value};
 use runmat_types::ClassIdentity;
-use std::collections::HashMap;
 use std::rc::Rc;
 
-// Clone and structural equality include native payloads. Public handle
-// equality remains identity-based through HandleRef, not this comparison.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ObjectInstance {
-    pub class_name: ClassIdentity,
-    pub properties: HashMap<String, Value>,
-    pub dynamic_properties: Option<Box<HashMap<String, DynamicPropertyDef>>>,
-    selected_class: Option<Rc<SelectedObjectClassFacts>>,
-    native_payload: Option<Box<NativeObjectPayload>>,
+    payload: SharedObjectPayload,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum NativeObjectPayload {
-    ContainersMap(ContainersMapStorage),
-    ForeignHostControl(ForeignRef),
-    DatasetAuthority(ForeignRef),
-    MatFileAuthority(ForeignRef),
-    MemmapReceiver(MemmapReceiverState),
-    TcpAuthority(ForeignRef),
-    GraphicsReceiver(GraphicsReceiverRef),
-}
-
-/// Whether a value object carries host- or session-owned native state.
-/// Serialization must match this exhaustive classification, not class text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObjectPersistencePayloadKind {
-    PlainValue,
-    SelectedClass,
-    MixedSelectedNative,
-    ContainersMap,
-    ForeignHostControl,
-    DatasetAuthority,
-    MatFileAuthority,
-    MemmapReceiver,
-    TcpAuthority,
-    GraphicsReceiver,
-}
-
-impl Trace for NativeObjectPayload {
-    fn trace(&self, tracer: &mut dyn Tracer) {
-        match self {
-            Self::ContainersMap(storage) => storage.trace(tracer),
-            Self::ForeignHostControl(_) => {}
-            Self::DatasetAuthority(_) => {}
-            Self::MatFileAuthority(_) => {}
-            Self::MemmapReceiver(receiver) => {
-                if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
-                    snapshot.trace(tracer);
-                }
-            }
-            Self::TcpAuthority(_) => {}
-            Self::GraphicsReceiver(_) => {}
-        }
+impl PartialEq for ObjectInstance {
+    fn eq(&self, other: &Self) -> bool {
+        self.payload == other.payload
     }
 }
 
 impl ObjectInstance {
-    pub fn persistence_payload_kind(&self) -> ObjectPersistencePayloadKind {
-        if self.selected_class.is_some() && self.native_payload.is_some() {
-            return ObjectPersistencePayloadKind::MixedSelectedNative;
+    pub fn new(class_name: impl Into<crate::SharedClassIdentity>) -> Self {
+        Self::from_unbounded_parts(
+            class_name.into(),
+            ExactOrderedMap::empty(),
+            ExactOrderedMap::empty(),
+        )
+    }
+
+    pub(super) fn from_unbounded_parts(
+        class_name: crate::SharedClassIdentity,
+        properties: ExactOrderedMap<Value>,
+        dynamic_properties: ExactOrderedMap<DynamicPropertyDef>,
+    ) -> Self {
+        Self::from_payload(SharedObjectPayload::unbounded(ObjectPayload {
+            class_name,
+            properties,
+            dynamic_properties,
+            selected_class: None,
+            native_payload: None,
+            payload_claim: None,
+        }))
+    }
+
+    pub(super) fn from_payload(payload: SharedObjectPayload) -> Self {
+        Self { payload }
+    }
+
+    pub(super) fn generation(&self) -> &ObjectPayload {
+        self.payload.get()
+    }
+
+    pub(super) fn generation_mut_unique(&mut self) -> Option<&mut ObjectPayload> {
+        self.payload.get_mut_unique()
+    }
+
+    pub fn class_name(&self) -> &ClassIdentity {
+        self.generation().class_name.as_identity()
+    }
+
+    pub fn class_name_owner(&self) -> &crate::SharedClassIdentity {
+        &self.generation().class_name
+    }
+
+    pub fn properties(&self) -> &ExactOrderedMap<Value> {
+        &self.generation().properties
+    }
+
+    pub fn property(&self, name: &str) -> Option<&Value> {
+        self.properties().get(name)
+    }
+
+    pub fn property_count(&self) -> usize {
+        self.generation().properties.len()
+    }
+
+    pub fn dynamic_property_count(&self) -> usize {
+        self.generation().dynamic_properties.len()
+    }
+
+    /// Physical metadata still needing claims before this generation can be
+    /// copied into an independently admitted Object payload. Child Values are
+    /// already canonical owners and are not included here.
+    pub fn unclaimed_metadata_quote(
+        &self,
+    ) -> Result<super::ExactObjectQuote, ExactHostNumericAllocationError> {
+        let generation = self.generation();
+        let mut requested_bytes = 0usize;
+        let mut retained_claims = 0usize;
+        let mut add = |bytes: usize| -> Result<(), ExactHostNumericAllocationError> {
+            requested_bytes = requested_bytes
+                .checked_add(bytes)
+                .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+            if bytes != 0 {
+                retained_claims = retained_claims
+                    .checked_add(1)
+                    .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+            }
+            Ok(())
+        };
+        if !generation.class_name.has_retained_claim() {
+            add(generation.class_name.requested_bytes()?)?;
         }
-        if self.selected_class.is_some() {
-            return ObjectPersistencePayloadKind::SelectedClass;
-        }
-        match self.native_payload.as_deref() {
-            None => ObjectPersistencePayloadKind::PlainValue,
-            Some(NativeObjectPayload::ContainersMap(_)) => {
-                ObjectPersistencePayloadKind::ContainersMap
-            }
-            Some(NativeObjectPayload::ForeignHostControl(_)) => {
-                ObjectPersistencePayloadKind::ForeignHostControl
-            }
-            Some(NativeObjectPayload::DatasetAuthority(_)) => {
-                ObjectPersistencePayloadKind::DatasetAuthority
-            }
-            Some(NativeObjectPayload::MatFileAuthority(_)) => {
-                ObjectPersistencePayloadKind::MatFileAuthority
-            }
-            Some(NativeObjectPayload::MemmapReceiver(_)) => {
-                ObjectPersistencePayloadKind::MemmapReceiver
-            }
-            Some(NativeObjectPayload::TcpAuthority(_)) => {
-                ObjectPersistencePayloadKind::TcpAuthority
-            }
-            Some(NativeObjectPayload::GraphicsReceiver(_)) => {
-                ObjectPersistencePayloadKind::GraphicsReceiver
+        for entry in generation.properties.entries() {
+            if !entry.key().has_retained_claim() {
+                add(crate::Utf8Text::requested_bytes_for_capacity(
+                    entry.key().capacity(),
+                )?)?;
             }
         }
+        for entry in generation.dynamic_properties.entries() {
+            if !entry.key().has_retained_claim() {
+                add(crate::Utf8Text::requested_bytes_for_capacity(
+                    entry.key().capacity(),
+                )?)?;
+            }
+            let definition = entry.value();
+            if !definition.name.has_retained_claim() {
+                add(crate::Utf8Text::requested_bytes_for_capacity(
+                    definition.name.capacity(),
+                )?)?;
+            }
+            if !definition.defining_class.has_retained_claim() {
+                add(definition.defining_class.requested_bytes()?)?;
+            }
+            if !definition.description.has_retained_claim() {
+                add(crate::Utf8Text::requested_bytes_for_capacity(
+                    definition.description.capacity(),
+                )?)?;
+            }
+        }
+        let (native_bytes, native_claims) = self.native_unclaimed_quote()?;
+        requested_bytes = requested_bytes
+            .checked_add(native_bytes)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        retained_claims = retained_claims
+            .checked_add(native_claims)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        Ok(super::ExactObjectQuote {
+            requested_bytes,
+            retained_claims,
+        })
+    }
+
+    /// Promote original immutable metadata owners in place. Aliases observe
+    /// the same claims; no class/key/description bytes are copied.
+    pub fn try_admit_metadata_exact(
+        &self,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<(), ExactHostNumericAllocationError> {
+        let generation = self.generation();
+        generation
+            .class_name
+            .clone()
+            .try_admit_exact(permit)
+            .map_err(|error| error.source())?;
+        for entry in generation.properties.entries() {
+            entry
+                .key()
+                .clone()
+                .try_admit_exact(permit)
+                .map_err(|error| error.source())?;
+        }
+        for entry in generation.dynamic_properties.entries() {
+            entry
+                .key()
+                .clone()
+                .try_admit_exact(permit)
+                .map_err(|error| error.source())?;
+            entry
+                .value()
+                .clone()
+                .try_admit_exact(permit)
+                .map_err(|error| error.source())?;
+        }
+        self.try_admit_native_exact(permit)?;
+        Ok(())
+    }
+
+    pub fn shares_generation_with(&self, other: &Self) -> bool {
+        self.payload.shares_allocation_with(&other.payload)
+    }
+
+    pub fn permits_unbounded_edit(&self) -> bool {
+        self.generation().can_copy_unbounded()
+    }
+
+    pub(crate) fn permits_exact_move_edit(&self) -> bool {
+        self.payload.is_unique()
+            && self.generation().properties.is_unique()
+            && self.generation().dynamic_properties.is_unique()
+    }
+
+    pub(in crate::object) fn into_payload_unique(self) -> Result<ObjectPayload, Self> {
+        self.payload.try_unwrap().map_err(Self::from_payload)
+    }
+
+    /// Begin an explicit structural edit without copying children. Shared or
+    /// admitted generations are returned unchanged; their replacement needs
+    /// a separately admitted destination.
+    pub fn try_into_unbounded_builder(self) -> Result<UnboundedObjectBuilder, Self> {
+        if !self.generation().can_begin_unbounded_edit() {
+            return Err(self);
+        }
+        match self.payload.try_unwrap() {
+            Ok(payload) => Ok(UnboundedObjectBuilder::from_payload(payload)),
+            Err(payload) => Err(Self::from_payload(payload)),
+        }
+    }
+
+    /// Explicit ordinary-policy edit. Shared ordinary generations are copied
+    /// into a new unpublished generation; admitted generations are refused.
+    pub fn into_unbounded_builder(self) -> Result<UnboundedObjectBuilder, Self> {
+        if !self.generation().can_copy_unbounded() {
+            return Err(self);
+        }
+        if self.generation().can_begin_unbounded_edit() {
+            return match self.payload.try_unwrap() {
+                Ok(payload) => Ok(UnboundedObjectBuilder::from_payload(payload)),
+                Err(payload) => Ok(UnboundedObjectBuilder::copy_from_payload(payload.get())),
+            };
+        }
+        let builder = UnboundedObjectBuilder::copy_from_payload(self.generation());
+        Ok(builder)
     }
 
     pub fn dynamic_property_definitions(
         &self,
-    ) -> impl Iterator<Item = (&String, &DynamicPropertyDef)> {
-        self.dynamic_properties
-            .iter()
-            .flat_map(|properties| properties.iter())
+    ) -> impl ExactSizeIterator<Item = (&str, &DynamicPropertyDef)> + DoubleEndedIterator {
+        self.generation().dynamic_properties.iter()
     }
 
-    pub fn new(class_name: impl Into<ClassIdentity>) -> Self {
-        Self {
-            class_name: class_name.into(),
-            properties: HashMap::new(),
-            dynamic_properties: None,
-            selected_class: None,
-            native_payload: None,
-        }
-    }
-
-    /// Preserve a selected constructor's receiver facts with value copies and
-    /// handle-object GC targets. This is storage, not issuance authority:
-    /// method invocation must still validate its exact typed binding/owner.
     pub fn with_selected_class(mut self, selected: Rc<SelectedObjectClassFacts>) -> Option<Self> {
         self.try_attach_selected_class(selected).then_some(self)
     }
 
-    /// Attach already-issued exact facts to an existing object, including a
-    /// GC-owned handle target. Rejection leaves the receiver untouched.
     pub fn try_attach_selected_class(&mut self, selected: Rc<SelectedObjectClassFacts>) -> bool {
-        if self.class_name != *selected.class()
-            || self.selected_class.is_some()
-            || self.native_payload.is_some()
+        let Some(payload) = self.generation_mut_unique() else {
+            return false;
+        };
+        if payload.payload_claim.is_some()
+            || payload.class_name.has_retained_claim()
+            || payload.class_name != *selected.class()
+            || payload.selected_class.is_some()
+            || payload.native_payload.is_some()
         {
             return false;
         }
-        self.selected_class = Some(selected);
+        payload.selected_class = Some(selected);
         true
     }
 
     pub fn selected_class(&self) -> Option<&Rc<SelectedObjectClassFacts>> {
-        self.selected_class.as_ref()
-    }
-
-    pub fn with_containers_map_payload(mut self, storage: ContainersMapStorage) -> Self {
-        self.native_payload = Some(Box::new(NativeObjectPayload::ContainersMap(storage)));
-        self
-    }
-
-    pub fn with_foreign_host_control(mut self, reference: ForeignRef) -> Self {
-        self.native_payload = Some(Box::new(NativeObjectPayload::ForeignHostControl(reference)));
-        self
-    }
-
-    pub fn foreign_host_control(&self) -> Option<&ForeignRef> {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::ForeignHostControl(reference)) => Some(reference),
-            Some(NativeObjectPayload::ContainersMap(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::MemmapReceiver(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => None,
-        }
-    }
-
-    pub fn with_dataset_authority(mut self, reference: ForeignRef) -> Self {
-        self.native_payload = Some(Box::new(NativeObjectPayload::DatasetAuthority(reference)));
-        self
-    }
-
-    pub fn dataset_authority(&self) -> Option<&ForeignRef> {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::DatasetAuthority(reference)) => Some(reference),
-            Some(NativeObjectPayload::ContainersMap(_))
-            | Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::MemmapReceiver(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => None,
-        }
-    }
-
-    pub fn with_matfile_authority(mut self, reference: ForeignRef) -> Self {
-        self.native_payload = Some(Box::new(NativeObjectPayload::MatFileAuthority(reference)));
-        self
-    }
-
-    pub fn matfile_authority(&self) -> Option<&ForeignRef> {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::MatFileAuthority(reference)) => Some(reference),
-            Some(NativeObjectPayload::ContainersMap(_))
-            | Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MemmapReceiver(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => None,
-        }
-    }
-
-    pub fn with_tcp_authority(mut self, reference: ForeignRef) -> Self {
-        self.native_payload = Some(Box::new(NativeObjectPayload::TcpAuthority(reference)));
-        self
-    }
-
-    pub fn tcp_authority(&self) -> Option<&ForeignRef> {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::TcpAuthority(reference)) => Some(reference),
-            Some(NativeObjectPayload::ContainersMap(_))
-            | Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::MemmapReceiver(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => None,
-        }
-    }
-
-    pub fn with_graphics_receiver(mut self, receiver: GraphicsReceiverRef) -> Self {
-        self.native_payload = Some(Box::new(NativeObjectPayload::GraphicsReceiver(receiver)));
-        self
-    }
-
-    pub fn graphics_receiver(&self) -> Option<&GraphicsReceiverRef> {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::GraphicsReceiver(receiver)) => Some(receiver),
-            Some(NativeObjectPayload::ContainersMap(_))
-            | Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::MemmapReceiver(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | None => None,
-        }
-    }
-
-    pub fn with_memmap_receiver(mut self, receiver: MemmapReceiverState) -> Self {
-        self.native_payload = Some(Box::new(NativeObjectPayload::MemmapReceiver(receiver)));
-        self
-    }
-
-    pub fn memmap_receiver(&self) -> Option<&MemmapReceiverState> {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::MemmapReceiver(receiver)) => Some(receiver),
-            Some(NativeObjectPayload::ContainersMap(_))
-            | Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => None,
-        }
-    }
-
-    pub fn memmap_receiver_mut(&mut self) -> Option<&mut MemmapReceiverState> {
-        match self.native_payload.as_deref_mut() {
-            Some(NativeObjectPayload::MemmapReceiver(receiver)) => Some(receiver),
-            Some(NativeObjectPayload::ContainersMap(_))
-            | Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => None,
-        }
-    }
-
-    pub fn containers_map_payload(&self) -> Option<&ContainersMapStorage> {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
-            Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::MemmapReceiver(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => None,
-        }
-    }
-
-    pub fn containers_map_payload_mut(&mut self) -> Option<&mut ContainersMapStorage> {
-        match self.native_payload.as_deref_mut() {
-            Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
-            Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::MemmapReceiver(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => None,
-        }
-    }
-
-    pub fn has_native_payload(&self) -> bool {
-        self.native_payload.is_some()
-    }
-
-    pub fn for_each_native_value<'a>(&'a self, mut visitor: impl FnMut(&'a Value)) {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::ContainersMap(storage)) => {
-                storage.for_each_value(&mut visitor);
-            }
-            Some(NativeObjectPayload::ForeignHostControl(_))
-            | Some(NativeObjectPayload::DatasetAuthority(_))
-            | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::TcpAuthority(_))
-            | Some(NativeObjectPayload::GraphicsReceiver(_))
-            | None => {}
-            Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
-                if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
-                    visitor(snapshot);
-                }
-            }
-        }
-    }
-
-    pub(crate) fn trace_native_value_at(&self, index: usize) -> Option<&Value> {
-        match self.native_payload.as_deref() {
-            Some(NativeObjectPayload::ContainersMap(storage)) => storage.trace_value_at(index),
-            Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
-                if index == 0 {
-                    if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
-                        return Some(snapshot);
-                    }
-                }
-                None
-            }
-            Some(
-                NativeObjectPayload::ForeignHostControl(_)
-                | NativeObjectPayload::DatasetAuthority(_)
-                | NativeObjectPayload::MatFileAuthority(_)
-                | NativeObjectPayload::TcpAuthority(_)
-                | NativeObjectPayload::GraphicsReceiver(_),
-            )
-            | None => None,
-        }
+        self.generation().selected_class.as_ref()
     }
 
     pub(crate) fn trace_dynamic_property_values(
         &self,
-    ) -> Option<std::collections::hash_map::Values<'_, String, DynamicPropertyDef>> {
-        self.dynamic_properties.as_deref().map(HashMap::values)
+    ) -> impl ExactSizeIterator<Item = &DynamicPropertyDef> + DoubleEndedIterator {
+        self.generation().dynamic_properties.values()
     }
-
-    pub(crate) fn trace_native_payload(&self, tracer: &mut dyn Tracer) {
-        if let Some(payload) = &self.native_payload {
-            payload.trace(tracer);
-        }
-    }
-
     pub fn is_class(&self, identity: runmat_types::StaticClassIdentity) -> bool {
-        self.class_name.is(identity)
+        self.class_name().is(identity)
     }
-
     pub fn dynamic_property(&self, name: &str) -> Option<&DynamicPropertyDef> {
-        self.dynamic_properties
-            .as_ref()
-            .and_then(|properties| properties.get(name))
+        self.generation().dynamic_properties.get(name)
     }
-
-    pub fn dynamic_property_mut(&mut self, name: &str) -> Option<&mut DynamicPropertyDef> {
-        self.dynamic_properties
-            .as_mut()
-            .and_then(|properties| properties.get_mut(name))
+    pub fn dynamic_property_names(
+        &self,
+    ) -> impl ExactSizeIterator<Item = &str> + DoubleEndedIterator {
+        self.generation().dynamic_properties.keys()
     }
-
     pub fn has_dynamic_property(&self, name: &str) -> bool {
         self.dynamic_property(name).is_some()
     }
 
-    pub fn insert_dynamic_property(
+    pub fn try_replace_property_unique(
         &mut self,
-        name: String,
-        property: DynamicPropertyDef,
-    ) -> Option<DynamicPropertyDef> {
-        self.dynamic_properties
-            .get_or_insert_with(|| Box::new(HashMap::new()))
-            .insert(name, property)
+        name: &str,
+        value: Value,
+    ) -> Result<Value, Value> {
+        let Some(payload) = self.generation_mut_unique() else {
+            return Err(value);
+        };
+        payload.properties.try_replace_unique(name, value)
     }
 
-    pub fn remove_dynamic_property(&mut self, name: &str) -> Option<DynamicPropertyDef> {
-        let properties = self.dynamic_properties.as_mut()?;
-        let removed = properties.remove(name);
-        if properties.is_empty() {
-            self.dynamic_properties = None;
-        }
-        removed
+    /// Borrow an existing slot only when both original payload and map are
+    /// already unique. This never copies backing, changes claims, or grows a map.
+    pub fn try_property_mut_unique(&mut self, name: &str) -> Option<&mut Value> {
+        self.generation_mut_unique()?
+            .properties
+            .try_get_mut_unique(name)
     }
 
-    pub fn dynamic_property_names(&self) -> Vec<String> {
-        self.dynamic_properties
-            .as_ref()
-            .map(|properties| properties.keys().cloned().collect())
-            .unwrap_or_default()
+    /// Explicit ordinary-policy property edit. This may copy a shared
+    /// ordinary generation and is therefore never a Managed fallback.
+    pub fn replace_property_unbounded(&mut self, name: String, value: Value) -> Option<Value> {
+        let value = match self.try_replace_property_unique(&name, value) {
+            Ok(old) => return Some(old),
+            Err(value) => value,
+        };
+        assert!(
+            self.generation().can_copy_unbounded(),
+            "unbounded property replacement requires an ordinary object generation"
+        );
+        let mut replacement = UnboundedObjectBuilder::copy_from_payload(self.generation());
+        let old = replacement.insert(name, value);
+        *self = replacement.finish();
+        old
     }
 }

@@ -8,7 +8,7 @@ enum Candidate {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum StorageKind {
+pub(super) enum StorageKind {
     Value,
     Handle,
 }
@@ -25,7 +25,7 @@ impl Candidate {
 
 /// Incremental owner for homogeneous object-array storage.
 pub struct ObjectArrayAdmission {
-    class_name: ClassIdentity,
+    class_name: SharedClassIdentity,
     candidate: Candidate,
     shape: Vec<usize>,
     shape_index: usize,
@@ -44,31 +44,43 @@ pub struct ValidatedObjectArrayParts {
 
 impl ObjectArrayAdmission {
     pub fn values(
-        class_name: ClassIdentity,
+        class_name: impl Into<SharedClassIdentity>,
         values: Vec<Value>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        Self::new(class_name, Candidate::Values { values, index: 0 }, shape)
+        Self::new(
+            class_name.into(),
+            Candidate::Values { values, index: 0 },
+            shape,
+        )
     }
 
     pub fn objects(
-        class_name: ClassIdentity,
+        class_name: impl Into<SharedClassIdentity>,
         values: Vec<ObjectInstance>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        Self::new(class_name, Candidate::Objects(values.into_iter()), shape)
+        Self::new(
+            class_name.into(),
+            Candidate::Objects(values.into_iter()),
+            shape,
+        )
     }
 
     pub fn handles(
-        class_name: ClassIdentity,
+        class_name: impl Into<SharedClassIdentity>,
         values: Vec<HandleRef>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        Self::new(class_name, Candidate::Handles(values.into_iter()), shape)
+        Self::new(
+            class_name.into(),
+            Candidate::Handles(values.into_iter()),
+            shape,
+        )
     }
 
     fn new(
-        class_name: ClassIdentity,
+        class_name: SharedClassIdentity,
         candidate: Candidate,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
@@ -121,7 +133,11 @@ impl ObjectArrayAdmission {
                             completed += 1;
                             break;
                         };
-                        validate_value(value, &self.class_name, &mut self.storage_kind)?;
+                        validate_value(
+                            value,
+                            self.class_name.as_identity(),
+                            &mut self.storage_kind,
+                        )?;
                         *index += 1;
                     }
                     Candidate::Objects(values) => {
@@ -131,7 +147,11 @@ impl ObjectArrayAdmission {
                             break;
                         };
                         let value = Value::Object(object);
-                        validate_value(&value, &self.class_name, &mut self.storage_kind)?;
+                        validate_value(
+                            &value,
+                            self.class_name.as_identity(),
+                            &mut self.storage_kind,
+                        )?;
                         self.data.push(value);
                     }
                     Candidate::Handles(values) => {
@@ -141,7 +161,11 @@ impl ObjectArrayAdmission {
                             break;
                         };
                         let value = Value::HandleObject(handle);
-                        validate_value(&value, &self.class_name, &mut self.storage_kind)?;
+                        validate_value(
+                            &value,
+                            self.class_name.as_identity(),
+                            &mut self.storage_kind,
+                        )?;
                         self.data.push(value);
                     }
                 }
@@ -166,9 +190,9 @@ impl ObjectArrayAdmission {
         Ok(ValidatedObjectArrayParts {
             array: ObjectArray {
                 class_name: self.class_name,
-                data,
-                shape: self.shape,
-                selected_provenance: Vec::new(),
+                data: OutputListStorage::shared_unbounded(data),
+                shape: self.shape.into(),
+                selected_provenance: ExactArrayStorage::empty(),
                 unselected_provenance: false,
             },
         })
@@ -184,14 +208,14 @@ impl ObjectArrayAdmission {
     }
 }
 
-fn validate_value(
+pub(super) fn validate_value(
     value: &Value,
     class_name: &ClassIdentity,
     storage_kind: &mut Option<StorageKind>,
 ) -> Result<(), String> {
     let (element_class, element_kind) = match value {
-        Value::Object(object) => (&object.class_name, StorageKind::Value),
-        Value::HandleObject(handle) => (&handle.class_name, StorageKind::Handle),
+        Value::Object(object) => (object.class_name(), StorageKind::Value),
+        Value::HandleObject(handle) => (handle.class_name.as_identity(), StorageKind::Handle),
         _ => return Err("object array elements must be value or handle objects".into()),
     };
     if element_class != class_name {

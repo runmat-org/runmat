@@ -2,7 +2,8 @@
 //!
 //! Ordinary construction preserves the caller's `String` allocation. Exact
 //! promotion moves those same bytes into the canonical exact array owner;
-//! aliases of an exact owner are O(1) and retain its physical claim.
+//! all aliases share those original bytes in O(1), and promotion attaches one
+//! physical claim to that same owner.
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -11,21 +12,15 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use crate::{
-    ExactArrayAdoptionError, ExactArrayStorage, ExactHostAllocationPermit,
+    ExactArrayClaimPromotionError, ExactArrayStorage, ExactHostAllocationPermit,
     ExactHostNumericAllocationError,
 };
 
 mod staged_copy;
 pub use staged_copy::Utf8TextExactCopy;
 
-#[derive(Debug)]
-enum Utf8TextInner {
-    Owned(String),
-    Exact(ExactArrayStorage<u8>),
-}
-
-#[derive(Debug)]
-pub struct Utf8Text(Utf8TextInner);
+#[derive(Debug, Clone)]
+pub struct Utf8Text(ExactArrayStorage<u8>);
 
 impl Default for Utf8Text {
     fn default() -> Self {
@@ -34,61 +29,54 @@ impl Default for Utf8Text {
 }
 
 #[derive(Debug)]
-enum Utf8TextAdmissionFailure {
-    Unclaimed(Utf8Text),
-    Claimed(ExactArrayAdoptionError<u8>),
-}
-
-#[derive(Debug)]
 pub struct Utf8TextAdmissionError {
-    failure: Utf8TextAdmissionFailure,
+    text: Utf8Text,
     source: ExactHostNumericAllocationError,
 }
-
 impl Utf8TextAdmissionError {
     pub fn source(&self) -> ExactHostNumericAllocationError {
         self.source
     }
-
-    /// Recover the original text only when admission failed before a claim
-    /// was issued. A claim-bearing failure must retire intact.
+    /// Recovery cannot detach an already-attached physical claim, including
+    /// one attached through another alias after this reservation failed.
     pub fn try_into_unclaimed_text(self) -> Result<Utf8Text, Self> {
-        let Self { failure, source } = self;
-        match failure {
-            Utf8TextAdmissionFailure::Unclaimed(text) => Ok(text),
-            Utf8TextAdmissionFailure::Claimed(error) => Err(Self {
-                failure: Utf8TextAdmissionFailure::Claimed(error),
-                source,
-            }),
+        if self.text.has_retained_claim() {
+            Err(self)
+        } else {
+            Ok(self.text)
         }
     }
 }
 
 impl Utf8Text {
     pub fn new(text: String) -> Self {
-        Self(Utf8TextInner::Owned(text))
+        let bytes = text.into_bytes();
+        Self(if bytes.capacity() == 0 {
+            ExactArrayStorage::empty()
+        } else {
+            ExactArrayStorage::shared_unbounded(bytes)
+        })
     }
-
     pub fn as_str(&self) -> &str {
-        match &self.0 {
-            Utf8TextInner::Owned(text) => text,
-            Utf8TextInner::Exact(bytes) => {
-                // SAFETY: exact constructors retain validated String bytes or
-                // complete an unchanged str copy. This backing is immutable.
-                unsafe { std::str::from_utf8_unchecked(bytes.as_slice()) }
-            }
-        }
+        // SAFETY: constructors move validated String bytes or complete an
+        // unchanged str/char encoding copy. Published backing is immutable.
+        unsafe { std::str::from_utf8_unchecked(self.0.as_slice()) }
     }
-
     pub fn capacity(&self) -> usize {
-        match &self.0 {
-            Utf8TextInner::Owned(text) => text.capacity(),
-            Utf8TextInner::Exact(bytes) => bytes.capacity(),
-        }
+        self.0.capacity()
     }
-
     pub fn has_retained_claim(&self) -> bool {
-        matches!(&self.0, Utf8TextInner::Exact(bytes) if bytes.is_exact())
+        self.0.is_exact()
+    }
+    pub(crate) fn unclaimed_bytes(&self) -> Result<Option<usize>, ExactHostNumericAllocationError> {
+        self.0
+            .unclaimed_shared_bytes()
+            .map_err(|source| match source {
+                ExactArrayClaimPromotionError::Allocation(source) => source,
+                ExactArrayClaimPromotionError::UnsharedBacking => {
+                    unreachable!("text is shared from original construction")
+                }
+            })
     }
 
     pub fn requested_bytes_for_capacity(
@@ -103,32 +91,16 @@ impl Utf8Text {
         self,
         permit: &dyn ExactHostAllocationPermit,
     ) -> Result<Self, Utf8TextAdmissionError> {
-        let text = match self.0 {
-            Utf8TextInner::Owned(text) => text,
-            Utf8TextInner::Exact(bytes) => return Ok(Self(Utf8TextInner::Exact(bytes))),
-        };
-        let bytes = text.into_bytes();
-        match ExactArrayStorage::try_adopt_exact(bytes, permit) {
-            Ok(bytes) => Ok(Self(Utf8TextInner::Exact(bytes))),
-            Err(error) => {
-                let source = *error.source();
-                match error.try_into_unclaimed_values() {
-                    Ok(bytes) => {
-                        // SAFETY: the adopter returned the unchanged bytes
-                        // produced by `String::into_bytes`.
-                        let text = unsafe { String::from_utf8_unchecked(bytes) };
-                        Err(Utf8TextAdmissionError {
-                            failure: Utf8TextAdmissionFailure::Unclaimed(Self(
-                                Utf8TextInner::Owned(text),
-                            )),
-                            source,
-                        })
+        match self.0.try_promote_shared_claim(permit) {
+            Ok(()) => Ok(self),
+            Err(source) => {
+                let source = match source {
+                    ExactArrayClaimPromotionError::Allocation(source) => source,
+                    ExactArrayClaimPromotionError::UnsharedBacking => {
+                        unreachable!("text is shared from original construction")
                     }
-                    Err(error) => Err(Utf8TextAdmissionError {
-                        failure: Utf8TextAdmissionFailure::Claimed(error),
-                        source,
-                    }),
-                }
+                };
+                Err(Utf8TextAdmissionError { text: self, source })
             }
         }
     }
@@ -228,28 +200,21 @@ impl Utf8Text {
             encoded_index += 1;
             Ok(byte)
         })?;
-        Ok(Self(Utf8TextInner::Exact(bytes)))
+        Ok(Self(bytes))
     }
 
     /// Materialize ordinary String ownership. Exact callers should normally
     /// borrow `as_str`; this explicit boundary may copy shared bytes.
     pub fn into_string_unbounded(self) -> String {
-        match self.0 {
-            Utf8TextInner::Owned(text) => text,
-            Utf8TextInner::Exact(bytes) => {
-                // SAFETY: exact text bytes preserve the constructor invariant.
-                unsafe { String::from_utf8_unchecked(bytes.as_slice().to_vec()) }
-            }
-        }
-    }
-}
-
-impl Clone for Utf8Text {
-    fn clone(&self) -> Self {
-        match &self.0 {
-            Utf8TextInner::Owned(text) => Self::new(text.clone()),
-            Utf8TextInner::Exact(bytes) => Self(Utf8TextInner::Exact(bytes.clone())),
-        }
+        let bytes = match self.0.try_into_owned() {
+            Ok(values) => match values.try_into_unbounded_vec() {
+                Ok(bytes) => bytes,
+                Err(values) => values.as_slice().to_vec(),
+            },
+            Err(shared) => shared.as_slice().to_vec(),
+        };
+        // SAFETY: the original immutable UTF-8 sequence is unchanged.
+        unsafe { String::from_utf8_unchecked(bytes) }
     }
 }
 
@@ -338,6 +303,16 @@ impl From<String> for Utf8Text {
 impl From<&str> for Utf8Text {
     fn from(text: &str) -> Self {
         Self::new(text.to_owned())
+    }
+}
+impl From<&Utf8Text> for Utf8Text {
+    fn from(text: &Utf8Text) -> Self {
+        text.clone()
+    }
+}
+impl From<&String> for Utf8Text {
+    fn from(text: &String) -> Self {
+        Self::from(text.as_str())
     }
 }
 

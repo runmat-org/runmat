@@ -1,28 +1,35 @@
 use super::StructArray;
+use crate::UnboundedOrderedMapBuilder;
 use crate::Value;
-use indexmap::IndexMap;
 
 impl StructArray {
-    pub fn select_linear(&self, indices: &[usize], shape: Vec<usize>) -> Result<Value, String> {
+    pub fn select_linear_unbounded(
+        &self,
+        indices: &[usize],
+        shape: Vec<usize>,
+    ) -> Result<Value, String> {
         validate_indices(indices, self.len())?;
         let fields = self
             .fields
             .iter()
             .map(|(name, values)| {
                 (
-                    name.clone(),
+                    name.to_owned(),
                     indices.iter().map(|index| values[*index].clone()).collect(),
                 )
             })
-            .collect::<IndexMap<_, _>>();
+            .collect::<UnboundedOrderedMapBuilder<_>>();
         Self::normalize_columns(fields, shape)
     }
 
-    pub fn take_linear(self, indices: &[usize], shape: Vec<usize>) -> Result<Value, String> {
+    pub fn take_linear_unbounded(
+        self,
+        indices: &[usize],
+        shape: Vec<usize>,
+    ) -> Result<Value, String> {
         validate_unique_indices(indices, self.len())?;
         let fields = self
-            .fields
-            .into_iter()
+            .into_columns_unbounded()
             .map(|(name, values)| {
                 let mut source = values.into_iter().map(Some).collect::<Vec<_>>();
                 let selected = indices
@@ -35,7 +42,7 @@ impl StructArray {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok((name, selected))
             })
-            .collect::<Result<IndexMap<_, _>, String>>()?;
+            .collect::<Result<UnboundedOrderedMapBuilder<_>, String>>()?;
         Self::normalize_columns(fields, shape)
     }
 }

@@ -2,15 +2,19 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SymbolicArray {
-    pub data: Vec<SymbolicExpr>,
-    pub shape: Vec<usize>,
+    pub data: ExactArrayStorage<SymbolicExpr>,
+    pub shape: SharedShape,
     pub rows: usize,
     pub cols: usize,
 }
 
 impl SymbolicArray {
-    pub fn new(data: Vec<SymbolicExpr>, shape: Vec<usize>) -> Result<Self, String> {
-        let expected: usize = shape.iter().product();
+    pub fn new(data: Vec<SymbolicExpr>, shape: impl Into<SharedShape>) -> Result<Self, String> {
+        let shape = shape.into();
+        let expected = shape
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            .ok_or_else(|| "SymbolicArray shape exceeds platform limits".to_owned())?;
         if data.len() != expected {
             return Err(format!(
                 "SymbolicArray data length {} doesn't match shape {:?} ({} elements)",
@@ -24,7 +28,11 @@ impl SymbolicArray {
         let rows = shape.first().copied().unwrap_or(1);
         let cols = shape.get(1).copied().unwrap_or(1);
         Ok(SymbolicArray {
-            data,
+            data: if data.capacity() == 0 {
+                ExactArrayStorage::empty()
+            } else {
+                ExactArrayStorage::shared_unbounded(data)
+            },
             shape,
             rows,
             cols,

@@ -25,12 +25,20 @@ impl NamedFunctionHandle {
         self.name.as_str()
     }
 
-    pub(crate) fn name_capacity(&self) -> usize {
-        self.name.capacity()
+    pub(crate) fn name_unclaimed_bytes(
+        &self,
+    ) -> Result<Option<usize>, crate::ExactHostNumericAllocationError> {
+        self.name.unclaimed_bytes()
     }
-
-    pub(crate) fn name_has_retained_claim(&self) -> bool {
-        self.name.has_retained_claim()
+    pub(crate) fn try_promote_name_claim(
+        &self,
+        permit: &dyn crate::ExactHostAllocationPermit,
+    ) -> Result<(), crate::ExactHostNumericAllocationError> {
+        self.name
+            .clone()
+            .try_admit_exact(permit)
+            .map(|_| ())
+            .map_err(|error| error.source())
     }
 
     pub fn into_text_owner(self) -> Utf8Text {

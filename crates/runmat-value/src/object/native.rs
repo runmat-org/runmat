@@ -1,0 +1,401 @@
+use runmat_execution::resource::ExactShared;
+use runmat_gc_api::{Trace, Tracer};
+use std::sync::OnceLock;
+
+use super::{
+    ContainersMapStorage, GraphicsReceiverRef, MemmapReceiverAuthority, MemmapReceiverState,
+    ObjectInstance,
+};
+use crate::{ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError};
+use crate::{ForeignRef, Value};
+
+#[derive(Debug)]
+struct SharedNativePayload<T> {
+    value: T,
+    // The native DTO and ExactShared header retire before this aggregate
+    // physical claim refunds.
+    claim: OnceLock<ExactHostAllocationClaim>,
+}
+
+#[derive(Debug)]
+pub(super) struct SharedNativeState<T>(ExactShared<SharedNativePayload<T>>);
+
+impl<T> Clone for SharedNativeState<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T: PartialEq> PartialEq for SharedNativeState<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get().value == other.0.get().value
+    }
+}
+
+impl<T> SharedNativeState<T> {
+    fn new(value: T) -> Self {
+        Self(ExactShared::new(SharedNativePayload {
+            value,
+            claim: OnceLock::new(),
+        }))
+    }
+    fn get(&self) -> &T {
+        &self.0.get().value
+    }
+    fn try_new_exact(
+        value: T,
+        retained_value_bytes: usize,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let bytes = ExactShared::<SharedNativePayload<T>>::requested_bytes()
+            .checked_add(retained_value_bytes)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        let claim = permit.reserve_exact_claim(bytes)?;
+        let claims = OnceLock::new();
+        let _ = claims.set(claim);
+        ExactShared::try_new(SharedNativePayload {
+            value,
+            claim: claims,
+        })
+        .map(Self)
+        .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)
+    }
+    fn get_mut_unbounded(&mut self) -> Option<&mut T> {
+        if !self.0.is_unique() {
+            return None;
+        }
+        let payload = self.0.get_mut_unique();
+        payload.claim.get().is_none().then_some(&mut payload.value)
+    }
+    fn has_retained_claim(&self) -> bool {
+        self.0.get().claim.get().is_some()
+    }
+    fn try_admit_exact(
+        &self,
+        retained_value_bytes: usize,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<(), ExactHostNumericAllocationError> {
+        if self.has_retained_claim() {
+            return Ok(());
+        }
+        let bytes = ExactShared::<SharedNativePayload<T>>::requested_bytes()
+            .checked_add(retained_value_bytes)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        let claim = permit.reserve_exact_claim(bytes)?;
+        let _ = self.0.get().claim.set(claim);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum NativeObjectPayload {
+    ContainersMap(SharedNativeState<ContainersMapStorage>),
+    ForeignHostControl(ForeignRef),
+    DatasetAuthority(ForeignRef),
+    MatFileAuthority(ForeignRef),
+    MemmapReceiver(SharedNativeState<MemmapReceiverState>),
+    TcpAuthority(ForeignRef),
+    GraphicsReceiver(GraphicsReceiverRef),
+}
+
+impl NativeObjectPayload {
+    pub(super) fn memmap_receiver_unbounded(value: MemmapReceiverState) -> Self {
+        Self::MemmapReceiver(SharedNativeState::new(value))
+    }
+    pub(super) fn containers_map_requested_bytes(
+        value: &ContainersMapStorage,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        ExactShared::<SharedNativePayload<ContainersMapStorage>>::requested_bytes()
+            .checked_add(value.retained_physical_bytes()?)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
+    pub(super) fn memmap_receiver_requested_bytes(
+        value: &MemmapReceiverState,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        ExactShared::<SharedNativePayload<MemmapReceiverState>>::requested_bytes()
+            .checked_add(value.retained_physical_bytes()?)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
+    pub(super) fn containers_map_exact(
+        value: ContainersMapStorage,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let bytes = value.retained_physical_bytes()?;
+        SharedNativeState::try_new_exact(value, bytes, permit).map(Self::ContainersMap)
+    }
+
+    pub(super) fn memmap_receiver_exact(
+        value: MemmapReceiverState,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let bytes = value.retained_physical_bytes()?;
+        SharedNativeState::try_new_exact(value, bytes, permit).map(Self::MemmapReceiver)
+    }
+
+    pub(super) fn clone_unbounded(&self) -> Self {
+        match self {
+            Self::ContainersMap(value) => {
+                Self::ContainersMap(SharedNativeState::new(value.get().clone()))
+            }
+            Self::MemmapReceiver(value) => {
+                Self::MemmapReceiver(SharedNativeState::new(value.get().clone()))
+            }
+            Self::ForeignHostControl(value) => Self::ForeignHostControl(value.clone()),
+            Self::DatasetAuthority(value) => Self::DatasetAuthority(value.clone()),
+            Self::MatFileAuthority(value) => Self::MatFileAuthority(value.clone()),
+            Self::TcpAuthority(value) => Self::TcpAuthority(value.clone()),
+            Self::GraphicsReceiver(value) => Self::GraphicsReceiver(value.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectPersistencePayloadKind {
+    PlainValue,
+    SelectedClass,
+    MixedSelectedNative,
+    ContainersMap,
+    ForeignHostControl,
+    DatasetAuthority,
+    MatFileAuthority,
+    MemmapReceiver,
+    TcpAuthority,
+    GraphicsReceiver,
+}
+
+impl Trace for NativeObjectPayload {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        match self {
+            Self::ContainersMap(storage) => storage.get().trace(tracer),
+            Self::MemmapReceiver(receiver) => {
+                if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.get().authority {
+                    snapshot.trace(tracer);
+                }
+            }
+            Self::ForeignHostControl(_)
+            | Self::DatasetAuthority(_)
+            | Self::MatFileAuthority(_)
+            | Self::TcpAuthority(_)
+            | Self::GraphicsReceiver(_) => {}
+        }
+    }
+}
+
+impl ObjectInstance {
+    pub(super) fn native_is_admitted_for_copy(&self) -> bool {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => storage.has_retained_claim(),
+            Some(NativeObjectPayload::MemmapReceiver(storage)) => storage.has_retained_claim(),
+            _ => true,
+        }
+    }
+
+    pub(super) fn native_unclaimed_quote(
+        &self,
+    ) -> Result<(usize, usize), ExactHostNumericAllocationError> {
+        let Some(native) = self.generation().native_payload.as_ref() else {
+            return Ok((0, 0));
+        };
+        match native {
+            NativeObjectPayload::ContainersMap(storage) if !storage.has_retained_claim() => Ok((
+                NativeObjectPayload::containers_map_requested_bytes(storage.get())?,
+                1,
+            )),
+            NativeObjectPayload::MemmapReceiver(storage) if !storage.has_retained_claim() => Ok((
+                NativeObjectPayload::memmap_receiver_requested_bytes(storage.get())?,
+                1,
+            )),
+            _ => Ok((0, 0)),
+        }
+    }
+
+    pub(super) fn try_admit_native_exact(
+        &self,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<(), ExactHostNumericAllocationError> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => {
+                storage.try_admit_exact(storage.get().retained_physical_bytes()?, permit)
+            }
+            Some(NativeObjectPayload::MemmapReceiver(storage)) => {
+                storage.try_admit_exact(storage.get().retained_physical_bytes()?, permit)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub fn persistence_payload_kind(&self) -> ObjectPersistencePayloadKind {
+        let payload = self.generation();
+        if payload.selected_class.is_some() && payload.native_payload.is_some() {
+            return ObjectPersistencePayloadKind::MixedSelectedNative;
+        }
+        if payload.selected_class.is_some() {
+            return ObjectPersistencePayloadKind::SelectedClass;
+        }
+        match payload.native_payload.as_ref() {
+            None => ObjectPersistencePayloadKind::PlainValue,
+            Some(NativeObjectPayload::ContainersMap(_)) => {
+                ObjectPersistencePayloadKind::ContainersMap
+            }
+            Some(NativeObjectPayload::ForeignHostControl(_)) => {
+                ObjectPersistencePayloadKind::ForeignHostControl
+            }
+            Some(NativeObjectPayload::DatasetAuthority(_)) => {
+                ObjectPersistencePayloadKind::DatasetAuthority
+            }
+            Some(NativeObjectPayload::MatFileAuthority(_)) => {
+                ObjectPersistencePayloadKind::MatFileAuthority
+            }
+            Some(NativeObjectPayload::MemmapReceiver(_)) => {
+                ObjectPersistencePayloadKind::MemmapReceiver
+            }
+            Some(NativeObjectPayload::TcpAuthority(_)) => {
+                ObjectPersistencePayloadKind::TcpAuthority
+            }
+            Some(NativeObjectPayload::GraphicsReceiver(_)) => {
+                ObjectPersistencePayloadKind::GraphicsReceiver
+            }
+        }
+    }
+
+    fn with_native(mut self, native: NativeObjectPayload) -> Self {
+        let payload = self
+            .generation_mut_unique()
+            .expect("native payload attachment requires a unique object generation");
+        assert!(
+            payload.payload_claim.is_none() && !payload.class_name.has_retained_claim(),
+            "native payload attachment requires an explicitly unbounded object generation"
+        );
+        payload.native_payload = Some(native);
+        self
+    }
+
+    pub fn with_containers_map_payload(self, storage: ContainersMapStorage) -> Self {
+        self.with_native(NativeObjectPayload::ContainersMap(SharedNativeState::new(
+            storage,
+        )))
+    }
+    pub fn with_foreign_host_control(self, reference: ForeignRef) -> Self {
+        self.with_native(NativeObjectPayload::ForeignHostControl(reference))
+    }
+    pub fn with_dataset_authority(self, reference: ForeignRef) -> Self {
+        self.with_native(NativeObjectPayload::DatasetAuthority(reference))
+    }
+    pub fn with_matfile_authority(self, reference: ForeignRef) -> Self {
+        self.with_native(NativeObjectPayload::MatFileAuthority(reference))
+    }
+    pub fn with_tcp_authority(self, reference: ForeignRef) -> Self {
+        self.with_native(NativeObjectPayload::TcpAuthority(reference))
+    }
+    pub fn with_graphics_receiver(self, receiver: GraphicsReceiverRef) -> Self {
+        self.with_native(NativeObjectPayload::GraphicsReceiver(receiver))
+    }
+    pub fn with_memmap_receiver(self, receiver: MemmapReceiverState) -> Self {
+        self.with_native(NativeObjectPayload::MemmapReceiver(SharedNativeState::new(
+            receiver,
+        )))
+    }
+
+    pub fn foreign_host_control(&self) -> Option<&ForeignRef> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::ForeignHostControl(value)) => Some(value),
+            _ => None,
+        }
+    }
+    pub fn dataset_authority(&self) -> Option<&ForeignRef> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::DatasetAuthority(value)) => Some(value),
+            _ => None,
+        }
+    }
+    pub fn matfile_authority(&self) -> Option<&ForeignRef> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::MatFileAuthority(value)) => Some(value),
+            _ => None,
+        }
+    }
+    pub fn tcp_authority(&self) -> Option<&ForeignRef> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::TcpAuthority(value)) => Some(value),
+            _ => None,
+        }
+    }
+    pub fn graphics_receiver(&self) -> Option<&GraphicsReceiverRef> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::GraphicsReceiver(value)) => Some(value),
+            _ => None,
+        }
+    }
+    pub fn memmap_receiver(&self) -> Option<&MemmapReceiverState> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::MemmapReceiver(value)) => Some(value.get()),
+            _ => None,
+        }
+    }
+    pub fn memmap_receiver_mut(&mut self) -> Option<&mut MemmapReceiverState> {
+        let payload = self.generation_mut_unique()?;
+        if payload.payload_claim.is_some() || payload.class_name.has_retained_claim() {
+            return None;
+        }
+        match payload.native_payload.as_mut() {
+            Some(NativeObjectPayload::MemmapReceiver(value)) => value.get_mut_unbounded(),
+            _ => None,
+        }
+    }
+    pub fn containers_map_payload(&self) -> Option<&ContainersMapStorage> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::ContainersMap(value)) => Some(value.get()),
+            _ => None,
+        }
+    }
+    pub fn containers_map_payload_mut(&mut self) -> Option<&mut ContainersMapStorage> {
+        let payload = self.generation_mut_unique()?;
+        if payload.payload_claim.is_some() || payload.class_name.has_retained_claim() {
+            return None;
+        }
+        match payload.native_payload.as_mut() {
+            Some(NativeObjectPayload::ContainersMap(value)) => value.get_mut_unbounded(),
+            _ => None,
+        }
+    }
+    pub fn has_native_payload(&self) -> bool {
+        self.generation().native_payload.is_some()
+    }
+
+    pub fn for_each_native_value<'a>(&'a self, mut visitor: impl FnMut(&'a Value)) {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => {
+                storage.get().for_each_value(&mut visitor)
+            }
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
+                if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.get().authority {
+                    visitor(snapshot);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn trace_native_value_at(&self, index: usize) -> Option<&Value> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => {
+                storage.get().trace_value_at(index)
+            }
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) if index == 0 => {
+                match &receiver.get().authority {
+                    MemmapReceiverAuthority::Detached(value) => Some(value),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn trace_native_payload(&self, tracer: &mut dyn Tracer) {
+        if let Some(payload) = &self.generation().native_payload {
+            payload.trace(tracer);
+        }
+    }
+}

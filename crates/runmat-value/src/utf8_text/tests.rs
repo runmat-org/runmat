@@ -54,7 +54,15 @@ fn exact_text_and_callable_generation_preserve_physical_owners() {
         limit: requested,
         live: live.clone(),
     };
-    let text = Utf8Text::new(source).try_admit_exact(&permit).unwrap();
+    let text = Utf8Text::new(source);
+    let original_alias = text.clone();
+    assert_eq!(original_alias.as_str().as_ptr(), pointer);
+    assert!(!original_alias.has_retained_claim());
+    let text = text.try_admit_exact(&permit).unwrap();
+    assert!(original_alias.has_retained_claim());
+    drop(text.clone().try_admit_exact(&permit).unwrap());
+    assert_eq!(live.load(Ordering::SeqCst), requested);
+    drop(original_alias);
     assert_eq!(text.as_str().as_ptr(), pointer);
     assert!(text == "callback");
     assert_eq!(String::from("callback"), text);
@@ -144,7 +152,10 @@ fn exact_text_and_callable_generation_preserve_physical_owners() {
     let mut callable_name = String::with_capacity(23);
     callable_name.push_str("solver_step");
     let callable_pointer = callable_name.as_ptr();
+    let callable_name_bytes =
+        Utf8Text::requested_bytes_for_capacity(callable_name.capacity()).unwrap();
     let callable = crate::Value::function_handle(callable_name);
+    let callable_name_alias = callable.clone();
     let quote = crate::SharedValueGeneration::callable_quote(&callable)
         .unwrap()
         .unwrap();
@@ -163,6 +174,152 @@ fn exact_text_and_callable_generation_preserve_physical_owners() {
     drop(generation);
     assert_eq!(live.load(Ordering::SeqCst), quote.requested_bytes);
     drop(generation_alias);
+    assert_eq!(live.load(Ordering::SeqCst), callable_name_bytes);
+    drop(callable_name_alias);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    // Both callable metadata strings belong to their original shared owners,
+    // not to the temporary generation carrying this callable.
+    let closure = crate::Closure::new(
+        "retained_closure".to_owned(),
+        None,
+        runmat_types::FunctionSourceRole::Unknown,
+        Some("source.m".to_owned()),
+        Vec::new(),
+        None,
+    );
+    let name_pointer = closure.function_name.as_str().as_ptr();
+    let source_pointer = closure.source_file.as_ref().unwrap().as_str().as_ptr();
+    let detached = closure.clone().into_data();
+    assert_eq!(detached.function_name.as_str().as_ptr(), name_pointer);
+    assert_eq!(
+        detached.source_file.as_ref().unwrap().as_str().as_ptr(),
+        source_pointer
+    );
+    let callable = crate::Value::Closure(closure);
+    let quote = crate::SharedValueGeneration::callable_quote(&callable)
+        .unwrap()
+        .unwrap();
+    let metadata_bytes = quote.requested_bytes
+        - crate::SharedValueGeneration::requested_bytes()
+        - crate::Closure::resolved_header_bytes();
+    let permit = Permit {
+        limit: quote.requested_bytes,
+        live: live.clone(),
+    };
+    let mut input = crate::CallableGenerationInput::new(callable);
+    let generation = crate::SharedValueGeneration::prepare_callable(&mut input, &permit).unwrap();
+    assert!(detached.function_name.has_retained_claim());
+    assert!(detached.source_file.as_ref().unwrap().has_retained_claim());
+    drop(generation);
+    assert_eq!(live.load(Ordering::SeqCst), metadata_bytes);
+    drop(detached);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    let closure = crate::Closure::new(
+        "resolve_alias".to_owned(),
+        None,
+        runmat_types::FunctionSourceRole::Unknown,
+        None,
+        Vec::new(),
+        None,
+    );
+    let original = closure.clone();
+    let binding = crate::BoundFunctionBinding {
+        function: 7,
+        authority: crate::BoundFunctionAuthority::unavailable(7),
+    };
+    let bytes = crate::Closure::resolved_header_bytes();
+    let denied = Permit {
+        limit: bytes - 1,
+        live: live.clone(),
+    };
+    assert!(matches!(
+        closure.try_bind_resolved(
+            binding.clone(),
+            runmat_types::FunctionSourceRole::Unknown,
+            None,
+            &denied
+        ),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    assert!(original.binding.is_none());
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+    let permit = Permit {
+        limit: bytes,
+        live: live.clone(),
+    };
+    let resolved = closure
+        .try_bind_resolved(
+            binding,
+            runmat_types::FunctionSourceRole::Unknown,
+            None,
+            &permit,
+        )
+        .unwrap();
+    assert_ne!(original.instance_id(), resolved.instance_id());
+    assert!(original.binding.is_none());
+    assert_eq!(resolved.bound_function(), Some(7));
+    assert_eq!(
+        original.function_name.as_str().as_ptr(),
+        resolved.function_name.as_str().as_ptr()
+    );
+    let alias = resolved.clone();
+    drop(resolved);
+    assert_eq!(live.load(Ordering::SeqCst), bytes);
+    drop(alias);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    // A future's output contract owns nested vectors. Cloning the Value must
+    // retain those exact original pointers, including spare physical capacity.
+    let mut shape = Vec::with_capacity(11);
+    shape.push(1);
+    let shape_pointer = shape.as_ptr();
+    let future = crate::SharedFutureHandle::new(runmat_execution::FutureHandle {
+        id: runmat_execution::FutureId::derive(&[b"shared-future"]),
+        scope_id: runmat_execution::ExecutionScopeId::derive(&[b"shared-scope"]),
+        outputs: runmat_execution::OutputContract {
+            requested_outputs: 1,
+            owned_work: Some(runmat_execution::task::OwnedBuiltinResponseContract {
+                dense: vec![runmat_execution::task::OwnedBuiltinDenseOutputContract {
+                    shape,
+                    allowed_element_types: vec![runmat_execution::value::ElementType::F64],
+                }],
+                max_wire_bytes: runmat_execution::task::OWNED_BUILTIN_FAILURE_WIRE_BYTES + 64,
+            }),
+        },
+    });
+    let alias = future.clone();
+    assert!(future.shares_allocation_with(&alias));
+    assert_eq!(
+        alias.outputs.owned_work.as_ref().unwrap().dense[0]
+            .shape
+            .as_ptr(),
+        shape_pointer
+    );
+    let bytes = future.metadata_unclaimed_bytes().unwrap().unwrap();
+    let denied = Permit {
+        limit: bytes - 1,
+        live: live.clone(),
+    };
+    assert!(matches!(
+        future.try_promote_metadata(&denied),
+        Err(crate::ExecutionMetadataQuoteError::Allocation(
+            ExactHostNumericAllocationError::ExceedsPermit
+        ))
+    ));
+    assert!(!alias.has_retained_metadata_claim());
+    let permit = Permit {
+        limit: bytes,
+        live: live.clone(),
+    };
+    future.try_promote_metadata(&permit).unwrap();
+    assert!(alias.has_retained_metadata_claim());
+    alias.try_promote_metadata(&permit).unwrap();
+    assert_eq!(live.load(Ordering::SeqCst), bytes);
+    drop(future);
+    assert_eq!(live.load(Ordering::SeqCst), bytes);
+    drop(alias);
     assert_eq!(live.load(Ordering::SeqCst), 0);
 
     let characters = ['A', 'é', '𝄞'];

@@ -1,10 +1,13 @@
 use super::StructArray;
-use crate::Value;
-use indexmap::IndexMap;
+use crate::{UnboundedOrderedMapBuilder, Value};
 use std::collections::HashSet;
 
 impl StructArray {
-    pub fn insert_field(&mut self, name: String, values: Vec<Value>) -> Result<(), String> {
+    pub fn insert_field_unbounded(
+        &mut self,
+        name: String,
+        values: Vec<Value>,
+    ) -> Result<(), String> {
         if self.fields.contains_key(&name) {
             return Err(format!("structure array field '{name}' already exists"));
         }
@@ -15,15 +18,30 @@ impl StructArray {
                 self.len()
             ));
         }
-        self.fields.insert(name, values);
+        let shape = self.shape.to_vec();
+        let mut fields = self
+            .clone()
+            .into_columns_unbounded()
+            .collect::<UnboundedOrderedMapBuilder<_>>();
+        fields.insert(name, values);
+        *self = Self::publish_columns_unbounded(fields, shape)?;
         Ok(())
     }
-
-    pub fn remove_field(&mut self, name: &str) -> Option<Vec<Value>> {
-        self.fields.shift_remove(name)
+    pub fn remove_field_unbounded(&mut self, name: &str) -> Option<Vec<Value>> {
+        if !self.fields.contains_key(name) {
+            return None;
+        }
+        let shape = self.shape.to_vec();
+        let mut fields = self
+            .clone()
+            .into_columns_unbounded()
+            .collect::<UnboundedOrderedMapBuilder<_>>();
+        let removed = fields.remove(name);
+        *self = Self::publish_columns_unbounded(fields, shape)
+            .expect("removal preserves field lengths");
+        removed
     }
-
-    pub fn replace_field_values(
+    pub fn replace_field_values_unbounded(
         &mut self,
         name: &str,
         values: Vec<Value>,
@@ -34,32 +52,43 @@ impl StructArray {
         }
         let column = self
             .fields
-            .get_mut(name)
+            .get(name)
             .ok_or_else(|| format!("structure array field '{name}' does not exist"))?;
         for (old, new) in column.iter().zip(&values) {
             before_replace(old, new);
         }
-        *column = values;
+        let shape = self.shape.to_vec();
+        let mut fields = self
+            .clone()
+            .into_columns_unbounded()
+            .collect::<UnboundedOrderedMapBuilder<_>>();
+        fields.insert(name.to_owned(), values);
+        *self = Self::publish_columns_unbounded(fields, shape)?;
         Ok(())
     }
-
-    pub fn reorder_fields(&mut self, order: &[String]) -> Result<(), String> {
-        let unique = order.iter().collect::<HashSet<_>>();
+    pub fn reorder_fields_unbounded(&mut self, order: &[String]) -> Result<(), String> {
+        let unique = order.iter().map(String::as_str).collect::<HashSet<_>>();
         if order.len() != self.fields.len()
             || unique.len() != order.len()
             || order.iter().any(|name| !self.fields.contains_key(name))
         {
             return Err("structure array field order must contain its exact field set".into());
         }
-        let mut reordered = IndexMap::with_capacity(order.len());
-        for name in order {
-            let values = self
-                .fields
-                .shift_remove(name)
-                .ok_or_else(|| "structure array field order is invalid".to_string())?;
-            reordered.insert(name.clone(), values);
-        }
-        self.fields = reordered;
+        let shape = self.shape.to_vec();
+        let mut fields = self
+            .clone()
+            .into_columns_unbounded()
+            .collect::<UnboundedOrderedMapBuilder<_>>();
+        let reordered = order
+            .iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    fields.remove(name).expect("validated field set"),
+                )
+            })
+            .collect::<Vec<_>>();
+        *self = Self::publish_columns_unbounded(reordered, shape)?;
         Ok(())
     }
 }

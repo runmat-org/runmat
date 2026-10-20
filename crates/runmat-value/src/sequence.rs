@@ -190,12 +190,10 @@ pub fn validate_output_count(count: usize) -> Result<(), ValueSequenceError> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use runmat_types::ClassIdentity;
 
     use super::*;
-    use crate::{CellArray, Closure, ObjectArray, ObjectInstance, StructArray, StructValue};
+    use crate::{CellArray, Closure, ObjectArray, StructArray};
 
     #[test]
     fn mapping_preserves_sequence_kind_and_cardinality() {
@@ -336,22 +334,24 @@ mod tests {
         );
         let cell = Value::Cell(CellArray::new(vec![transient()], 1, 1).unwrap());
 
-        let mut structure = StructValue::new();
+        let mut structure = crate::UnboundedStructValueBuilder::new();
         structure.fields.insert("value".into(), transient());
-        let structure = Value::Struct(structure);
+        let structure = Value::Struct(structure.finish());
 
-        let mut element = StructValue::new();
+        let mut element = crate::UnboundedStructValueBuilder::new();
         element.fields.insert("value".into(), transient());
+        let element = element.finish();
         let struct_array = Value::StructArray(
             StructArray::new(vec![element.clone(), element], vec![1, 2]).unwrap(),
         );
 
-        let mut object = ObjectInstance::new("SequenceTestObject");
-        object.properties.insert("value".into(), transient());
-        let object = Value::Object(object);
+        let mut object = crate::UnboundedObjectBuilder::new("SequenceTestObject");
+        object.insert("value".into(), transient());
+        let object = Value::Object(object.finish());
 
-        let mut array_element = ObjectInstance::new("SequenceTestObject");
-        array_element.properties.insert("value".into(), transient());
+        let mut array_element = crate::UnboundedObjectBuilder::new("SequenceTestObject");
+        array_element.insert("value".into(), transient());
+        let array_element = array_element.finish();
         let object_array = Value::ObjectArray(
             ObjectArray::from_objects(
                 ClassIdentity::from("SequenceTestObject"),
@@ -380,8 +380,8 @@ mod tests {
 
     #[test]
     fn ordinary_objects_remain_accepted() {
-        let mut object = ObjectInstance::new(ClassIdentity::from("SequenceTestObject"));
-        object.properties = HashMap::from([("value".into(), Value::Num(1.0))]);
-        assert!(ValueSequence::single(Value::Object(object)).is_ok());
+        let mut object = crate::UnboundedObjectBuilder::new("SequenceTestObject");
+        object.insert("value".into(), Value::Num(1.0));
+        assert!(ValueSequence::single(Value::Object(object.finish())).is_ok());
     }
 }

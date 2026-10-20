@@ -106,42 +106,40 @@ impl SharedValueGeneration {
     ) -> Result<Option<CallableGenerationQuote>, ExactHostNumericAllocationError> {
         let mut requested = Self::requested_bytes();
         let mut retained_claims = 1usize;
-        let mut add_capacity = |capacity: usize, element: usize| {
-            let bytes = capacity
-                .checked_mul(element)
-                .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
-            requested = requested
-                .checked_add(bytes)
-                .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
-            Ok::<_, ExactHostNumericAllocationError>(())
-        };
         match value {
             Value::FunctionHandle(handle)
             | Value::ExternalFunctionHandle(handle)
             | Value::MethodFunctionHandle(handle) => {
-                if !handle.name_has_retained_claim() {
-                    add_capacity(handle.name_capacity(), 1)?;
+                if let Some(bytes) = handle.name_unclaimed_bytes()? {
+                    requested = requested
+                        .checked_add(bytes)
+                        .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+                    retained_claims += 1;
                 }
             }
             Value::BoundFunctionHandle(handle) => {
-                add_capacity(handle.name.capacity(), 1)?;
-                if let Some(source_file) = &handle.source_file {
-                    add_capacity(source_file.capacity(), 1)?;
-                }
+                let (bytes, claims) = handle.metadata_quote()?;
+                requested = requested
+                    .checked_add(bytes)
+                    .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+                retained_claims += claims;
             }
             Value::Closure(closure) => {
-                add_capacity(closure.function_name.capacity(), 1)?;
-                if let Some(source_file) = &closure.source_file {
-                    add_capacity(source_file.len(), 1)?;
-                }
-                let capture_bytes = closure.captures.unclaimed_shared_bytes().map_err(|error| {
-                    match error {
-                        ExactArrayClaimPromotionError::Allocation(error) => error,
-                        ExactArrayClaimPromotionError::UnsharedBacking => {
-                            unreachable!("constructed closure captures have shared backing")
-                        }
-                    }
-                })?;
+                let (bytes, claims) = closure.metadata_quote()?;
+                requested = requested
+                    .checked_add(bytes)
+                    .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+                retained_claims += claims;
+                let capture_bytes =
+                    closure
+                        .captures
+                        .unclaimed_shared_bytes()
+                        .map_err(|error| match error {
+                            ExactArrayClaimPromotionError::Allocation(error) => error,
+                            ExactArrayClaimPromotionError::UnsharedBacking => {
+                                unreachable!("constructed closure captures have shared backing")
+                            }
+                        })?;
                 if let Some(capture_bytes) = capture_bytes {
                     requested = requested
                         .checked_add(capture_bytes)
@@ -171,23 +169,35 @@ impl SharedValueGeneration {
             .value
             .as_ref()
             .ok_or(CallableGenerationPrepareError::AlreadyConsumedOrReserved)?;
-        let quote = Self::callable_quote(value)
+        let _quote = Self::callable_quote(value)
             .map_err(CallableGenerationPrepareError::Allocation)?
             .ok_or(CallableGenerationPrepareError::NotCallable)?;
+        if let Value::FunctionHandle(handle)
+        | Value::ExternalFunctionHandle(handle)
+        | Value::MethodFunctionHandle(handle) = value
+        {
+            handle
+                .try_promote_name_claim(permit)
+                .map_err(CallableGenerationPrepareError::Allocation)?;
+        }
         if let Value::Closure(closure) = value {
+            closure
+                .try_promote_metadata(permit)
+                .map_err(CallableGenerationPrepareError::Allocation)?;
             closure
                 .captures
                 .try_promote_shared_claim(permit)
                 .map_err(CallableGenerationPrepareError::CapturePromotion)?;
         }
-        let generation_bytes = if let Value::Closure(_) = value {
-            Self::callable_quote(value)
-                .map_err(CallableGenerationPrepareError::Allocation)?
-                .expect("quoted closure")
-                .requested_bytes
-        } else {
-            quote.requested_bytes
-        };
+        if let Value::BoundFunctionHandle(handle) = value {
+            handle
+                .try_promote_metadata(permit)
+                .map_err(CallableGenerationPrepareError::Allocation)?;
+        }
+        let generation_bytes = Self::callable_quote(value)
+            .map_err(CallableGenerationPrepareError::Allocation)?
+            .expect("quoted callable")
+            .requested_bytes;
         let claim = permit
             .reserve_exact_claim(generation_bytes)
             .map_err(CallableGenerationPrepareError::Allocation)?;

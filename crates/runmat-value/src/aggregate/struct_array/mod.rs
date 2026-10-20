@@ -1,9 +1,14 @@
 use super::StructValue;
-use crate::Value;
-use indexmap::IndexMap;
+use crate::{ExactOrderedMap, OutputListStorage, SharedShape, Value};
 use std::{fmt, ops::Index};
 
 mod admission;
+mod storage;
+mod builder;
+pub use builder::{
+    StructArrayBuilder, StructArrayConstructionError, StructArrayFieldError, StructArrayQuote,
+    UnboundedStructArrayBuilder,
+};
 mod concatenate;
 mod construction;
 mod fields;
@@ -29,8 +34,8 @@ pub(crate) use shape::{column_major_strides, total_len};
 /// each field owns one column of values in linear array order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructArray {
-    fields: IndexMap<String, Vec<Value>>,
-    shape: Vec<usize>,
+    fields: ExactOrderedMap<OutputListStorage>,
+    shape: SharedShape,
 }
 
 #[derive(Clone, Copy)]
@@ -40,19 +45,17 @@ pub struct StructElementRef<'a> {
 
 impl StructElementRef<'_> {
     pub fn to_owned(self) -> StructValue {
-        StructValue {
-            fields: self
-                .fields
+        StructValue::from_fields_unbounded(
+            self.fields
                 .iter()
-                .map(|(name, value)| (name.clone(), value.clone()))
-                .collect(),
-        }
+                .map(|(name, value)| (name.to_owned(), value.clone())),
+        )
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct StructFieldsRef<'a> {
-    fields: &'a IndexMap<String, Vec<Value>>,
+    fields: &'a ExactOrderedMap<OutputListStorage>,
     index: usize,
 }
 
@@ -69,7 +72,7 @@ impl<'a> StructFieldsRef<'a> {
         self.fields.contains_key(name)
     }
 
-    pub fn keys(self) -> impl Iterator<Item = &'a String> {
+    pub fn keys(self) -> impl ExactSizeIterator<Item = &'a str> + Clone {
         self.fields.keys()
     }
 
@@ -79,11 +82,11 @@ impl<'a> StructFieldsRef<'a> {
             .and_then(|values| values.get(self.index))
     }
 
-    pub fn values(self) -> impl Iterator<Item = &'a Value> {
+    pub fn values(self) -> impl Iterator<Item = &'a Value> + Clone {
         self.fields.values().map(move |values| &values[self.index])
     }
 
-    pub fn iter(self) -> impl Iterator<Item = (&'a String, &'a Value)> {
+    pub fn iter(self) -> impl ExactSizeIterator<Item = (&'a str, &'a Value)> + Clone {
         self.fields
             .iter()
             .map(move |(name, values)| (name, &values[self.index]))
@@ -122,12 +125,26 @@ impl<'a> Iterator for StructElements<'a> {
 impl ExactSizeIterator for StructElements<'_> {}
 
 impl StructArray {
-    pub fn field_names(&self) -> impl Iterator<Item = &String> {
+    pub fn column_owners(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&str, &OutputListStorage)> + Clone {
+        self.fields
+            .entries()
+            .iter()
+            .map(|entry| (entry.key().as_str(), entry.value()))
+    }
+    pub fn shape_owner(&self) -> &SharedShape {
+        &self.shape
+    }
+    pub fn column_owner(&self, name: &str) -> Option<&OutputListStorage> {
+        self.fields.get(name)
+    }
+    pub fn field_names(&self) -> impl ExactSizeIterator<Item = &str> + Clone {
         self.fields.keys()
     }
 
     pub fn field_values(&self, name: &str) -> Option<&[Value]> {
-        self.fields.get(name).map(Vec::as_slice)
+        self.fields.get(name).map(OutputListStorage::as_slice)
     }
 
     pub fn shape(&self) -> &[usize] {
@@ -135,7 +152,7 @@ impl StructArray {
     }
 
     pub fn len(&self) -> usize {
-        self.fields.first().map_or_else(
+        self.fields.get_index(0).map_or_else(
             || total_len(&self.shape).expect("validated structure-array shape"),
             |(_, values)| values.len(),
         )

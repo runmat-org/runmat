@@ -3,10 +3,10 @@ use crate::Value;
 use std::collections::HashSet;
 
 fn structure(first: f64, second: f64) -> StructValue {
-    let mut structure = StructValue::new();
+    let mut structure = crate::UnboundedStructValueBuilder::new();
     structure.insert("first", Value::Num(first));
     structure.insert("second", Value::Num(second));
-    structure
+    structure.finish()
 }
 
 #[test]
@@ -22,7 +22,9 @@ fn array_replacement_moves_matching_field_columns() {
     .unwrap();
     let replacements =
         StructArray::new(vec![structure(7.0, 70.0), structure(8.0, 80.0)], vec![2, 1]).unwrap();
-    let output = target.replace_linear_array(&[2, 0], replacements).unwrap();
+    let output = target
+        .replace_linear_array_unbounded(&[2, 0], replacements)
+        .unwrap();
     assert_eq!(
         output.field_values("first").unwrap(),
         [Value::Num(8.0), Value::Num(2.0), Value::Num(7.0)]
@@ -38,7 +40,7 @@ fn deletion_moves_each_field_column_and_normalizes_singletons() {
     let array =
         StructArray::new(vec![structure(1.0, 10.0), structure(2.0, 20.0)], vec![2, 1]).unwrap();
     let output = array
-        .remove_linear(&HashSet::from([0]), vec![1, 1])
+        .remove_linear_unbounded(&HashSet::from([0]), vec![1, 1])
         .unwrap();
     let Value::Struct(output) = output else {
         panic!("one retained element must normalize to a scalar structure");
@@ -54,7 +56,9 @@ fn growth_accepts_removed_trailing_singletons_without_panicking() {
         vec![2, 1, 1],
     )
     .unwrap();
-    let output = array.grow(vec![2, 1], &structure(0.0, 0.0)).unwrap();
+    let output = array
+        .grow_unbounded(vec![2, 1], &structure(0.0, 0.0))
+        .unwrap();
     assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(
         output.field_values("first").unwrap(),

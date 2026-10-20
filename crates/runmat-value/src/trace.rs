@@ -40,14 +40,12 @@ impl Trace for Closure {
 impl Trace for ObjectInstance {
     fn trace(&self, tracer: &mut dyn Tracer) {
         self.trace_native_payload(tracer);
-        for value in self.properties.values() {
+        for value in self.properties().values() {
             value.trace(tracer);
         }
-        if let Some(dynamic_properties) = &self.dynamic_properties {
-            for property in dynamic_properties.values() {
-                if let Some(metadata_handle) = property.metadata_handle {
-                    tracer.mark(metadata_handle);
-                }
+        for property in self.trace_dynamic_property_values() {
+            if let Some(metadata_handle) = property.metadata_handle {
+                tracer.mark(metadata_handle);
             }
         }
     }

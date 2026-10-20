@@ -7,7 +7,7 @@ use crate::{
     ExactHostNumericAllocationError,
 };
 
-use super::{Utf8Text, Utf8TextInner};
+use super::Utf8Text;
 
 /// The source borrow keeps its bytes unchanged while a partially initialized
 /// prefix may end inside a multibyte scalar. Only completion publishes text;
@@ -65,6 +65,6 @@ impl<'a> Utf8TextExactCopy<'a> {
             .bytes
             .try_finish()
             .unwrap_or_else(|_| unreachable!("complete UTF-8 copy fills exact owner"));
-        Ok(Utf8Text(Utf8TextInner::Exact(bytes)))
+        Ok(Utf8Text(bytes))
     }
 }
