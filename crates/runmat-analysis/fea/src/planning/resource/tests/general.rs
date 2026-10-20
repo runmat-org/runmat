@@ -97,7 +97,7 @@ fn general_host_solver_demand_does_not_authorize_accelerator_execution() {
     let mut planned = input(PartitioningPolicy::Monolithic);
     operator_mut(&mut planned).solve = SolveResourcePolicy::GeneralSparse(general(policy(), 0));
     planned.worker.accelerators.push(AcceleratorRequirement {
-        class: "test-gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
         count: 1,
         memory_bytes_each: ByteCount(1024),
     });

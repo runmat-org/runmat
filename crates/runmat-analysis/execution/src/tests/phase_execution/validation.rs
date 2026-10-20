@@ -112,7 +112,7 @@ fn phase_rejects_foreign_host_and_original_callable_tampering() {
         .validate_for(&host, &task.resource_plan, &response)
         .is_err());
     let mut original = valid.task_evidence().clone();
-    original.task.submission.request.callable.entrypoint_digest =
-        runmat_execution::Digest::sha256(b"foreign");
+    original.task.submission.request.callable.program =
+        runmat_execution::ProgramCallable::semantic(runmat_execution::ProgramFunctionId(9_999), None);
     assert!(AnalysisPhaseExecutionEvidence::new(original, 1).is_err());
 }

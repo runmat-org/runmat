@@ -739,9 +739,11 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     )
     .is_err());
     let accelerator = AcceleratorRequest {
-        class: "test-gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
         count: 1,
-        memory_bytes_each: 1024 * 1024 * 1024,
+        minimum_allocation_bytes: 1024 * 1024 * 1024,
+            provider: None,
+            required_features: Default::default(),
     };
     let accelerated = build_structural_resource_plan(
         Some(&mesh),
@@ -757,7 +759,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     assert!(accelerated
         .request
         .required_capabilities
-        .contains(&Capability::Accelerator("test-gpu".into())));
+        .contains(&Capability::Accelerator(runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap())));
 }
 
 #[test]
@@ -1313,16 +1315,12 @@ fn missing_capability_or_accelerator_rejects_before_memory_admission() {
 
     let mut accelerated = input(PartitioningPolicy::Monolithic);
     accelerated.worker.accelerators = vec![AcceleratorRequirement {
-        class: "gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
         count: 1,
         memory_bytes_each: ByteCount(4_096),
     }];
     let inadequate = ResourceInventory {
-        accelerators: vec![AcceleratorRequest {
-            class: "gpu".into(),
-            count: 1,
-            memory_bytes_each: 2_048,
-        }],
+        accelerators: vec![test_accelerator_device("gpu", 2_048)],
         ..inventory(64 * 1024 * 1024, 10_000)
     };
     assert!(matches!(
@@ -1386,16 +1384,21 @@ fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
 fn reconciliation_checks_accelerator_device_time() {
     let mut accelerated = input(PartitioningPolicy::Monolithic);
     accelerated.worker.accelerators = vec![AcceleratorRequirement {
-        class: "gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
         count: 1,
         memory_bytes_each: ByteCount(4_096),
     }];
     let plan = build_resource_plan(accelerated).unwrap();
     let actual = AnalysisResourceUsage {
         scheduler: ResourceUsage {
-            accelerator_millis: vec![runmat_execution::resource::AcceleratorUsage {
-                class: "gpu".into(),
-                device_millis: 1_001,
+            accelerator_millis: vec![{
+                let device = test_accelerator_device("gpu", 4_096);
+                runmat_execution::resource::AcceleratorUsage {
+                    class: device.class,
+                    provider: device.provider.id,
+                    device_id: device.id,
+                    device_millis: 1_001,
+                }
             }],
             ..ResourceUsage::default()
         },
@@ -1415,7 +1418,7 @@ fn reconciliation_checks_accelerator_device_time() {
 fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
     let mut accelerated = input(PartitioningPolicy::Monolithic);
     accelerated.worker.accelerators = vec![AcceleratorRequirement {
-        class: "gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
         count: 1,
         memory_bytes_each: ByteCount(4_096),
     }];
@@ -1452,7 +1455,7 @@ fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
     ));
 
     let mut understated = plan.request.clone();
-    understated.accelerators[0].memory_bytes_each -= 1;
+    understated.accelerators[0].minimum_allocation_bytes -= 1;
     assert!(matches!(
         record_usage(understated),
         Err(ResourcePlanningError::Invalid(message))
@@ -1723,4 +1726,25 @@ fn deserialization_revalidates_derived_plan_fields() {
     let mut encoded = serde_json::to_value(plan).unwrap();
     encoded["request"]["memory_bytes"] = serde_json::json!(1);
     assert!(serde_json::from_value::<FeaResourcePlan>(encoded).is_err());
+}
+
+fn test_accelerator_device(
+    class: &str,
+    max_allocation_bytes: u64,
+) -> runmat_execution::resource::AcceleratorDevice {
+    use runmat_execution::resource::*;
+    AcceleratorDevice {
+        id: AcceleratorDeviceId::new("device:test-accelerator").unwrap(),
+        allocation_domain: AcceleratorAllocationDomainId::new("allocation:test-accelerator")
+            .unwrap(),
+        class: AcceleratorClass::new(class).unwrap(),
+        provider: AcceleratorProvider {
+            id: AcceleratorProviderId::new("runmat.test").unwrap(),
+            version: AcceleratorProviderVersion::new("1.0.0").unwrap(),
+            abi_fingerprint: Digest::sha256(b"test-accelerator-abi"),
+        },
+        max_allocation_bytes,
+        features: std::collections::BTreeSet::from([AcceleratorFeature::Compute]),
+        inventory_epoch: 1,
+    }
 }

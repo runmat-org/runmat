@@ -406,11 +406,13 @@ fn workload_rejects_identity_and_access_tampering() {
 fn worker_capability_inventory_uses_generic_execution_capabilities() {
     let formulation = digest("formulation");
     let capabilities =
-        analysis_worker_capabilities([formulation], ["gpu.compute".to_string()], true);
+        analysis_worker_capabilities(
+            [formulation],
+            [crate::test_fixtures::accelerator_class("gpu.compute")],
+            true,
+        );
     assert!(
-        capabilities.contains(&runmat_execution::resource::Capability::Accelerator(
-            "gpu.compute".into()
-        ))
+        capabilities.contains(&runmat_execution::resource::Capability::Accelerator(crate::test_fixtures::accelerator_class("gpu.compute")))
     );
     assert!(
         capabilities.contains(&runmat_execution::resource::Capability::Custom(format!(
@@ -467,12 +469,11 @@ fn logical_task_identity_is_independent_of_pool_placement() {
         .iter()
         .map(|argument| match argument {
             runmat_execution::value::ValuePayload::Object(reference) => reference.as_ref().clone(),
-            runmat_execution::value::ValuePayload::Inline(_) => {
-                panic!("analysis task inputs must remain externalized")
-            }
+            other => panic!("analysis task inputs must remain externalized: {other:?}"),
         })
         .collect::<Vec<_>>();
     let context = |pool: &[u8]| AnalysisExecutionContext {
+        host: crate::test_fixtures::host_requirement(),
         scope_id: ExecutionScopeId::derive(&[b"study-scope"]),
         pool_id: PoolId::derive(&[pool]),
         program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[b"analysis-program"]),
@@ -559,11 +560,12 @@ fn analysis_task_retains_logical_dependencies_after_scheduler_replacement() {
         .iter()
         .map(|argument| match argument {
             runmat_execution::value::ValuePayload::Object(reference) => reference.as_ref().clone(),
-            runmat_execution::value::ValuePayload::Inline(_) => unreachable!(),
+            other => unreachable!("analysis task inputs are object references: {other:?}"),
         })
         .collect::<Vec<_>>();
     let predecessor = AnalysisTaskIdentity::new(host.workload.identity, Vec::new()).unwrap();
     let context = AnalysisExecutionContext {
+        host: crate::test_fixtures::host_requirement(),
         scope_id: ExecutionScopeId::derive(&[b"replacement-scope"]),
         pool_id: PoolId::derive(&[b"replacement-pool"]),
         program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[
@@ -703,6 +705,7 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
                 host,
                 program,
                 context: AnalysisExecutionContext {
+                    host: crate::test_fixtures::host_requirement(),
                     scope_id: ExecutionScopeId::derive(&[b"parallel-study"]),
                     pool_id: PoolId::derive(&[step_id.as_bytes()]),
                     program_artifact_id,
@@ -1673,7 +1676,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .iter()
         .map(|input| match input {
             ValuePayload::Object(root) => (**root).clone(),
-            ValuePayload::Inline(_) => unreachable!(),
+            other => unreachable!("expected an object reference: {other:?}"),
         })
         .collect::<Vec<_>>();
     let mut scheduled_resources = prepared.resource_plan.request.clone();
@@ -1681,6 +1684,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .required_capabilities
         .extend(prepared.host.workload.generic_capabilities().unwrap());
     let execution_context = |resources| AnalysisExecutionContext {
+        host: crate::test_fixtures::host_requirement(),
         scope_id: ExecutionScopeId::derive(&[b"structural-study"]),
         pool_id: PoolId::derive(&[b"structural-pool"]),
         program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[
@@ -1796,6 +1800,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         worker_id: runmat_execution::identity::WorkerId::derive(&[b"structural-worker"]),
         ordinal: 0,
         driver_fence: 1,
+        resource_assignment: Default::default(),
         task: submission.request.clone(),
     };
     let unmetered = completed.attempt_success();
@@ -1809,8 +1814,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .is_err());
     let metered = runmat_execution_runner::AttemptSuccess::new(
         &attempt_request,
-        unmetered.outputs,
-        unmetered.result_objects,
+        unmetered.values().unwrap().0.to_vec(),
+        unmetered.result_objects().to_vec(),
         1,
         0,
         0,
@@ -1830,8 +1835,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let alternate_unmetered = completed.attempt_success();
     let alternate_metered = runmat_execution_runner::AttemptSuccess::new(
         &alternate_attempt_request,
-        alternate_unmetered.outputs,
-        alternate_unmetered.result_objects,
+        alternate_unmetered.values().unwrap().0.to_vec(),
+        alternate_unmetered.result_objects().to_vec(),
         1,
         0,
         0,
@@ -1848,8 +1853,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let unmetered = completed.attempt_success();
     let overrun_success = runmat_execution_runner::AttemptSuccess::new(
         &attempt_request,
-        unmetered.outputs,
-        unmetered.result_objects,
+        unmetered.values().unwrap().0.to_vec(),
+        unmetered.result_objects().to_vec(),
         prepared.resource_plan.request.max_wall_millis + 1,
         0,
         0,
@@ -2087,7 +2092,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .iter()
             .map(|input| match input {
                 ValuePayload::Object(root) => (**root).clone(),
-                ValuePayload::Inline(_) => unreachable!(),
+                other => unreachable!("expected an object reference: {other:?}"),
             })
             .collect::<Vec<_>>();
         let mut resources = partition.resource_plan.request.clone();
@@ -2185,7 +2190,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .iter()
             .map(|input| match input {
                 ValuePayload::Object(root) => (**root).clone(),
-                ValuePayload::Inline(_) => unreachable!(),
+                other => unreachable!("expected an object reference: {other:?}"),
             })
             .collect::<Vec<_>>();
         let mut resources = reduction.resource_plan.request.clone();
@@ -3065,9 +3070,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: vec![runmat_execution::resource::AcceleratorRequest {
-            class: "test-gpu".into(),
+            class: crate::test_fixtures::accelerator_class("test-gpu"),
             count: 1,
-            memory_bytes_each: 1024 * 1024 * 1024,
+            minimum_allocation_bytes: 1024 * 1024 * 1024,
+            provider: None,
+            required_features: Default::default(),
         }],
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
@@ -3319,9 +3326,11 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
             accelerator_requests: vec![runmat_execution::resource::AcceleratorRequest {
-                class: "substituted-gpu".into(),
+                class: crate::test_fixtures::accelerator_class("substituted-gpu"),
                 count: 1,
-                memory_bytes_each: 1024,
+                minimum_allocation_bytes: 1024,
+            provider: None,
+            required_features: Default::default(),
             }],
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })

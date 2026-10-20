@@ -235,14 +235,14 @@ fn serial_stage_imports_executes_and_externalizes_a_validated_closure() {
 
     let success = completed.attempt_success();
     assert_eq!(
-        success.result_objects.len(),
+        success.result_objects().len(),
         completed.publication().result_objects().len() + 1
     );
     assert_eq!(
         crate::import_stage_evidence_observation(
             &fixture.store,
             &fixture.host,
-            &success.result_objects,
+            success.result_objects(),
             ObjectInventoryLimits::default(),
         )
         .unwrap(),
@@ -300,14 +300,17 @@ fn externalized_stage_evidence_rejects_missing_and_poisoned_objects() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let mut success = completed.attempt_success();
-    success
-        .result_objects
-        .retain(|reference| reference.media_type != crate::STAGE_EVIDENCE_MEDIA_TYPE);
+    let without_evidence = completed
+        .attempt_success()
+        .result_objects()
+        .iter()
+        .filter(|reference| reference.media_type != crate::STAGE_EVIDENCE_MEDIA_TYPE)
+        .cloned()
+        .collect::<Vec<_>>();
     assert!(crate::import_stage_evidence_observation(
         &fixture.store,
         &fixture.host,
-        &success.result_objects,
+        &without_evidence,
         ObjectInventoryLimits::default(),
     )
     .unwrap_err()
@@ -316,7 +319,7 @@ fn externalized_stage_evidence_rejects_missing_and_poisoned_objects() {
 
     let success = completed.attempt_success();
     let evidence = success
-        .result_objects
+        .result_objects()
         .iter()
         .find(|reference| reference.media_type == crate::STAGE_EVIDENCE_MEDIA_TYPE)
         .unwrap();
@@ -327,7 +330,7 @@ fn externalized_stage_evidence_rejects_missing_and_poisoned_objects() {
     assert!(crate::import_stage_evidence_observation(
         &fixture.store,
         &fixture.host,
-        &success.result_objects,
+        success.result_objects(),
         ObjectInventoryLimits::default(),
     )
     .unwrap_err()

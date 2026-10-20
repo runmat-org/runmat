@@ -16,8 +16,8 @@ use runmat_geometry_ops::ResolvedGeneratedGeometryRequest;
 use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
 use runmat_types::{
     CallableFact, CapabilitySet, EffectKind, EffectSet, InteropManifest, NumericClass,
-    NumericDomain, NumericFact, ObjectFact, ParallelManifest, ProgramFunctionId, QualifiedName,
-    ShapeFact, StorageFact, SymbolName, ValueFact, ValueKindFact, INTEROP_MANIFEST_SCHEMA_VERSION,
+    NumericDomain, NumericFact, ObjectFact, ParallelManifest, ProgramFunctionId,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact, INTEROP_MANIFEST_SCHEMA_VERSION,
     PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
 };
 
@@ -77,10 +77,7 @@ fn geometry_output() -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(QualifiedName(vec![
-                SymbolName("geometry".into()),
-                SymbolName("Generated".into()),
-            ])),
+            runtime_class: Some(runmat_types::ClassIdentity::new("geometry.Generated").unwrap()),
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),
@@ -95,6 +92,7 @@ fn analysis() -> FunctionAnalysis {
     FunctionAnalysis {
         function: ProgramFunctionId(7),
         callable: CallableFact {
+            capabilities: Default::default(),
             identity: None,
             parameters: vec![numeric_scalar(), numeric_scalar()],
             parameters_complete: true,
@@ -141,10 +139,11 @@ fn executable(admitted: &AdmittedGeometryGenerator) -> ExecutableUnitEnvelope {
         ExecutableUnitManifest {
             schema_version: EXECUTABLE_UNIT_SCHEMA_VERSION,
             identity: ExecutableIdentity {
+                declaration_class: None,
                 program: admitted.invocation.program_revision.clone(),
                 root_package: admitted.invocation.callable.owner_identity.clone(),
                 entrypoint: admitted.invocation.callable.qualified_name.clone(),
-                entrypoint_function: admitted.invocation.function,
+                entrypoint_function: Some(admitted.invocation.function),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
                 source_digest: admitted.invocation.executable_source_digest,
             },
@@ -267,7 +266,9 @@ fn typed_product_and_receipt_are_canonical_and_substitution_resistant() {
     };
     let prepared = prepare_generated_geometry_product(
         &admitted,
-        ProgramExecutionResponse::Success { value },
+        ProgramExecutionResponse::Success {
+            outputs: vec![value],
+        },
         &access,
     )
     .unwrap();
@@ -285,7 +286,7 @@ fn typed_product_and_receipt_are_canonical_and_substitution_resistant() {
     let other = prepare_generated_geometry_product(
         &admitted,
         ProgramExecutionResponse::Success {
-            value: encode_generated_geometry_value(&product).unwrap(),
+            outputs: vec![encode_generated_geometry_value(&product).unwrap()],
         },
         &other_access,
     )

@@ -384,9 +384,11 @@ fn prestressed_modal_plan_accounts_for_exact_geometric_state_and_tangent() {
 fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
     let (cpu_workload, mesh, constraints, observations) = modal_case(2, ComputeBackend::Cpu);
     let spurious = AcceleratorRequest {
-        class: "test-gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
         count: 1,
-        memory_bytes_each: u64::MAX,
+        minimum_allocation_bytes: u64::MAX,
+            provider: None,
+            required_features: Default::default(),
     };
     assert!(build_structural_modal_resource_plan(
         Some(&mesh),
@@ -447,9 +449,11 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
     )
     .unwrap();
     let short = AcceleratorRequest {
-        class: "test-gpu".into(),
+        class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
         count: 1,
-        memory_bytes_each: required - 1,
+        minimum_allocation_bytes: required - 1,
+            provider: None,
+            required_features: Default::default(),
     };
     assert!(build_structural_modal_resource_plan(
         Some(&mesh),
@@ -462,7 +466,9 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
     )
     .is_err());
     let exact = AcceleratorRequest {
-        memory_bytes_each: required,
+        minimum_allocation_bytes: required,
+            provider: None,
+            required_features: Default::default(),
         ..short
     };
     let accelerated = build_structural_modal_resource_plan(

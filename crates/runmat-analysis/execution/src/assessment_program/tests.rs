@@ -6,6 +6,8 @@ fn function_facts() -> FunctionAnalysis {
         StructFact,
     };
     let output = ValueFact::scalar(ValueKindFact::Struct(StructFact {
+        elements_complete: false,
+        elements: Vec::new(),
         fields: std::collections::BTreeMap::from([
             (
                 "evaluated".into(),
@@ -18,6 +20,7 @@ fn function_facts() -> FunctionAnalysis {
     FunctionAnalysis {
         function: ProgramFunctionId(1),
         callable: CallableFact {
+            capabilities: Default::default(),
             identity: None,
             parameters: vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,

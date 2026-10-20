@@ -337,9 +337,11 @@ fn frequency_entry_preflight_rejects_accelerator_and_request_substitution() {
         &request,
         StructuralFrequencyStateInputs::default(),
         &[AcceleratorRequest {
-            class: "gpu".into(),
+            class: runmat_execution::resource::AcceleratorClass::new("gpu").unwrap(),
             count: 1,
-            memory_bytes_each: 1024,
+            minimum_allocation_bytes: 1024,
+            provider: None,
+            required_features: Default::default(),
         }],
         prepared(input_facts(1024), entry_output(&request)),
     )

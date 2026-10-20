@@ -190,12 +190,8 @@ mod acceleration_resource_tests {
         serde_json::from_value(serde_json::to_value(Digest::sha256(label)).unwrap()).unwrap()
     }
 
-    fn allocation(class: &str, memory_bytes_each: u64) -> AcceleratorRequest {
-        AcceleratorRequest {
-            class: class.into(),
-            count: 1,
-            memory_bytes_each,
-        }
+    fn allocation(class: &str, minimum_allocation_bytes: u64) -> AcceleratorRequest {
+        crate::test_fixtures::accelerator_request(class, minimum_allocation_bytes)
     }
 
     #[test]
@@ -247,7 +243,7 @@ mod acceleration_resource_tests {
             .get_mut(&first)
             .unwrap()
             .allocation
-            .memory_bytes_each += 1;
+            .minimum_allocation_bytes += 1;
         assert!(reconcile_observation_acceleration_claims(&claims, &substituted).is_err());
 
         let mut swapped = reservations.clone();
@@ -279,7 +275,7 @@ mod acceleration_resource_tests {
         let exact = ResourceAccounting::for_reserved_interval(request.clone(), 1, 0, 0, 0).unwrap();
         validate_exact_accelerator_allocation(std::slice::from_ref(&planned), &exact).unwrap();
 
-        request.accelerators[0].memory_bytes_each -= 1;
+        request.accelerators[0].minimum_allocation_bytes -= 1;
         let underallocated =
             ResourceAccounting::for_reserved_interval(request, 1, 0, 0, 0).unwrap();
         assert!(validate_exact_accelerator_allocation(

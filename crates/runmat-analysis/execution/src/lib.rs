@@ -632,6 +632,8 @@ pub use workload::{
 };
 
 #[cfg(test)]
+mod test_fixtures;
+#[cfg(test)]
 mod tests;
 
 mod nonlinear_field_recovery;

@@ -68,6 +68,7 @@ pub(crate) fn analysis() -> AnalysisStore {
         functions: vec![FunctionAnalysis {
             function: ProgramFunctionId(7),
             callable: CallableFact {
+                capabilities: Default::default(),
                 identity: None,
                 parameters: vec![parameter],
                 parameters_complete: true,
@@ -133,10 +134,11 @@ pub(crate) fn envelope(analysis: &AnalysisStore) -> ExecutableUnitEnvelope {
         ExecutableUnitManifest {
             schema_version: EXECUTABLE_UNIT_SCHEMA_VERSION,
             identity: ExecutableIdentity {
+                declaration_class: None,
                 program: revision(),
                 root_package: callable().owner_identity,
                 entrypoint: "pulse".into(),
-                entrypoint_function: ProgramFunctionId(7),
+                entrypoint_function: Some(ProgramFunctionId(7)),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
                 source_digest: Digest::sha256("executable-source"),
             },
@@ -245,7 +247,7 @@ fn rejects_foreign_envelope_identity_and_unauthenticated_payload() {
     changed.manifest.identity.entrypoint_kind = ExecutableEntrypointKind::Script;
     assert!(admit(&changed).is_err());
     let mut changed = base.clone();
-    changed.manifest.identity.entrypoint_function = ProgramFunctionId(8);
+    changed.manifest.identity.entrypoint_function = Some(ProgramFunctionId(8));
     assert!(admit(&changed).is_err());
     let mut changed = base.clone();
     changed.manifest.identity.program = ProgramRevision::new(

@@ -61,6 +61,7 @@ fn phase_execution_with_retry(
         Vec::new(),
         BTreeSet::new(),
         crate::AnalysisExecutionContext {
+            host: crate::test_fixtures::host_requirement(),
             scope_id: scope,
             pool_id: pool,
             program_artifact_id: ArtifactId::derive(&[program.request.artifact.id.0.bytes()]),
@@ -75,7 +76,7 @@ fn phase_execution_with_retry(
         cpu_millicores: resources.cpu_millicores,
         memory_bytes: resources.memory_bytes,
         scratch_bytes: resources.scratch_bytes.max(1),
-        accelerators: resources.accelerators,
+        accelerators: crate::test_fixtures::accelerator_devices(&resources.accelerators),
         capabilities: resources.required_capabilities,
     };
     let mut driver = Driver::new(DriverConfig::default(), fence).unwrap();
@@ -102,6 +103,7 @@ fn phase_execution_with_retry(
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            host: crate::test_fixtures::host_inventory(),
             id: worker,
             pool_id: pool,
             resources: inventory,

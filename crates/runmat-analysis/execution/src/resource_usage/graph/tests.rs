@@ -5,7 +5,7 @@ use runmat_execution::{
     resource::{Capability, ResourceInventory},
     state::PoolState,
     task::{Callable, RetryPolicy, TaskRequest},
-    Digest, ExecutionScopeId, OutputContract, PoolId, TaskId,
+    ExecutionScopeId, OutputContract, PoolId, TaskId,
 };
 use runmat_execution_runner::{
     port::BackendReport, AttemptReport, AttemptSuccess, Driver, DriverAction, DriverCommand,
@@ -30,7 +30,7 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
         cpu_millicores: plan.request.cpu_millicores,
         memory_bytes: plan.request.memory_bytes,
         scratch_bytes: plan.request.scratch_bytes.max(1),
-        accelerators: plan.request.accelerators.clone(),
+        accelerators: crate::test_fixtures::accelerator_devices(&plan.request.accelerators),
         capabilities: resources.required_capabilities.clone(),
     };
     let mut driver = Driver::new(DriverConfig::default(), 1).unwrap();
@@ -57,6 +57,7 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            host: crate::test_fixtures::host_inventory(),
             id: worker,
             pool_id: pool,
             resources: inventory,
@@ -69,14 +70,22 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
             id: TaskId::derive(&[b"usage-history"]),
             scope_id: scope,
             pool_id: pool,
-            program_artifact_id: ArtifactId::derive(&[b"usage-history"]),
-            callable: Callable {
-                owner_identity: "bookkeeping-test".into(),
-                qualified_name: "original-history".into(),
-                entrypoint_digest: Digest::sha256(b"usage-history"),
-            },
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                ArtifactId::derive(&[b"usage-history"]),
+            ),
+            callable: Callable::for_program(
+                "bookkeeping-test",
+                &runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(0),
+                    None,
+                ),
+            ),
+            host: crate::test_fixtures::host_requirement(),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: Vec::new(),
             outputs: OutputContract {
+                owned_work: None,
                 requested_outputs: 0,
             },
             resources,
@@ -152,8 +161,8 @@ fn complete_original_usage_rejects_unknown_retry_and_plan_substitution() {
             .committed
             .as_ref()
             .unwrap()
-            .resources
-            .as_deref()
+            .result
+            .resources()
             .unwrap()
     );
     let lost = original(plan, FirstAttempt::UnknownLoss);
@@ -197,7 +206,14 @@ fn graph_constructor_rejects_internally_valid_accounting_for_a_foreign_allocatio
         crate::FluidStudyCoordinator::new(crate::fluid_study::tests::preparation()).unwrap();
     let plan = coordinator.prepare_solve().unwrap().resource_plan.clone();
     let evidence = original(&plan, FirstAttempt::Succeeded);
-    let mut accounting = *evidence.task.committed.unwrap().resources.unwrap();
+    let mut accounting = evidence
+        .task
+        .committed
+        .unwrap()
+        .result
+        .resources()
+        .unwrap()
+        .clone();
     let mut foreign = accounting.resources.allocation.clone();
     foreign.memory_bytes += 1;
     accounting.resources =

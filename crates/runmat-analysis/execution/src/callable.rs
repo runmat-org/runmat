@@ -803,6 +803,7 @@ mod tests {
         FunctionAnalysis {
             function: ProgramFunctionId(7),
             callable: CallableFact {
+                capabilities: Default::default(),
                 identity: None,
                 parameters: vec![numeric_column(), numeric()],
                 parameters_complete: true,
@@ -992,14 +993,35 @@ mod tests {
             function: runmat_types::ProgramFunctionId(7),
             display_name: "loads.pulse".into(),
         };
-        let frozen = |capture: f64| CallableValue {
-            owner_identity: "bound:7".into(),
-            qualified_name: "loads.pulse".into(),
-            callable_digest: CallableValue::identity_digest("bound:7", "loads.pulse"),
-            captures: vec![ValuePayload::Inline(Box::new(InlineValue::F64Bits(
-                capture.to_bits(),
-            )))],
+        let bound_owner = runmat_execution::value::CallableOwner::Bound(
+            runmat_execution::FunctionBindingOrigin::from_revision(
+                &revision(),
+                runmat_types::ProgramFunctionId(7),
+            )
+            .unwrap(),
+        );
+        let callable_value = |owner: runmat_execution::value::CallableOwner, capture: f64| {
+            let form = runmat_execution::value::CallableForm::Closure;
+            let source_role = runmat_types::FunctionSourceRole::Anonymous;
+            CallableValue {
+                callable_digest: CallableValue::identity_digest(
+                    owner.clone(),
+                    "loads.pulse",
+                    form,
+                    source_role,
+                    None,
+                ),
+                owner,
+                qualified_name: "loads.pulse".into(),
+                form,
+                source_role,
+                source_file: None,
+                captures: vec![ValuePayload::Inline(Box::new(InlineValue::F64Bits(
+                    capture.to_bits(),
+                )))],
+            }
         };
+        let frozen = |capture: f64| callable_value(bound_owner.clone(), capture);
         let first = admit_callable_signal_generator(
             &bound_signal,
             revision(),
@@ -1027,10 +1049,7 @@ mod tests {
             changed_capture.materialization_identity
         );
 
-        let mut unresolved = frozen(2.0);
-        unresolved.owner_identity = "workspace".into();
-        unresolved.callable_digest =
-            CallableValue::identity_digest(&unresolved.owner_identity, &unresolved.qualified_name);
+        let unresolved = callable_value(runmat_execution::value::CallableOwner::Workspace, 2.0);
         assert!(admit_callable_signal_generator(
             &bound_signal,
             revision(),
