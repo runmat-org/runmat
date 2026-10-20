@@ -231,8 +231,32 @@ impl AnalysisPublicationBuilder {
         if *guard {
             return Err("publication inventory is frozen for manifest preparation".into());
         }
-        self.admit_run(run)?;
-        self.store.persist_run(run).map_err(Into::into)
+        validate_run_identity(run)?;
+        let mut requested = 0u64;
+        let mut denied = None;
+        let prepared = prepare_run_artifact_with_admission(
+            run,
+            Utc::now().to_rfc3339(),
+            &mut |bytes| {
+                requested = requested
+                    .checked_add(bytes)
+                    .ok_or("staging byte overflow")?;
+                self.admit(requested).map_err(|error| {
+                    let error =
+                        error.context(&run_admission::run_failure_facts(run, self.maximum_bytes));
+                    let message = error.to_string();
+                    denied = Some(error);
+                    message
+                })
+            },
+        );
+        if let Some(error) = denied {
+            return Err(error);
+        }
+        let prepared = prepared?;
+        self.store
+            .persist_prepared_run(run, prepared)
+            .map_err(Into::into)
     }
     pub fn stage_structural_frequency(
         &self,

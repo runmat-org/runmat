@@ -20,6 +20,18 @@ impl InMemoryAnalysisArtifactStore {
             ..Self::new()
         }
     }
+    pub(super) fn persist_prepared_run(
+        &self,
+        run: &AnalysisRunResult,
+        prepared: PreparedRunArtifact,
+    ) -> Result<AnalysisArtifactRecord, String> {
+        let created_at = self.install_standalone(
+            &run.run_id,
+            PersistedAnalysisArtifact::Standard(Box::new(prepared.persisted)),
+            prepared.chunks.into_iter().collect(),
+        )?;
+        artifact_record(run, created_at)
+    }
 }
 
 impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
@@ -81,12 +93,7 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
         validate_run_identity(run)?;
         let prepared = prepare_run_artifact(run, Utc::now().to_rfc3339())?;
-        let created_at = self.install_standalone(
-            &run.run_id,
-            PersistedAnalysisArtifact::Standard(Box::new(prepared.persisted)),
-            prepared.chunks.into_iter().collect(),
-        )?;
-        artifact_record(run, created_at)
+        self.persist_prepared_run(run, prepared)
     }
 
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {

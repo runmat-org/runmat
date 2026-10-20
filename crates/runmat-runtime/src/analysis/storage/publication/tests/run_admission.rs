@@ -5,7 +5,17 @@ fn run_ceiling_rejection_reports_quality_and_components_without_staging_payloads
     let _guard = tests::analysis_test_guard();
     reset_artifact_store_for_tests();
     let run = run();
-    let required = super::super::resident(&run, 128 << 20).unwrap() * 2;
+    // The preparation owner's own phase charges are the run's staging requirement.
+    let mut required = 0u64;
+    crate::analysis::storage::preparation::prepare_run_artifact_with_admission(
+        &run,
+        "2026-01-01T00:00:00Z".into(),
+        &mut |bytes| {
+            required += bytes;
+            Ok(())
+        },
+    )
+    .unwrap();
     let builder = AnalysisPublicationBuilder::new(
         Digest::sha256(b"run-admission-failure-facts"),
         required - 1,

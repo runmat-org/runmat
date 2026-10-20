@@ -4,6 +4,18 @@ pub(super) fn prepare_run_artifact(
     run: &AnalysisRunResult,
     created_at: String,
 ) -> Result<PreparedRunArtifact, String> {
+    prepare_run_artifact_with_admission(run, created_at, &mut |_| Ok(()))
+}
+
+/// Prepares the persisted run, charging `admit` before each phase allocates:
+/// field payloads and their chunks, render tiles, history chunks, the typed
+/// stripping copy, and the stripped run's JSON projection (the only JSON tree
+/// built). Charges are cumulative requested estimates, not measured heap.
+pub(super) fn prepare_run_artifact_with_admission(
+    run: &AnalysisRunResult,
+    created_at: String,
+    admit: &mut dyn FnMut(u64) -> Result<(), String>,
+) -> Result<PreparedRunArtifact, String> {
     let mut fields = BTreeMap::<String, PersistedFieldArtifact>::new();
     let mut chunks = HashMap::new();
     let mut seen_field_ids = HashSet::new();
@@ -41,6 +53,12 @@ pub(super) fn prepare_run_artifact(
                     return;
                 }
                 if values.is_empty() {
+                    return;
+                }
+                // The encoded payload and its chunk copies coexist while chunking.
+                let payload_bytes = (values.len() as u64).saturating_mul(16);
+                if let Err(error) = admit(payload_bytes) {
+                    preparation_error = Some(error);
                     return;
                 }
                 let payload = encode_field_values(values);
@@ -106,6 +124,7 @@ pub(super) fn prepare_run_artifact(
     }
 
     let render_tiles = if let Some(topology) = run.render_topology.as_ref() {
+        admit(typed_estimate(topology)?)?;
         let (mut index, objects) = render_tiles::partition(topology)?;
         index.field_summaries = summarize_render_fields(run, index.volume_element_count)?;
         index.validate()?;
@@ -128,6 +147,8 @@ pub(super) fn prepare_run_artifact(
     };
     let mut observation_histories = Vec::with_capacity(run.run.observation_histories.len());
     for history in &run.run.observation_histories {
+        // Canonical bytes plus their chunk copies.
+        admit(typed_estimate(history)?.saturating_mul(2))?;
         let payload = history
             .canonical_bytes()
             .map_err(|error| error.to_string())?;
@@ -157,20 +178,23 @@ pub(super) fn prepare_run_artifact(
             manifest: chunked.manifest,
         });
     }
+    admit(typed_estimate(run)?)?;
     let mut stripped_run = run.clone();
     stripped_run.observation_scalars =
         runmat_analysis_fea::results::assessment::scalar_observation_inventory(&run.run);
     stripped_run.render_topology = None;
-    stripped_run.run.observation_histories.clear();
+    stripped_run.run.observation_histories = Vec::new();
     crate::analysis::operations::visit_analysis_result_fields_mut(&mut stripped_run, |field| {
         if let AnalysisFieldValues::HostF64(values) = &mut field.values {
             if !values.is_empty() {
-                values.clear();
+                // Release the copied values rather than retaining their capacity.
+                *values = Vec::new();
             }
         }
     });
     let field_inventory =
         crate::analysis::operations::collect_analysis_result_fields(&stripped_run);
+    admit(json_projection_estimate(&stripped_run)?)?;
     let run_value = serde_json::to_value(&stripped_run)
         .map_err(|error| format!("failed to encode stripped analysis run: {error}"))?;
     let materialized_field_ids = fields.keys().cloned().collect::<Vec<_>>();
@@ -200,6 +224,20 @@ pub(super) fn prepare_run_artifact(
         },
         chunks,
     })
+}
+
+fn typed_estimate(value: &impl serde::Serialize) -> Result<u64, String> {
+    runmat_canonical_codec::typed_resident_bytes_estimate(value).map_err(|error| error.to_string())
+}
+
+fn json_projection_estimate(value: &impl serde::Serialize) -> Result<u64, String> {
+    runmat_canonical_codec::profile_serialized(
+        value,
+        runmat_canonical_codec::CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
+    )
+    .map_err(|error| error.to_string())?
+    .json_projection_resident_bytes_estimate()
+    .ok_or_else(|| "stripped run JSON projection estimate is invalid".to_string())
 }
 
 fn summarize_render_fields(

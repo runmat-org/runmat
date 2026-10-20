@@ -22,6 +22,8 @@ pub use materialization::{
 };
 
 mod json;
+mod typed_resident;
+pub use typed_resident::typed_resident_bytes_estimate;
 pub use json::{encode_json_bounded, profile_json_bytes, write_json_bounded};
 
 mod controlled_serde;
