@@ -543,11 +543,11 @@ mod periodic_image_tests {
 
     #[test]
     fn interior_edges_between_node_images_are_split_at_their_chart_midpoint() {
-        let face = PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "face".into(),
-            assembly_path: vec!["root".into()],
-        };
+        let face = PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "face".to_string(),
+            vec!["root".to_string()],
+        );
         let vertex = |node: u8, uv: [f64; 2]| ExactFacePslgVertex {
             node_id: StableDigest::from_bytes([node; 32]),
             seam_image: None,
