@@ -40,6 +40,12 @@ pub enum ModelArg {
     /// One host object of a listed class, or a cell array whose known elements
     /// are such objects (the runtime also decodes nested component values).
     TypedOrCell(&'static [StaticClassIdentity]),
+    /// One host object of an `object` class, or a cell array whose known
+    /// elements are of a `cell` class (for example a signal, or components).
+    ObjectOrCellOf {
+        object: &'static [StaticClassIdentity],
+        cell: &'static [StaticClassIdentity],
+    },
 }
 
 /// The complete static call shape of one model-object constructor.
@@ -117,6 +123,14 @@ fn check_argument(fact: &ValueFact, rule: ModelArg, index: usize) -> Option<Infe
             possible_object_or_cell(fact, classes),
             TYPED,
             "expected a typed FEA object of the documented class, or a cell array of them",
+        ),
+        ModelArg::ObjectOrCellOf { object, cell } => (
+            match &fact.kind {
+                ValueKindFact::Cell(_) => possible_object_or_cell(fact, cell),
+                _ => possible_object(fact, object),
+            },
+            TYPED,
+            "expected a typed FEA object of the documented class, or a cell array of its documented components",
         ),
     };
     (!admitted).then(|| argument_error(code, message, index))

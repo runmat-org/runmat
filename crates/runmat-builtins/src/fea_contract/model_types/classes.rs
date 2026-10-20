@@ -141,3 +141,14 @@ pub const FEA_THERMO_MECHANICAL_STEP_CLASS: StaticClassIdentity =
     StaticClassIdentity::new("fea.ThermoMechanicalStep");
 pub const FEA_TRANSLATION_PERIODIC_TRANSFORM_CLASS: StaticClassIdentity =
     StaticClassIdentity::new("fea.TranslationPeriodicTransform");
+
+/// Every concrete coordinate-frame class a frame-valued argument may hold.
+pub const FEA_COORDINATE_FRAME_CLASSES: &[StaticClassIdentity] = &[
+    FEA_GLOBAL_COORDINATE_FRAME_CLASS,
+    FEA_MATERIAL_COORDINATE_FRAME_CLASS,
+    FEA_ELEMENT_COORDINATE_FRAME_CLASS,
+    FEA_BOUNDARY_NORMAL_TANGENT_FRAME_CLASS,
+    FEA_CARTESIAN_COORDINATE_FRAME_CLASS,
+    FEA_CYLINDRICAL_COORDINATE_FRAME_CLASS,
+    FEA_SPHERICAL_COORDINATE_FRAME_CLASS,
+];

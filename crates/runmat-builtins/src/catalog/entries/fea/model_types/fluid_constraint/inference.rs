@@ -46,7 +46,10 @@ pub(super) const PRESCRIBED_VELOCITY: ModelObjectCall = ModelObjectCall {
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
-        ModelArg::TypedOrCell(&[StaticClassIdentity::new("fea.VelocitySignal")]),
+        ModelArg::ObjectOrCellOf {
+            object: &[StaticClassIdentity::new("fea.VelocitySignal")],
+            cell: &[StaticClassIdentity::new("fea.Velocity")],
+        },
     ],
 };
 
@@ -62,7 +65,10 @@ pub(super) const MOVING_WALL: ModelObjectCall = ModelObjectCall {
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
-        ModelArg::TypedOrCell(&[StaticClassIdentity::new("fea.VelocitySignal")]),
+        ModelArg::ObjectOrCellOf {
+            object: &[StaticClassIdentity::new("fea.VelocitySignal")],
+            cell: &[StaticClassIdentity::new("fea.Velocity")],
+        },
     ],
 };
 

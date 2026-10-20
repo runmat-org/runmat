@@ -26,15 +26,7 @@ pub(super) const PRESCRIBED: ModelObjectCall = ModelObjectCall {
             classes::FEA_STRUCTURAL_TRANSLATION_DOF_VALUE_CLASS,
             classes::FEA_STRUCTURAL_ROTATION_DOF_VALUE_CLASS,
         ]),
-        ModelArg::Typed(&[
-            classes::FEA_GLOBAL_COORDINATE_FRAME_CLASS,
-            classes::FEA_MATERIAL_COORDINATE_FRAME_CLASS,
-            classes::FEA_ELEMENT_COORDINATE_FRAME_CLASS,
-            classes::FEA_BOUNDARY_NORMAL_TANGENT_FRAME_CLASS,
-            classes::FEA_CARTESIAN_COORDINATE_FRAME_CLASS,
-            classes::FEA_CYLINDRICAL_COORDINATE_FRAME_CLASS,
-            classes::FEA_SPHERICAL_COORDINATE_FRAME_CLASS,
-        ]),
+        ModelArg::Typed(classes::FEA_COORDINATE_FRAME_CLASSES),
     ],
 };
 

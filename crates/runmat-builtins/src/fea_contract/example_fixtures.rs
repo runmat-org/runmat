@@ -391,7 +391,10 @@ macro_rules! fea_box_run_setup {
         concat!(
             $crate::fea_contract::example_fixtures::fea_box_model_setup!(),
             "solverMesh = meshing.generate(part, \"TargetSize\", 0.5, \"MaximumDeviation\", 0.05, \"ElementOrder\", \"tet4\");\n",
-            "study = fea.study(\"box_static\", part, model, \"Mesh\", solverMesh);\n",
+            "sequence = fea.AnalysisSequence.new(\"box_model.sequence\", {staticStep}, {}, {}, {});\n",
+            "plan = fea.ExecutionPlan.defaults(sequence, fea.ComputeBackend.cpu(), ...\n",
+            "    fea.FormulationRequirement.experimental());\n",
+            "study = fea.study(\"box_static\", part, model, \"Mesh\", solverMesh, \"Execution\", plan);\n",
             "run = fea.run(study);\n",
         )
     };

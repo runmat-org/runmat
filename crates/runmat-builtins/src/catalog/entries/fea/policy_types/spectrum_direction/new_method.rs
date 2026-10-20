@@ -91,7 +91,7 @@ policy_entry!(
             "frame",
             Any,
             "Typed fea.CoordinateFrame the vector is expressed in.",
-            PolicyArg::Typed(&[classes::COORDINATE_FRAME]),
+            PolicyArg::Typed(crate::fea_contract::model_types::classes::FEA_COORDINATE_FRAME_CLASSES),
         ),
         (
             "vector",

@@ -34,6 +34,7 @@ fn valid(rule: ModelArg) -> ValueFact {
         ModelArg::RealScalar => double(ShapeFact::Scalar),
         ModelArg::RealVector3 => double(ShapeFact::from(vec![Some(1), Some(3)])),
         ModelArg::Typed(classes) | ModelArg::TypedOrCell(classes) => object_fact(classes[0]),
+        ModelArg::ObjectOrCellOf { object, .. } => object_fact(object[0]),
     }
 }
 
