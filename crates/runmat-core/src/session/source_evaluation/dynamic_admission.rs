@@ -229,15 +229,14 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
         )
         .map_err(invalid)?;
         let serialize = |interop| {
-            if unit.bytecode().instructions.is_empty() {
-                unit.portable_envelope_for_current_definition_with_interop(
-                    &original_ids,
-                    ProgramSourceId(0),
-                    interop,
-                )
-            } else {
-                unit.portable_envelope_for_with_interop(None, interop)
-            }
+            unit.portable_primary_source_envelope(
+                &original_ids,
+                unit.source_map()
+                    .entries()
+                    .first()
+                    .map(|entry| entry.source_id),
+                interop,
+            )
         };
         let inferred = serialize(runmat_types::InteropManifest::empty()).map_err(invalid)?;
         #[cfg(not(target_arch = "wasm32"))]

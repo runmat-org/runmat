@@ -1,6 +1,16 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "updatedDocuments = addEntityDetails(documents)\nupdatedDocuments = addEntityDetails(documents, Name, Value)",
+        "`updatedDocuments` is a `tokenizedDocument` compatibility object.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "`Name, Value` pairs may include `RetokenizeMethod`, `DiscardKnownValues`, and `Model`.",
+        "`RetokenizeMethod` may be `\"entity\"` or `\"none\"`.",
+        "`DiscardKnownValues` must be a logical scalar; numeric and integer 0/1 values are rejected.",
+        "`Model` currently accepts `\"auto\"`; custom entity model objects remain tracked.",
+        "Use `tokenDetails(updatedDocuments)` to view the resulting `Entity` table column.",
+    ] },
     BuiltinDocumentationSection { heading: "Entity metadata and controls", paragraphs: &[
         "addEntityDetails(documents) adds named-entity tags to a RunMat tokenizedDocument object; tokenDetails exposes the Entity column. RetokenizeMethod, DiscardKnownValues, and Model are the supported name-value options.",
         "RetokenizeMethod defaults to entity and merges simple adjacent entity tokens such as multiword locations; none preserves existing tokens. DiscardKnownValues defaults to logical false, retaining known tags while filling missing entries. Logical true recomputes all tags and ignores malformed stored tags.",

@@ -20,6 +20,7 @@ use runmat_runtime::context::{
 mod semantic_identity;
 #[path = "vm_fusion_plan/host_input_uses.rs"]
 mod host_input_uses;
+use crate::accel::fusion::input_transport::VmFusionInputTransport;
 pub(crate) use semantic_identity::{vm_fusion_executable_identity, vm_fusion_semantic_identity};
 
 /// VM-private owner retained beside the exact store-reconciled plan. Runtime
@@ -29,6 +30,7 @@ pub(crate) struct VmFusionPlanInstallation {
     plan: FusionPlanRef,
     regions: Vec<(usize, VmFusionInstalledRegion, Option<usize>)>,
     input_uses: Vec<(usize, runmat_accelerate::fusion_exec::VmHostInputUses)>,
+    input_transports: Vec<(usize, VmFusionInputTransport)>,
 }
 
 impl std::fmt::Debug for VmFusionPlanInstallation {
@@ -41,6 +43,26 @@ impl std::fmt::Debug for VmFusionPlanInstallation {
 }
 
 impl VmFusionPlanInstallation {
+    pub(crate) fn input_transport<'a>(
+        &'a self,
+        active_plan: &FusionPlanRef,
+        selected: &runmat_accelerate::FusionGroupPlan,
+    ) -> Option<&'a VmFusionInputTransport> {
+        if !Rc::ptr_eq(&self.plan, active_plan) || !selected.kernel.supported {
+            return None;
+        }
+        let original = self.plan.groups.iter().find(|group| {
+            group.index == selected.index
+                && group.group.id == selected.group.id
+                && group.group.span == selected.group.span
+                && group.output == selected.output
+                && group.inputs == selected.inputs
+        })?;
+        self.input_transports
+            .iter()
+            .find_map(|(index, transport)| (*index == original.index).then_some(transport))
+    }
+
     /// Exact graph-value IDs and load PCs originate in the same instruction
     /// walk. Neither serialized hints nor ordinal merged stack patterns grant
     /// host substitution authority.
@@ -248,6 +270,9 @@ impl Bytecode {
                         *value == store.value_id && binding == &store.binding
                     })
                 });
+                if VmFusionInputTransport::project(selected, &graph, &loads, &stores).is_none() {
+                    selected.kernel.supported = false;
+                }
             }
             Rc::new(owned)
         });
@@ -272,6 +297,15 @@ impl Bytecode {
                 .iter()
                 .filter_map(|group| {
                     host_input_uses::project(group, &loads).map(|uses| (group.index, uses))
+                })
+                .collect();
+            let input_transports = plan
+                .groups
+                .iter()
+                .filter(|group| group.kernel.supported)
+                .filter_map(|group| {
+                    VmFusionInputTransport::project(group, graph.as_ref()?, &loads, &stores)
+                        .map(|transport| (group.index, transport))
                 })
                 .collect();
             let regions = plan
@@ -320,6 +354,7 @@ impl Bytecode {
                 plan: Rc::clone(plan),
                 regions,
                 input_uses,
+                input_transports,
             }
         });
         (plan, graph, installation)

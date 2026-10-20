@@ -4,7 +4,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Surface geometry and axes", paragraphs: &[
         "`XData`, `YData`, and `ZData` retain native single, double, or integer class, exact values, and shape. Vertex generation, color preparation, and rendering are explicit floating boundaries and do not replace authoritative scene data.",
         "Surface handles can be inspected and updated with get/set. view, zlabel, colorbar, colormap, and shading use the same subplot-local axes state. surf fills and shades a surface; mesh emphasizes wireframe geometry, and surfc adds contour overlays.",
-        "When vector-axis GPU buffers can be exported through the shared plotting device, surface geometry can remain resident through the floating rendering path. Full host coordinate matrices use the CPU parametric-surface path; other unsupported direct-render combinations gather through the existing source-preparation boundary. Color limits and subplot-local metadata follow the same surface pipeline on either path.",
+            "When vector-axis GPU buffers can be exported through the shared plotting device, surface geometry can remain resident through the floating rendering path. Full host coordinate matrices use the CPU parametric-surface path; other unsupported direct-render combinations gather through the existing source-preparation boundary. Color limits and subplot-local metadata follow the same surface pipeline on either path. The shared surface pipeline also serves image, contour-composite, and surface-style plot families.",
     ] },
     BuiltinDocumentationSection {
         heading: "Coordinate and color forms",

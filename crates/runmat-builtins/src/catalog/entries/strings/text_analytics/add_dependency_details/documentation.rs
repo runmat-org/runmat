@@ -1,6 +1,13 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported form", paragraphs: &[
+        "updatedDocuments = addDependencyDetails(documents)",
+        "`updatedDocuments` is a `tokenizedDocument` compatibility object.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "No name-value options are supported for this MATLAB-compatible form.",
+        "Use `tokenDetails(updatedDocuments)` to view the resulting `Head` and `Dependency` table columns.",
+    ] },
     BuiltinDocumentationSection { heading: "Dependency metadata", paragraphs: &[
         "addDependencyDetails(documents) updates a RunMat tokenizedDocument object. It accepts no name-value options. tokenDetails then exposes Head, Dependency, and SentenceNumber columns; missing sentence-number details are created before dependency analysis.",
         "Head is the one-based index of a token's syntactic head in the same document; a root token uses zero. Dependency uses Universal Dependencies-style labels including root, nsubj, obj, det, amod, advmod, case, obl, aux, cc, mark, punct, nummod, and dep.",

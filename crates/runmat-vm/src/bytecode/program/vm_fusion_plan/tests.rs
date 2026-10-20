@@ -21,6 +21,78 @@ fn planned(instructions: Vec<Instr>, span: InstrSpan) -> FusionPlanRef {
         .expect("runtime graph-derived plan")
 }
 
+#[test]
+fn input_transport_requires_an_exact_evaluated_source_not_a_graph_binding_guess() {
+    let instructions = vec![
+        Instr::CallBuiltinMulti("opaqueProducer".into(), 0, 1),
+        Instr::LoadConst(1.0),
+        Instr::Add,
+    ];
+    let plan = planned(instructions.clone(), InstrSpan { start: 2, end: 2 });
+    let (graph, stores, loads) =
+        build_accel_graph_with_transcript(&instructions, &[Type::Unknown; 0]);
+    let selected = &plan.groups[0];
+    assert!(selected.kernel.supported);
+    let proof = VmFusionInputTransport::project(selected, &graph, &loads, &stores)
+        .expect("ordinary producer's evaluated stack output has an exact identity");
+    let vars = crate::interpreter::vars::InterpreterVars::from_owned(Vec::new());
+    let context = crate::bytecode::program::ExecutionContext::default();
+    let inputs = proof
+        .gather(
+            &[
+                runmat_value::Value::Num(41.0),
+                runmat_value::Value::Num(1.0),
+            ],
+            &vars,
+            &context,
+        )
+        .expect("no producer replay or variable lookup is necessary");
+    assert!(inputs.contains(&runmat_value::Value::Num(41.0)));
+
+    let mut missing_source = selected.clone();
+    missing_source
+        .group
+        .stack_layout
+        .as_mut()
+        .unwrap()
+        .bindings
+        .clear();
+    assert!(VmFusionInputTransport::project(&missing_source, &graph, &loads, &stores).is_none());
+
+    let mut wrong_input = selected.clone();
+    wrong_input.inputs.push(u32::MAX);
+    assert!(!proof.matches(&wrong_input));
+    assert!(VmFusionInputTransport::project(&wrong_input, &graph, &loads, &stores).is_none());
+}
+
+#[test]
+fn input_transport_folded_array_does_not_freeze_a_live_child_binding() {
+    for live_child in [false, true] {
+        let plan = planned(
+            vec![
+                Instr::LoadConst(5.0),
+                Instr::StoreVar(0),
+                Instr::LoadConst(1.0),
+                Instr::LoadConst(2.0),
+                Instr::Add,
+                if live_child {
+                    Instr::LoadVar(0)
+                } else {
+                    Instr::LoadConst(5.0)
+                },
+                Instr::LoadConst(3.0),
+                Instr::CreateMatrix(1, 2),
+                Instr::Add,
+            ],
+            InstrSpan { start: 4, end: 8 },
+        );
+        assert_eq!(
+            plan.groups[0].kernel.supported, !live_child,
+            "only a true source literal array can replace an in-region constructor"
+        );
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn semantic_region_identity_covers_executable_stream_and_catch_authority() {

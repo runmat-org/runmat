@@ -48,7 +48,7 @@ BuiltinDocumentationLink { label: "randperm", target: BuiltinDocumentationLinkTa
 BuiltinDocumentationLink { label: "range", target: BuiltinDocumentationLinkTarget::Documentation("./range") },
 BuiltinDocumentationLink { label: "true", target: BuiltinDocumentationLinkTarget::Documentation("./true") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/ones.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/ones.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/ones.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/ones.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained ones verification", location: "builtins::array::creation::ones::tests::ones_gpu_like_alloc" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained ones verification", location: "builtins::array::creation::ones::tests" }, ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

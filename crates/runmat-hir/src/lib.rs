@@ -12,8 +12,8 @@ mod span;
 pub mod testing;
 
 pub use diagnostic::{
-    HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity, HirDiagnosticSpan,
-    HirDiagnosticSuggestion,
+    DiagnosticExecution, HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity,
+    HirDiagnosticSpan, HirDiagnosticSuggestion,
 };
 pub use error::{set_error_namespace, HirError, HirErrorKind};
 pub use hir::{

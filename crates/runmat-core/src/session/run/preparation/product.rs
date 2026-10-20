@@ -300,50 +300,54 @@ impl RunMatSession {
                 .get(*function)
                 .is_some_and(|body| body.binding_origin.is_some())
         });
+        let source_selection = crate::executable::SourceProductSelection::classify(
+            &interactive_unit,
+            &selected_current_function_ids,
+            lowering.assembly.primary_source,
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableClassProduct")
+                    .build(),
+            )
+        })?;
+        // A declaration-only class may still own method bodies. Its methods
+        // retain their callable artifact while class metadata retains the
+        // declaration product; neither role manufactures a script entrypoint.
+        let declaration_class = source_selection.declaration().cloned();
         let callable_artifact = if has_current_artifact_origin {
             Some(Arc::<[u8]>::from(
-                (if interactive_unit.bytecode().instructions.is_empty() {
-                    let primary_source = lowering.assembly.primary_source.ok_or_else(|| {
+                source_selection
+                    .envelope(
+                        &interactive_unit,
+                        &selected_current_function_ids,
+                        lowering.assembly.primary_source,
+                        selected_interop.clone(),
+                    )
+                    .and_then(|mut envelope| {
+                        if !selected_static_imports.imports.is_empty() {
+                            let section = runmat_execution::executable::static_import_section(
+                                selected_static_imports.imports.clone(),
+                            )
+                            .map_err(|error| error.to_string())?;
+                            envelope.manifest.optional_sections.push(section);
+                            envelope
+                                .manifest
+                                .optional_sections
+                                .sort_by(|left, right| left.name.cmp(&right.name));
+                        }
+                        envelope
+                            .canonical_bytes()
+                            .map_err(|error| error.to_string())
+                    })
+                    .map_err(|error| {
                         RunError::Runtime(
-                            build_runtime_error("definition-only executable has no primary source")
+                            build_runtime_error(error)
                                 .with_identifier("RunMat:CallableArtifact:ExecutableProduct")
                                 .build(),
                         )
-                    })?;
-                    interactive_unit.portable_envelope_for_current_definition_with_interop(
-                        &selected_current_function_ids,
-                        primary_source,
-                        selected_interop.clone(),
-                    )
-                } else {
-                    interactive_unit.portable_script_envelope_with_current_definitions(
-                        selected_interop.clone(),
-                        &selected_current_function_ids,
-                    )
-                })
-                .and_then(|mut envelope| {
-                    if !selected_static_imports.imports.is_empty() {
-                        let section = runmat_execution::executable::static_import_section(
-                            selected_static_imports.imports.clone(),
-                        )
-                        .map_err(|error| error.to_string())?;
-                        envelope.manifest.optional_sections.push(section);
-                        envelope
-                            .manifest
-                            .optional_sections
-                            .sort_by(|left, right| left.name.cmp(&right.name));
-                    }
-                    envelope
-                        .canonical_bytes()
-                        .map_err(|error| error.to_string())
-                })
-                .map_err(|error| {
-                    RunError::Runtime(
-                        build_runtime_error(error)
-                            .with_identifier("RunMat:CallableArtifact:ExecutableProduct")
-                            .build(),
-                    )
-                })?,
+                    })?,
             ))
         } else {
             None
@@ -395,23 +399,6 @@ impl RunMatSession {
                 })
             })
             .collect::<HashSet<_>>();
-        let declaration_class = if callable_artifact.is_none() {
-            lowering
-                .assembly
-                .primary_source
-                .map(|source| interactive_unit.primary_declaration_only_class(source))
-                .transpose()
-                .map_err(|error| {
-                    RunError::Runtime(
-                        build_runtime_error(error)
-                            .with_identifier("RunMat:ExecutableClassProduct")
-                            .build(),
-                    )
-                })?
-                .flatten()
-        } else {
-            None
-        };
         let mut selected_static_targets = Some(selected_static_imports.targets);
         let selected_graph = if declaration_class.is_none()
             && (callable_artifact.is_some() || !interactive_unit.bytecode().instructions.is_empty())
@@ -486,30 +473,36 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
-            let mut envelope = interactive_unit
-                .portable_declaration_envelope_with_interop(
-                    &class,
-                    primary_source,
-                    selected_interop,
-                    &selected_current_function_ids,
-                )
-                .map_err(|error| RunError::Runtime(build_runtime_error(error).build()))?;
-            if !selected_static_imports.imports.is_empty() {
-                let section = runmat_execution::executable::static_import_section(
-                    selected_static_imports.imports,
-                )
-                .map_err(|error| {
+            let bytes = if let Some(bytes) = callable_artifact.as_ref() {
+                // A declaration with methods already issued these exact bytes
+                // above. Both roles share the immutable artifact backing.
+                Arc::clone(bytes)
+            } else {
+                let mut envelope = interactive_unit
+                    .portable_declaration_envelope_with_interop(
+                        &class,
+                        primary_source,
+                        selected_interop,
+                        &selected_current_function_ids,
+                    )
+                    .map_err(|error| RunError::Runtime(build_runtime_error(error).build()))?;
+                if !selected_static_imports.imports.is_empty() {
+                    let section = runmat_execution::executable::static_import_section(
+                        selected_static_imports.imports,
+                    )
+                    .map_err(|error| {
+                        RunError::Runtime(build_runtime_error(error.to_string()).build())
+                    })?;
+                    envelope.manifest.optional_sections.push(section);
+                    envelope
+                        .manifest
+                        .optional_sections
+                        .sort_by(|left, right| left.name.cmp(&right.name));
+                }
+                Arc::<[u8]>::from(envelope.canonical_bytes().map_err(|error| {
                     RunError::Runtime(build_runtime_error(error.to_string()).build())
-                })?;
-                envelope.manifest.optional_sections.push(section);
-                envelope
-                    .manifest
-                    .optional_sections
-                    .sort_by(|left, right| left.name.cmp(&right.name));
-            }
-            let bytes = Arc::<[u8]>::from(envelope.canonical_bytes().map_err(|error| {
-                RunError::Runtime(build_runtime_error(error.to_string()).build())
-            })?);
+                })?)
+            };
             let source_owner = interactive_unit
                 .selected_source_owner(&execution_runtime)
                 .map_err(|error| RunError::Runtime(build_runtime_error(error).build()))?;

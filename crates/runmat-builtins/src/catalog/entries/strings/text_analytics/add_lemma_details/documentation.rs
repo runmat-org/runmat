@@ -1,6 +1,13 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "updatedDocuments = addLemmaDetails(documents)\nupdatedDocuments = addLemmaDetails(documents, 'DiscardKnownValues', tf)",
+        "`updatedDocuments` is a `tokenizedDocument` compatibility object.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "`tf` must be a logical scalar; numeric and integer 0/1 values are rejected.",
+        "Use `tokenDetails(updatedDocuments)` to view the resulting `Lemma` table column.",
+    ] },
     BuiltinDocumentationSection {
         heading: "Lemma metadata",
         paragraphs: &[

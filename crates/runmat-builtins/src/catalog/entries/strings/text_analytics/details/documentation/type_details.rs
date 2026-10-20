@@ -1,6 +1,14 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "updatedDocuments = addTypeDetails(documents)\nupdatedDocuments = addTypeDetails(documents, 'DiscardKnownValues', tf)\nupdatedDocuments = addTypeDetails(documents, 'TopLevelDomains', domains)",
+        "`updatedDocuments` is a `tokenizedDocument` compatibility object.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "`tf` must be a logical scalar; numeric and integer 0/1 values are rejected.",
+        "`domains` must contain one or more valid top-level-domain labels.",
+        "Use `tokenDetails(updatedDocuments)` to view the resulting type table.",
+    ] },
     BuiltinDocumentationSection { heading: "Token types", paragraphs: &[
         "addTypeDetails(documents) detects token types in a RunMat tokenizedDocument object. If details are absent, one type is derived for each token. DiscardKnownValues defaults to logical false, preserving known types and filling missing or unknown values; logical true recomputes every type.",
         "TopLevelDomains accepts a character vector, string array, or cell array of character vectors. It overrides the document's stored TLD list for web-address recognition and is stored on the returned object.",
@@ -37,7 +45,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("addTypeDetails"), slug: Some("addTypeDetails"),
     summary: "Detect token types in tokenized documents.",
     description: "addTypeDetails adds token-type metadata to a RunMat tokenizedDocument object and can override top-level domains used for web-address recognition.",
-    keywords: &["addTypeDetails", "tokenizedDocument", "text analytics", "token type", "TopLevelDomains"],
+    keywords: &["addTypeDetails", "tokenizedDocument", "text analytics", "token type", "TopLevelDomains", "token types"],
     related: &["tokenDetails", "tokenizedDocument", "addSentenceDetails"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
     faqs: &[

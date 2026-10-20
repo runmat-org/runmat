@@ -47,7 +47,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "repelem runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/repelem.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "repelem semantic and provider tests", location: "crates/runmat-runtime/src/builtins/array/shape/repelem.rs" }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Retained repelem verification", location: "crates/runmat-runtime/tests/nd_ops.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained repelem verification", location: "builtins::array::shape::repelem::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "repelem semantic and provider tests", location: "crates/runmat-runtime/src/builtins/array/shape/repelem.rs" }],
         notes: &[],
     },
     introduced: None,

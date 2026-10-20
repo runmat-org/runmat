@@ -1,12 +1,21 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "updatedDocuments = addSentenceDetails(documents)\nupdatedDocuments = addSentenceDetails(documents, 'Abbreviations', abbreviations)\nupdatedDocuments = addSentenceDetails(documents, 'Starters', starters)\nupdatedDocuments = addSentenceDetails(documents, 'DiscardKnownValues', tf)",
+        "`updatedDocuments` is a `tokenizedDocument` compatibility object.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "`abbreviations` can be text or a table with `Abbreviation` and `Usage` variables.",
+        "`starters` must be a text or categorical vector.",
+        "`tf` must be a logical scalar; numeric and integer 0/1 values are rejected.",
+        "Use `tokenDetails(updatedDocuments)` to view the resulting `SentenceNumber` table column.",
+    ] },
     BuiltinDocumentationSection { heading: "Sentence numbers", paragraphs: &[
         "addSentenceDetails(documents) detects sentence boundaries in a RunMat tokenizedDocument object and stores one SentenceNumber per token. tokenDetails shows the resulting column.",
         "Terminating punctuation includes period, exclamation, question mark, and common Japanese/Korean equivalents. Single-letter initialisms such as U.S.A. are treated as regular abbreviations and do not split internally.",
         "Abbreviations accepts a character vector, string array, cell array of character vectors, or a table with Abbreviation and Usage variables. Text lists are regular abbreviations; table Usage may be text or categorical regular, inner, reference, or unit.",
         "Starters accepts a character vector, string array, cell array of character vectors, or categorical vector. It controls whether regular abbreviations break before capitalized starter words. The default list combines English stopWords with common sentence starters.",
-        "DiscardKnownValues defaults to logical false and preserves complete positive sentence-number details. Logical true recomputes every number. The detector is deterministic and token-level; exact MathWorks statistical boundaries, emoji-after-terminator placement, line provenance, and MeCab behavior remain open.",
+        "DiscardKnownValues defaults to logical false and preserves complete positive integer sentence-number details. Logical true recomputes every number. The detector is deterministic and token-level; exact MathWorks statistical boundaries, emoji-after-terminator placement, line provenance, and MeCab behavior remain open.",
     ] },
     BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
         "The builtin updates host tokenizedDocument metadata and has no provider kernel or fusion path.",
@@ -39,7 +48,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("addSentenceDetails"), slug: Some("addSentenceDetails"),
     summary: "Detect sentence boundaries in tokenized documents.",
     description: "addSentenceDetails stores sentence-number metadata on a RunMat tokenizedDocument object.",
-    keywords: &["addSentenceDetails", "tokenizedDocument", "text analytics", "sentence", "abbreviations"],
+    keywords: &["addSentenceDetails", "tokenizedDocument", "text analytics", "sentence", "abbreviations", "sentence numbers", "token details"],
     related: &["tokenDetails", "tokenizedDocument", "stopWords"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
     faqs: &[

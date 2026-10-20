@@ -1,112 +1,26 @@
 use super::*;
-#[cfg(test)]
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_builtins::{
     BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
+#[cfg(test)]
+pub(crate) use runmat_builtins::{
+    ARRAY_DATASTORE_EXTENSIONS, ARRAY_DATASTORE_INTEGER_CAPABILITIES,
+    PARQUET_DATASTORE_INTEGER_CAPABILITIES, ROWFILTER_INTEGER_AUDIT, TIMERANGE_DESCRIPTOR,
+    TIMERANGE_EXTENSIONS, TIMERANGE_INTEGER_CAPABILITIES, UITABLE_EXTENSIONS,
+    UITABLE_INTEGER_CAPABILITIES, VARTYPE_INTEGER_AUDIT,
+};
+pub(crate) use runmat_builtins::{
+    ARRAY_DATASTORE_GPU_INPUT_EXTENSION, TIMERANGE_EXPLICIT_GPU_EXTENSION,
+    TIMERANGE_NUMERIC_BOUNDS_EXTENSION, UITABLE_EXPLICIT_GPU_EXTENSION,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericDType;
 
 const ARRAY_DATASTORE_BUILTIN_NAME: &str = "arrayDatastore";
 
-#[cfg(test)]
-pub const VARTYPE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "vartype accepts one host string scalar or character vector naming a variable class; integer and resident numeric values reject before provider access or selector construction.",
-};
-
-pub(in crate::builtins::table) const TIMERANGE_NUMERIC_BOUNDS_EXTENSION:
-    BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "timerange-numeric-bounds",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "timerange with numeric row-time bounds is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TimerangeNumericBoundsExtension"),
-};
-const TIMERANGE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "timerange-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "timerange with explicitly GPU-resident input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TimerangeExplicitGpuInputExtension"),
-};
-#[cfg(test)]
-pub const TIMERANGE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    TIMERANGE_NUMERIC_BOUNDS_EXTENSION,
-    TIMERANGE_EXPLICIT_GPU_EXTENSION,
-];
-#[cfg(test)]
-const TIMERANGE_INTEGER_BOUND_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "start or end numeric row-time bound",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public timerange bounds are datetime, duration, or supported event filters. Numeric row-time bounds remain available only in RunMat mode.",
-    }];
-#[cfg(test)]
-pub const TIMERANGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "S = timerange(integer_start, integer_end [, interval_type])",
-        inputs: &TIMERANGE_INTEGER_BOUND_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Numeric extension bounds retain their native scalar identity and compare with numeric timetable row times through exact mixed-class ordering rather than f64 conversion.",
-    }];
-#[cfg(test)]
-const TIMERANGE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Timetable row-time subscript selector.",
-}];
-#[cfg(test)]
-const TIMERANGE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "startTime",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Beginning of the selected row-time interval.",
-    },
-    BuiltinParamDescriptor {
-        name: "endTime",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "End of the selected row-time interval.",
-    },
-    BuiltinParamDescriptor {
-        name: "intervalType",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("openright"),
-        description: "One of openright, openleft, open, or closed.",
-    },
-];
-#[cfg(test)]
-const TIMERANGE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "S = timerange(startTime, endTime, intervalType)",
-    inputs: &TIMERANGE_INPUTS,
-    outputs: &TIMERANGE_OUTPUT,
-}];
-#[cfg(test)]
-pub const TIMERANGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TIMERANGE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
 pub(crate) const TABLE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "table-gpu-input",
@@ -151,110 +65,6 @@ pub const TABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "int8 through uint64 VariableTypes allocate zero-filled authoritative native columns directly; floating VariableTypes allocate native f64 or f32 columns.",
-    },
-];
-
-#[cfg(test)]
-pub const ROWFILTER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "rowfilter is constructed from variable names, Parquet metadata/datastores, tables, or timetables; direct typed-integer arrays have no public data or control role and reject before gather. Integer columns nested in a tabular source remain opaque authoritative payloads while the filter captures row-selection metadata.",
-    };
-
-pub(crate) const ARRAY_DATASTORE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "arraydatastore-gpu-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "arrayDatastore with an interactive resident GPU argument is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ArrayDatastoreGpuInputExtension"),
-    };
-
-#[cfg(test)]
-pub const ARRAY_DATASTORE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [ARRAY_DATASTORE_GPU_INPUT_EXTENSION];
-
-#[cfg(test)]
-const PARQUET_DATASTORE_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ReadSize, BlockSize, location, or other constructor argument",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented ReadSize and BlockSize numeric datatype is double, while locations and other constructor options are text, logical, or objects. Typed-integer host or resident arguments reject before gather and cannot be silently ignored.",
-    }];
-#[cfg(test)]
-pub const PARQUET_DATASTORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "pds = parquetDatastore(location, typed_integer_argument...)",
-        inputs: &PARQUET_DATASTORE_INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The constructor records supported host metadata only. Integer Parquet columns belong to parquetread/read datastore operations, not to this constructor input surface.",
-    }];
-
-#[cfg(test)]
-const ARRAY_DATASTORE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented in-memory array input accepts matrices whose values use any of the eight real integer classes.",
-    }];
-#[cfg(test)]
-const ARRAY_DATASTORE_READ_SIZE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ReadSize",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public property is explicitly double and typed-integer values are rejected.",
-    }];
-#[cfg(test)]
-const ARRAY_DATASTORE_ITERATION_DIMENSION_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "IterationDimension",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public property is explicitly double and typed-integer values are rejected.",
-    }];
-#[cfg(test)]
-pub const ARRAY_DATASTORE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "arrds = arrayDatastore(integer_A, Name,Value...)",
-        inputs: &ARRAY_DATASTORE_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The datastore object retains A in authoritative same-class storage. Interactive resident input is a mode-gated RunMat extension that gathers before host datastore construction.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "arrds = arrayDatastore(A, \"ReadSize\", typed_integer)",
-        inputs: &ARRAY_DATASTORE_READ_SIZE_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "ReadSize is documented as a double-only value; all typed-integer scalar and tensor classes reject.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "arrds = arrayDatastore(A, \"IterationDimension\", typed_integer)",
-        inputs: &ARRAY_DATASTORE_ITERATION_DIMENSION_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "IterationDimension is documented as a double-only value; all typed-integer scalar and tensor classes reject.",
     },
 ];
 
@@ -766,7 +576,7 @@ pub(crate) async fn timerange_builtin(
         ("End", gathered[1].clone()),
         (
             "Inclusivity",
-            Value::string(inclusivity.to_ascii_lowercase()),
+            Value::string(inclusivity.trim().to_ascii_lowercase()),
         ),
     ];
     construct_descriptor_object(runtime.as_ref(), TIMERANGE_CLASS, &fields)
@@ -816,6 +626,11 @@ pub(crate) async fn rowfilter_builtin(
     args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ensure_table_class_registered();
+    if args.len() > 2 {
+        return Err(invalid_argument(
+            "rowfilter: expected at most a source and optional predicate",
+        ));
+    }
     if args.iter().any(|value| {
         crate::builtins::common::validation::value_has_native_integer_class(value)
             || matches!(value, Value::GpuTensor(_))
@@ -1015,7 +830,10 @@ pub(crate) async fn parquet_datastore_builtin(
     args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ensure_table_class_registered();
-    if args.iter().any(parquet_value_contains_typed_integer) {
+    if args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_native_integer_class)
+    {
         return Err(invalid_argument(
             "parquetDatastore: typed-integer constructor arguments are not supported",
         ));
@@ -1074,45 +892,6 @@ pub(crate) async fn parquet_datastore_builtin(
     ];
     construct_descriptor_object(runtime.as_ref(), PARQUET_DATASTORE_CLASS, &fields)
 }
-
-fn parquet_value_contains_typed_integer(value: &Value) -> bool {
-    matches!(value, Value::Int(_))
-        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
-        || matches!(value, Value::Cell(cell) if cell.data().iter().any(parquet_value_contains_typed_integer))
-        || matches!(value, Value::Struct(structure) if structure.fields.values().any(parquet_value_contains_typed_integer))
-        || matches!(value, Value::Object(object) if object.properties().values().any(parquet_value_contains_typed_integer))
-}
-
-const UITABLE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "uitable-explicit-gpu-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "uitable with explicitly GPU-resident data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:UitableExplicitGpuDataExtension"),
-};
-#[cfg(test)]
-pub const UITABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [UITABLE_EXPLICIT_GPU_EXTENSION];
-#[cfg(test)]
-const UITABLE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The Data property accepts every numeric type and retains the exact integer class, shape, and values in the UI component object.",
-    }];
-#[cfg(test)]
-pub const UITABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "ui = uitable(..., Data=integer_data, ...)",
-        inputs: &UITABLE_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host integer data remains exact in the Data property. Automatically resident data gathers transparently through its owner; explicit gpuArray data is a separately gated extension.",
-    }];
 
 fn construct_descriptor_object(
     runtime: Option<&crate::context::RuntimeContext>,

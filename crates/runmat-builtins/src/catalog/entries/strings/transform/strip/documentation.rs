@@ -61,7 +61,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[SOURCE],
-        verification: &[
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained strip verification", location: "builtins::strings::transform::strip::tests::strip_cell_array_mixed_content" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "container, direction and character-set semantics", location: "builtins::strings::transform::strip::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "typed text facts", location: "crates/runmat-builtins/src/catalog/entries/strings/transform/strip/inference.rs" },
         ],

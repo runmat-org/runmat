@@ -23,6 +23,18 @@ struct PortableSourceEntry<'a> {
 }
 
 impl ExecutableUnit {
+    /// Publish the compiler's typed primary-source role consistently across
+    /// interactive, precompiled and deferred graph products.
+    pub(crate) fn portable_primary_source_envelope(
+        &self,
+        current: &std::collections::HashSet<runmat_hir::FunctionId>,
+        primary: Option<runmat_types::ProgramSourceId>,
+        interop: runmat_types::InteropManifest,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        super::SourceProductSelection::classify(self, current, primary)?
+            .envelope(self, current, primary, interop)
+    }
+
     /// Build the complete physical-path-free executable product for package,
     /// test, browser, remote, native-codegen, and cache consumers.
     pub fn portable_envelope(&self) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
@@ -140,6 +152,18 @@ impl ExecutableUnit {
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
         self.portable_envelope_with_entrypoint(interop, Some(included), |unit| {
             super::portable_entrypoint::resolve_declaration_source(unit, class, primary_source)
+        })
+    }
+
+    pub(crate) fn portable_constructor_envelope_with_interop(
+        &self,
+        class: &runmat_types::ClassIdentity,
+        primary_source: runmat_types::ProgramSourceId,
+        interop: runmat_types::InteropManifest,
+        included: &std::collections::HashSet<runmat_hir::FunctionId>,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        self.portable_envelope_with_entrypoint(interop, Some(included), |unit| {
+            super::portable_entrypoint::resolve_constructor_source(unit, class, primary_source)
         })
     }
 

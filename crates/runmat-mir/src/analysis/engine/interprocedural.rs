@@ -198,6 +198,7 @@ fn collect_argument_diagnostics(
                     "argument is incompatible with the callee's arguments block",
                     span,
                 )
+                .with_runtime_check()
                 .with_primary_label(format!(
                     "argument {} cannot satisfy its declared contract",
                     index + 1

@@ -17,12 +17,14 @@ fn session_binding_rejects_text_and_accepts_explicit_handle() {
             ..Default::default()
         },
     )]));
-    let binding = SessionCallableBinding::named(0, helper, "helper".into());
+    let binding =
+        SessionCallableBinding::named(0, helper, "helper".into(), FunctionReferenceKind::Local);
     assert!(remap_session_entrypoint(&mut bytecode, &HashMap::new(), &[binding]).is_err());
     assert!(matches!(bytecode.instructions[0], Instr::LoadCharRow(_)));
 
     bytecode.instructions[0] = Instr::CreateFunctionHandle("helper".into());
-    let binding = SessionCallableBinding::named(0, helper, "helper".into());
+    let binding =
+        SessionCallableBinding::named(0, helper, "helper".into(), FunctionReferenceKind::Local);
     remap_session_entrypoint(&mut bytecode, &HashMap::new(), &[binding])
         .expect("explicit source handle may bind");
     assert!(matches!(

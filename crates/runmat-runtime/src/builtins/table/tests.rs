@@ -1160,7 +1160,14 @@ fn readtable_imports_xlsx_sheet_and_range() {
 
 #[test]
 fn spreadsheet_import_options_registers_public_descriptor() {
-    assert!(runmat_builtins::builtin_function_by_name("spreadsheetImportOptions").is_some());
+    let entry = &runmat_builtins::SPREADSHEET_IMPORT_OPTIONS_CATALOG_ENTRY;
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name(entry.identity.name);
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(
+        bindings[0].identity,
+        entry.binding_identity(&entry.bindings[0])
+    );
+    assert!(runmat_builtins::builtin_function_by_name(entry.identity.name).is_none());
     let labels = SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR
         .signatures
         .iter()
@@ -1299,7 +1306,14 @@ fn documented_table_import_integer_controls_remain_enabled_in_matlab_mode() {
 
 #[test]
 fn detect_import_options_registers_public_descriptor() {
-    assert!(runmat_builtins::builtin_function_by_name("detectImportOptions").is_some());
+    let entry = &runmat_builtins::DETECT_IMPORT_OPTIONS_CATALOG_ENTRY;
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name(entry.identity.name);
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(
+        bindings[0].identity,
+        entry.binding_identity(&entry.bindings[0])
+    );
+    assert!(runmat_builtins::builtin_function_by_name(entry.identity.name).is_none());
     let labels = DETECT_IMPORT_OPTIONS_DESCRIPTOR
         .signatures
         .iter()
@@ -3860,7 +3874,7 @@ fn parquet_datastore_rejects_typed_integer_arguments_before_gather() {
 }
 
 #[test]
-fn legacy_constructor_contracts_remain_conserved_until_catalog_cutover() {
+fn canonical_constructor_contracts_are_shared_with_runtime() {
     assert_eq!(TIMERANGE_DESCRIPTOR.signatures.len(), 1);
     assert_eq!(TIMERANGE_EXTENSIONS.len(), 2);
     assert_eq!(TIMERANGE_INTEGER_CAPABILITIES.len(), 1);
@@ -3870,6 +3884,70 @@ fn legacy_constructor_contracts_remain_conserved_until_catalog_cutover() {
     );
     assert_eq!(UITABLE_EXTENSIONS.len(), 1);
     assert_eq!(UITABLE_INTEGER_CAPABILITIES.len(), 1);
+}
+
+#[test]
+fn rowfilter_rejects_surplus_payload_before_gather_and_keeps_default_forms() {
+    let Value::Object(empty) = block_on(rowfilter_builtin(Vec::new())).unwrap() else {
+        panic!("expected rowfilter descriptor");
+    };
+    assert_eq!(empty.properties().get("Predicate"), Some(&Value::from("")));
+    let Value::Cell(variables) = empty.properties().get("Variables").unwrap() else {
+        panic!("expected empty Variables");
+    };
+    assert!(variables.data().is_empty());
+    let Value::Object(source) = block_on(rowfilter_builtin(vec![Value::from("A")])).unwrap() else {
+        panic!("expected source descriptor");
+    };
+    assert_eq!(
+        source.properties().get("Variables"),
+        Some(&Value::from("A"))
+    );
+    let allocation = unregistered_table_allocation(vec![1, 1]);
+    let error = block_on(rowfilter_builtin(vec![
+        Value::from("A"),
+        Value::from("@gt0"),
+        Value::GpuTensor(allocation.handle.clone()),
+    ]))
+    .expect_err("surplus argument must not be discarded or gathered");
+    assert!(error.message().contains("at most a source"));
+    assert!(!error.message().contains("provider"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn parquet_datastore_rejects_sparse_complex_and_nested_integer_storage() {
+    let sparse = Value::SparseTensor(
+        runmat_value::SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .unwrap(),
+    );
+    let complex = Value::ComplexTensor(
+        ComplexTensor::new_integer(
+            runmat_value::IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap(),
+    );
+    for value in [sparse, complex] {
+        let nested = Value::Cell(CellArray::new(vec![value.clone()], 1, 1).unwrap());
+        for argument in [value, nested] {
+            let error = block_on(parquet_datastore_builtin(vec![argument]))
+                .expect_err("native integer locations reject before descriptor construction");
+            assert!(error.message().contains("typed-integer"));
+        }
+    }
 }
 
 #[test]
@@ -3893,6 +3971,16 @@ fn parquet_datastore_records_supported_double_controls_and_rejects_unknown_optio
         datastore.properties().get("BlockSize"),
         Some(&Value::Num(1_000_000.0))
     );
+    for property in ["Files", "ReadSize", "BlockSize"] {
+        assert!(
+            crate::class_registry::lookup_property(
+                &PARQUET_DATASTORE_CLASS.owned(),
+                &property.into(),
+            )
+            .is_some(),
+            "constructor property must be registered: {property}"
+        );
+    }
 
     let error = block_on(parquet_datastore_builtin(vec![
         Value::from("sample.parquet"),
@@ -5022,9 +5110,10 @@ fn timerange_defaults_to_half_open_and_orders_wide_integer_row_times_exactly() {
         Value::Int(IntValue::U64(base + 2)),
     ]))
     .unwrap();
+    let timetable = object(tt);
     let selected = object(
         table_paren_get(
-            &object(tt),
+            &timetable,
             &Value::Cell(CellArray::new(vec![selector, Value::from(":")], 1, 2).unwrap()),
         )
         .unwrap(),
@@ -5032,6 +5121,27 @@ fn timerange_defaults_to_half_open_and_orders_wide_integer_row_times_exactly() {
     match table_member_get(&selected, &Value::from("X")).unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
         other => panic!("expected exact half-open range result, got {other:?}"),
+    }
+    let closed = block_on(timerange_builtin(vec![
+        Value::Int(IntValue::U64(base + 1)),
+        Value::Int(IntValue::U64(base + 2)),
+        Value::from(" CLOSED "),
+    ]))
+    .unwrap();
+    assert_eq!(
+        object(closed.clone()).properties().get("Inclusivity"),
+        Some(&Value::from("closed"))
+    );
+    let selected = object(
+        table_paren_get(
+            &timetable,
+            &Value::Cell(CellArray::new(vec![closed, Value::from(":")], 1, 2).unwrap()),
+        )
+        .unwrap(),
+    );
+    match table_member_get(&selected, &Value::from("X")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0, 30.0]),
+        other => panic!("expected normalized closed range result, got {other:?}"),
     }
 }
 

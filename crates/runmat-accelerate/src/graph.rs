@@ -91,12 +91,7 @@ impl AccelGraph {
             return None;
         }
         for (position, input) in producer.inputs.iter().enumerate() {
-            let Some(ValueInfo {
-                origin: ValueOrigin::Constant,
-                constant: Some(BuiltinValue::Num(source)),
-                ..
-            }) = self.value(*input)
-            else {
+            let Some(BuiltinValue::Num(source)) = self.source_literal_constant(*input) else {
                 return None;
             };
             let row = position / *columns;
@@ -108,22 +103,21 @@ impl AccelGraph {
         info.constant.as_ref()
     }
 
-    /// Exact vector control represented by a proved folded source array.
-    pub fn folded_literal_numeric_vector(&self, id: ValueId) -> Option<&BuiltinValue> {
+    /// An immutable source array, not a constant fact on a live binding.
+    pub fn source_literal_array(&self, id: ValueId) -> Option<&BuiltinValue> {
         let value = self.exact_folded_literal_array(id)?;
         let ValueOrigin::NodeOutput { node, .. } = self.value(id)?.origin else {
             return None;
         };
-        if self.var_binding(id).is_some()
-            || self.node_binding(node).is_some()
-            || self
-                .node(node)?
-                .inputs
-                .iter()
-                .any(|input| self.source_literal_constant(*input).is_none())
-        {
+        if self.var_binding(id).is_some() || self.node_binding(node).is_some() {
             return None;
         }
+        Some(value)
+    }
+
+    /// Exact vector control represented by a proved folded source array.
+    pub fn folded_literal_numeric_vector(&self, id: ValueId) -> Option<&BuiltinValue> {
+        let value = self.source_literal_array(id)?;
         let BuiltinValue::Tensor(tensor) = value else {
             return None;
         };
@@ -419,6 +413,20 @@ mod tests {
             node_bindings: HashMap::new(),
         };
         assert!(graph.folded_literal_numeric_vector(2).is_some());
+        graph.var_bindings.insert(
+            0,
+            VarBinding {
+                kind: VarKind::Global,
+                index: 9,
+            },
+        );
+        assert!(
+            graph.exact_folded_literal_array(2).is_none(),
+            "a live child binding is not a source literal"
+        );
+        assert!(graph.source_literal_array(2).is_none());
+        graph.var_bindings.remove(&0);
+        assert!(graph.source_literal_array(2).is_some());
         graph.nodes[0].tags.push(AccelGraphTag::Elementwise);
         assert!(graph.folded_literal_numeric_vector(2).is_none());
         graph.nodes[0].tags.pop();
@@ -436,6 +444,7 @@ mod tests {
             },
         );
         assert!(graph.exact_folded_literal_array(2).is_some());
+        assert!(graph.source_literal_array(2).is_none());
         assert!(graph.folded_literal_numeric_vector(2).is_none());
     }
 
@@ -494,6 +503,18 @@ mod tests {
             )]),
         };
         assert!(graph.exact_folded_unary_scalar(1).is_some());
+        graph.var_bindings.insert(
+            0,
+            VarBinding {
+                kind: VarKind::Global,
+                index: 7,
+            },
+        );
+        assert!(
+            graph.exact_folded_unary_scalar(1).is_none(),
+            "a live cast input is not a source literal"
+        );
+        graph.var_bindings.remove(&0);
         graph.values[1].constant = Some(BuiltinValue::Tensor(
             runmat_value::Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap(),
         ));

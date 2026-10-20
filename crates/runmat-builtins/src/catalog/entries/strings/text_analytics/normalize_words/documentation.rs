@@ -1,6 +1,14 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "updatedDocuments = normalizeWords(documents)\nupdatedWords = normalizeWords(words)\nupdatedWords = normalizeWords(words, 'Language', language)\n___ = normalizeWords(___, 'Style', style)",
+        "`updatedDocuments` is a tokenizedDocument compatibility object. `updatedWords` preserves string-array shape and cell-array shape. Character arrays preserve row count and are repadded after normalization.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "`words` may be a string scalar, string array, character vector, character array, or cell array containing scalar string or character-vector elements.",
+        "`language` must be `\"en\"` or `\"de\"` for standalone word input.",
+        "`style` must be `\"stem\"` or `\"lemma\"`; `\"lemma\"` supports English in this compatibility slice.",
+    ] },
     BuiltinDocumentationSection {
         heading: "Text forms and controls",
         paragraphs: &[
@@ -42,7 +50,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
         id: "documents", title: "Normalize tokenized documents",
         program: "documents = tokenizedDocument(\"a strongly worded collection of words\"); newDocuments = normalizeWords(documents)",
-        display_output: Some("newDocuments retains tokenizedDocument shape with normalized word tokens"),
+        display_output: Some("`newDocuments` is a tokenizedDocument containing `a strongli word collect of word`."),
         compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(newDocuments), size(documents)));" },
     },

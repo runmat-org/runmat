@@ -1,6 +1,13 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported form", paragraphs: &[
+        "tdetails = tokenDetails(documents)",
+        "`tdetails` is a table.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "The returned table has one row per token in document order.",
+        "RunMat's table variable storage preserves MATLAB-compatible column names.",
+    ] },
     BuiltinDocumentationSection { heading: "Token table", paragraphs: &[
         "tokenDetails(documents) builds a host table for a tokenizedDocument object. Normally it contains Token, DocumentNumber, LineNumber, Type, and Language. Pre-tokenized TokenizeMethod none documents initially contain only Token and DocumentNumber; addTypeDetails adds Type.",
         "addSentenceDetails inserts SentenceNumber after DocumentNumber. addPartOfSpeechDetails adds PartOfSpeech after Language. addEntityDetails adds Entity after PartOfSpeech when present, otherwise after Language. addLemmaDetails adds Lemma after Language; with multiple details, PartOfSpeech precedes Entity and Entity precedes Lemma. addDependencyDetails adds Head and Dependency after other language details.",
@@ -62,7 +69,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("tokenDetails"), slug: Some("tokenDetails"),
     summary: "Return token details for tokenizedDocument objects.",
     description: "tokenDetails returns a table describing tokens and available annotations in a tokenizedDocument object.",
-    keywords: &["tokenDetails", "tokenizedDocument", "text analytics", "token types"],
+    keywords: &["tokenDetails", "tokenizedDocument", "text analytics", "token types", "table"],
     related: &["tokenizedDocument", "addTypeDetails", "addSentenceDetails", "addPartOfSpeechDetails", "addEntityDetails", "addLemmaDetails", "addDependencyDetails"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
     faqs: &[

@@ -1,11 +1,19 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "updatedDocuments = addPartOfSpeechDetails(documents)\nupdatedDocuments = addPartOfSpeechDetails(documents, Name, Value)",
+        "`updatedDocuments` is a `tokenizedDocument` compatibility object.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "`Name, Value` pairs may include `RetokenizeMethod`, `Abbreviations`, and `DiscardKnownValues`.",
+        "`DiscardKnownValues` must be a logical scalar; numeric and integer 0/1 values are rejected.",
+        "Use `tokenDetails(updatedDocuments)` to view the resulting `PartOfSpeech` table column.",
+    ] },
     BuiltinDocumentationSection { heading: "Part-of-speech metadata", paragraphs: &[
         "addPartOfSpeechDetails(documents) adds part-of-speech tags to a RunMat tokenizedDocument object. tokenDetails exposes the resulting PartOfSpeech column.",
         "RetokenizeMethod defaults to part-of-speech and handles common English contractions, wanna/gonna, ellipses, and dotted initialisms; none keeps existing tokens. Abbreviations are forwarded to the sentence-detail prepass when sentence details are missing.",
         "DiscardKnownValues defaults to logical false: existing known tags are preserved and missing entries are filled. Logical true recomputes every stored tag; numeric 0 or 1 is not accepted as a logical flag.",
-        "RunMat uses deterministic English and German classifiers for pronouns, determiners, conjunctions, adpositions, particles, auxiliary verbs, verbs, adverbs, adjectives, nouns, numerals, punctuation, and other tokens. Existing Japanese or Korean metadata uses token-class-aware fallback tags and a conservative noun fallback for letters. Public MeCab-backed construction and exact MathWorks statistical-model parity remain open.",
+        "RunMat uses deterministic English and German classifiers for pronouns, determiners, coordinate and subordinate conjunctions, adpositions, particles, auxiliary verbs, verbs, adverbs, adjectives, nouns, numerals, punctuation, and other tokens. Existing Japanese or Korean metadata uses token-class-aware fallback tags and a conservative noun fallback for letters. Public MeCab-backed construction and exact MathWorks statistical-model parity remain open.",
     ] },
     BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
         "The builtin retokenizes host text and updates host tokenizedDocument metadata. It has no provider kernel or fusion path.",

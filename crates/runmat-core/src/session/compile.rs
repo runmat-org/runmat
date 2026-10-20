@@ -17,7 +17,7 @@ fn fatal_frontend_diagnostic(
 ) -> Option<&runmat_hir::HirDiagnostic> {
     diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.severity == runmat_hir::HirDiagnosticSeverity::Error)
+        .find(|diagnostic| diagnostic.blocks_execution())
 }
 
 fn bind_frontend_diagnostic(
@@ -1697,7 +1697,7 @@ impl RunMatSession {
         if current_registry.functions.is_empty() {
             bytecode.function_registry = execution_registry;
             bytecode.bound_functions = bytecode.function_registry.functions.clone();
-            let bindings = semantic_function_bindings(bytecode)?;
+            let bindings = semantic_function_bindings(bytecode, &HashSet::new())?;
             runmat_vm::remap_session_entrypoint(bytecode, &HashMap::new(), &bindings).map_err(
                 |error| {
                     RunError::Runtime(
@@ -1811,7 +1811,7 @@ impl RunMatSession {
 
         bytecode.function_registry = execution_registry;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
-        let bindings = semantic_function_bindings(bytecode)?;
+        let bindings = semantic_function_bindings(bytecode, &remap.values().copied().collect())?;
         runmat_vm::remap_session_entrypoint(bytecode, &remap, &bindings).map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(format!("session entrypoint remap: {error}"))
@@ -1939,6 +1939,7 @@ impl RunMatSession {
 
 fn semantic_function_bindings(
     bytecode: &runmat_vm::Bytecode,
+    current: &HashSet<runmat_hir::FunctionId>,
 ) -> Result<Vec<runmat_vm::SessionCallableBinding>, RunError> {
     let registry = &bytecode.function_registry;
     let mut bindings = Vec::new();
@@ -1952,6 +1953,7 @@ fn semantic_function_bindings(
                         pc,
                         function,
                         name.clone(),
+                        session_reference_kind(function, current),
                     ));
                 }
                 continue;
@@ -1974,11 +1976,23 @@ fn semantic_function_bindings(
                     pc,
                     function,
                     name.clone(),
+                    session_reference_kind(function, current),
                 ));
             }
         }
     }
     Ok(bindings)
+}
+
+fn session_reference_kind(
+    function: runmat_hir::FunctionId,
+    current: &HashSet<runmat_hir::FunctionId>,
+) -> runmat_vm::FunctionReferenceKind {
+    if current.contains(&function) {
+        runmat_vm::FunctionReferenceKind::Local
+    } else {
+        runmat_vm::FunctionReferenceKind::External
+    }
 }
 #[cfg(test)]
 mod source_discovery_tests {

@@ -2,20 +2,24 @@
 mod graph_codec;
 
 #[test]
-fn portable_compilation_rejects_proven_matrix_shape_error() {
+fn portable_compilation_retains_proven_runtime_contract_diagnostics() {
     let source = "A = rand(3,4); B = rand(3,4); C = A * B;";
     let mut session = crate::RunMatSession::with_options(false, false).expect("session");
-    let error = futures::executor::block_on(session.compile_executable_unit(
+    let unit = futures::executor::block_on(session.compile_executable_unit(
         crate::ExecutableSource::new("fixture", "main.m", source),
         None,
     ))
-    .expect_err("proven incompatible matrix dimensions must not seal a product");
-    let crate::RunError::Compile(error) = error else {
-        panic!("canonical frontend diagnostic must remain a typed compile error");
-    };
-    assert_eq!(error.identifier.as_deref(), Some("RM-TYPE-MATMUL"));
+    .expect("a failing runtime operation is executable and may have a caller's handler");
+    let error = unit
+        .analysis()
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL")
+        .expect("static shape error must remain available to analysis consumers");
+    assert_eq!(error.severity, runmat_hir::HirDiagnosticSeverity::Error);
+    assert!(!error.blocks_execution());
     assert!(error.message.contains("inner dimensions 4 and 3"));
-    let span = error.span.expect("MIR diagnostic keeps its source span");
+    let span = error.primary.span;
     assert!(source[span.start..span.end].contains("A * B"));
 }
 

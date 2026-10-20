@@ -463,21 +463,11 @@ impl SelectedGraphPrimary {
                     .unit
                     .as_ref()
                     .ok_or_else(|| "retained graph product has no indexed V3 bytes".to_string())?;
-                let mut envelope = if unit.bytecode().instructions.is_empty() {
-                    let primary = self.primary_source.ok_or_else(|| {
-                        "definition-only graph product has no selected primary source".to_string()
-                    })?;
-                    unit.portable_envelope_for_current_definition_with_interop(
-                        &self.current_functions,
-                        primary,
-                        self.interop.clone(),
-                    )?
-                } else {
-                    unit.portable_script_envelope_with_current_definitions(
-                        self.interop.clone(),
-                        &self.current_functions,
-                    )?
-                };
+                let mut envelope = unit.portable_primary_source_envelope(
+                    &self.current_functions,
+                    self.primary_source,
+                    self.interop.clone(),
+                )?;
                 if let Some(section) = static_import_section_for(&self.static_targets)? {
                     envelope.manifest.optional_sections.push(section);
                     envelope

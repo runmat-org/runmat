@@ -149,14 +149,34 @@ mod tests {
             remap_session_entrypoint(
                 &mut bytecode,
                 &HashMap::new(),
-                &[SessionCallableBinding::constructor(0, id, class.into())],
+                &[SessionCallableBinding::constructor(
+                    0,
+                    id,
+                    class.into(),
+                    crate::FunctionReferenceKind::External,
+                )],
             )
             .expect("typed constructor handle seals");
             assert!(matches!(
                 &bytecode.instructions[0],
-                Instr::CreateBoundFunctionHandle(function, name, _)
-                | Instr::CreateExternalBoundFunctionHandle(function, name, _)
+                Instr::CreateExternalBoundFunctionHandle(function, name, _)
                     if *function == id && name == class
+            ));
+            bytecode.instructions[0] = Instr::CreateFunctionHandle(class.into());
+            remap_session_entrypoint(
+                &mut bytecode,
+                &HashMap::new(),
+                &[SessionCallableBinding::constructor(
+                    0,
+                    id,
+                    class.into(),
+                    crate::FunctionReferenceKind::Local,
+                )],
+            )
+            .expect("the same spelling can select a current constructor");
+            assert!(matches!(
+                &bytecode.instructions[0],
+                Instr::CreateBoundFunctionHandle(function, name, _) if *function == id && name == class
             ));
         }
     }

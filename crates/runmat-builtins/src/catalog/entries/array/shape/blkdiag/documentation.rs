@@ -53,7 +53,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "blkdiag runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "blkdiag semantic and provider tests", location: "crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs" }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained blkdiag verification", location: "builtins::array::shape::blkdiag::tests::gpu_numeric_inputs_roundtrip_to_gpu" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained blkdiag verification", location: "builtins::array::shape::blkdiag::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "blkdiag semantic and provider tests", location: "crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs" }],
         notes: &[],
     },
     introduced: None,

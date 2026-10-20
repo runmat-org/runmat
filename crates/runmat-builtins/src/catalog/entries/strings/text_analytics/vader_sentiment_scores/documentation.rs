@@ -1,6 +1,15 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "compoundScores = vaderSentimentScores(documents)\ncompoundScores = vaderSentimentScores(documents, Name, Value)\n[compoundScores,positiveScores,negativeScores,neutralScores] = vaderSentimentScores(___)",
+        "Numeric column vectors with one score per input document.",
+        "`SentimentLexicon` must be a table with `Token` and `SentimentScore` variables.",
+        "`Token` entries in a custom lexicon must be nonempty lowercase strings.",
+        "`SentimentScore` entries must be finite single, double, or native integer values in [-4, 4].",
+        "`Boosters`, `Dampeners`, and `Negations` must contain at least one word or n-gram when supplied.",
+        "Only English `tokenizedDocument` inputs are accepted.",
+    ] },
     BuiltinDocumentationSection { heading: "Inputs and sentiment rules", paragraphs: &[
         "vaderSentimentScores accepts an English RunMat tokenizedDocument. One output is the compound score; four requested outputs additionally return positive, negative and neutral proportions. Each is a host double column vector with one entry per document.",
         "Compound scores lie in [-1,1] and apply booster, dampener, negation, capitalization and punctuation modifiers to token sentiment. The compact default English lexicon covers common scripts; domain-specific or full-coverage scoring should pass a SentimentLexicon table. Exact MATLAB VADER scoring parity remains open.",
@@ -20,7 +29,7 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Impl
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("vaderSentimentScores"), slug: Some("vaderSentimentScores"), summary: "Score English tokenized documents with VADER-style rules.",
     description: "vaderSentimentScores returns compound and optional positive, negative and neutral host scores for English tokenizedDocument inputs.",
-    keywords: &["vaderSentimentScores", "VADER", "sentiment", "tokenizedDocument"], related: &["tokenizedDocument", "tokenDetails"], sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
+    keywords: &["vaderSentimentScores", "VADER", "sentiment", "tokenizedDocument", "text analytics"], related: &["tokenizedDocument", "tokenDetails"], sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Does RunMat include MATLAB's full VADER lexicon?", answer: "Not yet. It includes a compact default lexicon and supports custom SentimentLexicon tables." },
         BuiltinDocumentationFaq { question: "Can I provide modifier lists?", answer: "Yes. Boosters, Dampeners and Negations are applied to sentiment-bearing tokens." },

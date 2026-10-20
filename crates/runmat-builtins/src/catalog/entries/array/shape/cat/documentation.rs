@@ -62,7 +62,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "cat runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/cat.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "cat semantic and provider tests", location: "crates/runmat-runtime/src/builtins/array/shape/cat.rs" }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained cat verification", location: "builtins::array::shape::cat::tests::cat_gpu_roundtrip" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained cat verification", location: "builtins::array::shape::cat::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "cat semantic and provider tests", location: "crates/runmat-runtime/src/builtins/array/shape/cat.rs" }],
         notes: &[],
     },
     introduced: None,

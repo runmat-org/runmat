@@ -1,6 +1,15 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "counts = encode(bag, documents)\ncounts = encode(bag, words)\ncounts = encode(___, \"DocumentsIn\", \"rows\")\ncounts = encode(___, \"DocumentsIn\", \"columns\")\nC = encode(___, \"ForceCellOutput\", true)",
+        "`counts` is a sparse count matrix. `C` is a 1-by-1 cell containing that sparse matrix.",
+        "`bag` must be a scalar RunMat `bagOfWords` or `bagOfNgrams` object.",
+        "`documents` must be a RunMat `tokenizedDocument` object.",
+        "Non-tokenized input must be a row word vector and is treated as one document.",
+        "`DocumentsIn` must be `'rows'` or `'columns'`.",
+        "`ForceCellOutput` must be a logical scalar.",
+    ] },
     BuiltinDocumentationSection { heading: "Inputs and orientation", paragraphs: &[
         "encode accepts a scalar RunMat bagOfWords or bagOfNgrams object and either tokenizedDocument input or a row word vector treated as one document. Integer and numeric model/document values are not converted to text and reject before provider access.",
         "The result is a host sparse double count matrix; documents are rows and bag terms are columns by default. DocumentsIn='columns' transposes that orientation. Unrecognized words or n-grams are ignored; bagOfNgrams uses the stored n-gram rows and their scan lengths.",
@@ -19,7 +28,7 @@ const EXAMPLES: &[BuiltinExample] = &[
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/text_analytics/encode.rs") };
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("encode"), slug: Some("encode"), summary: "Encode documents against a bag model as sparse counts.", description: "encode creates a host sparse double count matrix from bagOfWords or bagOfNgrams and tokenized documents or row words.",
-    keywords: &["encode", "bagOfWords", "bagOfNgrams", "text analytics", "sparse"], related: &["bagOfWords", "bagOfNgrams", "tokenizedDocument"], sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
+    keywords: &["encode", "bagOfWords", "bagOfNgrams", "text analytics", "sparse", "count matrix"], related: &["bagOfWords", "bagOfNgrams", "tokenizedDocument"], sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Does encode return sparse output?", answer: "Yes. Both supported bag models produce a host sparse double matrix." },
         BuiltinDocumentationFaq { question: "Does ForceCellOutput implement bag object arrays?", answer: "No. It supports a scalar-bag 1-by-1 cell wrapper only." },

@@ -1,6 +1,12 @@
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
+    BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &[
+        "words = stopWords\nwords = stopWords('Language', language)",
+        "`words` is an `N x 1` string array.",
+        "`language` must be `\"en\"`, `\"ja\"`, `\"de\"`, or `\"ko\"`.",
+        "The option name is case-insensitive and must be `Language`.",
+    ] },
     BuiltinDocumentationSection {
         heading: "Languages and output",
         paragraphs: &[
@@ -23,7 +29,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         id: "english-default",
         title: "Get English stop words",
         program: "words = stopWords",
-        display_output: Some("words = N-by-1 string array of English stop words"),
+        display_output: Some("words = N×1 string\n    \"a\"\n    \"about\"\n    \"above\"\n    ..."),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
@@ -36,7 +42,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         id: "german-language",
         title: "Get German stop words",
         program: "words = stopWords('Language','de')",
-        display_output: Some("words = N-by-1 string array including \"ab\" and \"aber\""),
+        display_output: Some("words = N×1 string\n    \"ab\"\n    \"aber\"\n    \"alle\"\n    ..."),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,

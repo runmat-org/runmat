@@ -302,6 +302,8 @@ pub fn analyze_program_with_catalog(
     });
     diagnostics.dedup_by(|left, right| {
         left.code == right.code
+            && left.severity == right.severity
+            && left.execution == right.execution
             && left.primary.source == right.primary.source
             && left.primary.span == right.primary.span
             && left.message == right.message
@@ -845,10 +847,20 @@ mod tests {
     #[test]
     fn includes_canonical_mir_fact_diagnostics() {
         let analysis = analyze("a = ones(2,3); b = ones(4,2); c = a * b;");
-        assert!(analysis
+        let diagnostic = analysis
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL"));
+            .find(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL")
+            .expect("retain the static matrix contract failure");
+        assert!(
+            analysis.has_errors(),
+            "check and editor severity is preserved"
+        );
+        assert!(!diagnostic.blocks_execution());
+        assert!(
+            analysis.bytecode.is_some(),
+            "runtime checks remain executable"
+        );
     }
 
     #[test]

@@ -1,5 +1,8 @@
 use crate::*;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/runtime_contract_transfers.rs"]
+mod runtime_contract_transfers;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/executable_roots.rs"]
 mod executable_roots;
 #[path = "tests/portable_entrypoint.rs"]
@@ -15622,19 +15625,15 @@ fn distributed_eps_maps_values_and_retains_scalar_like_owner() {
 #[test]
 fn distributed_builtin_policy_rejects_unclassified_operations() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let error = execute_text_request(
+    let outcome = execute_text_request(
         &mut session,
         "distributedSource = distributed([1, 2]); unsupported = full(distributedSource);",
     )
-    .expect_err("known distributed inputs are rejected by the canonical full contract");
-    let RunError::Compile(error) = error else {
-        panic!("expected the static full input diagnostic");
-    };
-    assert_eq!(error.identifier.as_deref(), Some("RM-CATALOG-FULL-INPUT"));
-    assert_eq!(
-        error.message,
-        "full requires a numeric, logical, or character array"
-    );
+    .expect("executable code retains the runtime placement guard");
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|diagnostic| { diagnostic.code == "RunMat:parallel:DistributedBuiltinUnsupported" }));
 
     // Direct session-owned calls still require the runtime placement guard
     // when there is no statically analyzed input fact.

@@ -48,7 +48,7 @@ BuiltinDocumentationLink { label: "range", target: BuiltinDocumentationLinkTarge
 BuiltinDocumentationLink { label: "true", target: BuiltinDocumentationLinkTarget::Documentation("./true") },
 BuiltinDocumentationLink { label: "zeros", target: BuiltinDocumentationLinkTarget::Documentation("./zeros") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/randperm.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randperm.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/randperm.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randperm.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained randperm verification", location: "builtins::array::creation::randperm::tests::randperm_gpu_like_roundtrip" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained randperm verification", location: "builtins::array::creation::randperm::tests" }, ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

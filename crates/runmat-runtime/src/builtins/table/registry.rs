@@ -37,7 +37,7 @@ pub fn ensure_table_class_registered() {
                 "ReadMode",
             ],
         );
-        register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files"]);
+        register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files", "ReadSize", "BlockSize"]);
         register_plain_object_class(UITABLE_CLASS, &["Data", "ColumnName", "RowName"]);
     });
 }

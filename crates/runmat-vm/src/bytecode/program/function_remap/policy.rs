@@ -4,6 +4,7 @@ use runmat_hir::FunctionId;
 use runmat_types::CallableIdentity;
 
 use super::grammar::with_instruction_function_references;
+use super::reference_sites::FunctionReferenceKind;
 use crate::bytecode::{
     Bytecode, BytecodeSourceRef, BytecodeSubscriptStep, FunctionBytecode, Instr,
 };
@@ -222,17 +223,21 @@ fn remap_session_entrypoint_with_policy(
     for instruction in &mut next.instructions {
         remap_instruction_with_policy(instruction, &context);
     }
-    let mut bound_pcs = HashMap::<usize, (FunctionId, &str, SessionCallableBindingKind)>::new();
+    let mut bound_pcs = HashMap::new();
     for binding in bindings {
-        if let Some((function, name, kind)) = bound_pcs.insert(
+        if let Some((function, name, kind, reference)) = bound_pcs.insert(
             binding.pc,
             (
                 binding.function,
                 binding.display_name.as_str(),
                 binding.kind,
+                binding.reference,
             ),
         ) {
-            if function == binding.function && name == binding.display_name && kind == binding.kind
+            if function == binding.function
+                && name == binding.display_name
+                && kind == binding.kind
+                && reference == binding.reference
             {
                 continue;
             }
@@ -272,8 +277,9 @@ fn remap_session_entrypoint_with_policy(
             .map_or(runmat_types::FunctionSourceRole::Unknown, |body| {
                 body.source_role
             });
-        let external = matches!(instruction, Instr::CreateExternalFunctionHandle(_));
-        *instruction = if external {
+        // Source spelling does not establish the definition's identity domain:
+        // an unqualified constructor can belong to a prior session product.
+        *instruction = if binding.reference == FunctionReferenceKind::External {
             Instr::CreateExternalBoundFunctionHandle(
                 binding.function,
                 binding.display_name.clone(),
@@ -305,6 +311,7 @@ pub struct SessionCallableBinding {
     pub function: FunctionId,
     pub display_name: String,
     kind: SessionCallableBindingKind,
+    reference: FunctionReferenceKind,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -314,21 +321,33 @@ enum SessionCallableBindingKind {
 }
 
 impl SessionCallableBinding {
-    pub fn named(pc: usize, function: FunctionId, display_name: String) -> Self {
+    pub fn named(
+        pc: usize,
+        function: FunctionId,
+        display_name: String,
+        reference: FunctionReferenceKind,
+    ) -> Self {
         Self {
             pc,
             function,
             display_name,
             kind: SessionCallableBindingKind::Named,
+            reference,
         }
     }
 
-    pub fn constructor(pc: usize, function: FunctionId, display_name: String) -> Self {
+    pub fn constructor(
+        pc: usize,
+        function: FunctionId,
+        display_name: String,
+        reference: FunctionReferenceKind,
+    ) -> Self {
         Self {
             pc,
             function,
             display_name,
             kind: SessionCallableBindingKind::Constructor,
+            reference,
         }
     }
 }
