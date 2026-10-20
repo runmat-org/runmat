@@ -13,7 +13,10 @@ pub const BAG_OF_NGRAMS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry
     category: "strings/text_analytics",
     // Preserve docs/builtins/reference/bagOfNgrams.json as the prose authority
     // until the documentation exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation::EMPTY,
+    documentation: BuiltinDocumentation {
+        summary: "Create bag-of-n-grams model objects.",
+        ..BuiltinDocumentation::EMPTY
+    },
     descriptor: &BAG_OF_NGRAMS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

@@ -20,6 +20,7 @@ pub(super) fn compute_init_dataflow(
 ) -> InitDataflowResult {
     let local_count = body.locals.len();
     let current_bindings = current_scope_bindings(body);
+    let spmd_exits = crate::analysis::parallel::spmd_exit_projections(body);
     if body.blocks.is_empty() {
         return InitDataflowResult {
             in_states: Vec::new(),
@@ -112,6 +113,16 @@ pub(super) fn compute_init_dataflow(
                 } else {
                     output.clone()
                 };
+            // The client owns a Composite even when a worker entry is undefined.
+            // Worker-local reads still use the ordinary initialization analysis.
+            for projection in spmd_exits
+                .iter()
+                .filter(|exit| exit.crosses(block.id, successor))
+            {
+                for local in &projection.outputs {
+                    edge_output[local.0] = InitFact::DefinitelyAssigned;
+                }
+            }
             if let MirTerminatorKind::TryCatch {
                 catch_block,
                 catch_binding: Some(binding),
@@ -299,12 +310,13 @@ fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
             body_block,
             exit_block,
             ..
-        }
-        | MirTerminatorKind::Spmd {
-            body_block,
-            exit_block,
-            ..
         } => vec![*body_block, *exit_block],
+        // Unlike a loop, a successful SPMD dispatch cannot skip its body:
+        // admission requires a nonempty gang, or raises an error. The header's
+        // client exit is a dispatch continuation, not a zero-iteration edge.
+        // Keep conditional assignments inside the body conservative by reaching
+        // the continuation through the body's ordinary CFG edges only.
+        MirTerminatorKind::Spmd { body_block, .. } => vec![*body_block],
         MirTerminatorKind::TryCatch {
             try_block,
             catch_block,

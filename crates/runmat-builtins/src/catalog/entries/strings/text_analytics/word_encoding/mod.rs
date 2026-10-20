@@ -12,7 +12,10 @@ pub const WORD_ENCODING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry
     category: "strings/text_analytics",
     // Preserve docs/builtins/reference/wordEncoding.json as the prose authority
     // until the documentation exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation::EMPTY,
+    documentation: BuiltinDocumentation {
+        summary: "Create a word encoding object that maps words to indices and back.",
+        ..BuiltinDocumentation::EMPTY
+    },
     descriptor: &WORD_ENCODING_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

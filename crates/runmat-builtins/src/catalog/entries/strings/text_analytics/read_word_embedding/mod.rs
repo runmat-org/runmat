@@ -14,7 +14,10 @@ pub const READ_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalo
     category: "strings/text_analytics",
     // Preserve docs/builtins/reference/readWordEmbedding.json as the prose
     // authority until the exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation::EMPTY,
+    documentation: BuiltinDocumentation {
+        summary: "Read a word embedding model from a UTF-8 text file or zip archive.",
+        ..BuiltinDocumentation::EMPTY
+    },
     descriptor: &READ_WORD_EMBEDDING_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

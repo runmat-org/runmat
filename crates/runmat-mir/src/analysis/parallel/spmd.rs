@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+#[path = "spmd/exports.rs"]
+pub(super) mod exports;
+
 use runmat_hir::FunctionId;
 use runmat_types::{
     CapabilityRequirement, CapabilitySet, CollectiveContract, CollectiveOperation,

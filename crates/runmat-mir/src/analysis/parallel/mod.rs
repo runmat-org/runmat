@@ -5,6 +5,8 @@ mod patterns;
 mod region;
 mod spmd;
 
+pub(super) use spmd::exports::{spmd_exit_projections, SpmdExit};
+
 use runmat_types::{ParallelManifest, PARALLEL_MANIFEST_SCHEMA_VERSION};
 
 use crate::{MirAssembly, MirDiagnostic};

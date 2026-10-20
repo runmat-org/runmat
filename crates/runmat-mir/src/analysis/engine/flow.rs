@@ -26,6 +26,7 @@ mod call_observations;
 pub(crate) use call_observations::CallObservation;
 #[path = "flow/sequence.rs"]
 mod sequence;
+mod spmd;
 
 const WIDEN_AFTER_UPDATE: usize = 4;
 const MAX_BLOCK_UPDATES: usize = 64;
@@ -77,6 +78,7 @@ pub(crate) fn analyze_body(
     let mut worklist = VecDeque::from([0usize]);
     let mut widened = false;
     let mut converged = true;
+    let spmd_exits = crate::analysis::parallel::spmd_exit_projections(body);
 
     while let Some(block_index_value) = worklist.pop_front() {
         let Some(input) = entries[block_index_value].clone() else {
@@ -85,7 +87,8 @@ pub(crate) fn analyze_body(
         let block = &body.blocks[block_index_value];
         let mut state = input;
         transfer_statements(&block.statements, &mut state, summaries, &mut Vec::new());
-        for (successor, outgoing) in edge_states(&block.terminator.kind, &state, summaries) {
+        for (successor, mut outgoing) in edge_states(&block.terminator.kind, &state, summaries) {
+            spmd::project_exit(&spmd_exits, block.id, successor, &mut outgoing);
             let Some(&successor_index) = block_index.get(&successor) else {
                 continue;
             };
@@ -381,16 +384,12 @@ fn edge_states(
             summaries,
             true,
         ),
-        MirTerminatorKind::Spmd {
-            body_block,
-            exit_block,
-            ..
-        } => {
+        MirTerminatorKind::Spmd { body_block, .. } => {
             let mut body = state.clone();
             body.capabilities
                 .0
                 .insert(CapabilityRequirement::ParallelRuntime);
-            vec![(*body_block, body), (*exit_block, state.clone())]
+            vec![(*body_block, body)]
         }
         MirTerminatorKind::TryCatch {
             try_block,

@@ -5,7 +5,21 @@ use runmat_value::{
 
 use super::FunctionRegistry;
 
+#[path = "bound_binding/selected_sites.rs"]
+mod selected_sites;
+
 impl FunctionRegistry {
+    /// Bind a selected body's proved imports once at frame admission. The
+    /// resulting invocation map retains only code/source/definition leases.
+    pub fn bind_selected_body_sites(
+        &self,
+        runtime: runmat_runtime::context::RuntimeContext,
+        binding: &BoundFunctionBinding,
+        body: &super::FunctionBytecode,
+    ) -> Result<runmat_runtime::context::RuntimeContext, runmat_runtime::RuntimeError> {
+        selected_sites::bind_selected_body_sites(runtime, binding, body, self)
+    }
+
     /// Issue one local callable only from the exact selected definition and
     /// its complete retained dependency graph. A reused numeric function ID
     /// or matching display name is never sufficient to select this binding.

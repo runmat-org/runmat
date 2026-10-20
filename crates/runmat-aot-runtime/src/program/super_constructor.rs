@@ -3,7 +3,6 @@
 use runmat_execution::FunctionBindingOrigin;
 use runmat_runtime::context::{RetainedClassDeclaration, RetainedConstructorDeclaration};
 use runmat_types::{ClassMethodRole, FunctionId};
-use runmat_value::BoundFunctionBinding;
 
 use super::native_error;
 
@@ -89,7 +88,13 @@ pub(super) fn bind_selected(
         target_metadata.portable_id,
     )
     .map_err(native_error)?;
-    let target_function = target.function.0;
+    let target_binding =
+        runmat_runtime::user_functions::resolve_binding_origin_binding_from_runtime(
+            &runtime,
+            target_origin,
+        )
+        .filter(|binding| binding.function == target.function.0)
+        .ok_or_else(|| native_error("linked superclass constructor has no exact issued binding"))?;
     runtime
         .with_retained_super_constructors(
             vec![
@@ -99,7 +104,7 @@ pub(super) fn bind_selected(
                     caller_origin,
                     target_origin,
                     target_owner.clone(),
-                    BoundFunctionBinding::portable(target_function, target_origin),
+                    target_binding,
                 )?,
             ],
             caller_origin,

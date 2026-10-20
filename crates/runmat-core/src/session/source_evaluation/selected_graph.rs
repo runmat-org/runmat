@@ -16,6 +16,10 @@ use crate::executable::ExecutableUnit;
 #[path = "selected_graph/selection.rs"]
 mod selection;
 use selection::select_local_body;
+
+#[path = "selected_graph/function_bindings.rs"]
+mod function_bindings;
+pub(crate) use function_bindings::bind_function_resolvers;
 #[path = "selected_graph/snapshot.rs"]
 mod snapshot;
 #[path = "selected_graph/product.rs"]
@@ -254,7 +258,7 @@ impl SelectedGraphPrimary {
         &self.selected_registry
     }
 
-    pub(super) fn static_targets(&self) -> &[SelectedStaticTarget] {
+    pub(in crate::session) fn static_targets(&self) -> &[SelectedStaticTarget] {
         &self.static_targets
     }
 

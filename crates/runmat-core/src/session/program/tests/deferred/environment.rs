@@ -14,7 +14,7 @@ async fn original_future_environment_survives_caller_mutation_without_mutating_p
         )
         .unwrap();
         session.set_compat_mode(crate::CompatMode::RunMat);
-        let service = Rc::new(CapturingService::default());
+        let service = Rc::new(CapturingService::new(&session));
         session.install_execution_services(service.clone());
         let unit = session.compile_executable_unit(ExecutableSource::new(
             "deferred-environment-owner", "environment.m",

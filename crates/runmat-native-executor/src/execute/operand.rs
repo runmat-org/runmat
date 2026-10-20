@@ -277,9 +277,34 @@ pub(super) fn evaluate_rvalue(
         } => {
             let arguments = super::call::materialize_arguments(state, args)?;
             runmat_runtime::execution::validate_spawn_captures(&arguments)?;
+            let identity = match value {
+                MirRvalue::ExternalFuture { display_name, .. } => {
+                    runmat_types::CallableIdentity::ExternalFunction {
+                        function: *function,
+                        display_name: display_name.clone(),
+                    }
+                }
+                _ => runmat_types::CallableIdentity::BoundFunction(*function),
+            };
+            let selected_function = state
+                .runtime
+                .selected_graph_function_binding(state.function.id, &identity);
+            let capabilities = match &selected_function {
+                Some(selected) => selected.capabilities.clone(),
+                None if matches!(
+                    identity,
+                    runmat_types::CallableIdentity::ExternalFunction { .. }
+                ) =>
+                {
+                    return Err(NativeExecutorError::Host(
+                        "native external future has no exact selected function contract".into(),
+                    ));
+                }
+                None => native_function_capabilities(state, *function)?,
+            };
             let mut invocation = runmat_runtime::execution::DeferredInvocation::callable(
                 runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                    runmat_types::CallableIdentity::BoundFunction(*function),
+                    identity.clone(),
                     arguments,
                     requested_outputs.executor_carrier_count().ok_or_else(|| {
                         NativeExecutorError::Host(
@@ -291,25 +316,27 @@ pub(super) fn evaluate_rvalue(
                     runmat_runtime::call::descriptor::CallableCallKind::Direct,
                 ),
             );
-            let program = if !state.runtime.execution().requires_program_capture() {
-                runmat_runtime::execution::DeferredProgram::Local
-            } else if let Some(selected) = state.runtime.selected_graph_program() {
-                let binding = state
-                    .runtime
-                    .selected_graph_function_binding(*function)
-                    .ok_or_else(|| {
-                        NativeExecutorError::Host(
-                            "native async callable has no exact selected definition and source graph"
-                                .into(),
-                        )
-                    })?;
+            if let Some(selected) = selected_function {
                 let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) =
                     &mut invocation
                 else {
                     unreachable!("native future admission created a callable invocation")
                 };
                 descriptor.target =
-                    runmat_runtime::call::descriptor::CallableTarget::Bound(binding);
+                    runmat_runtime::call::descriptor::CallableTarget::Bound(selected.binding);
+            }
+            let program = if !state.runtime.execution().requires_program_capture() {
+                runmat_runtime::execution::DeferredProgram::Local
+            } else if let Some(selected) = state.runtime.selected_graph_program() {
+                if !matches!(&invocation,
+                    runmat_runtime::execution::DeferredInvocation::Callable(descriptor)
+                    if matches!(&descriptor.target, runmat_runtime::call::descriptor::CallableTarget::Bound(_))
+                ) {
+                    return Err(NativeExecutorError::Host(
+                        "native async callable has no exact selected definition and source graph"
+                            .into(),
+                    ));
+                }
                 runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone())
             } else {
                 if runmat_runtime::execution::value_codec::deferred_invocation_requires_graph(
@@ -351,7 +378,7 @@ pub(super) fn evaluate_rvalue(
                         .host()
                         .and_then(|host| host.console_limits()),
                     program_revision,
-                    capabilities: native_function_capabilities(state, *function)?,
+                    capabilities,
                     program,
                 })
                 .map_err(execution_service_error)?;

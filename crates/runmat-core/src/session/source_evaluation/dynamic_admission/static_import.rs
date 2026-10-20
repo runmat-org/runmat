@@ -20,8 +20,8 @@ use runmat_vm::{
 /// One immutable, invocation-local source selection. It keeps a definition
 /// lease only until script/parallel graph capture finishes; no persistent
 /// executable product points back into the selected registry.
-#[derive(Debug)]
-pub(in crate::session) struct SelectedStaticTarget {
+#[derive(Clone, Debug)]
+pub(crate) struct SelectedStaticTarget {
     pub import: ExecutableStaticImport,
     pub function: runmat_hir::FunctionId,
     pub definition: FunctionDefinitionLease,

@@ -13,7 +13,10 @@ pub const FASTTEXT_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCa
     category: "strings/text_analytics",
     // Preserve docs/builtins/reference/fastTextWordEmbedding.json as the prose
     // authority until the exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation::EMPTY,
+    documentation: BuiltinDocumentation {
+        summary: "Return a compact fastText-style word embedding compatibility model.",
+        ..BuiltinDocumentation::EMPTY
+    },
     descriptor: &FASTTEXT_WORD_EMBEDDING_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

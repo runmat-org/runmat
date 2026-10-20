@@ -14,6 +14,7 @@ struct CapturingService {
     serial: RuntimeExecutionService,
     original: RefCell<Option<(FutureHandle, DeferredCall)>>,
     original_source: RefCell<Option<runmat_types::SourceId>>,
+    program: std::rc::Weak<SessionProgramService>,
 }
 
 /// A real reserved serial task and the graph materialized from its selected
@@ -22,6 +23,7 @@ struct CapturingService {
 struct CapturedCall {
     call: DeferredCall,
     request: runmat_execution_artifact::GraphExecutionRequest,
+    original: Option<Rc<ExecutableUnit>>,
 }
 
 impl CapturedCall {
@@ -51,6 +53,14 @@ impl CapturedCall {
     }
 
     fn envelope(&self) -> runmat_execution::ExecutableUnitEnvelope {
+        // A Graph unit with sealed static links is not a standalone Core
+        // product. Keep that transport oracle separate from the original
+        // complete compiler product used by cold-import/tamper assertions.
+        if let Some(original) = &self.original {
+            return original
+                .portable_envelope_for_function(self.origin().function)
+                .unwrap();
+        }
         use runmat_execution::value::{GraphCallableOwner, GraphInvocationRoots, GraphNode};
         let GraphInvocationRoots::Callable { target, .. } = &self.request.roots else {
             unreachable!()
@@ -79,6 +89,13 @@ impl CapturedCall {
 }
 
 impl CapturingService {
+    fn new(session: &RunMatSession) -> Self {
+        Self {
+            program: Rc::downgrade(&session.program_service),
+            ..Self::default()
+        }
+    }
+
     fn take_original(&self) -> CapturedCall {
         let (future, call) = self
             .original
@@ -98,7 +115,19 @@ impl CapturingService {
             runmat_execution::value::ValueLimits::default(),
         )
         .expect("capture through the actual selected compiler owner");
-        CapturedCall { call, request }
+        request
+            .validate()
+            .expect("actual selected Graph request must validate");
+        let mut captured = CapturedCall {
+            call,
+            request,
+            original: None,
+        };
+        captured.original = self
+            .program
+            .upgrade()
+            .and_then(|program| program.original_for_test(captured.origin()));
+        captured
     }
 }
 
@@ -176,7 +205,7 @@ impl RuntimeExecutionServices for CapturingService {
 async fn deferred_capture_preserves_original_complete_product_in_both_executors() {
     for native in [false, true] {
         let mut session = RunMatSession::with_options(false, false).unwrap();
-        let service = Rc::new(CapturingService::default());
+        let service = Rc::new(CapturingService::new(&session));
         session.install_execution_services(service.clone());
         let unit = session.compile_executable_unit(ExecutableSource::new(
             "original-deferred-owner", "entry.m",
@@ -342,7 +371,7 @@ async fn deferred_capture_preserves_original_complete_product_in_both_executors(
 #[tokio::test]
 async fn raw_script_capture_has_original_product_and_restores_session_context() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
-    let service = Rc::new(CapturingService::default());
+    let service = Rc::new(CapturingService::new(&session));
     session.install_execution_services(service.clone());
     let original_revision = session.runtime_context.program_revision().cloned();
     let source = "f = rawAsync(5);\nasync function y = rawAsync(x); y = x + 7; end\n";

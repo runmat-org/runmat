@@ -22,7 +22,12 @@ async fn capture(session: &mut RunMatSession, service: &CapturingService) -> Cap
     run(session, "f = retainedAsync(5);")
         .await
         .expect("original retained callable capture");
-    service.take_original()
+    let captured = service.take_original();
+    assert!(
+        captured.original.is_some(),
+        "published capture must retain the exact original Core product for its standalone oracle"
+    );
+    captured
 }
 
 async fn cold_value(call: &CapturedCall) -> runmat_runtime::execution::RootedValueSequence {
@@ -74,7 +79,7 @@ async fn cold_envelope_value(
 #[tokio::test]
 async fn prior_raw_function_capture_preserves_original_product_across_redefinition_and_failure() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
-    let service = Rc::new(CapturingService::default());
+    let service = Rc::new(CapturingService::new(&session));
     session.install_execution_services(service.clone());
     let original = "async function y = retainedAsync(x); y = x + 7; end";
     run(&mut session, original).await.unwrap();
@@ -200,7 +205,7 @@ async fn retained_program_owner_validates_caller_and_preserves_original_cold_pro
 async fn earlier_async_declaration_is_captured_by_interpreter_and_forced_native_caller() {
     for native in [false, true] {
         let mut session = RunMatSession::with_options(false, false).unwrap();
-        let service = Rc::new(CapturingService::default());
+        let service = Rc::new(CapturingService::new(&session));
         session.install_execution_services(service.clone());
         run(
             &mut session,
@@ -238,6 +243,10 @@ async fn earlier_async_declaration_is_captured_by_interpreter_and_forced_native_
             .unwrap();
         assert!(matches!(result.as_slice(), [Value::Future(_)]));
         let captured = service.take_original();
+        assert!(
+            captured.original.is_some(),
+            "the earlier published declaration must resolve its original Core owner"
+        );
         assert_ne!(
             captured.envelope().manifest.identity.program,
             caller.revision().program_revision

@@ -15313,7 +15313,7 @@ fn cooperative_codistributed_build_keeps_partition_payloads_worker_owned() {
     session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
     execute_text_request(
         &mut session,
-        "pool = parpool(2); spmd(2); if spmdIndex() == 1; local = uint64([1, 2]); else; local = uint64([3, 4]); end; codist = codistributor1d(uint32(2), uint64([2, 2]), uint64([1, 4])); value = codistributed.build(local, codist); part = getLocalPart(value); indices = globalIndices(value, uint32(2)); end; assembled = gather(value); part1 = part{1}; part2 = part{2}; indices1 = indices{1}; indices2 = indices{2};",
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; local = uint64([1, 2]); onlyFirst = uint64([9, 10]); else; local = uint64([3, 4]); end; codist = codistributor1d(uint32(2), uint64([2, 2]), uint64([1, 4])); value = codistributed.build(local, codist); part = getLocalPart(value); indices = globalIndices(value, uint32(2)); end; assembled = gather(value); part1 = part{1}; part2 = part{2}; firstPartial = onlyFirst{1}; indices1 = indices{1}; indices2 = indices{2};",
     )
     .expect("build a codistributed value from worker-local partitions");
     let variables = session.get_variables().unwrap();
@@ -15331,7 +15331,11 @@ fn cooperative_codistributed_build_keeps_partition_payloads_worker_owned() {
             .unwrap()
         ))
     );
-    for (name, values) in [("part1", vec![1, 2]), ("part2", vec![3, 4])] {
+    for (name, values) in [
+        ("part1", vec![1, 2]),
+        ("part2", vec![3, 4]),
+        ("firstPartial", vec![9, 10]),
+    ] {
         assert_eq!(
             variables.get(name),
             Some(&runmat_value::Value::Tensor(
@@ -15618,15 +15622,38 @@ fn distributed_eps_maps_values_and_retains_scalar_like_owner() {
 #[test]
 fn distributed_builtin_policy_rejects_unclassified_operations() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let outcome = execute_text_request(
+    let error = execute_text_request(
         &mut session,
         "distributedSource = distributed([1, 2]); unsupported = full(distributedSource);",
     )
-    .expect("execution returns a structured diagnostic");
-    assert!(outcome
-        .diagnostics
-        .iter()
-        .any(|diagnostic| { diagnostic.code == "RunMat:parallel:DistributedBuiltinUnsupported" }));
+    .expect_err("known distributed inputs are rejected by the canonical full contract");
+    let RunError::Compile(error) = error else {
+        panic!("expected the static full input diagnostic");
+    };
+    assert_eq!(error.identifier.as_deref(), Some("RM-CATALOG-FULL-INPUT"));
+    assert_eq!(
+        error.message,
+        "full requires a numeric, logical, or character array"
+    );
+
+    // Direct session-owned calls still require the runtime placement guard
+    // when there is no statically analyzed input fact.
+    execute_text_request(&mut session, "distributedSource = distributed([1, 2]);")
+        .expect("construct the distributed input");
+    let variables = session.get_variables().expect("session variables");
+    let argument = variables
+        .get("distributedSource")
+        .expect("distributed input");
+    let error = block_on(runmat_runtime::dispatcher::call_builtin_async_in_context(
+        session.runtime_context(),
+        "full",
+        std::slice::from_ref(argument),
+    ))
+    .expect_err("dynamic distributed inputs retain the runtime placement guard");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:parallel:DistributedBuiltinUnsupported")
+    );
 }
 
 #[test]

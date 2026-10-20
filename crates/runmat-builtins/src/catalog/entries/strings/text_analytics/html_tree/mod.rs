@@ -9,9 +9,12 @@ pub const HTML_TREE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "htmlTree" },
     category: "strings/text_analytics",
-    // The existing JSON remains the sole prose authority until its fields are
-    // mechanically conserved and retired by the documentation exporter.
-    documentation: BuiltinDocumentation::EMPTY,
+    // The legacy sidecar retains full prose/examples authority; its summary
+    // is mirrored here until complete documentation conservation.
+    documentation: BuiltinDocumentation {
+        summary: "Parse HTML code into a lightweight htmlTree object.",
+        ..BuiltinDocumentation::EMPTY
+    },
     descriptor: &HTML_TREE_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

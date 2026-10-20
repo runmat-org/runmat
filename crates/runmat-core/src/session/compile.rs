@@ -1178,7 +1178,7 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        unit.with_portable_selection(current, selected.imports)
+        unit.with_portable_selection(current, selected.imports, selected.targets)
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)

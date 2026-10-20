@@ -24,18 +24,17 @@ pub(super) fn install(
     runtime: &RuntimeContext,
     functions: &[user_functions::SourceFunctionInfo],
 ) -> Result<InstalledExternalSources, Box<runmat_runtime::RuntimeError>> {
-    let Some(binding) = program.product.selected() else {
-        return Ok(InstalledExternalSources {
-            guard: user_functions::install_execution_source_resolver(None)?,
-            scoped_bindings: Rc::new(HashMap::new()),
-        });
-    };
     let owner = runmat_runtime::source_context::SelectedProgramSourceOwner::capture(
         runtime,
         &program.source_map,
     )
     .map_err(native_error)?;
-    let product = binding.fingerprint().map_err(native_error)?;
+    let product = program
+        .product
+        .selected()
+        .map(|binding| binding.fingerprint())
+        .transpose()
+        .map_err(native_error)?;
     let by_function = Arc::new(
         functions
             .iter()
@@ -45,6 +44,8 @@ pub(super) fn install(
     let mut external = HashMap::new();
     let mut scoped_bindings = HashMap::new();
     let retained_program = Arc::new(program.clone());
+    // Every linked program issues exact native leases. A selected product
+    // additionally supplies the authority required to export a static link.
     for info in functions {
         let function = executor
             .function_metadata(runmat_types::FunctionId(info.function))

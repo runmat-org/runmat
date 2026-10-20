@@ -140,7 +140,8 @@ pub use preferences::{
 pub use runtime::{
     ProgramExecutionAssignmentGuard, ProgramExecutionJobGuard, ProgramSourceSelectionError,
     RuntimeContext, RuntimeContextLocalId, RuntimeExecutionStack, RuntimeExecutionStackGuard,
-    RuntimeLanguageMode, RuntimeLanguagePolicy, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
+    RuntimeLanguageMode, RuntimeLanguagePolicy, SelectedGraphFunction,
+    SelectedGraphFunctionResolver, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
 pub use scope::{
     ContextFuture, DeferredRuntimeFuture, PreparedRuntimeFutureScope, PreparedRuntimeScope,

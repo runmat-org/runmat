@@ -14,7 +14,10 @@ pub const TRAIN_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatal
     category: "strings/text_analytics",
     // Preserve docs/builtins/reference/trainWordEmbedding.json as the prose
     // authority until the exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation::EMPTY,
+    documentation: BuiltinDocumentation {
+        summary: "Train a word embedding from a text file or tokenized documents.",
+        ..BuiltinDocumentation::EMPTY
+    },
     descriptor: &TRAIN_WORD_EMBEDDING_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

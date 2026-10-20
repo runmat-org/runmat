@@ -113,10 +113,17 @@ pub(crate) async fn invoke(
             .and_then(|metadata| metadata.class_method_owner.as_ref()),
     )?;
     let registry = Rc::new(runtime_functions.clone());
-    let runtime = runtime.with_selected_graph_function_resolver({
-        let registry = Rc::clone(&registry);
-        Rc::new(move |function| registry.exact_bound_binding(function))
-    });
+    let runtime = if runtime.has_selected_graph_function_resolver() {
+        runtime
+    } else {
+        crate::session::bind_function_resolvers(
+            runtime,
+            unit,
+            Rc::clone(&registry),
+            unit.original_static_targets().to_vec(),
+        )
+        .map_err(|error| super::error::stage("NativeStaticImport", error))?
+    };
     let native_functions = unit.mir().bodies.keys().copied().collect::<BTreeSet<_>>();
     let previous_invoker = user_functions::current_semantic_function_invoker();
     let nested_executor = Rc::clone(&published.executor);

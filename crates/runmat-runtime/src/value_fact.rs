@@ -239,25 +239,12 @@ pub fn value_fact(value: &Value) -> ValueFact {
             certainty: CertaintyFact::Proven,
             invalidation: InvalidationVector::default(),
         },
-        Value::Composite(handle) => ValueFact {
-            kind: ValueKindFact::Composite(runmat_types::CompositeFact {
-                owner: handle.owner_region,
-                labs: handle.gang.labs,
-                value: Box::new(handle.value.clone()),
-            }),
-            shape: ShapeFact::Scalar,
-            storage: StorageFact::Opaque,
-            layout: LayoutFact::Unknown,
-            contiguity: ContiguityFact::Unknown,
-            view: ViewFact::Unknown,
-            residency: ResidencyFact::Remote {
-                pool: Some(handle.gang.pool.id.to_string()),
-            },
-            alias: AliasFact::Identity,
-            mutation: MutationFact::HandleSemantics,
-            certainty: CertaintyFact::Proven,
-            invalidation: InvalidationVector::default(),
-        },
+        Value::Composite(handle) => runmat_types::composite_fact(
+            handle.owner_region,
+            handle.gang.labs,
+            handle.value.clone(),
+            Some(handle.gang.pool.id.to_string()),
+        ),
         Value::Foreign(reference) => {
             let mut fact = fact(
                 ValueKindFact::Foreign(ForeignFact {

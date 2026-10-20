@@ -70,12 +70,13 @@ pub(super) struct ImportedPortableContract {
 }
 
 /// Compiler-selected bodies and their exact outbound product references.
-/// Only immutable wire facts live here; selected target products and definition
-/// leases remain with the separate graph owner.
+/// The wire section and its original selected dependency owners are kept
+/// together. Targets never point back to this unit or to its direct-code cache.
 #[derive(Debug)]
 struct PortableSelection {
     current: HashSet<FunctionId>,
     imports: Vec<ExecutableStaticImport>,
+    targets: Vec<crate::session::SelectedStaticTarget>,
 }
 
 impl ExecutableUnit {
@@ -83,6 +84,7 @@ impl ExecutableUnit {
         mut self,
         current: HashSet<FunctionId>,
         imports: Vec<ExecutableStaticImport>,
+        targets: Vec<crate::session::SelectedStaticTarget>,
     ) -> Result<Self, String> {
         let compiled = self.compiled_product_owners()?;
         if !current
@@ -91,9 +93,25 @@ impl ExecutableUnit {
         {
             return Err("selected portable body is not owned by this compiled product".into());
         }
+        if !imports
+            .iter()
+            .eq(targets.iter().map(|target| &target.import))
+        {
+            return Err("selected portable imports differ from their original targets".into());
+        }
         self.reset_direct_code_cache();
-        self.portable_selection = Some(Rc::new(PortableSelection { current, imports }));
+        self.portable_selection = Some(Rc::new(PortableSelection {
+            current,
+            imports,
+            targets,
+        }));
         Ok(self)
+    }
+
+    pub(crate) fn original_static_targets(&self) -> &[crate::session::SelectedStaticTarget] {
+        self.portable_selection
+            .as_ref()
+            .map_or(&[], |selection| &selection.targets)
     }
 
     pub(crate) fn compiled_current_body_ids(&self) -> Result<HashSet<FunctionId>, String> {
@@ -104,7 +122,7 @@ impl ExecutableUnit {
             .collect())
     }
 
-    pub(super) fn compiled_script_owner_ids(
+    pub(crate) fn compiled_script_owner_ids(
         &self,
     ) -> Result<std::collections::BTreeSet<FunctionId>, String> {
         let owners = self.compiled_product_owners()?;

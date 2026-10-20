@@ -1330,6 +1330,22 @@ impl Compiler {
             return self.compile_mir_dynamic_multi_assign(targets, value);
         }
         let output_count = self.output_count_for_targets(targets)?;
+        let parallel_output_count = match value {
+            MirRvalue::Distributed(runmat_mir::parallel::MirDistributedOp::GlobalIndices {
+                requested_outputs,
+                ..
+            })
+            | MirRvalue::Collective(runmat_mir::parallel::MirCollectiveOp::Receive {
+                requested_outputs,
+                ..
+            }) => Some(usize::from(*requested_outputs)),
+            _ => None,
+        };
+        if parallel_output_count.is_some_and(|count| count != output_count) {
+            return Err(self.compile_error(
+                "parallel operation output count disagrees with its assignment targets",
+            ));
+        }
         match value {
             MirRvalue::Call(call) => self.compile_mir_call_for_multi_assign(call, output_count)?,
             MirRvalue::Index { base, indexing }
@@ -1361,7 +1377,10 @@ impl Compiler {
                 value,
                 MirRvalue::SubscriptChain(chain)
                     if matches!(chain.sequence_use, runmat_types::SequenceUse::SelectPrefix { count } if count == output_count)
-            );
+            )
+            // These typed instructions already publish one stack slot per
+            // requested output; Unpack would consume the last scalar instead.
+            || parallel_output_count.is_some();
         if !emits_requested_values {
             self.emit(Instr::Unpack(targets.targets.len()));
         }
@@ -4712,6 +4731,63 @@ mod tests {
         let error = compiler.compile_error("source-owned failure");
         assert_eq!(error.source, Some(runmat_types::ProgramSourceId(7)));
         assert_eq!(error.span, compiler.current_span);
+    }
+
+    #[test]
+    fn typed_parallel_multi_outputs_are_stored_without_scalar_unpacking() {
+        let operand = MirOperand::Constant(MirConstant::Number("1".into()));
+        let values = [
+            MirRvalue::Distributed(runmat_mir::parallel::MirDistributedOp::GlobalIndices {
+                value: operand.clone(),
+                dimension: operand.clone(),
+                lab: None,
+                requested_outputs: 2,
+            }),
+            MirRvalue::Collective(runmat_mir::parallel::MirCollectiveOp::Receive {
+                id: runmat_types::CollectiveId {
+                    region: runmat_types::ParallelRegionId(runmat_types::RegionId {
+                        function: runmat_types::ProgramFunctionId(0),
+                        ordinal: 0,
+                    }),
+                    ordinal: 0,
+                },
+                source: None,
+                tag: None,
+                requested_outputs: 2,
+            }),
+        ];
+        for value in values {
+            let mut compiler = compiler_with_assignments(vec![
+                (MirLocalId(0), MirRvalue::Use(operand.clone())),
+                (MirLocalId(1), MirRvalue::Use(operand.clone())),
+            ]);
+            let targets = runmat_mir::MirOutputTargetList {
+                targets: vec![
+                    MirOutputTarget::Place(MirPlace::Local(MirLocalId(0))),
+                    MirOutputTarget::Place(MirPlace::Local(MirLocalId(1))),
+                ],
+                requested_outputs: RequestedOutputCount::Exactly(2),
+            };
+            compiler.compile_mir_multi_assign(&targets, &value).unwrap();
+            assert!(!compiler
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::Unpack(_))));
+            assert!(matches!(
+                compiler.instructions.as_slice(),
+                [.., Instr::StoreVar(8), Instr::StoreVar(7)]
+            ));
+
+            let mismatched_targets = runmat_mir::MirOutputTargetList {
+                targets: vec![MirOutputTarget::Discard],
+                requested_outputs: RequestedOutputCount::One,
+            };
+            let before = compiler.instructions.len();
+            assert!(compiler
+                .compile_mir_multi_assign(&mismatched_targets, &value)
+                .is_err());
+            assert_eq!(compiler.instructions.len(), before);
+        }
     }
 
     #[test]

@@ -4,7 +4,7 @@ use super::*;
 #[tokio::test]
 async fn original_transitive_dependencies_survive_cold_native_execution_and_redefinition() {
     let mut producer = RunMatSession::with_options(false, false).unwrap();
-    let service = Rc::new(CapturingService::default());
+    let service = Rc::new(CapturingService::new(&producer));
     producer.install_execution_services(service.clone());
     run(
         &mut producer,
@@ -25,6 +25,16 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
     .await
     .unwrap();
     let original = capture(&mut producer, &service).await;
+    assert!(
+        original.request.static_dependencies.len() >= 2,
+        "the actual Graph request must retain the transitive selected static links"
+    );
+    let static_origins = original
+        .request
+        .static_dependencies
+        .iter()
+        .map(|edge| edge.target.origin)
+        .collect::<std::collections::HashSet<_>>();
     run(
         &mut producer,
         "function y = originalLeaf(x); y = x + 100; end",
@@ -32,6 +42,16 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
     .await
     .unwrap();
     let unchanged = capture(&mut producer, &service).await;
+    assert_eq!(
+        unchanged
+            .request
+            .static_dependencies
+            .iter()
+            .map(|edge| edge.target.origin)
+            .collect::<std::collections::HashSet<_>>(),
+        static_origins,
+        "later name publication must not change the Graph's original static targets"
+    );
     assert_eq!(unchanged.envelope(), original.envelope());
     drop(producer);
     let envelope = original.envelope();
@@ -111,7 +131,7 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
 async fn nested_cold_future_capture_preserves_original_dependency_product() {
     let leaf_source = "async function y = originalLeaf(x); y = x + 7; end";
     let mut producer = RunMatSession::with_options(false, false).unwrap();
-    let service = Rc::new(CapturingService::default());
+    let service = Rc::new(CapturingService::new(&producer));
     producer.install_execution_services(service.clone());
     run(&mut producer, leaf_source).await.unwrap();
     run(
@@ -125,7 +145,7 @@ async fn nested_cold_future_capture_preserves_original_dependency_product() {
     let envelope = original.envelope();
     let mut cold = RunMatSession::with_options(false, false).unwrap();
     cold.set_compat_mode(runmat_parser::CompatMode::RunMat);
-    let cold_capture = Rc::new(CapturingService::default());
+    let cold_capture = Rc::new(CapturingService::new(&cold));
     cold.install_execution_services(cold_capture.clone());
     let value = cold
         .invoke_portable_unit(

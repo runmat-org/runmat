@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use super::super::{BytecodeSourceRef, FunctionBytecode, FunctionRegistry};
 use runmat_execution::executable::ExecutableStaticCaller;
 use runmat_execution::value::GraphStaticReferenceSite;
 use runmat_execution::FunctionBindingOrigin;
@@ -10,11 +11,10 @@ use runmat_hir::FunctionId;
 use runmat_runtime::context::RuntimeContext;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::{BoundFunctionBinding, SelectedStaticSiteBinding};
-use runmat_vm::{BytecodeSourceRef, FunctionBytecode, FunctionRegistry};
 
 fn invalid(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message.into())
-        .with_identifier("RunMat:CallableArtifact:StaticImport")
+        .with_identifier("RunMat:StaticImportUnavailable")
         .build()
 }
 

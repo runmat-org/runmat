@@ -409,6 +409,19 @@ async fn invoke_semantic_function_with_captures_inner(
     })?;
     // The entered body, not a numeric caller ID or ambient name, selects the
     // instruction-site namespace for this invocation's static imports.
+    let runtime = if func.selected_executable_product.is_some() {
+        let binding = function_registry
+            .exact_bound_binding(function_id)
+            .ok_or_else(|| {
+                mex(
+                    "StaticImportUnavailable",
+                    "selected frame has no exact definition graph",
+                )
+            })?;
+        function_registry.bind_selected_body_sites(runtime, &binding, func)?
+    } else {
+        runtime
+    };
     let runtime = runtime.with_selected_static_caller(func.binding_origin);
     lexical_storage::validate_inherited_storage(func, function_registry)?;
     if arguments.len() < func.capture_slots.len() {

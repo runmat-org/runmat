@@ -43,6 +43,42 @@ pub(crate) enum RetainedSuperConstructorTarget {
 }
 
 impl RetainedSuperConstructorTarget {
+    pub(super) fn is_admitted_in(&self, runtime: &super::RuntimeContext) -> bool {
+        let (origin, owner, binding) = match self {
+            Self::Bound {
+                origin,
+                owner,
+                binding,
+                ..
+            } => (origin, owner, binding),
+            Self::Implicit { .. } => return true,
+        };
+        if owner.role != ClassMethodRole::Constructor || owner.is_static {
+            return false;
+        }
+        match &binding.authority {
+            runmat_value::BoundFunctionAuthority::Local { .. } => {
+                binding.authority.admits_local(&runtime.session_lease())
+                    && binding.authority.local_lease(binding.function).is_some()
+                    && binding.authority.export_origin(&runtime.session_lease()) == Some(*origin)
+            }
+            runmat_value::BoundFunctionAuthority::Portable { origin: issued } => {
+                issued == origin
+                    && crate::user_functions::resolve_binding_origin_binding_from_runtime(
+                        runtime, *origin,
+                    )
+                    .is_some_and(|issued| issued == *binding)
+            }
+            runmat_value::BoundFunctionAuthority::SelectedNative { .. } => {
+                crate::user_functions::selected_native_binding_admitted(runtime, binding, *origin)
+                    && crate::user_functions::resolve_binding_origin_binding_from_runtime(
+                        runtime, *origin,
+                    )
+                    .is_some_and(|issued| issued == *binding)
+            }
+        }
+    }
+
     pub(crate) fn parent(&self) -> &ClassIdentity {
         match self {
             Self::Bound { owner, .. } => &owner.declaring_class,

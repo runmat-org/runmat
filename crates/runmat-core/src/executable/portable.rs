@@ -185,9 +185,13 @@ impl ExecutableUnit {
         &self,
         selected: Option<(String, runmat_hir::FunctionId)>,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        // A standalone Core product conserves the compiler's inherited
+        // projections and carries their original products in its dependency
+        // inventory. Selected Graph products use explicit body/import slices.
+        let included = self.functions().functions.keys().copied().collect();
         self.portable_local_envelope_with_entrypoint_mode(
             runmat_types::InteropManifest::empty(),
-            None,
+            Some(&included),
             true,
             |unit| match selected {
                 Some((name, function)) => {
@@ -303,7 +307,7 @@ impl ExecutableUnit {
         };
         let selected_functions = selected_local_functions
             .into_iter()
-            .filter(|function| !self.original_dependencies().contains_key(function))
+            .filter(|function| script_owners.contains(function) || self.owns_callable(*function))
             .map(|function| self.portable_function_for_local(function))
             .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
         let inferred = match (&selected_scope, &selected_report) {

@@ -171,12 +171,20 @@ fn descriptor_preserves_exact_callable_authority_without_preparing_chunks() {
     let admitted = admitted();
     let executable = executable(&admitted);
     let descriptor = prepare_generator_descriptor(&admitted, executable.clone()).unwrap();
+    assert_eq!(
+        descriptor.recipe.entrypoint,
+        admitted.callable.qualified_name
+    );
+    assert_eq!(descriptor.recipe.interop, executable.manifest.interop);
     let prepared = prepare_generator_program(&admitted, executable.clone(), chunks(), &[]).unwrap();
     assert_eq!(descriptor, prepared.descriptor);
     assert!(prepare_generator_program(&admitted, executable.clone(), Vec::new(), &[]).is_err());
 
     let mut foreign = admitted.clone();
     foreign.callable.owner_identity = "foreign@1".into();
+    assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
+    let mut foreign = admitted.clone();
+    foreign.callable.qualified_name = "loads.foreign".into();
     assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
     let mut foreign = admitted.clone();
     foreign.function = ProgramFunctionId(4);

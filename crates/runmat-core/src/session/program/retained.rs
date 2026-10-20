@@ -8,6 +8,34 @@ pub(super) struct RetainedPrograms {
 }
 
 impl SessionProgramService {
+    /// Fixture projection of the actual original compiler owner, not Graph
+    /// unit decoding or an invocation grant. Exact origins must be unambiguous.
+    #[cfg(test)]
+    pub(in crate::session) fn original_for_test(
+        &self,
+        origin: FunctionBindingOrigin,
+    ) -> Option<Rc<ExecutableUnit>> {
+        let retained = self.retained.borrow();
+        let mut selected = None;
+        for owner in retained.owners.values() {
+            if owner
+                .local_function_for_origin(origin)
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                if selected
+                    .as_ref()
+                    .is_some_and(|previous| !Rc::ptr_eq(previous, owner))
+                {
+                    return None;
+                }
+                selected = Some(Rc::clone(owner));
+            }
+        }
+        selected
+    }
+
     pub(in crate::session) fn bind_original_dependencies(
         &self,
         unit: ExecutableUnit,

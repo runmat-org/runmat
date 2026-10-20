@@ -815,12 +815,20 @@ impl RunMatSession {
             .runtime_bytecode(&runtime)
             .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;
         let selected = self.prepare_executable_graph(unit, &runtime, &mut runtime_bytecode)?;
+        let selected = Rc::new(selected);
         let runtime = runtime
             .without_selected_graph_program()
             .with_selected_graph_program(super::source_evaluation::SelectedGraphSnapshot::program(
-                Rc::new(selected),
+                Rc::clone(&selected),
                 &self.source_evaluator,
             ));
+        let runtime = super::source_evaluation::bind_function_resolvers(
+            runtime,
+            unit,
+            Rc::new(runtime_bytecode.function_registry.clone()),
+            selected.static_targets().to_vec(),
+        )
+        .map_err(|error| runtime_error("RunMat:ExecutableStaticImport", error))?;
         if let Some(host) = runtime.service_ports().host() {
             host.check_execution()?;
         }

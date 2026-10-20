@@ -42,9 +42,11 @@ use dynamic_identity::ProjectSourceIdentityIndex;
 #[path = "source_evaluation/dynamic_admission.rs"]
 mod dynamic_admission;
 use dynamic_admission::CoreDynamicEvalAdmission;
+pub(crate) use dynamic_admission::SelectedStaticTarget;
 pub(in crate::session) use dynamic_admission::{
-    selected_static_imports, static_capture, SelectedStaticTarget,
+    selected_static_imports, selected_static_imports_with_preselected, static_capture,
 };
+pub(crate) use selected_graph::bind_function_resolvers;
 pub(super) use selected_graph::{
     SelectedGraphCodeSource, SelectedGraphPrimary, SelectedGraphPublication,
     SelectedGraphSelection, SelectedGraphSnapshot, SelectedGraphSource,

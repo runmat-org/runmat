@@ -169,7 +169,16 @@ impl RunMatSession {
             .collect::<HashSet<_>>();
         // Keep one immutable code owner while an accepted deferred task is
         // outstanding; canonical V3 bytes remain lazy until graph use.
-        let interactive_unit = Rc::new(draft.seal());
+        let interactive_unit = self
+            .program_service
+            .bind_original_dependencies(draft.seal())
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableProduct")
+                        .build(),
+                )
+            })?;
         let selected_static_imports = crate::session::source_evaluation::selected_static_imports(
             &interactive_unit,
             &inherited_registry,
@@ -183,6 +192,21 @@ impl RunMatSession {
                     .build(),
             )
         })?;
+        let interactive_unit = Rc::new(
+            interactive_unit
+                .with_portable_selection(
+                    selected_current_function_ids.clone(),
+                    selected_static_imports.imports.clone(),
+                    selected_static_imports.targets.clone(),
+                )
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableProduct")
+                            .build(),
+                    )
+                })?,
+        );
         let execution_runtime = interactive_unit
             .bind_runtime_sources(
                 self.runtime_context

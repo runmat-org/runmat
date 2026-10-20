@@ -44,6 +44,52 @@ fn ordinary_local_still_requires_assignment() {
 }
 
 #[test]
+fn successful_spmd_separates_client_exports_from_worker_initialization() {
+    for header in ["spmd", "spmd(2)", "spmd(1, 2)"] {
+        let source = format!("{header}; exported = 7; end; observed = exported;");
+        let found = diagnostics(&source);
+        assert!(
+            found
+                .iter()
+                .all(|item| !matches!(item.code.as_str(), "RM-MIR0001" | "RM-MIR0002")),
+            "successful SPMD executes its nonempty gang: {source}: {found:#?}"
+        );
+
+        let source = format!(
+            "{header}; if spmdIndex() == 1; conditional = 7; end; end; observed = conditional;"
+        );
+        let found = diagnostics(&source);
+        assert!(
+            found
+                .iter()
+                .all(|item| !matches!(item.code.as_str(), "RM-MIR0001" | "RM-MIR0002")),
+            "conditional entries still have a client Composite: {source}: {found:#?}"
+        );
+        let source = format!(
+            "{header}; if spmdIndex() == 1; conditional = 7; end; observed = conditional; end;"
+        );
+        let found = diagnostics(&source);
+        assert!(
+            found
+                .iter()
+                .any(|item| matches!(item.code.as_str(), "RM-MIR0001" | "RM-MIR0002")),
+            "SPMD does not prove a conditional worker assignment: {source}: {found:#?}"
+        );
+    }
+    let found = diagnostics(
+        "spmd(2); exported = uint64([1, 2]); end; first = exported{1}; second = exported{2};",
+    );
+    assert!(
+        found.is_empty(),
+        "client sees Composite entries: {found:#?}"
+    );
+    let found = diagnostics("spmd(2); exported = 7; end; outside = exported{3};");
+    assert!(found
+        .iter()
+        .any(|item| item.code == "RM-TYPE-COMPOSITE-INDEX"));
+}
+
+#[test]
 fn admitted_incoming_workspace_is_initialized_without_seeding_new_locals() {
     let variables = std::collections::HashMap::from([("committed".to_string(), 0usize)]);
     let parsed = runmat_parser::parse("seen = committed; committed = seen + 1;")

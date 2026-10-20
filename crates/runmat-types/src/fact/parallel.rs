@@ -39,6 +39,28 @@ pub struct CompositeFact {
     pub value: Box<ValueFact>,
 }
 
+/// A client-side SPMD owner, distinct from any worker's local value facts.
+pub fn composite_fact(
+    owner: ParallelRegionId,
+    labs: LabCount,
+    value: ValueFact,
+    pool: Option<String>,
+) -> ValueFact {
+    let mut fact = ValueFact::scalar(ValueKindFact::Composite(CompositeFact {
+        owner,
+        labs,
+        value: Box::new(value),
+    }));
+    fact.storage = StorageFact::Opaque;
+    fact.layout = crate::LayoutFact::Unknown;
+    fact.contiguity = crate::ContiguityFact::Unknown;
+    fact.view = crate::ViewFact::Unknown;
+    fact.residency = crate::ResidencyFact::Remote { pool };
+    fact.alias = crate::AliasFact::Identity;
+    fact.mutation = crate::MutationFact::HandleSemantics;
+    fact
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodistributorClass {
     OneDimensional,
