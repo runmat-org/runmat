@@ -16,19 +16,23 @@ struct Row<'a> {
     node: usize,
     parameter: Parameter<'a>,
 }
+/// Per-node rows follow the canonical exact-parameter order validated by the solver mesh
+/// contract (`total_cmp` on values). Raw bit order would place negative parameters after
+/// positive ones and reverse them among themselves.
 fn compare(a: &Row<'_>, b: &Row<'_>) -> std::cmp::Ordering {
     a.node
         .cmp(&b.node)
         .then_with(|| match (a.parameter, b.parameter) {
             (Parameter::Curve(a, x), Parameter::Curve(b, y)) => {
-                a.cmp(b).then_with(|| x.to_bits().cmp(&y.to_bits()))
+                a.cmp(b).then_with(|| x.total_cmp(&y))
             }
             (Parameter::Curve(..), Parameter::Surface(..)) => std::cmp::Ordering::Less,
             (Parameter::Surface(..), Parameter::Curve(..)) => std::cmp::Ordering::Greater,
             (Parameter::Surface(a, ac, x), Parameter::Surface(b, bc, y)) => a
                 .cmp(b)
                 .then_with(|| ac.cmp(&bc))
-                .then_with(|| x.map(f64::to_bits).cmp(&y.map(f64::to_bits))),
+                .then_with(|| x[0].total_cmp(&y[0]))
+                .then_with(|| x[1].total_cmp(&y[1])),
         })
 }
 fn observations<'a>(
