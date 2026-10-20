@@ -7,7 +7,7 @@ use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::state::PoolState;
 use runmat_execution::value::{InlineValue, ValuePayload};
 use runmat_execution::{CancellationReason, ExecutionScopeId, PoolId, TaskId};
-use runmat_execution_runner::{AttemptReport, AttemptRequest, PoolSpec, WorkerSpec};
+use runmat_execution_runner::{AttemptReport, AttemptRequest, AttemptSuccess, PoolSpec, WorkerSpec};
 use tokio::sync::oneshot;
 
 async fn download<'a>(
@@ -21,11 +21,12 @@ async fn download<'a>(
     let reference = object_reference(&pool.value_scope, bytes);
     let worker = ResultObjectWorker {
         spec: WorkerSpec {
+            host: crate::test_fixtures::host_inventory(),
             id: attempt.worker_id,
             pool_id: pool.pool_id,
             resources: inventory(1_000),
         },
-        bundle: Arc::new(pool.bundle.to_vec()),
+        bundle: Arc::new(pool.test_bundle().to_vec()),
         reference: reference.clone(),
         bytes: Arc::new(bytes.to_vec()),
         corrupt_download: false,
@@ -154,7 +155,7 @@ async fn rejected_accounting_releases_downloaded_results_when_report_lease_drops
                 })
                 .unwrap();
         } else {
-            rejected.resources = None;
+            *crate::test_fixtures::attempt_resources_mut(&mut rejected) = None;
         }
         fixture.pool.apply_report(BackendReport::for_request(
             &fixture.attempt,
@@ -172,11 +173,12 @@ async fn failed_download_releases_its_reservation_before_a_valid_retry() {
     let reference = object_reference(&fixture.pool.value_scope, b"valid retry");
     let worker = ResultObjectWorker {
         spec: WorkerSpec {
+            host: crate::test_fixtures::host_inventory(),
             id: fixture.attempt.worker_id,
             pool_id: fixture.pool.pool_id,
             resources: inventory(1_000),
         },
-        bundle: Arc::new(fixture.pool.bundle.to_vec()),
+        bundle: Arc::new(fixture.pool.test_bundle().to_vec()),
         reference: reference.clone(),
         bytes: Arc::new(b"valid retry".to_vec()),
         corrupt_download: true,
@@ -230,6 +232,7 @@ async fn fixture() -> Fixture {
             .unwrap();
         driver
             .handle(DriverCommand::RegisterWorker(WorkerSpec {
+                host: crate::test_fixtures::host_inventory(),
                 id: WorkerId::derive(&[b"completion-authority"]),
                 pool_id,
                 resources: inventory(1_000),
@@ -284,17 +287,16 @@ async fn rejected_success_accounting_never_reaches_the_waiter_as_success() {
         let mut fixture = fixture().await;
         let mut result = success(&fixture.attempt, "rejected");
         match corruption {
-            0 => result.resources = None,
+            0 => *crate::test_fixtures::attempt_resources_mut(&mut result) = None,
             1 => {
-                result
-                    .resources
+                crate::test_fixtures::attempt_resources_mut(&mut result)
                     .as_mut()
                     .unwrap()
                     .resources
                     .allocation
                     .memory_bytes += 1
             }
-            _ => result.resources.as_mut().unwrap().attempt_id = AttemptId::derive(&[b"foreign"]),
+            _ => crate::test_fixtures::attempt_resources_mut(&mut result).as_mut().unwrap().attempt_id = AttemptId::derive(&[b"foreign"]),
         }
         fixture.pool.apply_report(BackendReport::for_request(
             &fixture.attempt,
@@ -336,7 +338,7 @@ async fn discarded_reports_resolve_only_the_persisted_commit_and_accounting() {
                 },
                 _ => {
                     let mut forged = success(&fixture.attempt, "forged");
-                    forged.resources = None;
+                    *crate::test_fixtures::attempt_resources_mut(&mut forged) = None;
                     AttemptReport::Succeeded { result: forged }
                 }
             };
@@ -422,11 +424,12 @@ async fn committed_objects_are_protected_before_discarding_another_attempts_resu
         let reference = object_reference(&fixture.pool.value_scope, &bytes);
         let worker = ResultObjectWorker {
             spec: WorkerSpec {
+                host: crate::test_fixtures::host_inventory(),
                 id: fixture.attempt.worker_id,
                 pool_id: fixture.pool.pool_id,
                 resources: inventory(1_000),
             },
-            bundle: Arc::new(fixture.pool.bundle.to_vec()),
+            bundle: Arc::new(fixture.pool.test_bundle().to_vec()),
             reference: reference.clone(),
             bytes: Arc::new(bytes),
             corrupt_download: false,

@@ -82,6 +82,7 @@ fn constructed_and_derived_geometry_publish_reimportable_exact_closures() {
         &prepared,
         BTreeSet::new(),
         GeometryExecutionContext {
+            host: crate::test_fixtures::host_requirement(),
             scope_id: ExecutionScopeId::derive(&[b"geometry-scope"]),
             pool_id: PoolId::derive(&[b"geometry-pool"]),
             program_artifact_id: ArtifactId::derive(&[prepared.program.artifact.id.0.bytes()]),
@@ -428,6 +429,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
     let function = FunctionAnalysis {
         function: ProgramFunctionId(4),
         callable: CallableFact {
+            capabilities: Default::default(),
             identity: None,
             parameters: Vec::new(),
             parameters_complete: true,

@@ -1,3 +1,5 @@
+#[path = "support/fixtures.rs"]
+mod test_fixtures;
 #[path = "analysis_process_conformance/fluid_fourier.rs"]
 mod fluid_fourier;
 #[path = "analysis_process_conformance/fluid_mass_flow.rs"]
@@ -882,11 +884,13 @@ async fn remote_conformance(
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-analysis-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"remote-analysis-pool"]);
     let first_worker = WorkerSpec {
+        host: crate::test_fixtures::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-a"]),
         pool_id,
         resources: inventory(),
     };
     let second_worker = WorkerSpec {
+        host: crate::test_fixtures::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-b"]),
         pool_id,
         resources: inventory(),
@@ -1052,11 +1056,11 @@ async fn remote_conformance(
                 .unwrap();
         let mut result_store = publication_chain::MemoryStore::default();
         for reference in success
-            .result_objects
+            .result_objects()
             .iter()
-            .chain(&second_success.result_objects)
-            .chain(&mixed_success.result_objects)
-            .chain(&explicit_success.result_objects)
+            .chain(&second_success.result_objects())
+            .chain(&mixed_success.result_objects())
+            .chain(&explicit_success.result_objects())
         {
             result_store.0.insert(
                 reference.logical_digest,
@@ -2177,6 +2181,7 @@ fn analysis_submission(
         })
         .collect();
     let context = AnalysisExecutionContext {
+        host: crate::test_fixtures::host_requirement(),
         scope_id,
         pool_id,
         program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),

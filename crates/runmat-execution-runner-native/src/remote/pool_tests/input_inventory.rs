@@ -137,6 +137,7 @@ async fn cold_worker_receives_only_exact_task_input_closure_and_inventory_is_imm
     let received = Arc::new(Mutex::new(Vec::new()));
     pool.add_worker(Arc::new(InputWorker {
         spec: WorkerSpec {
+            host: crate::test_fixtures::host_inventory(),
             id: WorkerId::derive(&[b"cold"]),
             pool_id,
             resources: inventory(1000),
@@ -153,14 +154,20 @@ async fn cold_worker_receives_only_exact_task_input_closure_and_inventory_is_imm
             id: TaskId::derive(&[b"scoped-task"]),
             scope_id: scope,
             pool_id,
-            program_artifact_id: artifact,
-            callable: Callable {
-                owner_identity: "test".into(),
-                qualified_name: "answer".into(),
-                entrypoint_digest: Digest::sha256(b"answer"),
-            },
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact),
+            callable: runmat_execution::task::Callable::for_program(
+                "test",
+                &runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(0),
+                    Some(String::from("answer")),
+                ),
+            ),
+            host: crate::test_fixtures::host_requirement(),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: program.arguments.clone(),
             outputs: OutputContract {
+                owned_work: None,
                 requested_outputs: 1,
             },
             resources: request(),

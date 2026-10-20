@@ -78,9 +78,8 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
         std::collections::BTreeSet::new(),
     )
     .unwrap();
-    session
-        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project))
-        .unwrap();
+    futures::executor::block_on(session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(project)))
+    .unwrap();
     let checked = session
         .load_and_check_fea_source_path(&study_path.canonicalize().unwrap())
         .await

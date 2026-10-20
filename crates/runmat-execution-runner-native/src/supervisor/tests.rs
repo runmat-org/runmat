@@ -464,7 +464,7 @@ async fn failed_detached_launch_retains_original_unknown_attempt_accounting() {
 }
 
 #[test]
-fn exact_program_submission_round_trips_through_durable_storage() {
+fn exact_program_submission_record_kind_round_trips_through_durable_storage() {
     let temp = tempfile::tempdir().unwrap();
     let store = JobStore::open(SupervisorPaths::new(temp.path().join("state")).unwrap()).unwrap();
     let submission = original_program_submission(super::DurableExecutionContext {

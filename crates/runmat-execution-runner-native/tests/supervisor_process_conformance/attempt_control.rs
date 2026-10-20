@@ -123,6 +123,9 @@ async fn run_case(case: ControlCase) {
         .await
         .unwrap();
     let recipe = ProgramBuildRecipe {
+        foreign_policy: None,
+        accelerators: Vec::new(),
+        interop: runmat_types::InteropManifest::empty(),
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: ProgramRevision::new(
             Digest::sha256(b"control-graph"),
@@ -139,6 +142,7 @@ async fn run_case(case: ControlCase) {
         .unwrap(),
         entrypoint: "7".into(),
         outputs: OutputContract {
+            owned_work: None,
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),

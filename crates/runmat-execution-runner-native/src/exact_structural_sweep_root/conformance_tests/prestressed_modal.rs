@@ -98,9 +98,7 @@ async fn prestressed_modal_reaches_an_admitted_result_over_encrypted_quic() {
             .into(),
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     };
     let inventory = ResourceInventory {
@@ -193,6 +191,7 @@ async fn run_prestressed_exact_study_conformance(
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"prestressed-modal-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"prestressed-modal-pool"]);
     let worker = WorkerSpec {
+        host: crate::test_fixtures::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"prestressed-modal-worker"]),
         pool_id,
         resources: inventory.clone(),

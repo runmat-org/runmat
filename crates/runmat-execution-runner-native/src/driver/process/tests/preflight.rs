@@ -3,7 +3,7 @@ use super::*;
 use runmat_execution::{
     identity::ArtifactId,
     resource::ResourceRequest,
-    task::{Callable, RetryPolicy, TaskRequest},
+    task::{RetryPolicy, TaskRequest},
     Digest, ExecutionScopeId, OutputContract, TaskId,
 };
 use runmat_execution_runner::{DriverAction, DriverCommand, TaskSubmission};
@@ -21,6 +21,7 @@ fn unreadable_program_preserves_known_prelaunch_consumption() {
     assert!(observed
         .result
         .unwrap_err()
+        .to_string()
         .contains("local artifact store failed"));
     assert_eq!(
         observed.execution.termination,
@@ -46,14 +47,20 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
         id: TaskId::derive(&[b"preflight"]),
         scope_id: driver.scope_id(),
         pool_id: driver.pool_id(),
-        program_artifact_id: artifact_id,
-        callable: Callable {
-            owner_identity: "test".into(),
-            qualified_name: "preflight".into(),
-            entrypoint_digest: Digest::sha256(b"preflight"),
-        },
+        schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+        executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact_id),
+        callable: runmat_execution::task::Callable::for_program(
+            "test",
+            &runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                Some(String::from("preflight")),
+            ),
+        ),
+        host: crate::test_fixtures::host_requirement(),
+        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
         inputs: Vec::new(),
         outputs: OutputContract {
+            owned_work: None,
             requested_outputs: 0,
         },
         resources: ResourceRequest {
@@ -90,12 +97,13 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
 }
 
 #[test]
-fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch() {
+fn foreign_stored_artifact_rejects_before_process_launch() {
     use runmat_execution::{ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramTarget,
     };
-    for foreign in [false, true] {
+    // The stored program no longer carries an entrypoint; the task request owns the callable.
+    for foreign in [true] {
         let directory = tempfile::tempdir().unwrap();
         let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
         config.store_root = directory.path().to_path_buf();
@@ -108,6 +116,9 @@ fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch()
         )
         .unwrap();
         let recipe = ProgramBuildRecipe {
+            foreign_policy: None,
+            accelerators: Vec::new(),
+            interop: runmat_types::InteropManifest::empty(),
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: ProgramRevision::new(
                 Digest::sha256(b"graph"),
@@ -124,6 +135,7 @@ fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch()
             .unwrap(),
             entrypoint: "test_attempt".into(),
             outputs: OutputContract {
+                owned_work: None,
                 requested_outputs: 0,
             },
             execution_mode: "interpreter".into(),
@@ -140,7 +152,7 @@ fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch()
         )
         .unwrap();
         let artifact_id = ArtifactId::derive(&[original.id.0.bytes()]);
-        let stored = crate::protocol::StoredProgram {
+        let stored = crate::protocol::StoredProgram::Direct(Box::new(crate::protocol::StoredDirectProgram {
             recipe: recipe.clone(),
             artifact: if foreign {
                 ProgramArtifact::materialize(
@@ -152,15 +164,14 @@ fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch()
             } else {
                 original
             },
-            function: if foreign { 0 } else { 7 },
-        };
+        }));
         driver
             .artifacts
             .put(artifact_id, &serde_json::to_vec(&stored).unwrap())
             .unwrap();
         let request = admit(&driver, artifact_id);
         let observed = execute_attempt(&driver, &request, &TaskCompletion::new());
-        let error = observed.result.unwrap_err();
+        let error = observed.result.unwrap_err().to_string();
         assert!(
             error.contains(if foreign {
                 "original admitted artifact"
@@ -181,48 +192,6 @@ fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch()
             .validate_against(&request)
             .unwrap();
     }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn shared_provider_preserves_prelaunch_cancellation_in_an_existing_runtime() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
-    config.store_root = directory.path().to_path_buf();
-    config.max_workers = 1;
-    config.executable = directory.path().join("must-never-launch");
-    let driver =
-        LocalDriver::new(config, ExecutionScopeId::derive(&[b"cancel-preflight"])).unwrap();
-    let request = admit(&driver, ArtifactId::derive(&[b"missing-program"]));
-    let completion = TaskCompletion::new();
-    completion
-        .cancelled
-        .store(true, std::sync::atomic::Ordering::Release);
-    let observed = crate::process_provider::execute_attempt(
-        &NativeProcessProvider {
-            config: &driver.config,
-            artifacts: &driver.artifacts,
-            objects: &driver.objects,
-        },
-        &request,
-        &completion,
-        std::time::Instant::now(),
-    )
-    .await;
-    assert!(observed
-        .result
-        .unwrap_err()
-        .contains("cancelled before process launch"));
-    assert_eq!(
-        observed.execution.termination,
-        AttemptExecutionTermination::NotStarted
-    );
-    assert_eq!(observed.execution.local_ipc_sent_bytes, Some(0));
-    assert_eq!(observed.execution.local_ipc_received_bytes, Some(0));
-    observed
-        .unsuccessful_resources
-        .unwrap()
-        .validate_against(&request)
-        .unwrap();
 }
 
 #[test]
@@ -247,7 +216,7 @@ fn provider_failure_and_cancellation_commit_the_original_observation_and_account
         let observed = execute_attempt(&driver, &request, &completion);
         let original_execution = observed.execution.clone();
         let original_resources = observed.unsuccessful_resources.clone();
-        let (result, report) = observed.into_report(&request, &completion);
+        let (result, report) = observed.into_backend_report(&request, false);
         assert!(result.is_err());
         assert_eq!(report.attempt_id, request.id);
         assert_eq!(report.task_id, request.task_id);

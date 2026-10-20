@@ -208,7 +208,7 @@ impl SignalFixture {
                 )
                 .unwrap();
             let success = super::wait_for_native_task(&task).await;
-            assert!(success.result_objects.is_empty());
+            assert!(success.result_objects().is_empty());
             assert_eq!(success.outputs.len(), 1);
             outputs.push(GeneratorChunkOutput {
                 chunk_identity: chunk.plan.identity,
@@ -309,6 +309,7 @@ impl SignalFixture {
             capabilities: BTreeSet::from([Capability::ProcessIsolation]),
         };
         let worker = WorkerSpec {
+            host: crate::test_fixtures::host_inventory(),
             id: runmat_execution::identity::WorkerId::derive(&[b"signal-conformance-worker"]),
             pool_id,
             resources: inventory.clone(),
@@ -393,7 +394,7 @@ impl SignalFixture {
                     .await
                     .expect("remote signal completion timeout")
                     .unwrap();
-                assert!(success.result_objects.is_empty());
+                assert!(success.result_objects().is_empty());
                 assert_eq!(success.outputs.len(), 1);
                 outputs.push(GeneratorChunkOutput {
                     chunk_identity: chunk.plan.identity,

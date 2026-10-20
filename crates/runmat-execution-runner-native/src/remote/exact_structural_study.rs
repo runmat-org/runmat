@@ -345,9 +345,9 @@ mod allocation_tests {
             cpu_millicores: 1_000,
             memory_bytes: 1 << 20,
             scratch_bytes: 1 << 20,
-            accelerator_count,
-            accelerator_class: (accelerator_count > 0).then(|| "gpu.test".into()),
-            accelerator_memory_bytes: if accelerator_count > 0 { 1 << 18 } else { 0 },
+            accelerators: (0..accelerator_count)
+                .map(|_| crate::test_fixtures::accelerator_request("gpu.test", 1 << 18))
+                .collect(),
             maximum_wall_millis: 10_000,
         }
     }
@@ -372,9 +372,11 @@ mod allocation_tests {
             .unwrap_err()
             .contains("immutable structural-study request"));
         let requested = runmat_execution::resource::AcceleratorRequest {
-            class: "gpu.test".into(),
+            class: crate::test_fixtures::accelerator_class("gpu.test"),
             count: 1,
-            memory_bytes_each: 1 << 18,
+            minimum_allocation_bytes: 1 << 18,
+            provider: None,
+            required_features: Default::default(),
         };
         assert!(admit_analysis_task_resources(
             &resources(0),

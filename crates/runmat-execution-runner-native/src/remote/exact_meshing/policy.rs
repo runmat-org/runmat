@@ -25,9 +25,7 @@ mod tests {
             cpu_millicores,
             memory_bytes: 1 << 30,
             scratch_bytes: 1 << 30,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: Vec::new(),
             maximum_wall_millis: 180_000,
         }
     }

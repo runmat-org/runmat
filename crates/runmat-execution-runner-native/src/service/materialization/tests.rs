@@ -31,6 +31,7 @@ fn service_fixture() -> (tempfile::TempDir, super::NativeExecutionService) {
             )
             .unwrap(),
         accelerator_devices: Vec::new(),
+        ..crate::NativeExecutionConfig::for_current_executable().expect("native config defaults")
     };
     (
         temporary,
@@ -43,6 +44,8 @@ fn admitted_program_call() -> DeferredCall {
     let program = b"unexecuted checkpoint witness".to_vec();
     let digest = runmat_execution::Digest::sha256(&program);
     DeferredCall {
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        console: None,
         invocation: DeferredInvocation::Program {
             callable: runmat_execution::ProgramCallable::semantic(
                 runmat_execution::ProgramFunctionId(0),
@@ -70,6 +73,8 @@ fn fixture() -> (Mutex<State>, FutureHandle) {
     let scope_id = crate::config::fresh_scope_id(b"materialization-test", 1);
     let id = FutureId::derive(&[scope_id.bytes(), b"future"]);
     let call = DeferredCall {
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        console: None,
         invocation: DeferredInvocation::callable(CallableDescriptor {
             target: CallableTarget::FevalForward(Value::Num(13.0)),
             args: vec![Value::Num(29.0)],

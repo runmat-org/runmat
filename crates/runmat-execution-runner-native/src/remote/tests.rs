@@ -287,6 +287,7 @@ async fn remote_driver_commits_verified_externalized_results() {
     };
     let control = FakeControl {
         bootstrap: DriverBootstrap {
+            driver_accelerator_devices: Vec::new(),
             project_revision: "unused".into(),
             endpoint_fingerprint: "unused".into(),
             run_key_envelope: Vec::new(),
@@ -301,6 +302,7 @@ async fn remote_driver_commits_verified_externalized_results() {
     };
     let run_key = RunKeyMaterial::from_entropy([41; 32]).unwrap();
     let config = RemoteDriverConfig {
+        ready_v1: false,
         authority: DriverAuthority {
             server_url: "https://control.invalid".into(),
             run_id: run_id.into(),
@@ -1218,6 +1220,7 @@ fn result_object(run_id: &str, bytes: &[u8]) -> ProgramExecutionObject {
 
 fn unused_bootstrap() -> DriverBootstrap {
     DriverBootstrap {
+        driver_accelerator_devices: Vec::new(),
         project_revision: "unused".into(),
         endpoint_fingerprint: "unused".into(),
         run_key_envelope: Vec::new(),

@@ -403,9 +403,7 @@ fn resources() -> ResourceRequest {
         cpu_millicores: 1_000,
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     }
 }
@@ -523,6 +521,7 @@ pub(super) async fn run_worker(
 ) -> crate::NativeExecutionResult<()> {
     let allocation_id = allocation.allocation_lease_id.clone();
     let worker = WorkerSpec {
+        host: crate::test_fixtures::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[
             RUN_ID.as_bytes(),
             allocation_id.as_bytes(),

@@ -18,8 +18,8 @@ pub(super) async fn fault_child(mode: &str) {
     reserved.validate().unwrap();
     drop(reserved);
     let mut response = ProgramExecutionResponse::Success {
-        value: ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Null)),
-    };
+            outputs: vec![ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Null))],
+        };
     if mode == "--retry-observed-child" {
         // Test-only fault injection; no production formulation or physical output.
         let root = std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV).unwrap();
@@ -167,7 +167,7 @@ async fn fault_parent() {
             let success = result.unwrap();
             assert_eq!(
                 history[1].terminal.as_ref().unwrap().resources,
-                success.resources
+                success.resources()
             );
             assert_eq!(
                 history[1]
@@ -179,7 +179,7 @@ async fn fault_parent() {
                     .unwrap()
                     .wall_millis,
                 success
-                    .resources
+                    .resources()
                     .as_ref()
                     .unwrap()
                     .resources

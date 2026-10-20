@@ -91,6 +91,7 @@ fn derived_geometry_sweep_reuses_its_source_and_invalidates_every_downstream_ide
                 program,
                 BTreeSet::new(),
                 GeometryExecutionContext {
+                    host: crate::test_fixtures::host_requirement(),
                     scope_id,
                     pool_id,
                     program_artifact_id: ArtifactId::derive(&[program

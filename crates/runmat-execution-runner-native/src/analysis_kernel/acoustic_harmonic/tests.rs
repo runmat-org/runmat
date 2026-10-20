@@ -312,7 +312,7 @@ fn acoustic_task_submission_requires_the_exact_resource_allocation() {
         .iter()
         .map(|argument| match argument {
             ValuePayload::Object(root) => (**root).clone(),
-            ValuePayload::Inline(_) => panic!("canonical inputs must be externalized"),
+            other => panic!("canonical inputs must be externalized: {other:?}"),
         })
         .collect::<Vec<_>>();
     let mut resources = task.resource_plan.request.clone();
@@ -320,6 +320,7 @@ fn acoustic_task_submission_requires_the_exact_resource_allocation() {
         .required_capabilities
         .extend(task.host.workload.generic_capabilities().unwrap());
     let context = |resources| AnalysisExecutionContext {
+        host: crate::test_fixtures::host_requirement(),
         scope_id: ExecutionScopeId::derive(&[b"acoustic-study"]),
         pool_id: PoolId::derive(&[b"acoustic-pool"]),
         program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[b"acoustic-program"]),

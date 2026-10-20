@@ -22,10 +22,14 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
     let unit = session.compile_executable_unit(source, None).await.unwrap();
     let envelope = unit.portable_envelope_for(selected).unwrap();
     let recipe = ProgramBuildRecipe {
+        foreign_policy: None,
+        accelerators: Vec::new(),
+        interop: runmat_types::InteropManifest::empty(),
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
         entrypoint: envelope.manifest.identity.entrypoint_function.0.to_string(),
         outputs: OutputContract {
+            owned_work: None,
             requested_outputs: outputs,
         },
         execution_mode: "interpreter".into(),
@@ -38,8 +42,14 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
     ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
-        function: envelope.manifest.identity.entrypoint_function.0 as usize,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(envelope.manifest.identity.entrypoint_function.0 as usize),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         artifact: ProgramArtifact::materialize(
             &recipe,
             ExecutableForm::ExecutableUnitV4,
@@ -179,6 +189,7 @@ async fn transitive_request() -> ProgramExecutionRequest {
     let (recipe, artifact) = ProgramArtifact::materialize_executable_unit(
         &envelope,
         OutputContract {
+            owned_work: None,
             requested_outputs: 1,
         },
         ProgramTarget::portable("original-session-worker"),
@@ -187,8 +198,14 @@ async fn transitive_request() -> ProgramExecutionRequest {
     ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
-        function: envelope.manifest.identity.entrypoint_function.0 as usize,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(envelope.manifest.identity.entrypoint_function.0 as usize),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: vec![
             runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(5.0)).unwrap(),
         ],

@@ -21,7 +21,7 @@ pub(crate) fn successful_phase(
         cpu_millicores: resources.cpu_millicores,
         memory_bytes: resources.memory_bytes,
         scratch_bytes: resources.scratch_bytes.max(1),
-        accelerators: resources.accelerators.clone(),
+        accelerators: crate::test_fixtures::accelerator_devices(&resources.accelerators),
         capabilities: resources.required_capabilities.clone(),
     };
     let mut driver = Driver::new(DriverConfig::default(), fence).unwrap();
@@ -48,6 +48,7 @@ pub(crate) fn successful_phase(
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            host: crate::test_fixtures::host_inventory(),
             id: worker,
             pool_id: pool,
             resources: inventory,

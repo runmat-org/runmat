@@ -27,6 +27,7 @@ async fn stale_missing_route_report_does_not_fence_the_current_worker_or_attempt
         let mut driver = pool.driver.lock().unwrap();
         driver
             .handle(DriverCommand::RegisterWorker(WorkerSpec {
+                host: crate::test_fixtures::host_inventory(),
                 id: worker_id,
                 pool_id,
                 resources: inventory(1_000),

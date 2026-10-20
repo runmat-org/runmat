@@ -1027,9 +1027,7 @@ mod tests {
             cpu_millicores: 1_000,
             memory_bytes: 1 << 30,
             scratch_bytes: 1 << 30,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: Vec::new(),
             maximum_wall_millis: 180_000,
         };
         let inventory = ResourceInventory {
@@ -1042,6 +1040,7 @@ mod tests {
         let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-exact-root-scope"]);
         let pool_id = runmat_execution::PoolId::derive(&[b"remote-exact-root-pool"]);
         let worker = WorkerSpec {
+            host: crate::test_fixtures::host_inventory(),
             id: runmat_execution::identity::WorkerId::derive(&[b"remote-exact-root-worker"]),
             pool_id,
             resources: inventory.clone(),

@@ -90,6 +90,8 @@ async fn compiled_region_worker_drop_retires_source_and_pending_effect_without_r
     ))
     .with_service_ports(RuntimeServicePorts::default().with_collective(collective));
     let request = ProgramExecutionRequest {
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        console: None,
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: program.recipe,
         artifact: program.artifact,

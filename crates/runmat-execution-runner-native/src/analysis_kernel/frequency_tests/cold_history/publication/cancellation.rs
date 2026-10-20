@@ -9,7 +9,9 @@ pub(super) fn reject_and_retry(
 ) -> runmat_runtime::analysis::PreparedStudyPublication {
     let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     {
-        let _guard = runmat_runtime::interrupt::replace_interrupt(Some(cancelled));
+        let _guard = runmat_runtime::interrupt::replace_interrupt(Some(
+            runmat_execution::CancellationToken::from_shared(cancelled),
+        ));
         assert!(prepared.publish_without_function_execution().is_err());
         assert!(
             store.list_run_metadata().unwrap().is_empty(),

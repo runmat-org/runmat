@@ -98,9 +98,7 @@ async fn response_spectrum_fields_reach_an_admitted_result_over_encrypted_quic()
             .into(),
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     };
     let inventory = ResourceInventory {
@@ -140,6 +138,7 @@ pub(super) async fn run_response_spectrum_conformance(
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"response-spectrum-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"response-spectrum-pool"]);
     let worker = WorkerSpec {
+        host: crate::test_fixtures::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"response-spectrum-worker"]),
         pool_id,
         resources: inventory.clone(),

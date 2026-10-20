@@ -246,12 +246,8 @@ mod tests {
 
     use super::validate_accelerator_allocation;
 
-    fn accelerator(class: &str, memory_bytes_each: u64) -> AcceleratorRequest {
-        AcceleratorRequest {
-            class: class.into(),
-            count: 1,
-            memory_bytes_each,
-        }
+    fn accelerator(class: &str, minimum_allocation_bytes: u64) -> AcceleratorRequest {
+        crate::test_fixtures::accelerator_request(class, minimum_allocation_bytes)
     }
 
     #[test]

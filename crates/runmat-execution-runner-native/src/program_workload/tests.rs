@@ -16,10 +16,20 @@ async fn original_request() -> ProgramExecutionRequest {
         .unwrap();
     let envelope = unit.portable_envelope().unwrap();
     let recipe = ProgramBuildRecipe {
+        foreign_policy: None,
+        accelerators: Vec::new(),
+        interop: runmat_types::InteropManifest::empty(),
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: envelope.manifest.identity.entrypoint_function.0.to_string(),
+        entrypoint: envelope
+            .manifest
+            .identity
+            .entrypoint_function
+            .unwrap()
+            .0
+            .to_string(),
         outputs: runmat_execution::OutputContract {
+            owned_work: None,
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
@@ -32,8 +42,14 @@ async fn original_request() -> ProgramExecutionRequest {
     let request: ProgramExecutionRequest = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
-        function: envelope.manifest.identity.entrypoint_function.0 as usize,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        callable: runmat_execution::ProgramCallable::semantic(
+            envelope.manifest.identity.entrypoint_function.unwrap(),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         artifact: ProgramArtifact::materialize(
             &recipe,
             ExecutableForm::ExecutableUnitV4,
@@ -62,9 +78,10 @@ async fn original_unit_consumes_exact_frozen_environment_and_live_cancellation()
         ));
         let response = execute_unit(&request, None, None, None).await;
         response.validate_against(&request).unwrap();
-        let ProgramExecutionResponse::Success { value: output } = response else {
+        let ProgramExecutionResponse::Success { outputs } = response else {
             panic!("original execution failed: {response:?}")
         };
+        let [output]: [_; 1] = outputs.try_into().unwrap();
         assert_eq!(
             runmat_runtime::execution::value_codec::decode_inline_value(&output).unwrap(),
             Value::CharArray(CharArray::new_row(value))

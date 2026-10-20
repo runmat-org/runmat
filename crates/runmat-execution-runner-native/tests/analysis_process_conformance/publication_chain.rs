@@ -514,7 +514,7 @@ impl MeteredProgramResponse {
 pub(super) fn success_response(success: &AttemptSuccess) -> ProgramExecutionResponse {
     ProgramExecutionResponse::from_success_outputs(
         success.outputs.clone(),
-        success.result_objects.clone(),
+        success.result_objects().clone(),
     )
 }
 
@@ -525,7 +525,7 @@ pub(super) fn metered_response(
 ) -> MeteredProgramResponse {
     success.validate_accounting().unwrap();
     let resources = success
-        .resources
+        .resources()
         .as_deref()
         .expect("analysis task must retain resource accounting")
         .clone();
@@ -858,7 +858,7 @@ impl PublicationChainDriver for RemoteDriver {
                         remote_timeout_summary(&self.pool)
                     ),
                 };
-            for reference in &success.result_objects {
+            for reference in &success.result_objects() {
                 self.store.0.insert(
                     reference.logical_digest,
                     self.pool
@@ -937,7 +937,7 @@ impl PublicationChainDriver for RemoteDriver {
                             remote_timeout_summary(&self.pool)
                         ),
                     };
-                for reference in &success.result_objects {
+                for reference in &success.result_objects() {
                     self.store.0.insert(
                         reference.logical_digest,
                         self.pool

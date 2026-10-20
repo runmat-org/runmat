@@ -130,9 +130,7 @@ async fn constructed_geometry_reaches_a_terminal_mesh_over_encrypted_quic() {
         cpu_millicores: 1_000,
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     };
     let inventory = ResourceInventory {
@@ -145,6 +143,7 @@ async fn constructed_geometry_reaches_a_terminal_mesh_over_encrypted_quic() {
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"geometry-mesh-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"geometry-mesh-pool"]);
     let worker = WorkerSpec {
+        host: crate::test_fixtures::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"geometry-mesh-worker"]),
         pool_id,
         resources: inventory.clone(),

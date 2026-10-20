@@ -25,6 +25,8 @@ fn submit_local(driver: &Arc<LocalDriver>, label: &[u8]) -> (TaskId, Arc<TaskCom
                 owned_work: None,
             },
             retry: RetryPolicy::Never,
+            environment: request.environment,
+            console: request.console,
         })
         .expect("real local driver accepted test submission");
     (task_id, completion)
@@ -51,7 +53,9 @@ fn selected_queued_worker_cancellation_preserves_active_sibling() {
         before.tasks.get(&queued_id).unwrap().state,
         TaskState::Ready
     );
-    driver.cancel_task(queued_id).unwrap();
+    driver
+        .cancel_task(queued_id, runmat_execution::CancellationReason::User)
+        .unwrap();
     let after = driver.scheduler_snapshot_for_test();
     assert_eq!(
         after.tasks.get(&queued_id).unwrap().state,
@@ -64,7 +68,9 @@ fn selected_queued_worker_cancellation_preserves_active_sibling() {
     assert!(queued.is_cancelled());
     assert!(!active.is_cancelled());
 
-    driver.cancel_task(active_id).unwrap();
+    driver
+        .cancel_task(active_id, runmat_execution::CancellationReason::User)
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while active.try_value().is_none() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));

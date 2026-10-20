@@ -53,9 +53,8 @@ async fn frozen_imported_assessment_executes_portable_boolean_contract() {
         std::collections::BTreeSet::new(),
     )
     .unwrap();
-    session
-        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project))
-        .unwrap();
+    futures::executor::block_on(session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(project)))
+    .unwrap();
     let checked = session
         .load_and_check_fea_source_path(&path.canonicalize().unwrap())
         .await
@@ -135,9 +134,10 @@ async fn frozen_imported_assessment_executes_portable_boolean_contract() {
             });
         let response = crate::execute_host_program_request(prepared.request().clone()).await;
         response.validate_against(prepared.request()).unwrap();
-        let ProgramExecutionResponse::Success { value } = response else {
+        let ProgramExecutionResponse::Success { outputs: response_outputs } = response else {
             panic!("assessment execution failed: {response:?}")
         };
+        let [value]: [_; 1] = response_outputs.try_into().unwrap();
         assert_eq!(
             decode_assessment_outcome(&value).unwrap_or_else(|error| panic!(
                 "assessment return rejected: {error}; payload: {value:#?}"

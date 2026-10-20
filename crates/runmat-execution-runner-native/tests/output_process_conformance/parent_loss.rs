@@ -17,6 +17,7 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     let request = runmat_vm::materialize_deferred_call(
         &call,
         runmat_execution::OutputContract {
+            owned_work: None,
             requested_outputs: 1,
         },
         runmat_execution_artifact::ProgramTarget::portable("original-parent-loss"),

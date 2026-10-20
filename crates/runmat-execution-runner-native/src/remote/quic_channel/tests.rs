@@ -61,6 +61,7 @@ async fn original_receive_and_decode_failures_reach_waiters_and_reject_later_req
                 run_identity: "reply-failure".into(),
                 node_identity: "failure-node".into(),
                 worker: WorkerSpec {
+                    host: crate::test_fixtures::host_inventory(),
                     id: WorkerId::derive(&[b"reply-failure-worker"]),
                     pool_id: PoolId::derive(&[b"reply-failure-pool"]),
                     resources: crate::remote::pool_tests::inventory(1_000),

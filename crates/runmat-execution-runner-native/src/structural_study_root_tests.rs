@@ -15,9 +15,11 @@ pub(super) mod initial_fields;
 #[test]
 fn typed_study_root_binds_bounded_accelerators_to_the_planned_backend() {
     let request = runmat_execution::resource::AcceleratorRequest {
-        class: "gpu.test".into(),
+        class: crate::test_fixtures::accelerator_class("gpu.test"),
         count: 1,
-        memory_bytes_each: 1024,
+        minimum_allocation_bytes: 1024,
+            provider: None,
+            required_features: Default::default(),
     };
     assert!(validate_accelerator_requests(
         runmat_analysis_fea::ComputeBackend::Cpu,
@@ -300,9 +302,7 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
         cpu_millicores: 1_000,
         memory_bytes: 2 << 30,
         scratch_bytes: 2 << 30,
-        accelerator_count: 0,
-        accelerator_class: None,
-        accelerator_memory_bytes: 0,
+        accelerators: Vec::new(),
         maximum_wall_millis: 180_000,
     };
     let mut capabilities = runmat_analysis_execution::analysis_worker_capabilities(
@@ -335,6 +335,7 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
     };
     let pool_id = runmat_execution::PoolId::derive(&[b"typed-study-root-pool"]);
     let worker = WorkerSpec {
+        host: crate::test_fixtures::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"typed-study-root-worker"]),
         pool_id,
         resources: inventory.clone(),
