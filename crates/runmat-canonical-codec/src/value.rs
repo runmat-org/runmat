@@ -15,6 +15,12 @@ pub(crate) struct MaterializationProfile {
     pub value_nodes: u64,
     pub map_entries: u64,
     pub string_bytes: u64,
+    /// Arrays and value strings: the heap collections a typed decode owns.
+    pub heap_containers: u64,
+    /// Maps decode into typed structs whose keys are not retained.
+    pub maps: u64,
+    /// String bytes excluding map keys.
+    pub value_string_bytes: u64,
 }
 
 mod profile;

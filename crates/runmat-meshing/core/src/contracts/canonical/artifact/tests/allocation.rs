@@ -88,3 +88,59 @@ fn successful_topology_validation_reconciles_actual_requested_allocations() {
         );
     }
 }
+
+#[test]
+fn compact_topology_decode_peak_stays_within_its_typed_admission() {
+    use crate::fixtures::{
+        connected_quadratic_tetrahedron_solver_mesh, quadratic_slab_mesh, slab_mesh,
+        three_region_tetrahedron_solver_mesh_with_order,
+    };
+    let limits = runmat_canonical_codec::CanonicalLimits::new(1 << 30, 1 << 24, 1 << 20, 64);
+    let control = super::super::super::codec::MeshingCanonicalCodecControl::new(&crate::NeverCancelled);
+    for mesh in [
+        canonical_tetrahedron_solver_mesh(ElementOrder::Tet10),
+        connected_quadratic_tetrahedron_solver_mesh(),
+        three_region_tetrahedron_solver_mesh_with_order(ElementOrder::Tet4),
+        slab_mesh(6),
+        quadratic_slab_mesh(4),
+    ] {
+        let bytes = runmat_canonical_codec::encode_contract(
+            b"decode-peak\0",
+            "topology",
+            &mesh.topology,
+            limits,
+        )
+        .unwrap();
+        let value = runmat_canonical_codec::validated_contract_value(
+            b"decode-peak\0",
+            "topology",
+            &bytes,
+            limits,
+            &control,
+        )
+        .unwrap();
+        let admitted = super::super::super::codec::topology_decode_admission(
+            value,
+            &control,
+        )
+        .unwrap();
+        ALLOCATIONS.with(|state| state.set((true, 0, 0)));
+        let decoded: super::SolverMeshTopology =
+            runmat_canonical_codec::decode_contract(b"decode-peak\0", "topology", &bytes, limits)
+                .unwrap();
+        let (_, _, peak) = ALLOCATIONS.with(|state| {
+            let record = state.get();
+            state.set((false, 0, 0));
+            record
+        });
+        assert_eq!(decoded, mesh.topology);
+        println!(
+            "decode elements={} peak={peak} admitted={admitted}",
+            mesh.topology.volume_elements.len()
+        );
+        assert!(
+            peak as u64 <= admitted,
+            "decode peak {peak} exceeds its admitted {admitted}"
+        );
+    }
+}

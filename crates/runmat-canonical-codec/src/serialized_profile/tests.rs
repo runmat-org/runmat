@@ -348,12 +348,14 @@ fn all_counter_arithmetic_is_checked() {
         value_nodes: 0,
         map_entries: u64::MAX,
         string_bytes: 0,
+        ..Default::default()
     };
     assert!(counter.string(1, true, 0).is_err());
     counter.profile = MaterializationProfile {
         value_nodes: 0,
         map_entries: 0,
         string_bytes: u64::MAX,
+        ..Default::default()
     };
     assert!(counter.string(1, false, 0).is_err());
     assert!(

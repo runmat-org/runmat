@@ -45,6 +45,29 @@ pub fn canonical_chunked_payload_materialization_resident_bytes_estimate<'a>(
     materialization_resident_bytes_estimate(profile, encoded_bytes)
 }
 
+/// Typed resident estimate for directly decoding the bare canonical value into
+/// typed collections: one word per scalar, a vector header per array or string,
+/// string bytes, and no retained map keys (maps decode into typed structs).
+/// Direct decoding builds no JSON tree; this is the matching requested estimate.
+pub fn canonical_value_typed_resident_bytes_estimate(
+    value: &[u8],
+    control: &dyn crate::CanonicalCodecControl,
+) -> Result<u64, CanonicalCodecError> {
+    let (profile, _) = crate::value::value_profile(value, control)?;
+    let overflow = || CanonicalCodecError::resource_limit("typed decode estimate", "byte count overflow");
+    let scalars = profile
+        .value_nodes
+        .checked_sub(profile.heap_containers)
+        .and_then(|nodes| nodes.checked_sub(profile.maps))
+        .ok_or_else(overflow)?;
+    scalars
+        .checked_mul(8)
+        .and_then(|bytes| bytes.checked_add(profile.heap_containers.checked_mul(24)?))
+        .and_then(|bytes| bytes.checked_add(profile.value_string_bytes))
+        .and_then(|bytes| bytes.checked_add(CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT))
+        .ok_or_else(overflow)
+}
+
 /// Profile the bare canonical value supplied to decode_contract_with_admission.
 /// Envelope validation belongs to that decoder; this never prepends or copies it.
 /// The same structural scanner and cooperative checkpoints serve both forms.

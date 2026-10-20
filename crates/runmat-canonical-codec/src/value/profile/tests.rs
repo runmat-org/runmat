@@ -16,6 +16,9 @@ fn every_chunk_boundary_preserves_independent_structural_inventory() {
         value_nodes: 8,
         map_entries: 2,
         string_bytes: 15,
+        heap_containers: 2,
+        maps: 1,
+        value_string_bytes: 6,
     };
     for split in 0..=bytes.len() {
         let (profile, length) =
@@ -43,12 +46,8 @@ fn dense_numeric_inventory_uses_original_nodes_and_bytes() {
     .unwrap();
     let (profile, length) = chunked_profile(bytes.chunks(257), &NeverCancelled).unwrap();
     assert_eq!(
-        profile,
-        MaterializationProfile {
-            value_nodes: 100_001,
-            map_entries: 0,
-            string_bytes: 0
-        }
+        (profile.value_nodes, profile.map_entries, profile.string_bytes),
+        (100_001, 0, 0)
     );
     assert_eq!(length, bytes.len() as u64);
 }
@@ -136,13 +135,9 @@ fn admission_value_and_envelope_share_the_same_independent_structural_inventory(
         |value| {
             let (profile, bytes) = value_profile(value, &NeverCancelled)?;
             assert_eq!(
-                profile,
-                MaterializationProfile {
-                    value_nodes: 8,
-                    map_entries: 2,
-                    string_bytes: 15
-                }
-            );
+        (profile.value_nodes, profile.map_entries, profile.string_bytes),
+        (8, 2, 15)
+    );
             assert_eq!(bytes, value.len() as u64);
             let value_estimate = crate::canonical_value_materialization_resident_bytes_estimate(
                 value,

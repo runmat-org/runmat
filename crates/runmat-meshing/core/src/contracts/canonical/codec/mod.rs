@@ -208,6 +208,8 @@ pub(super) fn digest_with_cancellation(
 }
 
 mod metadata;
+#[cfg(test)]
+pub(crate) use metadata::topology_decode_admission;
 
 pub(super) use metadata::decode_validated;
 pub(super) fn digest_borrowed_contract<T: Serialize>(

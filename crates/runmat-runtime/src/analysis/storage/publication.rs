@@ -273,7 +273,8 @@ impl AnalysisPublicationBuilder {
         if *guard {
             return Err("publication inventory is frozen for manifest preparation".into());
         }
-        self.admit(frequency_bytes(step, catalog, roots, self.maximum_bytes)?)?;
+        self.admit(frequency_bytes(step, catalog, roots)?)
+            .map_err(|error| error.context("frequency step typed copies and published objects"))?;
         self.store
             .persist_structural_frequency(step, catalog, roots, source)
             .map_err(Into::into)
@@ -293,7 +294,8 @@ impl AnalysisPublicationBuilder {
         if *guard {
             return Err("publication inventory is frozen for manifest preparation".into());
         }
-        self.admit(frequency_bytes(step, catalog, roots, self.maximum_bytes)?)?;
+        self.admit(frequency_bytes(step, catalog, roots)?)
+            .map_err(|error| error.context("frequency step typed copies and published objects"))?;
         self.store
             .persist_acoustic_frequency(step, catalog, roots, source)
             .map_err(Into::into)
@@ -475,9 +477,10 @@ fn frequency_bytes(
     step: &AnalysisStudyStepRunData,
     catalog: &runmat_execution::value::PublishedObjectCatalog,
     roots: &impl Serialize,
-    maximum: u64,
 ) -> Result<u64, AnalysisPublicationError> {
-    let mut bytes = resident(&(step, catalog, roots), maximum)?;
+    // Frequency preparation clones these typed values and copies each published
+    // object; it builds no JSON tree.
+    let mut bytes = runmat_canonical_codec::typed_resident_bytes_estimate(&(step, catalog, roots))?;
     catalog.validate().map_err(|e| e.to_string())?;
     for object in &catalog.objects {
         bytes = bytes.checked_add(object.encoded_length).ok_or_else(|| {

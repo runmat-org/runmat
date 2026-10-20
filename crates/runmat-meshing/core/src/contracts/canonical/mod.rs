@@ -6,6 +6,7 @@ mod artifact_parameters;
 mod artifact_resources;
 mod artifact_storage;
 mod artifact_types;
+mod topology_wire;
 mod artifact_workspace;
 mod authoring;
 mod cancellation;

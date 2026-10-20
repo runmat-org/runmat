@@ -65,6 +65,14 @@ impl ResolvedFaceMetricField {
             let resolved = resolved_by_face
                 .remove(&face.id)
                 .expect("resolved every exact face");
+            tracing::info!(
+                event_code = "meshing.surface_metric.face",
+                face = ?face.id,
+                minimum_length_m = resolved.metric.conservative_minimum_length_m().unwrap_or(f64::NAN),
+                active_sources = ?resolved.active_sources,
+                applied = resolved.applied_contribution_count,
+                "resolved face metric"
+            );
             let provenance_bytes = super::super::ExactFaceMetricProvenance::storage_bytes(
                 &face.id,
                 &resolved.active_sources,

@@ -252,13 +252,18 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         MeshingStageKind::OrderElevation
     );
     assert_eq!(projection_stage.host().workload.inputs.len(), 3);
+    // The compact projection is small; a narrower chunk keeps publication multi-chunk.
+    let projection_policy = MeshingChunkPolicy {
+        maximum_chunk_bytes: 64 * 1024,
+        ..policy
+    };
     let projection = execute_serial_stage(
         &stage_program(&projection_stage, &mut fixture.store),
         &mut fixture.store,
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
-        policy,
+        projection_policy,
         ObjectInventoryLimits::default(),
     )
     .unwrap();

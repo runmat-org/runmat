@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ElementOrder, GeometryRevisionRef, MeshingRequest, PersistentEntityId, StableDigest};
 
-pub const SOLVER_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 8;
+pub const SOLVER_MESH_ARTIFACT_SCHEMA_VERSION: u16 = 9;
 /// Tet10 midside-node order after the four corners: 01, 12, 20, 03, 13, 23.
 pub const TETRAHEDRON_MIDSIDE_EDGE_CORNERS: [[usize; 2]; 6] =
     [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]];
@@ -156,8 +156,8 @@ pub struct FieldTopologyMap {
     pub ordered_entity_ids: Vec<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Serialized through the compact entity-table wire form in `topology_wire`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SolverMeshTopology {
     pub nodes: Vec<SolverMeshNode>,
     pub volume_elements: Vec<SolverVolumeElement>,
