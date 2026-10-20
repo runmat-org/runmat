@@ -33,13 +33,15 @@ fn compiled_map_has_a_canonical_json_safe_round_trip() {
         compile_solid_property_map(&matching_model(&mesh), &mesh).expect("compiled properties");
     let encoded = serde_json::to_vec(&compiled).expect("encode compiled property map");
     let value = serde_json::to_value(&compiled).unwrap();
-    let legacy_entries = compiled
-        .solid_materials()
-        .map(|entry| (entry.element_identity, entry))
-        .collect::<Vec<_>>();
+    // One shared material row; per-element data are columns.
+    assert_eq!(value["materials"].as_array().unwrap().len(), 1);
     assert_eq!(
-        value["solid_materials"],
-        serde_json::to_value(&legacy_entries).unwrap()
+        value["solids"]["identities"].as_array().unwrap().len(),
+        compiled.solid_materials().len()
+    );
+    assert_eq!(
+        value["audit"]["elements"].as_array().unwrap().len(),
+        compiled.audit().len()
     );
     let decoded: CompiledPropertyMap =
         serde_json::from_slice(&encoded).expect("decode compiled property map");
@@ -80,16 +82,15 @@ fn compiled_map_decode_rejects_semantic_audit_and_entry_substitution() {
     assert!(serde_json::from_value::<CompiledPropertyMap>(audit).is_err());
 
     let mut entry = encoded.clone();
-    entry["solid_materials"][0][1]["element_identity"] =
-        serde_json::to_value(runmat_meshing_core::StableDigest::from_bytes([0xa5; 32])).unwrap();
+    entry["solids"]["identities"][0] = serde_json::json!("a5".repeat(32));
     assert!(serde_json::from_value::<CompiledPropertyMap>(entry).is_err());
 
     let mut incomplete_audit = encoded;
-    incomplete_audit["audit"] = serde_json::json!([]);
+    incomplete_audit["audit"] = serde_json::json!({"elements": [], "owners": []});
     assert!(serde_json::from_value::<CompiledPropertyMap>(incomplete_audit).is_err());
 
     let mut material_evidence = serde_json::to_value(&compiled).unwrap();
-    material_evidence["solid_materials"][0][1]["material"]["name"] =
+    material_evidence["materials"][0]["name"] =
         serde_json::json!("substituted material display name");
     assert!(serde_json::from_value::<CompiledPropertyMap>(material_evidence).is_err());
 }

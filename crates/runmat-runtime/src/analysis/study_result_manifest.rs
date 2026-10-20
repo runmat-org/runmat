@@ -122,3 +122,31 @@ pub fn read_saved_study_publication(
         .map(|(_, publication)| publication)
         .map_err(|error| format!("{error:?}"))
 }
+
+/// A solver state held by a study manifest by reference. The state itself is persisted once as
+/// canonical binary in the run's state store; the manifest names it by identity and digest.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PersistedStateEvidence {
+    state_id: runmat_analysis_core::StateId,
+    identity: runmat_analysis_fea::execution::StateIdentity,
+    content_digest: Digest,
+    topology_digest: Digest,
+    artifact_path: String,
+}
+
+impl PersistedStateEvidence {
+    pub(super) fn persist(
+        state: &runmat_analysis_fea::execution::CanonicalSemanticState,
+        study_digest: Digest,
+        staging: &super::storage::AnalysisPublicationBuilder,
+    ) -> Result<Self, super::storage::AnalysisPublicationError> {
+        Ok(Self {
+            artifact_path: staging.persist_state(&study_digest.to_string(), state)?,
+            state_id: state.state_id.clone(),
+            identity: state.identity,
+            content_digest: state.content_digest,
+            topology_digest: state.topology_digest,
+        })
+    }
+}

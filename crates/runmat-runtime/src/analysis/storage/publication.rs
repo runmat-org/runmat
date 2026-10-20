@@ -381,8 +381,9 @@ impl AnalysisPublicationBuilder {
             )?;
             drop(observations);
             drop(runs);
-            self.admit(additional)
-                .map_err(|error| error.context("publication commit phase"))?;
+            self.admit(additional.total).map_err(|error| {
+                error.context(&format!("publication commit phase ({})", additional.facts))
+            })?;
         }
         if manifest.get("study_definition_digest")
             != Some(&serde_json::to_value(self.definition).map_err(|e| e.to_string())?)

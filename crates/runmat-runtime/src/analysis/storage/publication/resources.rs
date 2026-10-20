@@ -69,7 +69,7 @@ pub(super) fn commit_work(
     runs: &HashMap<String, PersistedAnalysisArtifact>,
     observations: &HashMap<String, observations::ObservationAttachment>,
     maximum: u64,
-) -> Result<u64, AnalysisPublicationError> {
+) -> Result<CommitWork, AnalysisPublicationError> {
     let descriptor = DescriptorShape {
         schema_version: 1,
         definition,
@@ -96,10 +96,29 @@ pub(super) fn commit_work(
     let descriptor_work = resident(&descriptor, maximum)?;
     let memory_transport = profile_json_bytes(&(&descriptor, manifest), maximum)
         .map_err(AnalysisPublicationError::from)?;
-    add(
+    let total = add(
         add(add(manifest_work, descriptor_work)?, record_work)?,
         memory_transport,
-    )
+    )?;
+    let mut largest_manifest_entries = Vec::new();
+    if let Some(entries) = manifest.as_object() {
+        for (key, value) in entries {
+            largest_manifest_entries.push((resident(value, maximum)?, key.as_str()));
+        }
+    }
+    largest_manifest_entries.sort_unstable_by(|left, right| right.cmp(left));
+    largest_manifest_entries.truncate(3);
+    Ok(CommitWork {
+        total,
+        facts: format!(
+            "commit work: manifest={manifest_work} (largest entries {largest_manifest_entries:?}), descriptor={descriptor_work}, largest_record={record_work}, transport={memory_transport}"
+        ),
+    })
+}
+
+pub(super) struct CommitWork {
+    pub total: u64,
+    pub facts: String,
 }
 
 pub(in crate::analysis::storage) fn admission_bytes(
@@ -120,7 +139,8 @@ pub(in crate::analysis::storage) fn admission_bytes(
                 &prepared.runs,
                 &prepared.observations,
                 prepared.maximum_bytes,
-            )?,
+            )?
+            .total,
         )?,
     )
 }

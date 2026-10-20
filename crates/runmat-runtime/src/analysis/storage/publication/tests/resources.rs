@@ -82,7 +82,8 @@ fn prepared_commit_rederives_phase_budget_before_any_backend_visibility() {
                 &prepared.observations,
                 prepared.maximum_bytes,
             )
-            .unwrap();
+            .unwrap()
+            .total;
         prepared.maximum_bytes = required - 1;
         assert!(matches!(
             store.commit_publication(prepared).unwrap_err(),
