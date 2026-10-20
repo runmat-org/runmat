@@ -94,6 +94,16 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
     let mut current = initial.clone();
     let mut insertion_count = 0u32;
     let mut chart_cut_split_count = 0u32;
+    // Encroached boundary segments found while refining the rest of the face. Interior
+    // insertion leaves PSLG segments unchanged, so every split remains valid until the face
+    // stops; one surface pass then reports them together instead of one round per pass.
+    let mut pending_splits: Vec<super::ExactProtectedSegmentSplit> = Vec::new();
+    let curve_splits = |pending: Vec<super::ExactProtectedSegmentSplit>, inserted: u32| {
+        ExactFaceRefinementOutcome::RequiresCurveSplits {
+            splits: pending,
+            completed_interior_insertions: inserted,
+        }
+    };
     loop {
         let iteration_storage = GeometryAllocationScope::new(context.geometry_control);
         let context = ExactFaceRefinementContext {
@@ -234,6 +244,12 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                     uv,
                 });
             }
+            if candidates.is_empty() && !pending_splits.is_empty() {
+                return Ok((
+                    curve_splits(pending_splits, insertion_count),
+                    chart_cut_split_count,
+                ));
+            }
             if candidates.is_empty() {
                 return finish_refinement(
                     domain,
@@ -257,12 +273,23 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
             domain.parameterization(),
             context.geometry_context(),
         )?;
-        if !classifications.protected_splits.is_empty() {
+        for split in classifications.protected_splits {
+            if !pending_splits
+                .iter()
+                .any(|pending| pending.pslg_segment_index == split.pslg_segment_index)
+            {
+                pending_splits.push(split);
+            }
+        }
+        // A chart-cut split renumbers PSLG segments; report pending curve splits first. With
+        // nothing left to insert, the face is blocked on its boundary.
+        if !pending_splits.is_empty()
+            && (!classifications.chart_cut_splits.is_empty()
+                || classifications.insertions.is_empty()
+                || insertion_count >= policy.refinement.maximum_interior_insertions)
+        {
             return Ok((
-                ExactFaceRefinementOutcome::RequiresCurveSplits {
-                    splits: classifications.protected_splits,
-                    completed_interior_insertions: insertion_count,
-                },
+                curve_splits(pending_splits, insertion_count),
                 chart_cut_split_count,
             ));
         }
@@ -312,6 +339,12 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                 Some(context.geometry_control),
             )?;
             candidates.truncate(remaining as usize);
+            if candidates.is_empty() && !pending_splits.is_empty() {
+                return Ok((
+                    curve_splits(pending_splits, insertion_count),
+                    chart_cut_split_count,
+                ));
+            }
             if candidates.is_empty() {
                 // Only shape candidates may be suppressed by the spacing collar. Their insertion
                 // would create an edge below the hard minimum, so the current constrained mesh is
