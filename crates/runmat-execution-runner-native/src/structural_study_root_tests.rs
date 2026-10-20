@@ -42,7 +42,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     let checked =
         runmat_runtime::analysis::check_fea_path_in_root(temporary.path(), &path).unwrap();
     assert!(checked.is_valid(), "{:#?}", checked.diagnostics);
-    let resolved = checked.resolve_study("project/main.fea", "static").unwrap();
+    let resolved = checked.resolve_study("main.fea", "static").unwrap();
     let realized = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, &[])
@@ -519,7 +519,7 @@ fn prepare_source(
 ) -> PreparedStructuralStudyRoot {
     let checked = runmat_runtime::analysis::check_fea_path_in_root(source_root, path).unwrap();
     assert!(checked.is_valid(), "{:#?}", checked.diagnostics);
-    let resolved = checked.resolve_study("project/main.fea", "static").unwrap();
+    let resolved = checked.resolve_study("main.fea", "static").unwrap();
     let realized = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, &[])

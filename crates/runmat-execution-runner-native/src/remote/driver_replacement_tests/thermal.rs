@@ -47,7 +47,7 @@ pub(super) fn prepare_authored_root(
     let checked = runmat_runtime::analysis::check_fea_path_in_root(root, &path).unwrap();
     assert!(checked.is_valid(), "{:#?}", checked.diagnostics);
     let resolved = checked
-        .resolve_study("project/src/heated.fea", "heated_modes")
+        .resolve_study("src/heated.fea", "heated_modes")
         .unwrap();
     let realized = resolved
         .study
@@ -122,7 +122,7 @@ fn authored_matrix_variants_typecheck_with_explicit_physical_loads() {
         .unwrap();
         assert!(checked.is_valid(), "{case:?}: {:#?}", checked.diagnostics);
         let resolved = checked
-            .resolve_study("project/src/heated.fea", "heated_modes")
+            .resolve_study("src/heated.fea", "heated_modes")
             .unwrap();
         let realized = resolved
             .study

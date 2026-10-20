@@ -12,7 +12,7 @@ pub(crate) fn verify_original_field_transport(fields: &[InitialFieldBinding]) {
     std::fs::write(&path, SOURCE).unwrap();
     let checked =
         runmat_runtime::analysis::check_fea_path_in_root(temporary.path(), &path).unwrap();
-    let resolved = checked.resolve_study("project/main.fea", "static").unwrap();
+    let resolved = checked.resolve_study("main.fea", "static").unwrap();
     let mut study = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, &[])
