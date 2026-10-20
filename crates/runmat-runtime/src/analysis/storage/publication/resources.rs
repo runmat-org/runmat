@@ -327,7 +327,8 @@ impl AnalysisPublicationBuilder {
             .persist_bytes(&relative, &bytes, available)
     }
 
-    /// Admit source and projected copies before family-manifest cloning/materialization.
+    /// Admit the typed clone of the public run placed into the family manifest.
+    /// Its JSON projection is admitted separately by `serialize_retained_manifest`.
     pub(in crate::analysis) fn admit_manifest_copy(
         &self,
         value: &impl Serialize,
@@ -336,13 +337,8 @@ impl AnalysisPublicationBuilder {
             .admission
             .lock()
             .map_err(|_| "staging admission lock poisoned")?;
-        self.admit(
-            resident(value, self.maximum_bytes)?
-                .checked_mul(2)
-                .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-                    message: "staging byte overflow".into(),
-                })?,
-        )?;
+        self.admit(runmat_canonical_codec::typed_resident_bytes_estimate(value)?)
+            .map_err(|error| error.context("family manifest typed public-run copy"))?;
         *guard = true;
         Ok(())
     }

@@ -230,7 +230,7 @@ fn decode_persisted_artifact(
 mod field_reader;
 use field_reader::{field_page_from_artifact, materialize_run, persisted_field_inventory};
 mod preparation;
-use preparation::prepare_run_artifact;
+use preparation::{prepare_run_artifact, prepare_run_artifact_with_admission};
 
 fn same_persisted_content(left: &PersistedRunArtifact, right: &PersistedRunArtifact) -> bool {
     left.schema_version == right.schema_version
