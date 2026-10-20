@@ -386,7 +386,14 @@ fn unchanged_scheduler_admits_only_a_capable_worker() {
             state: PoolState::Ready,
         })
         .unwrap();
-    driver
+    // The driver refuses work that no registered worker can serve, so queue the
+    // task first; an incapable worker joining later must still not receive it.
+    assert!(driver
+        .handle(DriverCommand::Submit(Box::new(submission.clone())))
+        .unwrap()
+        .iter()
+        .all(|action| !matches!(action, DriverAction::Launch(_))));
+    assert!(driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
             id: WorkerId::derive(&[b"incapable"]),
             pool_id: pool,
@@ -399,9 +406,6 @@ fn unchanged_scheduler_admits_only_a_capable_worker() {
                 capabilities: BTreeSet::new(),
             },
         }))
-        .unwrap();
-    assert!(driver
-        .handle(DriverCommand::Submit(Box::new(submission.clone())))
         .unwrap()
         .iter()
         .all(|action| !matches!(action, DriverAction::Launch(_))));

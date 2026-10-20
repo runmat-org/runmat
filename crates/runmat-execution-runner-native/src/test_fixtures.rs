@@ -138,3 +138,34 @@ pub(crate) fn attempt_resources_mut(
         other => panic!("test attempt is not a value result: {other:?}"),
     }
 }
+
+/// A worker host that serves exactly what `requirement` asks for.
+pub(crate) fn host_inventory_for(requirement: &ExecutionHostRequirement) -> ExecutionHostInventory {
+    let environment = &requirement.environment;
+    ExecutionHostInventory {
+        schema_version: runmat_execution::host::EXECUTION_HOST_SCHEMA_VERSION,
+        semantic_schema: environment.semantic_schema,
+        compiler_schema: environment.compiler_schema,
+        runtime_fingerprint: environment.runtime_fingerprint,
+        catalog_fingerprint: environment.catalog_fingerprint,
+        compatibility_modes: requirement
+            .additional_units
+            .iter()
+            .map(|unit| unit.environment.compatibility_mode)
+            .chain([environment.compatibility_mode])
+            .collect(),
+        target: match &requirement.native_target {
+            Some(target) => runmat_execution::host::ExecutionHostTarget::Native(target.clone()),
+            None => runmat_execution::host::ExecutionHostTarget::BrowserWasm,
+        },
+        capabilities: requirement.capabilities.clone(),
+        adapters: Vec::new(),
+        process_stack_available: true,
+        host_bridge_available: true,
+        trust_tier: *requirement
+            .permitted_trust_tiers
+            .iter()
+            .next()
+            .expect("host requirement permits a trust tier"),
+    }
+}

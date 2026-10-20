@@ -1425,14 +1425,36 @@ fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
     let plan = build_resource_plan(accelerated).unwrap();
     let attempt_id = runmat_execution::identity::AttemptId::derive(&[b"accelerated-attempt"]);
     let worker_id = runmat_execution::identity::WorkerId::derive(&[b"accelerated-worker"]);
-    let record = |allocation| ResourceUsageAttempt {
-        attempt_id,
-        worker_id,
-        plan: plan.identity,
-        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
-            allocation, 1, 0, 0, 0,
-        )
-        .unwrap(),
+    // Each requested accelerator is accounted against a leased device that serves it.
+    let record = |allocation: runmat_execution::resource::ResourceRequest| {
+        let assignment = runmat_execution::resource::ResourceAssignment {
+            accelerator_leases: allocation
+                .accelerators
+                .iter()
+                .map(|request| {
+                    runmat_execution::resource::AcceleratorDeviceLease::for_attempt(
+                        attempt_id,
+                        1,
+                        &test_accelerator_device(request.class.as_str(), 4_096),
+                    )
+                    .unwrap()
+                })
+                .collect(),
+        };
+        ResourceUsageAttempt {
+            attempt_id,
+            worker_id,
+            plan: plan.identity,
+            resources: runmat_execution::resource::ResourceAccounting::for_assigned_interval(
+                allocation,
+                &assignment,
+                1,
+                0,
+                0,
+                0,
+            )
+            .unwrap(),
+        }
     };
     let record_usage = |allocation| {
         record_resource_usage(

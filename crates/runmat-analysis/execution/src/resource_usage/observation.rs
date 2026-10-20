@@ -272,12 +272,24 @@ mod acceleration_resource_tests {
             accelerators: vec![planned.clone()],
             required_capabilities: BTreeSet::new(),
         };
-        let exact = ResourceAccounting::for_reserved_interval(request.clone(), 1, 0, 0, 0).unwrap();
+        // Accelerator requests are accounted against the leased device that satisfies them.
+        let device = crate::test_fixtures::accelerator_device("exact-f64", 8 << 30);
+        let assignment = runmat_execution::resource::ResourceAssignment {
+            accelerator_leases: vec![runmat_execution::resource::AcceleratorDeviceLease::for_attempt(
+                runmat_execution::identity::AttemptId::derive(&[b"exact-accelerator-attempt"]),
+                1,
+                &device,
+            )
+            .unwrap()],
+        };
+        let exact =
+            ResourceAccounting::for_assigned_interval(request.clone(), &assignment, 1, 0, 0, 0)
+                .unwrap();
         validate_exact_accelerator_allocation(std::slice::from_ref(&planned), &exact).unwrap();
 
         request.accelerators[0].minimum_allocation_bytes -= 1;
         let underallocated =
-            ResourceAccounting::for_reserved_interval(request, 1, 0, 0, 0).unwrap();
+            ResourceAccounting::for_assigned_interval(request, &assignment, 1, 0, 0, 0).unwrap();
         assert!(validate_exact_accelerator_allocation(
             std::slice::from_ref(&planned),
             &underallocated,

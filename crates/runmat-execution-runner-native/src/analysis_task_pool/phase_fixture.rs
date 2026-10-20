@@ -48,7 +48,7 @@ pub(crate) fn successful_phase(
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
-            host: crate::test_fixtures::host_inventory(),
+            host: crate::test_fixtures::host_inventory_for(&submission.request.host),
             id: worker,
             pool_id: pool,
             resources: inventory,

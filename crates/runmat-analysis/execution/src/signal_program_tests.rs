@@ -144,9 +144,25 @@ fn external_input(scope: &str) -> ProgramExecutionObject {
     .unwrap()
 }
 
-fn task_context(scope: &[u8], pool: &[u8]) -> GeneratorExecutionContext {
+/// The host a chunk's compiled program requires, as production derives it.
+fn chunk_host(chunk: &PreparedGeneratorChunk) -> runmat_execution::host::ExecutionHostRequirement {
+    chunk
+        .request
+        .artifact
+        .execution_host_requirement(
+            &chunk.request.recipe,
+            BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
+        )
+        .unwrap()
+}
+
+fn task_context(
+    host: runmat_execution::host::ExecutionHostRequirement,
+    scope: &[u8],
+    pool: &[u8],
+) -> GeneratorExecutionContext {
     GeneratorExecutionContext {
-        host: crate::test_fixtures::host_requirement(),
+        host,
         scope_id: ExecutionScopeId::derive(&[scope]),
         pool_id: PoolId::derive(&[pool]),
         resources: ResourceRequest {
@@ -359,7 +375,7 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
         &admitted,
         &prepared.chunks[0],
         BTreeSet::new(),
-        task_context(b"scope-a", b"pool-a"),
+        task_context(chunk_host(&prepared.chunks[0]), b"scope-a", b"pool-a"),
     )
     .unwrap();
     assert_eq!(first.request.callable.qualified_name(), "loads.pulse");
@@ -367,7 +383,7 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
         &admitted,
         &prepared.chunks[0],
         BTreeSet::new(),
-        task_context(b"scope-b", b"pool-b"),
+        task_context(chunk_host(&prepared.chunks[0]), b"scope-b", b"pool-b"),
     )
     .unwrap();
     assert_eq!(first.request.id, second.request.id);
@@ -376,7 +392,7 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
 }
 
 #[test]
-fn task_identity_tracks_materialization_while_entrypoint_tracks_generator() {
+fn task_identity_tracks_materialization_and_generator_while_callable_is_the_compiled_function() {
     let baseline = admitted();
     let prepared =
         prepare_generator_program(&baseline, executable(&baseline), chunks(), &[]).unwrap();
@@ -385,7 +401,7 @@ fn task_identity_tracks_materialization_while_entrypoint_tracks_generator() {
             admitted,
             &prepared.chunks[0],
             BTreeSet::new(),
-            task_context(b"scope", b"pool"),
+            task_context(chunk_host(&prepared.chunks[0]), b"scope", b"pool"),
         )
         .unwrap()
     };
@@ -420,7 +436,9 @@ fn task_identity_tracks_materialization_while_entrypoint_tracks_generator() {
     .unwrap();
     let generator_task = submit(&generator_change);
     assert_ne!(baseline_task.request.id, generator_task.request.id);
-    assert_ne!(
+    // The typed callable names the compiled function; the generator is bound by
+    // the task identity and the program request, not by the callable digest.
+    assert_eq!(
         baseline_task.request.callable.entrypoint_digest(),
         generator_task.request.callable.entrypoint_digest()
     );
