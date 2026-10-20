@@ -3,7 +3,7 @@
 
 use std::mem::size_of;
 
-use runmat_canonical_codec::{serialized_materialization_resident_bytes_estimate, CanonicalLimits};
+use runmat_canonical_codec::{profile_serialized_shape, CanonicalLimits};
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 use serde::{Serialize, Serializer};
 
@@ -126,7 +126,8 @@ fn node_count(order: ElementOrder) -> usize {
 }
 
 fn profile<T: Serialize>(value: &T) -> Result<u64, SolidIntegrationPlanError> {
-    serialized_materialization_resident_bytes_estimate(value, PROFILE_LIMITS)
+    profile_serialized_shape(value, PROFILE_LIMITS)
+        .map(|profile| profile.materialization_resident_bytes_estimate)
         .map_err(|error| SolidIntegrationPlanError::Identity(error.to_string()))
 }
 

@@ -21,13 +21,7 @@ async fn original_request() -> ProgramExecutionRequest {
         interop: runmat_types::InteropManifest::empty(),
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: envelope
-            .manifest
-            .identity
-            .entrypoint_function
-            .unwrap()
-            .0
-            .to_string(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: runmat_execution::OutputContract {
             owned_work: None,
             requested_outputs: 1,

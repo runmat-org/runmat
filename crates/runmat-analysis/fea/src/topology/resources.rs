@@ -1,5 +1,5 @@
 //! Count-only admission estimate beside the authoritative projection constructor.
-use runmat_canonical_codec::{serialized_materialization_resident_bytes_estimate, CanonicalLimits};
+use runmat_canonical_codec::{profile_serialized_shape, CanonicalLimits};
 use runmat_meshing_core::{BoundaryTriangleOrder, PersistentEntityId, SolverMeshArtifact};
 
 use super::{
@@ -120,11 +120,12 @@ impl AnalysisProjection {
         // shape rather than encoding it merely to count its temporary tree and byte buffer.
         add(
             &mut total,
-            serialized_materialization_resident_bytes_estimate(
+            profile_serialized_shape(
                 &(mesh.canonical_digest, AnalysisProjectionPolicy::default()),
                 PROFILE_LIMITS,
             )
-            .map_err(resource)?,
+            .map_err(resource)?
+            .materialization_resident_bytes_estimate,
         )?;
         Ok(total)
     }

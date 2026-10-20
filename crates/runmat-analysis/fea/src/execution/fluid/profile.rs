@@ -5,7 +5,7 @@ use super::{
     result::{source_data, FluidResultWire},
     AnalysisExecutionResult, FluidSteadyWorkload, LIMITS,
 };
-use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
+use runmat_canonical_codec::{profile_serialized_shape, SerializedCanonicalProfile};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Serialize, Serializer};
@@ -151,7 +151,7 @@ pub(super) fn original_block_encoding_profile<'a>(
     authorities: impl Iterator<Item = &'a str> + Clone,
     count: usize,
 ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
-    Ok(profile_serialized(
+    Ok(profile_serialized_shape(
         &original_block_profile(cells, faces, authorities, count),
         LIMITS,
     )?)
@@ -181,7 +181,7 @@ impl FluidSteadyWorkload {
             original,
         )?;
         let wire = FluidResultWire { data };
-        profile_serialized(&wire, LIMITS).map_err(invalid)
+        profile_serialized_shape(&wire, LIMITS).map_err(invalid)
     }
 }
 
@@ -240,9 +240,10 @@ mod tests {
                     flux_constitutive_relative: -f64::MAX,
                 },
             };
+            // The projection must have exactly the shape of a real result.
             assert_eq!(
-                profile_serialized(&original, LIMITS).unwrap(),
-                profile_serialized(
+                profile_serialized_shape(&original, LIMITS).unwrap(),
+                profile_serialized_shape(
                     &original_profile(cells, faces, std::iter::repeat_n("pressure_β", faces)),
                     LIMITS
                 )

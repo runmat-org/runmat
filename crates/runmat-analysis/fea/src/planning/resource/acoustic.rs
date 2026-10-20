@@ -99,7 +99,7 @@ fn evidence_profile(
                 | RealizedExcitationKind::AcousticIncidentPressure(_)
         )
     }) {
-        let profile = profile_serialized(
+        let profile = runmat_canonical_codec::profile_serialized_shape(
             &SpatialProjectionEvidence::scalar_projection_serialization(
                 &load.excitation_id.0,
                 &load.signal_id.0,

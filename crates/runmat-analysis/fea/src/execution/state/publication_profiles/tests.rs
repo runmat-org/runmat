@@ -200,7 +200,7 @@ fn presolve_projection_matches_schema_and_bounds_actual_encoding() {
             let projection =
                 StatePublicationProfiles::encoding_profile_for_requests(&requests).unwrap();
             let value = catalog(entries).unwrap();
-            assert_eq!(projection, profile_serialized(&value, LIMITS).unwrap());
+            assert_eq!(projection, profile_serialized_shape(&value, LIMITS).unwrap());
             assert!(
                 projection.encoded_bytes_upper_bound
                     >= value.canonical_bytes().unwrap().len() as u64

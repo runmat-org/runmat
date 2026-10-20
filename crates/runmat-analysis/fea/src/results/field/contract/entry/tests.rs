@@ -1,6 +1,6 @@
 use super::*;
 use crate::results::field::RecoveredFieldView;
-use runmat_canonical_codec::profile_serialized;
+use runmat_canonical_codec::profile_serialized_shape;
 
 fn definitions() -> [RecoveredFieldDefinition; 3] {
     [
@@ -64,7 +64,7 @@ fn projected_catalog_matches_actual_nested_entries_and_preserves_entry_wire() {
         rows.len(),
     )
     .unwrap();
-    let actual = profile_serialized(&rows, FIELD_LIMITS).unwrap();
+    let actual = profile_serialized_shape(&rows, FIELD_LIMITS).unwrap();
     assert_eq!(projected, actual);
     let encoded = encode_contract(b"test\0", "catalog", &rows, FIELD_LIMITS).unwrap();
     assert!(encoded.len() as u64 <= projected.encoded_bytes_upper_bound);

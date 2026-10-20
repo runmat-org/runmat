@@ -53,7 +53,9 @@ fn projection_counts_each_partition_and_bounds_actual_root_wire() {
             .chunks
             .iter()
             .all(|chunk| chunk.len() as u64 <= profile.largest_chunk_bytes_upper_bound));
-        let actual_profile = profile_serialized(&actual.manifest, MANIFEST_LIMITS).unwrap();
+        let actual_profile =
+            runmat_canonical_codec::profile_serialized_shape(&actual.manifest, MANIFEST_LIMITS)
+                .unwrap();
         assert_eq!(actual_profile, profile.root);
 
         // Independent legacy shape: extracting the serializer must not change manifest bytes.

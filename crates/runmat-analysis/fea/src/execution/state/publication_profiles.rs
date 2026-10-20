@@ -1,6 +1,7 @@
 use super::*;
 use runmat_canonical_codec::{
-    profile_serialized, projected_canonical_materialization_resident_bytes_estimate,
+    profile_serialized, profile_serialized_shape,
+    projected_canonical_materialization_resident_bytes_estimate,
     SerializedCanonicalProfile,
 };
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -221,7 +222,8 @@ impl StatePublicationProfiles {
                 }
             }
         }
-        Ok(profile_serialized(&CatalogProjection(requests), LIMITS)?)
+        // Stand-in digests and sizes bound every future catalog, so integers reserve full range.
+        Ok(profile_serialized_shape(&CatalogProjection(requests), LIMITS)?)
     }
 
     fn validate_metadata(&self) -> AnalysisExecutionResult<()> {

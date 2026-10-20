@@ -48,17 +48,23 @@ fn actual_nonzero_solve_cold_receipt_preserves_original_authority_and_schema_bou
     let original_bytes = result.canonical_bytes().unwrap();
     let receipt = FluidNumericalReceiptArtifact::new(&w, &result, &m).unwrap();
     let bytes = receipt.canonical_bytes().unwrap();
-    assert_eq!(
-        receipt.encoding_profile().unwrap(),
-        fluid_receipt_encoding_profile().unwrap()
+    // The projection reserves the widest scalar for every field: an upper bound.
+    let actual = runmat_canonical_codec::profile_serialized_shape(&receipt, LIMITS).unwrap();
+    let bound = fluid_receipt_encoding_profile().unwrap();
+    assert!(actual.encoded_bytes_upper_bound <= bound.encoded_bytes_upper_bound);
+    assert!(
+        actual.materialization_resident_bytes_estimate
+            <= bound.materialization_resident_bytes_estimate
     );
     assert!(bytes.len() as u64 <= FLUID_RECEIPT_MAX_ENCODED_BYTES);
-    assert_eq!(
+    // The wire ceiling planners admit covers the projection and the actual receipt.
+    assert!(bound.encoded_bytes_upper_bound <= FLUID_RECEIPT_MAX_ENCODED_BYTES);
+    assert!(
         receipt
             .encoding_profile()
             .unwrap()
-            .encoded_bytes_upper_bound,
-        FLUID_RECEIPT_MAX_ENCODED_BYTES
+            .encoded_bytes_upper_bound
+            <= FLUID_RECEIPT_MAX_ENCODED_BYTES
     );
     let cold = FluidNumericalReceiptArtifact::from_canonical_bytes_for(
         &bytes,

@@ -132,7 +132,7 @@ fn original_zero_flow_cold_fields_and_traction_evidence_roundtrip_without_resolv
     let result = workload.execute(&mesh).unwrap();
     assert_eq!(
         workload.result_encoding_profile(&mesh).unwrap(),
-        runmat_canonical_codec::profile_serialized(&result, LIMITS).unwrap()
+        runmat_canonical_codec::profile_serialized_shape(&result, LIMITS).unwrap()
     );
     assert!(result
         .original()
@@ -427,7 +427,7 @@ fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expan
     let result = workload.execute(&mesh).unwrap();
     assert_eq!(
         workload.result_encoding_profile(&mesh).unwrap(),
-        runmat_canonical_codec::profile_serialized(&result, LIMITS).unwrap()
+        runmat_canonical_codec::profile_serialized_shape(&result, LIMITS).unwrap()
     );
     assert!(
         projection.phase_resident_bytes_upper_bound.0

@@ -1,5 +1,5 @@
 use super::*;
-use runmat_canonical_codec::profile_serialized;
+use runmat_canonical_codec::profile_serialized_shape;
 
 fn definition(
     quantity: ObservationQuantity,
@@ -57,7 +57,7 @@ fn shape_profile_bounds_actual_identity_wire_for_advertised_storage_shapes() {
                 let profile =
                     RecoveredField::identity_profile_shape(&definition, sample, count).unwrap();
                 let actual =
-                    profile_serialized(&(&definition, sample, &storage), FIELD_LIMITS).unwrap();
+                    profile_serialized_shape(&(&definition, sample, &storage), FIELD_LIMITS).unwrap();
                 assert_eq!(profile, actual);
                 // Independent original tuple proves no domain, prefix, tuple-order or wire change.
                 let original = encode_contract(

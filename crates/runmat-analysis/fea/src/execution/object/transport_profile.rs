@@ -1,6 +1,6 @@
 //! Checked output-closure projection; does not allocate hypothetical chunks or descriptors.
 use super::*;
-use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
+use runmat_canonical_codec::{profile_serialized_shape, SerializedCanonicalProfile};
 use serde::ser::SerializeSeq;
 
 /// Conservative wire bounds, not a complete retained-heap or process-memory reservation.
@@ -120,7 +120,7 @@ impl AnalysisTransportProfiler {
         let digest = Digest::from_bytes([0; 32]);
         // Integer values have fixed conservative widths in the shared profiler. The actual
         // descriptor types and shared root serializer own all map keys and wire structure.
-        let root = profile_serialized(
+        let root = profile_serialized_shape(
             &serialization::ManifestSerialization {
                 schema_version: 1,
                 kind,

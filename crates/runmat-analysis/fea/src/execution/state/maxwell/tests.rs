@@ -101,7 +101,7 @@ fn both_orders_cold_complex_state_retains_original_electric_fields_and_exact_pro
                 *mesh.canonical_digest.bytes(),
             ))
             .unwrap();
-        let actual = runmat_canonical_codec::profile_serialized(
+        let actual = runmat_canonical_codec::profile_serialized_shape(
             &profiles,
             CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
         )

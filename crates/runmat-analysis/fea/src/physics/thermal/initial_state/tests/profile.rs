@@ -1,5 +1,5 @@
 use super::*;
-use runmat_canonical_codec::{encode_contract, profile_serialized};
+use runmat_canonical_codec::{encode_contract, profile_serialized_shape};
 
 #[test]
 fn projected_initial_evidence_uses_exact_selected_ids_and_covers_realized_values() {
@@ -35,7 +35,7 @@ fn projected_initial_evidence_uses_exact_selected_ids_and_covers_realized_values
         selected_condition_count(&model, step),
         realized.evidence.applied_initial_condition_ids.len()
     );
-    let actual = profile_serialized(
+    let actual = profile_serialized_shape(
         &realized.evidence,
         crate::execution::THERMAL_WORKLOAD_LIMITS,
     )
@@ -74,7 +74,7 @@ fn projected_initial_evidence_uses_exact_selected_ids_and_covers_realized_values
     );
     assert_eq!(
         inactive_profile,
-        profile_serialized(
+        profile_serialized_shape(
             &inactive_state.evidence,
             crate::execution::THERMAL_WORKLOAD_LIMITS
         )
