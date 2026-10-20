@@ -100,6 +100,52 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
             geometry_control: &iteration_storage,
             ..context
         };
+        // A chart edge between two images of one node (opposite sides of a periodic cut or
+        // seam) has zero physical length; its triangle cannot be evaluated. Split such edges
+        // at their chart midpoint, which is a distinct surface point, before evaluation.
+        let periodic = periodic_image_candidates(&current);
+        if !periodic.is_empty() {
+            if insertion_count >= policy.refinement.maximum_interior_insertions {
+                return Err(ExactFaceRefinementError::new(
+                    ExactFaceRefinementErrorKind::ResourceLimit,
+                    &current.pslg.source_face_id,
+                    "exact face refinement exceeded its interior insertion hard limit",
+                ));
+            }
+            let mut periodic = periodic;
+            periodic.truncate(
+                (policy.refinement.maximum_interior_insertions - insertion_count) as usize,
+            );
+            let (refined, inserted) = match domain {
+                ExactFaceRefinementDomain::ExactBoundary(boundary) => {
+                    insert_exact_face_refinement_candidates_with_control(
+                        boundary,
+                        &current,
+                        &periodic,
+                        context.cancellation,
+                        policy.delaunay,
+                        Some(context.geometry_control),
+                    )?
+                }
+                ExactFaceRefinementDomain::Chart(_) => insert_validated_face_refinement_candidates(
+                    &current,
+                    &periodic,
+                    context.cancellation,
+                    policy.delaunay,
+                    Some(context.geometry_control),
+                )?,
+            };
+            if inserted == 0 {
+                return Err(ExactFaceRefinementError::new(
+                    ExactFaceRefinementErrorKind::InvalidGeometry,
+                    &current.pslg.source_face_id,
+                    "periodic image edge split inserted no vertex",
+                ));
+            }
+            current = refined;
+            insertion_count += inserted;
+            continue;
+        }
         let geometry = evaluate_exact_face_geometry_in_parameterization(
             &current.trimmed,
             &current.pslg,
@@ -408,4 +454,125 @@ fn map_acceptance(error: ExactFaceAcceptanceError) -> ExactFaceRefinementError {
         ExactFaceAcceptanceErrorKind::InvalidInput => ExactFaceRefinementErrorKind::InvalidGeometry,
     };
     ExactFaceRefinementError::new(kind, &error.source_face_id, error.reason)
+}
+
+/// Midpoints of interior chart edges whose endpoints are images of one boundary node.
+fn periodic_image_candidates(
+    current: &ExactFaceRefinedTopology,
+) -> Vec<ExactFaceRefinementCandidate> {
+    let vertices = &current.pslg.vertices;
+    let segments = current
+        .pslg
+        .segments
+        .iter()
+        .map(|segment| {
+            let mut pair = segment.vertex_indices;
+            pair.sort_unstable();
+            pair
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut candidates = Vec::new();
+    for (index, triangle) in current.trimmed.triangles.iter().enumerate() {
+        let corners = triangle.vertex_indices;
+        for (first, second) in [(0, 1), (1, 2), (2, 0)] {
+            let mut pair = [corners[first], corners[second]];
+            pair.sort_unstable();
+            let [left, right] = pair.map(|vertex| &vertices[vertex as usize]);
+            if pair[0] == pair[1] || left.node_id != right.node_id || segments.contains(&pair) {
+                continue;
+            }
+            if !seen.insert(pair) {
+                continue;
+            }
+            candidates.push(ExactFaceRefinementCandidate {
+                source_face_id: current.pslg.source_face_id.clone(),
+                triangle_index: index as u32,
+                triangle: *triangle,
+                reason: ExactFaceRefinementReason::MetricEdgeLength,
+                uv: [0, 1].map(|axis| 0.5 * (left.uv[axis] + right.uv[axis])),
+            });
+        }
+    }
+    candidates
+}
+
+#[cfg(test)]
+mod periodic_image_tests {
+    use super::*;
+    use crate::{
+        ExactFaceConstrainedDelaunay, ExactFaceDelaunayTriangle, ExactFacePslg,
+        ExactFacePslgSegment, ExactFacePslgSegmentSource, ExactFacePslgVertex,
+        ExactFaceTrimmedDelaunay,
+    };
+    use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
+    use runmat_meshing_core::StableDigest;
+
+    #[test]
+    fn interior_edges_between_node_images_are_split_at_their_chart_midpoint() {
+        let face = PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "face".into(),
+            assembly_path: vec!["root".into()],
+        };
+        let vertex = |node: u8, uv: [f64; 2]| ExactFacePslgVertex {
+            node_id: StableDigest::from_bytes([node; 32]),
+            seam_image: None,
+            uv,
+        };
+        // Two images of node 1 on opposite cut sides, and a cut segment between images of
+        // node 2 that must never be split as an interior edge.
+        let vertices = vec![
+            vertex(1, [0.0, 0.0]),
+            vertex(1, [1.0, 0.0]),
+            vertex(3, [0.5, 1.0]),
+            vertex(2, [0.0, -1.0]),
+            vertex(2, [1.0, -1.0]),
+        ];
+        let segment = |vertex_indices| ExactFacePslgSegment {
+            source: ExactFacePslgSegmentSource::ChartCut {
+                cut_id: StableDigest::from_bytes([9; 32]),
+            },
+            vertex_indices,
+            edge_parameters: None,
+        };
+        let triangles = vec![
+            ExactFaceDelaunayTriangle {
+                vertex_indices: [0, 1, 2],
+            },
+            ExactFaceDelaunayTriangle {
+                vertex_indices: [0, 3, 1],
+            },
+            ExactFaceDelaunayTriangle {
+                vertex_indices: [1, 3, 4],
+            },
+        ];
+        let topology = ExactFaceRefinedTopology {
+            pslg: ExactFacePslg {
+                source_face_id: face.clone(),
+                vertices,
+                segments: vec![segment([3, 4])],
+                loops: Vec::new(),
+            },
+            constrained: ExactFaceConstrainedDelaunay {
+                source_face_id: face.clone(),
+                triangles: triangles.clone(),
+                protected_segments: Vec::new(),
+                recovery_edge_flip_count: 0,
+                cavity_retriangulation_count: 0,
+                delaunay_restoration_flip_count: 0,
+            },
+            trimmed: ExactFaceTrimmedDelaunay {
+                source_face_id: face,
+                triangles,
+                boundary_segments: Vec::new(),
+                removed_exterior_triangle_count: 0,
+                removed_hole_triangle_count: 0,
+            },
+        };
+        let candidates = periodic_image_candidates(&topology);
+        assert_eq!(candidates.len(), 1, "a shared image edge is split once");
+        assert_eq!(candidates[0].uv, [0.5, 0.0]);
+        assert_eq!(candidates[0].triangle_index, 0);
+    }
 }
