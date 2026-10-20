@@ -3,22 +3,30 @@ use crate::CanonicalCodecError;
 use serde::{ser, Serialize};
 use std::collections::BTreeMap;
 
+/// Sequences with a declared length write their header first and stream elements into the
+/// parent buffer; only sequences of unknown length hold their body until the count is known.
 pub(super) struct Array<'a, 'control> {
     output: &'a mut Vec<u8>,
     state: &'a mut State<'control>,
-    body: Vec<u8>,
+    body: Option<Vec<u8>>,
+    expected: Option<usize>,
     count: usize,
 }
 impl<'a, 'control> Array<'a, 'control> {
     pub(super) fn new(
         serializer: Serializer<'a, 'control>,
-        _len: Option<usize>,
+        len: Option<usize>,
     ) -> Result<Self, CanonicalCodecError> {
         serializer.state.check()?;
+        let Serializer { output, state, .. } = serializer;
+        if let Some(len) = len {
+            header(output, state, Header::Array(len as u64))?;
+        }
         Ok(Self {
-            output: serializer.output,
-            state: serializer.state,
-            body: Vec::new(),
+            output,
+            state,
+            body: len.is_none().then(Vec::new),
+            expected: len,
             count: 0,
         })
     }
@@ -27,22 +35,58 @@ impl<'a, 'control> Array<'a, 'control> {
             .count
             .checked_add(1)
             .ok_or_else(|| invalid("collection count overflow"))?;
-        value.serialize(Serializer {
-            output: &mut self.body,
-            state: self.state,
-        })
+        if self.expected.is_some_and(|len| self.count > len) {
+            return Err(invalid("sequence is longer than its declared length"));
+        }
+        let sink = match self.body.as_mut() {
+            Some(body) => body,
+            None => &mut *self.output,
+        };
+        value.serialize(Serializer::child(sink, self.state, value))
     }
     fn finish(self) -> Result<(), CanonicalCodecError> {
         self.state.check()?;
-        let before = self.output.len();
-        minicbor::Encoder::new(&mut *self.output)
-            .array(self.count as u64)
-            .map_err(encoding_error)?;
-        self.state.charge(self.output.len() - before)?;
-        // Payload bytes were charged at their scalar/header production sites.
-        self.output.extend_from_slice(&self.body);
-        Ok(())
+        match self.body {
+            None => {
+                if self.expected != Some(self.count) {
+                    return Err(invalid("sequence is shorter than its declared length"));
+                }
+                Ok(())
+            }
+            Some(body) => {
+                header(self.output, self.state, Header::Array(self.count as u64))?;
+                // Payload bytes were charged at their scalar/header production sites.
+                self.output.extend_from_slice(&body);
+                Ok(())
+            }
+        }
     }
+}
+
+enum Header {
+    Array(u64),
+    Map(u64),
+}
+fn header(
+    output: &mut Vec<u8>,
+    state: &mut State<'_>,
+    header: Header,
+) -> Result<(), CanonicalCodecError> {
+    let before = output.len();
+    let mut encoder = minicbor::Encoder::new(&mut *output);
+    match header {
+        Header::Array(count) => encoder.array(count),
+        Header::Map(count) => encoder.map(count),
+    }
+    .map_err(encoding_error)?;
+    state.charge(output.len() - before)
+}
+fn key_bytes(key: &str) -> Result<Vec<u8>, CanonicalCodecError> {
+    let mut bytes = Vec::new();
+    minicbor::Encoder::new(&mut bytes)
+        .str(key)
+        .map_err(encoding_error)?;
+    Ok(bytes)
 }
 macro_rules! array {
     ($trait:ident, $method:ident) => {
@@ -63,24 +107,116 @@ array!(SerializeTuple, serialize_element);
 array!(SerializeTupleStruct, serialize_field);
 array!(SerializeTupleVariant, serialize_field);
 
+/// Canonical maps order keys by UTF-8 bytes.
+///
+/// * Structs with probed fields write their header first, stream each field that is next in
+///   canonical order, and hold only fields that arrive before a smaller key.
+/// * Maps with a declared length stream while keys strictly increase; the first out-of-order
+///   or repeated key moves the streamed entries into the held inventory.
+/// * Maps of unknown length hold every entry until the count is known.
 pub(super) struct Map<'a, 'control> {
     output: &'a mut Vec<u8>,
     state: &'a mut State<'control>,
-    entries: BTreeMap<String, Vec<u8>>,
+    mode: Mode,
     pending: Option<String>,
+}
+enum Mode {
+    Ordered {
+        order: Vec<&'static str>,
+        next: usize,
+        held: BTreeMap<&'static str, Vec<u8>>,
+    },
+    Streaming {
+        header_start: usize,
+        expected: usize,
+        /// Key and offset of each streamed entry, in strictly increasing key order.
+        entries: Vec<(String, usize)>,
+    },
+    Held(BTreeMap<String, Vec<u8>>),
 }
 impl<'a, 'control> Map<'a, 'control> {
     pub(super) fn new(
         serializer: Serializer<'a, 'control>,
-        _len: Option<usize>,
+        len: Option<usize>,
     ) -> Result<Self, CanonicalCodecError> {
         serializer.state.check()?;
+        let Serializer { output, state, .. } = serializer;
+        let mode = match len {
+            Some(len) => {
+                let header_start = output.len();
+                header(output, state, Header::Map(len as u64))?;
+                Mode::Streaming {
+                    header_start,
+                    expected: len,
+                    entries: Vec::new(),
+                }
+            }
+            None => Mode::Held(BTreeMap::new()),
+        };
         Ok(Self {
-            output: serializer.output,
-            state: serializer.state,
-            entries: BTreeMap::new(),
+            output,
+            state,
+            mode,
             pending: None,
         })
+    }
+    pub(super) fn structure(
+        serializer: Serializer<'a, 'control>,
+        len: usize,
+    ) -> Result<Self, CanonicalCodecError> {
+        let Some(mut order) = serializer.keys.clone().filter(|keys| keys.len() == len) else {
+            return Self::new(serializer, Some(len));
+        };
+        order.sort_unstable();
+        if order.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Self::new(serializer, Some(len));
+        }
+        serializer.state.check()?;
+        let Serializer { output, state, .. } = serializer;
+        header(output, state, Header::Map(len as u64))?;
+        Ok(Self {
+            output,
+            state,
+            mode: Mode::Ordered {
+                order,
+                next: 0,
+                held: BTreeMap::new(),
+            },
+            pending: None,
+        })
+    }
+    fn field<T: Serialize + ?Sized>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), CanonicalCodecError> {
+        let Mode::Ordered { order, next, held } = &mut self.mode else {
+            return self.entry(key.to_owned(), value);
+        };
+        self.state.check()?;
+        let key_bytes = key_bytes(key)?;
+        self.state.charge(key_bytes.len())?;
+        if order.get(*next) == Some(&key) {
+            self.output.extend_from_slice(&key_bytes);
+            value.serialize(Serializer::child(self.output, self.state, value))?;
+            *next += 1;
+            while let Some(entry) = order.get(*next).and_then(|key| held.remove(key)) {
+                self.state.check()?;
+                self.output.extend_from_slice(&entry);
+                *next += 1;
+            }
+            return Ok(());
+        }
+        let Ok(position) = order.binary_search(&key) else {
+            return Err(invalid("struct field differs from its probed field set"));
+        };
+        if position < *next || held.contains_key(key) {
+            return Err(invalid("struct field repeats within one value"));
+        }
+        let mut entry = key_bytes;
+        value.serialize(Serializer::child(&mut entry, self.state, value))?;
+        held.insert(order[position], entry);
+        Ok(())
     }
     fn entry<T: Serialize + ?Sized>(
         &mut self,
@@ -88,43 +224,104 @@ impl<'a, 'control> Map<'a, 'control> {
         value: &T,
     ) -> Result<(), CanonicalCodecError> {
         self.state.check()?;
-        let existing = self.entries.contains_key(&key);
+        if let Mode::Streaming { entries, .. } = &self.mode {
+            if entries.last().is_none_or(|(last, _)| *last < key) {
+                let start = self.output.len();
+                let key_bytes = key_bytes(&key)?;
+                self.state.charge(key_bytes.len())?;
+                self.output.extend_from_slice(&key_bytes);
+                value.serialize(Serializer::child(self.output, self.state, value))?;
+                let Mode::Streaming { entries, .. } = &mut self.mode else {
+                    unreachable!("streaming mode is unchanged by its value");
+                };
+                entries.push((key, start));
+                return Ok(());
+            }
+            self.hold_streamed()?;
+        }
+        let Mode::Held(entries) = &mut self.mode else {
+            return Err(invalid("struct field differs from its probed field set"));
+        };
+        let existing = entries.contains_key(&key);
         if !existing {
-            let mut key_bytes = Vec::new();
-            minicbor::Encoder::new(&mut key_bytes)
-                .str(&key)
-                .map_err(encoding_error)?;
-            self.state.charge(key_bytes.len())?;
+            self.state.charge(key_bytes(&key)?.len())?;
         }
         let mut encoded = Vec::new();
-        value.serialize(Serializer {
-            output: &mut encoded,
-            state: self.state,
-        })?;
-        if let Some(previous) = self.entries.insert(key, encoded) {
+        value.serialize(Serializer::child(&mut encoded, self.state, value))?;
+        let Mode::Held(entries) = &mut self.mode else {
+            unreachable!("held mode is unchanged by its value");
+        };
+        if let Some(previous) = entries.insert(key, encoded) {
             // serde_json's original map projection retains the last duplicate.
             self.state.wire_bytes -= previous.len();
         }
         Ok(())
     }
-    fn finish(self) -> Result<(), CanonicalCodecError> {
+    /// Move streamed entries into the held inventory. Their key bytes stay charged as held
+    /// keys; the header is rewritten with the final count.
+    fn hold_streamed(&mut self) -> Result<(), CanonicalCodecError> {
+        let Mode::Streaming {
+            header_start,
+            entries,
+            ..
+        } = std::mem::replace(&mut self.mode, Mode::Held(BTreeMap::new()))
+        else {
+            return Ok(());
+        };
+        let tail = self.output.split_off(header_start);
+        let body_start = entries.first().map_or(tail.len(), |(_, start)| start - header_start);
+        self.state.wire_bytes -= body_start;
+        let mut held = BTreeMap::new();
+        let ends = entries
+            .iter()
+            .skip(1)
+            .map(|(_, start)| start - header_start)
+            .chain(std::iter::once(tail.len()))
+            .collect::<Vec<_>>();
+        for ((key, start), end) in entries.into_iter().zip(ends) {
+            self.state.check()?;
+            let value_start = start - header_start + key_bytes(&key)?.len();
+            held.insert(key, tail[value_start..end].to_vec());
+        }
+        self.mode = Mode::Held(held);
+        Ok(())
+    }
+    fn finish(mut self) -> Result<(), CanonicalCodecError> {
         self.state.check()?;
         if self.pending.is_some() {
             return Err(invalid("map key lacks its value"));
         }
-        let before = self.output.len();
-        minicbor::Encoder::new(&mut *self.output)
-            .map(self.entries.len() as u64)
-            .map_err(encoding_error)?;
-        self.state.charge(self.output.len() - before)?;
-        for (key, value) in self.entries {
-            self.state.check()?;
-            minicbor::Encoder::new(&mut *self.output)
-                .str(&key)
-                .map_err(encoding_error)?;
-            self.output.extend_from_slice(&value);
+        match &mut self.mode {
+            Mode::Ordered { order, next, held } => {
+                if *next != order.len() || !held.is_empty() {
+                    return Err(invalid("struct fields differ from their probed field set"));
+                }
+                Ok(())
+            }
+            Mode::Streaming {
+                expected, entries, ..
+            } => {
+                if *expected != entries.len() {
+                    // A declared length that differs from the entries keeps the established
+                    // count semantics of the held path.
+                    self.hold_streamed()?;
+                    return self.finish();
+                }
+                Ok(())
+            }
+            Mode::Held(entries) => {
+                let entries = std::mem::take(entries);
+                header(self.output, self.state, Header::Map(entries.len() as u64))?;
+                for (key, value) in entries {
+                    self.state.check()?;
+                    minicbor::Encoder::new(&mut *self.output)
+                        .str(&key)
+                        .map_err(encoding_error)?;
+                    self.output.extend_from_slice(&value);
+                }
+                Ok(())
+            }
         }
-        Ok(())
     }
 }
 
@@ -193,7 +390,7 @@ macro_rules! map {
                 key: &'static str,
                 value: &T,
             ) -> Result<(), Self::Error> {
-                self.entry(key.to_owned(), value)
+                self.field(key, value)
             }
             fn end(self) -> Result<(), Self::Error> {
                 self.finish()

@@ -115,60 +115,62 @@ impl Serialize for SolverMeshTopology {
         let edges = &self.boundary_edges;
         let neighbors = &self.neighbors;
 
+        // Fields are declared in canonical key order so the canonical encoder streams every
+        // column into its output instead of holding early fields.
         #[derive(Serialize)]
         struct Nodes<A, B, C, D, E> {
-            node_ids: A,
-            stable_identities: B,
             coordinates_m: C,
-            provenance: D,
             exact_parameters: E,
+            node_ids: A,
+            provenance: D,
+            stable_identities: B,
         }
         #[derive(Serialize)]
         struct Elements<A, B, C, D, E, F> {
             element_ids: A,
-            stable_identities: B,
-            orders: C,
             node_ids: D,
-            region_ids: E,
+            orders: C,
             provenance: F,
+            region_ids: E,
+            stable_identities: B,
         }
         #[derive(Serialize)]
         struct Neighbors<A, B, C> {
+            adjacent_element_ids: C,
             element_ids: A,
             local_face_indices: B,
-            adjacent_element_ids: C,
         }
         #[derive(Serialize)]
         struct Faces<A, B, C, D, E, F, G> {
-            face_ids: A,
-            stable_identities: B,
-            orders: C,
-            node_ids: D,
             adjacent_volume_element_ids: E,
-            roles: F,
+            face_ids: A,
+            node_ids: D,
+            orders: C,
             provenance: G,
+            roles: F,
+            stable_identities: B,
         }
         #[derive(Serialize)]
         struct Edges<A, B, C, D, E, F> {
-            edge_ids: A,
-            stable_identities: B,
-            orders: C,
-            node_ids: D,
             adjacent_boundary_face_ids: E,
+            edge_ids: A,
+            node_ids: D,
+            orders: C,
             provenance: F,
+            stable_identities: B,
         }
         #[derive(Serialize)]
         struct Wire<'a, N, V, M, F, E> {
-            entities: &'a [&'a PersistentEntityId],
-            nodes: N,
-            volume_elements: V,
-            neighbors: M,
-            boundary_faces: F,
             boundary_edges: E,
-            regions: &'a [MeshRegion],
+            boundary_faces: F,
             conformal_interfaces: &'a [ConformalInterface],
             contacts: &'a [ContactPair],
+            entities: &'a [&'a PersistentEntityId],
             field_topologies: &'a [FieldTopologyMap],
+            neighbors: M,
+            nodes: N,
+            regions: &'a [MeshRegion],
+            volume_elements: V,
         }
         Wire {
             entities: &t.entities,
