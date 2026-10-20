@@ -48,10 +48,15 @@ impl<'ctx> RepairExecution<'_, 'ctx> {
             Err(mut failure) => {
                 if failure.error.kind == DelaunayVolumeSliverErrorKind::NoAdmissibleOptimization {
                     if let Some(state) = failure.state.take() {
+                        // Mutations accepted before the local minimum are part of the
+                        // returned state. Any applied change clears the provisional
+                        // rejection; an unchanged state carries it.
+                        let mutations = std::mem::take(&mut failure.applied);
+                        let blocked = mutations.is_empty().then_some(failure.error);
                         return Ok(RepairOutcome {
                             state: *state,
-                            mutations: Vec::new(),
-                            blocked: Some(failure.error),
+                            mutations,
+                            blocked,
                         });
                     }
                 }
