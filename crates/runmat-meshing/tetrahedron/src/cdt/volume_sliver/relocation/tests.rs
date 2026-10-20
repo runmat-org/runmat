@@ -2,7 +2,10 @@ use runmat_meshing_core::{NeverCancelled, StableDigest};
 use runmat_meshing_size::metric::MetricTensor3;
 
 use super::geometry::{pattern_search_vertex_star, relocated_star_minimum_jacobian};
-use super::{rebuild_with_relocated_node, volume_weighted_star_centroid};
+use super::{
+    grouped_relocation_mutations, rebuild_with_relocated_node, replacement_identity,
+    volume_weighted_star_centroid, DelaunayVolumeSliverMutation,
+};
 use crate::cdt::{
     build_delaunay_volume_topology, DelaunayTopologyOptions, DelaunayVolumeNode,
     DelaunayVolumeSliverOptions,
@@ -108,4 +111,29 @@ fn pattern_search_improves_the_worst_incident_tetrahedron() {
 
     assert!(after > before);
     assert!(after > 0.1);
+}
+
+#[test]
+fn grouped_relocations_name_earlier_members_by_their_replacements() {
+    let id = |byte: u8| StableDigest::from_bytes([byte; 32]);
+    let node = |source: StableDigest| {
+        DelaunayVolumeNode::explicit(replacement_identity(source), [0.0, 0.0, 0.0])
+    };
+    let (a, b, c, d) = (id(1), id(2), id(3), id(4));
+    // Both cells were captured before the group moved; b's cell contains a.
+    let mutations = grouped_relocation_mutations([
+        (a, node(a), [a, b, c, d]),
+        (b, node(b), [a, b, c, d]),
+    ]);
+    let tetrahedra = mutations
+        .iter()
+        .map(|mutation| match mutation {
+            DelaunayVolumeSliverMutation::Relocated(relocation) => {
+                relocation.source_tetrahedron_node_identities
+            }
+            _ => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tetrahedra[0], [a, b, c, d]);
+    assert_eq!(tetrahedra[1], [replacement_identity(a), b, c, d]);
 }

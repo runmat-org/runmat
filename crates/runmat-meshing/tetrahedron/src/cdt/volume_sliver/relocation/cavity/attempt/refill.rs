@@ -84,21 +84,23 @@ impl RefillTrial<'_, '_> {
             })
             .collect();
         let mut mutations = prefix.to_vec();
-        mutations.extend(replacements.iter().map(|(index, node)| {
-            let cell = topology
-                .ordered_vertex_star(*index)
-                .into_iter()
-                .next()
-                .expect("nonempty star");
-            relocation_mutation(
-                topology.node(*index).identity,
-                *node,
-                topology
-                    .cell(cell)
-                    .vertex_indices
-                    .map(|v| topology.node(v).identity),
-            )
-        }));
+        mutations.extend(grouped_relocation_mutations(replacements.iter().map(
+            |(index, node)| {
+                let cell = topology
+                    .ordered_vertex_star(*index)
+                    .into_iter()
+                    .next()
+                    .expect("nonempty star");
+                (
+                    topology.node(*index).identity,
+                    *node,
+                    topology
+                        .cell(cell)
+                        .vertex_indices
+                        .map(|v| topology.node(v).identity),
+                )
+            },
+        )));
         let point_count = replacements.len();
         let mut trial = state.trial();
         if let Err(failure) = trial

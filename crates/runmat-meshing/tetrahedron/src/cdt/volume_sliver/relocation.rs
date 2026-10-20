@@ -420,6 +420,24 @@ fn relocation_mutation(
     })
 }
 
+/// Records one atomic multi-node relocation as an equivalent ordered sequence.
+/// Each source tetrahedron is captured before the group moves; members that an
+/// earlier entry already relocated are named by their replacement identity, so
+/// sequential lineage replay sees exactly the nodes present at each step.
+fn grouped_relocation_mutations(
+    moves: impl IntoIterator<Item = (StableDigest, DelaunayVolumeNode, [StableDigest; 4])>,
+) -> Vec<DelaunayVolumeSliverMutation> {
+    let mut moved = BTreeMap::new();
+    moves
+        .into_iter()
+        .map(|(source, replacement, tetrahedron)| {
+            let tetrahedron = tetrahedron.map(|identity| moved.get(&identity).copied().unwrap_or(identity));
+            moved.insert(source, replacement.identity);
+            relocation_mutation(source, replacement, tetrahedron)
+        })
+        .collect()
+}
+
 fn reject(counts: &mut std::collections::BTreeMap<&'static str, u64>, reason: &'static str) {
     *counts.entry(reason).or_default() += 1;
 }
