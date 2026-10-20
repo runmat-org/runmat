@@ -5,7 +5,6 @@ use runmat_execution::state::PoolState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::{CancellationReason, ExecutionScopeId, OutputContract, PoolId, TaskId};
 use runmat_execution_runner::port::BackendReport;
-use runmat_execution_runner::AttemptSuccess;
 use runmat_execution_runner::{
     AttemptReport, AttemptSuccess, Driver, DriverAction, DriverCommand, DriverConfig, PoolSpec,
     TaskSubmission, WorkerSpec,

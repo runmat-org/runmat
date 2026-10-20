@@ -4206,11 +4206,11 @@ fn write_ready_analysis_mesh_artifact(
 }
 
 fn persistent_face(source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: source_topology_id.to_owned(),
-        assembly_path: vec!["root".to_owned()],
-    }
+    PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        source_topology_id.to_owned(),
+        vec!["root".to_owned()],
+    )
 }
 
 #[test]

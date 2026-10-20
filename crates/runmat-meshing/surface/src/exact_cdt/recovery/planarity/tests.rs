@@ -47,11 +47,11 @@ fn fixture(
     points: Vec<[f64; 2]>,
     pairs: Vec<[u32; 2]>,
 ) -> (ExactFacePslg, BTreeMap<[u32; 2], Vec<EdgeUse>>) {
-    let face = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "planarity-fixture".into(),
-        assembly_path: vec![],
-    };
+    let face = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "planarity-fixture".into(),
+        vec![],
+    );
     let pslg = ExactFacePslg {
         source_face_id: face,
         vertices: points

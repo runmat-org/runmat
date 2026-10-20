@@ -219,11 +219,7 @@ fn sorted(mut edge: [u32; 2]) -> [u32; 2] {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 #[test]

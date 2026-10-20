@@ -625,33 +625,33 @@ study static {
             "body".into(),
             runmat_geometry_core::ResolvedGeometryRegion {
                 role: runmat_geometry_core::GeometryRegionRole::Solid,
-                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                    kind: runmat_geometry_core::PersistentEntityKind::Solid,
-                    source_topology_id: "body".into(),
-                    assembly_path: vec!["root".into()],
-                }],
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId::new(
+                    runmat_geometry_core::PersistentEntityKind::Solid,
+                    "body".into(),
+                    vec!["root".into()],
+                )],
             },
         ),
         (
             "support".into(),
             runmat_geometry_core::ResolvedGeometryRegion {
                 role: runmat_geometry_core::GeometryRegionRole::Face,
-                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                    kind: runmat_geometry_core::PersistentEntityKind::Face,
-                    source_topology_id: "support".into(),
-                    assembly_path: vec!["root".into()],
-                }],
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId::new(
+                    runmat_geometry_core::PersistentEntityKind::Face,
+                    "support".into(),
+                    vec!["root".into()],
+                )],
             },
         ),
         (
             "rail".into(),
             runmat_geometry_core::ResolvedGeometryRegion {
                 role: runmat_geometry_core::GeometryRegionRole::Edge,
-                entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                    kind: runmat_geometry_core::PersistentEntityKind::Edge,
-                    source_topology_id: "rail-edge".into(),
-                    assembly_path: vec!["root".into()],
-                }],
+                entity_ids: vec![runmat_geometry_core::PersistentEntityId::new(
+                    runmat_geometry_core::PersistentEntityKind::Edge,
+                    "rail-edge".into(),
+                    vec!["root".into()],
+                )],
             },
         ),
     ]);

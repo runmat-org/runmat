@@ -12,29 +12,31 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     for (face_index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if face_index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if face_index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let assignment = model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
+    let region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        assignment
             .selected_region_id()
             .expect("fixture uses selected material region")
             .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+        vec!["root".into()],
+    );
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;

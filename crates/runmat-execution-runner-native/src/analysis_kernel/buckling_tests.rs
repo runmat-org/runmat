@@ -83,21 +83,21 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
     for (face_index, region) in [(0, "root"), (3, "tip")] {
         mesh.topology.boundary_faces[face_index]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: region.into(),
-                assembly_path: vec!["root".into()],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                region.into(),
+                vec!["root".into()],
+            ));
         mesh.topology.boundary_faces[face_index].provenance.sort();
     }
-    let volume_region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: model.material_assignments[0]
+    let volume_region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        model.material_assignments[0]
             .selected_region_id()
             .expect("fixture uses selected material region")
             .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+        vec!["root".into()],
+    );
     mesh.topology.volume_elements[0].region_id = volume_region.clone();
     mesh.topology.regions[0].region_id = volume_region;
     mesh.canonical_digest = StableDigest::ZERO;

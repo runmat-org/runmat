@@ -1019,7 +1019,6 @@ mod tests {
                 capture.to_bits(),
             )))],
         };
-        let frozen = |capture: f64| callable_value(bound_owner.clone(), capture);
         let first = admit_callable_signal_generator(
             &bound_signal,
             revision(),

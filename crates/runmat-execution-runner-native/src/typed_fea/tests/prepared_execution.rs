@@ -62,7 +62,7 @@ async fn prepared_execution_rejects_metadata_and_envelope_substitution_before_ex
         .contains("backend"));
     let changed_options = LocalFeaExecutionOptions {
         accelerators: vec![runmat_execution::resource::AcceleratorRequest {
-            class: crate::test_fixtures::accelerator_class("unadmitted"),
+            class: runmat_execution::resource::AcceleratorClass::new("unadmitted").unwrap(),
             count: 1,
             minimum_allocation_bytes: 1024,
             provider: None,

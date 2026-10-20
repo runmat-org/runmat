@@ -90,7 +90,6 @@ fn executable(admitted: &AdmittedSignalGenerator) -> ExecutableUnitEnvelope {
                 entrypoint: admitted.callable.qualified_name.clone(),
                 entrypoint_function: Some(admitted.function),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
-                declaration_class: None,
                 source_digest: admitted.executable_source_digest,
             },
             revisions: ExecutableComponentRevisions {
@@ -163,7 +162,7 @@ fn task_context(
     pool: &[u8],
 ) -> GeneratorExecutionContext {
     GeneratorExecutionContext {
-        host: crate::tests::contract_host(&revision()),
+        host,
         scope_id: ExecutionScopeId::derive(&[scope]),
         pool_id: PoolId::derive(&[pool]),
         resources: ResourceRequest {
@@ -453,7 +452,7 @@ fn task_identity_tracks_materialization_and_generator_while_callable_is_the_comp
         &generator_change,
         &generator_program.chunks[0],
         BTreeSet::new(),
-        task_context(b"scope", b"pool"),
+        task_context(chunk_host(&generator_program.chunks[0]), b"scope", b"pool"),
     )
     .unwrap();
     assert_ne!(baseline_task.request.id, generator_task.request.id);

@@ -9,7 +9,7 @@ use runmat_analysis_execution::{
 };
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::value::ValuePayload;
-use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
     ArtifactAccess, ArtifactResult, BundleCallable, LogicalObject, ObjectNamespace,
@@ -27,8 +27,8 @@ use runmat_geometry_io::ExactCadImportOptions;
 use runmat_geometry_ops::GeometryFeaturePlanLimits;
 use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
 use runmat_types::{
-    CallableFact, CapabilitySet, EffectKind, EffectSet, ObjectFact, ProgramFunctionId,
-    QualifiedName, ShapeFact, StorageFact, SymbolName, ValueFact, ValueKindFact,
+    CallableFact, CapabilitySet, EffectKind, EffectSet, ObjectFact, ProgramFunctionId, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
 
 use super::*;
@@ -82,7 +82,7 @@ fn constructed_and_derived_geometry_publish_reimportable_exact_closures() {
         &prepared,
         BTreeSet::new(),
         GeometryExecutionContext {
-            host: crate::test_fixtures::host_requirement(),
+            host: crate::test_support::host_requirement(),
             scope_id: ExecutionScopeId::derive(&[b"geometry-scope"]),
             pool_id: PoolId::derive(&[b"geometry-pool"]),
             program_artifact_id: ArtifactId::derive(&[prepared.program.artifact.id.0.bytes()]),
@@ -415,10 +415,7 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
     let output = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(QualifiedName(vec![
-                SymbolName("geometry".into()),
-                SymbolName("Generated".into()),
-            ])),
+            runtime_class: Some(runmat_types::ClassIdentity::from("geometry.Generated")),
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),

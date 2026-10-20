@@ -92,8 +92,6 @@ mod task_outcome;
 pub use task_outcome::NativeTaskQuiescence;
 mod program_workload;
 mod test_workload;
-#[cfg(test)]
-mod test_fixtures;
 mod typed_fea;
 mod worker;
 

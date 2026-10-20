@@ -3,7 +3,7 @@ use super::*;
 use runmat_execution::{
     identity::ArtifactId,
     resource::ResourceRequest,
-    task::{RetryPolicy, TaskRequest},
+    task::{Callable, RetryPolicy, TaskRequest},
     Digest, ExecutionScopeId, OutputContract, TaskId,
 };
 use runmat_execution_runner::{DriverAction, DriverCommand, TaskSubmission};

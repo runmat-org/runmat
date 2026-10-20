@@ -2,11 +2,7 @@ use super::*;
 use crate::{GeometryDigest, PersistentEntityKind};
 
 fn entity(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 fn map() -> GeometryRevisionMap {

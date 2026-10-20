@@ -392,7 +392,7 @@ async fn run_exact_structural_sweep_conformance() {
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"exact-study-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"exact-study-pool"]);
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"exact-study-worker"]),
         pool_id,
         resources: inventory.clone(),
@@ -489,7 +489,7 @@ async fn run_exact_structural_sweep_conformance() {
             pool.snapshot()
                 .tasks
                 .values()
-                .filter(|task| task.submission.request.callable.qualified_name == "loads.pulse")
+                .filter(|task| task.submission.request.callable.qualified_name() == "loads.pulse")
                 .count(),
             1,
             "identical signal materializations must execute once across a sweep"
@@ -750,7 +750,7 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"direct-exact-study-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"direct-exact-study-pool"]);
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"direct-exact-study-worker"]),
         pool_id,
         resources: inventory.clone(),
@@ -1200,6 +1200,7 @@ async fn generated_box_workload(
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
         .unwrap();
     let unit = session
         .compile_executable_unit(
@@ -1215,7 +1216,13 @@ async fn generated_box_workload(
         .unwrap();
     let executable = unit.portable_envelope_for(Some("pulse")).unwrap();
     let function = unit
-        .function_analysis(executable.manifest.identity.entrypoint_function)
+        .function_analysis(
+            executable
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("pulse entrypoint function"),
+        )
         .cloned()
         .expect("pulse static facts");
     let executable_source_digest = unit.revision().source_digest.parse::<Digest>().unwrap();

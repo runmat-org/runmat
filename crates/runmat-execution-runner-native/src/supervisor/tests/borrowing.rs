@@ -38,7 +38,7 @@ async fn original_program_borrows_validation_and_worker_wire_without_payload_cop
         }));
     assert_eq!(request.callable, submission.callable);
     let bytes = runmat_canonical_codec::encode_json_bounded(
-        &stored,
+        &borrowed,
         u64::from(crate::supervisor::protocol::SUPERVISOR_MAX_MESSAGE_BYTES),
     )
     .unwrap();

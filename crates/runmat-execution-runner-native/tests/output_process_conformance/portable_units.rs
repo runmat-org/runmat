@@ -31,13 +31,9 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
         outputs: OutputContract {
             owned_work: None,
             requested_outputs: outputs,
-            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("original-session-worker"),
-        interop: envelope.manifest.interop.clone(),
-        accelerators: vec![],
-        foreign_policy: None,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: vec![],
@@ -218,7 +214,6 @@ async fn transitive_request() -> ProgramExecutionRequest {
         OutputContract {
             owned_work: None,
             requested_outputs: 1,
-            owned_work: None,
         },
         ProgramTarget::portable("original-session-worker"),
     )

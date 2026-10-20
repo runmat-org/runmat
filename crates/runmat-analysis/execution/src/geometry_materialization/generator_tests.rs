@@ -145,7 +145,6 @@ fn executable(admitted: &AdmittedGeometryGenerator) -> ExecutableUnitEnvelope {
                 entrypoint: admitted.invocation.callable.qualified_name.clone(),
                 entrypoint_function: Some(admitted.invocation.function),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
-                declaration_class: None,
                 source_digest: admitted.invocation.executable_source_digest,
             },
             revisions: ExecutableComponentRevisions {

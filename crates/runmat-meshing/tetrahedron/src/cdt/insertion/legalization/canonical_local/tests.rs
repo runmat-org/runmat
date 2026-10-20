@@ -89,11 +89,11 @@ fn maintained_legalization_preserves_region_barriers_and_rejects_exhausted_work(
     let mut original = neighborhoods(1, 4.);
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
     for (index, cell) in original.tetrahedra.iter_mut().enumerate() {
-        cell.region_id = Some(PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: format!("region-{index}"),
-            assembly_path: Vec::new(),
-        });
+        cell.region_id = Some(PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            format!("region-{index}"),
+            Vec::new(),
+        ));
     }
     original.incidence = crate::cdt::incidence::build_volume_incidence(
         &original.nodes,

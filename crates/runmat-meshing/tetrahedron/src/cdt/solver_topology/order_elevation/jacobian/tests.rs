@@ -34,11 +34,11 @@ fn borrowed_coordinate_gather_preserves_sparse_ids_connectivity_order_and_errors
         stable_identity: StableDigest::from_bytes([99; 32]),
         order: ElementOrder::Tet10,
         node_ids: order.map(|index| (index as u64 + 1) * 17).into(),
-        region_id: runmat_geometry_core::PersistentEntityId {
-            kind: runmat_geometry_core::PersistentEntityKind::Region,
-            source_topology_id: "region".into(),
-            assembly_path: Vec::new(),
-        },
+        region_id: runmat_geometry_core::PersistentEntityId::new(
+            runmat_geometry_core::PersistentEntityKind::Region,
+            "region".into(),
+            Vec::new(),
+        ),
         provenance: Vec::new(),
     };
     assert_eq!(

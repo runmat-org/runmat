@@ -160,11 +160,6 @@ impl SignalFixture {
                 source_role,
                 source_file.as_deref(),
             ),
-            owner,
-            qualified_name: "loads.pulse".into(),
-            form,
-            source_role,
-            source_file: None,
             captures: vec![capture],
         };
         let admitted = admit_callable_signal_generator(
@@ -475,7 +470,6 @@ fn signal_submission(
             host: super::phase_execution_support::host_requirement(&chunk.request),
             scope_id,
             pool_id,
-            host: crate::test_fixtures::host_requirement(),
             resources: ResourceRequest {
                 cpu_millicores: 1_000,
                 memory_bytes: 512 * 1024 * 1024,

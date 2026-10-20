@@ -7,11 +7,7 @@ use crate::{
 };
 
 fn entity(name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(PersistentEntityKind::Edge, name.into(), vec!["root".into()])
 }
 
 fn valid() -> TopologyValidity {

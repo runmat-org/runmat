@@ -28,11 +28,7 @@ fn stalled_state_reaches_the_host_observer_without_replacing_the_verdict() {
             ))
         }
     }
-    let entity = |kind, name: String| PersistentEntityId {
-        kind,
-        source_topology_id: name,
-        assembly_path: Vec::new(),
-    };
+    let entity = |kind, name: String| PersistentEntityId::new(kind, name, Vec::new());
     let region = entity(PersistentEntityKind::Region, "immutable-tetrahedron".into());
     let nodes = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1e-4]]
         .into_iter()

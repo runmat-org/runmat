@@ -19,7 +19,6 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
         runmat_execution::OutputContract {
             owned_work: None,
             requested_outputs: 1,
-            owned_work: None,
         },
         runmat_execution_artifact::ProgramTarget::portable("original-parent-loss"),
     );

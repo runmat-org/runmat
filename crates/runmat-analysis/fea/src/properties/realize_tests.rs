@@ -200,9 +200,5 @@ fn definition(property_id: &str) -> AuthoredPropertyDefinitionRef {
 }
 
 fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source_topology_id.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, source_topology_id.into(), vec!["root".into()])
 }

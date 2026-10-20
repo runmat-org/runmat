@@ -27,8 +27,6 @@ fn submit_local(driver: &Arc<LocalDriver>, label: &[u8]) -> (TaskId, Arc<TaskCom
                 owned_work: None,
             },
             retry: RetryPolicy::Never,
-            environment: request.environment,
-            console: request.console,
         })
         .expect("real local driver accepted test submission");
     (task_id, completion)

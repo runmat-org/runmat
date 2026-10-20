@@ -190,7 +190,7 @@ async fn run_exact_study(
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"prestressed-frequency-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"prestressed-frequency-pool"]);
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"prestressed-frequency-worker"]),
         pool_id,
         resources: inventory.clone(),

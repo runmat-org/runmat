@@ -169,11 +169,7 @@ mod tests {
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind, UnitSystem};
 
     fn face(id: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: id.into(),
-            assembly_path: vec!["root".into()],
-        }
+        PersistentEntityId::new(PersistentEntityKind::Face, id.into(), vec!["root".into()])
     }
 
     fn selection(id: &str) -> String {
@@ -181,11 +177,7 @@ mod tests {
     }
 
     fn identity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind,
-            source_topology_id: id.into(),
-            assembly_path: vec!["root".into()],
-        }
+        PersistentEntityId::new(kind, id.into(), vec!["root".into()])
     }
 
     fn model_with_all_boundary_targets() -> AnalysisModel {
@@ -473,11 +465,8 @@ mod tests {
 
     #[test]
     fn alias_inventory_rejects_non_face_and_invalid_identities() {
-        let non_face = PersistentEntityId {
-            kind: PersistentEntityKind::Solid,
-            source_topology_id: "solid".into(),
-            assembly_path: Vec::new(),
-        };
+        let non_face =
+            PersistentEntityId::new(PersistentEntityKind::Solid, "solid".into(), Vec::new());
         assert!(matches!(
             GeometryRegionAliases::new(BTreeMap::from([("face_000001".into(), non_face)])),
             Err(GeometryRegionResolutionError::WrongIdentityKind { .. })

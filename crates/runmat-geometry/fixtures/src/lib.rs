@@ -246,15 +246,15 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
+    PersistentEntityId::new(
         kind,
-        source_topology_id: name.into(),
-        assembly_path: if kind == PersistentEntityKind::Assembly && name == "root" {
+        name.into(),
+        if kind == PersistentEntityKind::Assembly && name == "root" {
             Vec::new()
         } else {
             vec!["part".into()]
         },
-    }
+    )
 }
 
 fn parameter(start: f64, end: f64) -> ParameterRange {

@@ -516,11 +516,11 @@ mod tests {
             solver_mesh_digest: Digest::sha256(b"mesh"),
             aliases: BTreeMap::from([(
                 "face_000001".into(),
-                PersistentEntityId {
-                    kind: PersistentEntityKind::Face,
-                    source_topology_id: "face-a".into(),
-                    assembly_path: vec!["root".into()],
-                },
+                PersistentEntityId::new(
+                    PersistentEntityKind::Face,
+                    "face-a".into(),
+                    vec!["root".into()],
+                ),
             )]),
         };
 

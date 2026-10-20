@@ -138,7 +138,7 @@ pub(super) async fn run_response_spectrum_conformance(
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"response-spectrum-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"response-spectrum-pool"]);
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"response-spectrum-worker"]),
         pool_id,
         resources: inventory.clone(),

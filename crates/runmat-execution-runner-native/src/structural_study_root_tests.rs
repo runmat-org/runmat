@@ -335,7 +335,7 @@ async fn typed_sweep_root_executes_geometry_mesh_compilation_and_solve_over_quic
     };
     let pool_id = runmat_execution::PoolId::derive(&[b"typed-study-root-pool"]);
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"typed-study-root-worker"]),
         pool_id,
         resources: inventory.clone(),

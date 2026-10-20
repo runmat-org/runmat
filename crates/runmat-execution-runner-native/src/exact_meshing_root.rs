@@ -673,11 +673,11 @@ mod tests {
     use super::*;
 
     fn face(source: &str, occurrence: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: source.into(),
-            assembly_path: vec!["root".into(), occurrence.into()],
-        }
+        PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            source.into(),
+            vec!["root".into(), occurrence.into()],
+        )
     }
 
     fn revision() -> ProgramRevision {
@@ -809,11 +809,11 @@ mod tests {
         )
         .is_err());
 
-        let region = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: "solid".into(),
-            assembly_path: vec!["root".into()],
-        };
+        let region = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            "solid".into(),
+            vec!["root".into()],
+        );
         validate_source_entity_order(
             &BTreeMap::from([(0, region)]),
             PersistentEntityKind::Region,
@@ -1033,7 +1033,7 @@ mod tests {
         let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-exact-root-scope"]);
         let pool_id = runmat_execution::PoolId::derive(&[b"remote-exact-root-pool"]);
         let worker = WorkerSpec {
-            host: crate::test_fixtures::host_inventory(),
+            host: crate::test_support::host_inventory(),
             id: runmat_execution::identity::WorkerId::derive(&[b"remote-exact-root-worker"]),
             pool_id,
             resources: inventory.clone(),

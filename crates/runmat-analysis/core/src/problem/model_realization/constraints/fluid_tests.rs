@@ -24,11 +24,8 @@ fn realization_keeps_exact_per_region_velocity_components_and_original_signal_re
         module_path: "flow.fea".into(),
         geometry_id: "fluid".into(),
     };
-    let entity = |id: &str| PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: id.into(),
-        assembly_path: vec![],
-    };
+    let entity =
+        |id: &str| PersistentEntityId::new(PersistentEntityKind::Face, id.into(), Vec::new());
     let regions = BTreeMap::from([
         (
             "inlet".into(),

@@ -24,11 +24,7 @@ impl GeometryEvaluationControl for Control {
 }
 #[test]
 fn indexed_membership_matches_direct_admission_in_disconnected_trimmed_regions() {
-    let face = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "query-fixture".into(),
-        assembly_path: vec![],
-    };
+    let face = PersistentEntityId::new(PersistentEntityKind::Face, "query-fixture".into(), vec![]);
     let triangles = vec![
         ExactFaceDelaunayTriangle {
             vertex_indices: [0, 1, 2],

@@ -27,9 +27,7 @@ mod accuracy_import;
 mod host_transport;
 #[path = "tests/host_contract.rs"]
 mod host_contract;
-pub(crate) use host_contract::{
-    contract_default_host, contract_devices, contract_host, contract_worker,
-};
+pub(crate) use host_contract::{contract_default_host, contract_devices, contract_worker};
 #[path = "tests/observation_history_checkpoint.rs"]
 mod observation_history_checkpoint_tests;
 
@@ -1598,22 +1596,22 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let assignment = solve.model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
+    let region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        assignment
             .selected_region_id()
             .expect("fixture uses selected material region")
             .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+        vec!["root".into()],
+    );
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -3239,22 +3237,22 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let assignment = workload.model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
+    let region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        assignment
             .selected_region_id()
             .expect("fixture uses selected material region")
             .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+        vec!["root".into()],
+    );
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;

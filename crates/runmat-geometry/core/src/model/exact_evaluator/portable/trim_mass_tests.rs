@@ -203,9 +203,9 @@ fn circular_face_with_hole() -> (ExactEvaluatorRegistry, ExactBRepTopology, Exac
 }
 
 fn part_id(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
+    PersistentEntityId::new(
         kind,
-        source_topology_id: source_topology_id.into(),
-        assembly_path: vec!["root".into(), "instance".into()],
-    }
+        source_topology_id.into(),
+        vec!["root".into(), "instance".into()],
+    )
 }

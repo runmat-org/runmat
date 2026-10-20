@@ -188,11 +188,11 @@ fn recovery_estimator_handles_uniform_stress_and_fails_closed() {
 #[test]
 fn recovery_estimator_preserves_stress_jumps_across_region_sides() {
     let mut artifact = two_tetrahedron_artifact();
-    let second_region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "region_b".to_owned(),
-        assembly_path: vec!["root".to_owned()],
-    };
+    let second_region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        "region_b".to_owned(),
+        vec!["root".to_owned()],
+    );
     artifact.topology.volume_elements[1].region_id = second_region.clone();
     artifact.topology.regions[0].element_ids = vec![1];
     artifact.topology.regions.push(MeshRegion {

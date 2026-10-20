@@ -12,11 +12,11 @@ fn borrowed_equation_source_preserves_stable_ties_and_owned_reference_digest() {
         .map(|i| {
             let mut target = RegionTarget::point(format!("node:{}", i % 5));
             target
-                .bind_resolved_entities(vec![PersistentEntityId {
-                    kind: PersistentEntityKind::Vertex,
-                    source_topology_id: format!("vertex-{i}"),
-                    assembly_path: vec!["root".repeat(32)],
-                }])
+                .bind_resolved_entities(vec![PersistentEntityId::new(
+                    PersistentEntityKind::Vertex,
+                    format!("vertex-{i}"),
+                    vec!["root".repeat(32)],
+                )])
                 .unwrap();
             StructuralConstraintEquationTerm {
                 target,

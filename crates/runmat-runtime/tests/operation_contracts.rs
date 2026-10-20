@@ -272,10 +272,12 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let volume_region = model.material_assignments[0]
         .selected_region_id()
-        .map(|region_id| PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: region_id.to_owned(),
-            assembly_path: vec!["root".to_owned()],
+        .map(|region_id| {
+            PersistentEntityId::new(
+                PersistentEntityKind::Region,
+                region_id.to_owned(),
+                vec!["root".to_owned()],
+            )
         })
         .unwrap_or_else(|| mesh.topology.regions[0].region_id.clone());
     mesh.topology.regions[0].region_id = volume_region.clone();
@@ -295,11 +297,11 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
     }) {
         mesh.topology.boundary_faces[0]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: boundary_region_id.to_string(),
-                assembly_path: vec!["root".to_owned()],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                boundary_region_id.to_string(),
+                vec!["root".to_owned()],
+            ));
         mesh.topology.boundary_faces[0].provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;

@@ -1449,11 +1449,10 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
     )
     .unwrap();
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: WorkerId::derive(&[b"stale-result-worker"]),
         pool_id,
         resources: inventory(1_000),
-        host: host_inventory(),
     };
     let old_active = Arc::new(AtomicUsize::new(0));
     pool.add_worker(Arc::new(FakeWorker {

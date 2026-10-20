@@ -521,7 +521,7 @@ pub(super) async fn run_worker(
 ) -> crate::NativeExecutionResult<()> {
     let allocation_id = allocation.allocation_lease_id.clone();
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[
             RUN_ID.as_bytes(),
             allocation_id.as_bytes(),

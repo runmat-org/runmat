@@ -252,11 +252,11 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -404,11 +404,11 @@ fn connector_observation_binds_exact_identity_and_partition_source() {
         });
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;

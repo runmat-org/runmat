@@ -87,7 +87,6 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
             outputs: OutputContract {
                 owned_work: None,
                 requested_outputs: 0,
-                owned_work: None,
             },
             resources,
             retry: RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 },

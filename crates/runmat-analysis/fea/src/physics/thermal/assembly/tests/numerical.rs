@@ -415,11 +415,11 @@ fn backward_euler_converges_at_first_order_to_the_closed_form_tetrahedron_mode()
 fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let (mut model, mut mesh, free_node, base_region) = thermal_reference_model();
     prescribe_base(&mut model, base_region, 350.0);
-    let convection_region = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "convective_sides".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let convection_region = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "convective_sides".into(),
+        vec!["root".into()],
+    );
     let base_node_ids = mesh.topology.boundary_faces.iter().find_map(|face| {
         face.provenance
             .iter()
@@ -442,7 +442,7 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let ambient_temperature_k = 290.0;
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "side_convection".into(),
-        target: RegionTarget::boundary(convection_region.source_topology_id),
+        target: RegionTarget::boundary(convection_region.source_topology_id.clone()),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient_temperature_k)),
             coefficient: HeatTransferCoefficient::new(coefficient),

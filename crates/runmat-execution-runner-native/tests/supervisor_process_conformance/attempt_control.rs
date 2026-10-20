@@ -137,13 +137,9 @@ async fn run_case(case: ControlCase) {
         outputs: OutputContract {
             owned_work: None,
             requested_outputs: 1,
-            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("test-interpreter-bytecode-v1"),
-        interop: Default::default(),
-        accelerators: Vec::new(),
-        foreign_policy: None,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),

@@ -6,16 +6,16 @@ use std::collections::BTreeSet;
 
 #[test]
 fn borrowed_parameter_images_preserve_ordered_reference_signed_zero_and_periodicity() {
-    let edge = PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: "edge".into(),
-        assembly_path: vec!["body".into()],
-    };
-    let face = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "face".into(),
-        assembly_path: vec!["body".into()],
-    };
+    let edge = PersistentEntityId::new(
+        PersistentEntityKind::Edge,
+        "edge".into(),
+        vec!["body".into()],
+    );
+    let face = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "face".into(),
+        vec!["body".into()],
+    );
     let chart = StableDigest::from_bytes([7; 32]);
     let observations = [
         Row {
@@ -38,16 +38,34 @@ fn borrowed_parameter_images_preserve_ordered_reference_signed_zero_and_periodic
             node: 0,
             parameter: Parameter::Surface(&face, chart, [-0.0, 0.5]),
         },
+        // Negative parameters must precede positive ones in the canonical order.
+        Row {
+            node: 0,
+            parameter: Parameter::Curve(&edge, -1.5),
+        },
+        Row {
+            node: 0,
+            parameter: Parameter::Curve(&edge, -0.25),
+        },
+        Row {
+            node: 0,
+            parameter: Parameter::Surface(&face, chart, [-2.0, -0.5]),
+        },
     ];
+    // `f64::total_cmp` order as an integer key.
+    let total = |value: f64| {
+        let bits = value.to_bits() as i64;
+        bits ^ (((bits >> 63) as u64) >> 1) as i64
+    };
     let key = |row: &Row<'_>| match row.parameter {
         Parameter::Curve(id, value) => (
             row.node,
             0,
             id.clone(),
             StableDigest::ZERO,
-            [value.to_bits(), 0],
+            [total(value), 0],
         ),
-        Parameter::Surface(id, chart, uv) => (row.node, 1, id.clone(), chart, uv.map(f64::to_bits)),
+        Parameter::Surface(id, chart, uv) => (row.node, 1, id.clone(), chart, uv.map(total)),
     };
     for repeats in [1, 64, 4096] {
         // Repeated metadata observations; this is not a duplicate-cell mesh witness.

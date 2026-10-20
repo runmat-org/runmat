@@ -116,8 +116,13 @@ fn direct_encoding_profile_bounds_original_wire_and_numeric_workspace_scales_wit
     let materialization = crate::profile_serialized(&original, LIMITS).unwrap();
     let wire = encode(b"test\0", "direct", &original, LIMITS, &NeverCancelled).unwrap();
     assert!(profile.encoded_bytes_upper_bound >= wire.len() as u64);
-    assert!(2 * profile.encoded_bytes_upper_bound >= wire.capacity() as u64);
-    assert!(profile.resident_workspace_bytes_estimate >= 4 * wire.len() as u64);
+    // The output is reserved once at the profiled bound and the sequence streams into it.
+    assert_eq!(profile.encoded_bytes_upper_bound, wire.capacity() as u64);
+    assert_eq!(
+        profile.resident_workspace_bytes_estimate,
+        profile.encoded_bytes_upper_bound
+            + crate::materialization::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT
+    );
     assert!(
         profile.resident_workspace_bytes_estimate
             < materialization.materialization_resident_bytes_estimate
@@ -148,7 +153,7 @@ fn encoding_workspace_retains_ancestor_maps_and_releases_sibling_metadata() {
     let repeated = crate::profile_canonical_encoding(&children, LIMITS).unwrap();
     let single = crate::profile_canonical_encoding(&children[..1], LIMITS).unwrap();
     let overhead = |profile: crate::CanonicalEncodingProfile| {
-        profile.resident_workspace_bytes_estimate - 4 * profile.encoded_bytes_upper_bound
+        profile.resident_workspace_bytes_estimate - profile.encoded_bytes_upper_bound
     };
     assert_eq!(overhead(repeated), overhead(single));
     let wide =
@@ -191,4 +196,97 @@ fn profiled_output_reservation_preserves_bytes_without_retained_growth_slack() {
         LIMITS.maximum_encoded_bytes + 1
     )
     .is_err());
+}
+
+#[derive(Serialize)]
+struct Declared {
+    zeta: u8,
+    alpha: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    middle: Option<Box<Declared>>,
+    beta: Variant,
+    #[serde(flatten)]
+    extra: BTreeMap<String, u8>,
+}
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum Tagged {
+    First { zz: u8, aa: Vec<f64> },
+    Second(Declared),
+}
+#[derive(Serialize)]
+struct Ordered {
+    a: u8,
+    b: Vec<u16>,
+    c: Option<Ordered2>,
+}
+#[derive(Serialize)]
+struct Ordered2 {
+    x: String,
+    y: [u8; 3],
+}
+
+#[test]
+fn streamed_and_held_struct_fields_preserve_canonical_bytes() {
+    let leaf = Declared {
+        zeta: 1,
+        alpha: vec![3, 2, 1],
+        middle: None,
+        beta: Variant::Record {
+            z: vec![0.5],
+            a: None,
+        },
+        extra: BTreeMap::new(),
+    };
+    let nested = Declared {
+        zeta: 9,
+        alpha: (0..300).collect(),
+        middle: Some(Box::new(leaf)),
+        beta: Variant::Tuple(false, 7),
+        extra: BTreeMap::from([("aa".into(), 1), ("zz".into(), 2)]),
+    };
+    equivalent(&nested);
+    equivalent(&Tagged::First {
+        zz: 3,
+        aa: vec![1.0, -2.0],
+    });
+    equivalent(&Tagged::Second(nested));
+    equivalent(&Ordered {
+        a: 1,
+        b: vec![1, 2],
+        c: Some(Ordered2 {
+            x: "x".into(),
+            y: [1, 2, 3],
+        }),
+    });
+    equivalent(&Vec::<Ordered>::new());
+}
+
+#[test]
+fn declared_maps_fall_back_from_streaming_without_changing_bytes() {
+    struct Keys(&'static [(&'static str, u32)], Option<usize>);
+    impl Serialize for Keys {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut map = serializer.serialize_map(self.1)?;
+            for (key, value) in self.0 {
+                map.serialize_entry(key, &vec![*value; *value as usize])?;
+            }
+            map.end()
+        }
+    }
+    // Streams throughout.
+    equivalent(&Keys(&[("a", 1), ("b", 2), ("c", 3)], Some(3)));
+    // Out of order after streaming two entries.
+    equivalent(&Keys(&[("a", 1), ("c", 3), ("b", 2), ("d", 4)], Some(4)));
+    // A repeated key keeps the last value, as the established projection does.
+    equivalent(&Keys(&[("a", 1), ("b", 2), ("b", 5)], Some(3)));
+    // A declared length that differs from the entries.
+    equivalent(&Keys(&[("a", 1), ("b", 2)], Some(5)));
+    // Unknown length.
+    equivalent(&Keys(&[("b", 1), ("a", 2)], None));
+    // Nested inside a held struct field.
+    equivalent(&BTreeMap::from([(
+        "outer",
+        vec![Keys(&[("x", 1), ("w", 2)], Some(2))],
+    )]));
 }

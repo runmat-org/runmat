@@ -178,11 +178,11 @@ fn contact_pair(
     let pairing_contract_digest = pairing_digest(&side_a_face_ids, &side_b_face_ids);
     let identity = contact_identity_digest(&pairing_contract_digest);
     ExactContactPair {
-        id: PersistentEntityId {
-            kind: PersistentEntityKind::Contact,
-            source_topology_id: format!("contact:{identity:x}"),
-            assembly_path: root_assembly_path.to_vec(),
-        },
+        id: PersistentEntityId::new(
+            PersistentEntityKind::Contact,
+            format!("contact:{identity:x}"),
+            root_assembly_path.to_vec(),
+        ),
         side_a_face_ids,
         side_b_face_ids,
         pairing_schema_version: EXACT_CONTACT_PAIRING_SCHEMA_VERSION,

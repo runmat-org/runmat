@@ -191,7 +191,7 @@ async fn run_prestressed_exact_study_conformance(
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"prestressed-modal-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"prestressed-modal-pool"]);
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"prestressed-modal-worker"]),
         pool_id,
         resources: inventory.clone(),

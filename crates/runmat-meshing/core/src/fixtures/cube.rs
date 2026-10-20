@@ -274,11 +274,7 @@ fn node_digest(index: usize) -> StableDigest {
 }
 
 fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, source.into(), vec!["root".into()])
 }
 
 fn field(

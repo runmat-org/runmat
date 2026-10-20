@@ -401,11 +401,7 @@ mod tests {
     }
 
     fn id(kind: PersistentEntityKind, seed: u8) -> PersistentEntityId {
-        PersistentEntityId {
-            kind,
-            source_topology_id: format!("entity-{seed}"),
-            assembly_path: Vec::new(),
-        }
+        PersistentEntityId::new(kind, format!("entity-{seed}"), Vec::new())
     }
 
     struct Control;

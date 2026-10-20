@@ -78,11 +78,11 @@ pub fn case(n: usize, reference: ReferenceCase, rotated: bool) -> Fixture {
         }
     }
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: format!("original-reference-face-{}", face.face_id),
-            assembly_path: vec!["root".into()],
-        }];
+        face.provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            format!("original-reference-face-{}", face.face_id),
+            vec!["root".into()],
+        )];
     }
     mesh.seal_canonical_digest().unwrap();
     let source = AnalysisProjection::derive(&mesh).unwrap();

@@ -79,7 +79,7 @@ impl ExpansionBudget<'_> {
             let entity = table
                 .get(*index as usize)
                 .ok_or_else(|| invalid("unknown volume entity index"))?;
-            self.charge(entity_heap(entity))?;
+            // Handles share the dictionary allocation; the slot is charged above.
             Ok(entity.clone())
         }))
     }
@@ -167,7 +167,6 @@ impl DecodedVolumeRepresentation {
                         let entity = entities
                             .get(index as usize)
                             .ok_or_else(|| invalid("unknown cell region index"))?;
-                        expansion.charge(entity_heap(entity))?;
                         Ok::<_, DelaunayVolumeMeshError>(entity.clone())
                     })
                     .transpose()?;

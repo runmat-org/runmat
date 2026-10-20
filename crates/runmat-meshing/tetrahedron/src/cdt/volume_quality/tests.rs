@@ -47,11 +47,7 @@ pub(super) fn region(value: &str) -> PersistentEntityId {
 }
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, value.to_owned(), Vec::new())
 }
 
 pub(super) fn metric_contexts(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {

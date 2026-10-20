@@ -96,13 +96,16 @@ fn compact_topology_decode_peak_stays_within_its_typed_admission() {
         three_region_tetrahedron_solver_mesh_with_order,
     };
     let limits = runmat_canonical_codec::CanonicalLimits::new(1 << 30, 1 << 24, 1 << 20, 64);
-    let control = super::super::super::codec::MeshingCanonicalCodecControl::new(&crate::NeverCancelled);
+    let control =
+        super::super::super::codec::MeshingCanonicalCodecControl::new(&crate::NeverCancelled);
     for mesh in [
         canonical_tetrahedron_solver_mesh(ElementOrder::Tet10),
         connected_quadratic_tetrahedron_solver_mesh(),
         three_region_tetrahedron_solver_mesh_with_order(ElementOrder::Tet4),
         slab_mesh(6),
         quadratic_slab_mesh(4),
+        slab_mesh(16),
+        quadratic_slab_mesh(10),
     ] {
         let bytes = runmat_canonical_codec::encode_contract(
             b"decode-peak\0",
@@ -119,11 +122,8 @@ fn compact_topology_decode_peak_stays_within_its_typed_admission() {
             &control,
         )
         .unwrap();
-        let admitted = super::super::super::codec::topology_decode_admission(
-            value,
-            &control,
-        )
-        .unwrap();
+        let admitted =
+            super::super::super::codec::topology_decode_admission(value, &control).unwrap();
         ALLOCATIONS.with(|state| state.set((true, 0, 0)));
         let decoded: super::SolverMeshTopology =
             runmat_canonical_codec::decode_contract(b"decode-peak\0", "topology", &bytes, limits)
@@ -135,8 +135,10 @@ fn compact_topology_decode_peak_stays_within_its_typed_admission() {
         });
         assert_eq!(decoded, mesh.topology);
         println!(
-            "decode elements={} peak={peak} admitted={admitted}",
-            mesh.topology.volume_elements.len()
+            "decode elements={} peak={peak} admitted={admitted} typed={}",
+            mesh.topology.volume_elements.len(),
+            runmat_canonical_codec::canonical_value_typed_resident_bytes_estimate(value, &control)
+                .unwrap()
         );
         assert!(
             peak as u64 <= admitted,

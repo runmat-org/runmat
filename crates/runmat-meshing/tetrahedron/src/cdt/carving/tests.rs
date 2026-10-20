@@ -22,11 +22,7 @@ mod same_facet_multi_steiner;
 mod small_void;
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, value.to_owned(), Vec::new())
 }
 
 fn fixture(interface: bool) -> (DelaunayConstraints, DelaunayFacetRecovery) {
@@ -377,9 +373,5 @@ fn opposite_vertex(facet: [u32; 3]) -> u32 {
 }
 
 fn region(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, value.to_owned(), Vec::new())
 }

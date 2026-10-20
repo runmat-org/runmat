@@ -146,13 +146,13 @@ fn realization_preserves_exact_multi_entity_region_targets() {
         panic!("fixture force must be region-scoped");
     };
     let entities = ["face:0", "face:1"]
-        .map(
-            |source_topology_id| runmat_geometry_core::PersistentEntityId {
-                kind: runmat_geometry_core::PersistentEntityKind::Face,
-                source_topology_id: source_topology_id.into(),
-                assembly_path: vec!["root".into()],
-            },
-        )
+        .map(|source_topology_id| {
+            runmat_geometry_core::PersistentEntityId::new(
+                runmat_geometry_core::PersistentEntityKind::Face,
+                source_topology_id.into(),
+                vec!["root".into()],
+            )
+        })
         .to_vec();
     target.bind_resolved_entities(entities.clone()).unwrap();
 

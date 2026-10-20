@@ -126,20 +126,6 @@ struct DirectPoolBundle {
     bytes: Arc<[u8]>,
 }
 
-#[cfg(test)]
-impl RemotePoolDriver {
-    /// The direct program bundle this pool was created with.
-    pub(super) fn test_bundle(&self) -> Arc<[u8]> {
-        Arc::clone(
-            &self
-                .direct_bundle
-                .as_ref()
-                .expect("test pool was created with a direct bundle")
-                .bytes,
-        )
-    }
-}
-
 impl CacheImport for RemotePoolDriver {
     fn read_verified_bounded_with_admission(
         &self,

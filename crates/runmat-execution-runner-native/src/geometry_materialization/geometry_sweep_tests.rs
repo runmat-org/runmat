@@ -8,7 +8,7 @@ use runmat_analysis_execution::{
 };
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::value::ValuePayload;
-use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
@@ -91,7 +91,7 @@ fn derived_geometry_sweep_reuses_its_source_and_invalidates_every_downstream_ide
                 program,
                 BTreeSet::new(),
                 GeometryExecutionContext {
-                    host: crate::test_fixtures::host_requirement(),
+                    host: crate::test_support::host_requirement(),
                     scope_id,
                     pool_id,
                     program_artifact_id: ArtifactId::derive(&[program
