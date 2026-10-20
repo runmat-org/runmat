@@ -442,7 +442,7 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let ambient_temperature_k = 290.0;
     model.boundaries.push(AnalysisBoundary {
         boundary_id: "side_convection".into(),
-        target: RegionTarget::boundary(convection_region.source_topology_id),
+        target: RegionTarget::boundary(convection_region.source_topology_id.clone()),
         operator: BoundaryOperator::ThermalConvection {
             ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient_temperature_k)),
             coefficient: HeatTransferCoefficient::new(coefficient),

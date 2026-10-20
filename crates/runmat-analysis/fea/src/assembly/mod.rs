@@ -4333,10 +4333,12 @@ mod tests {
     fn set_boundary_regions(mesh: &mut SolverMeshArtifact, face_index: usize, regions: &[&str]) {
         mesh.topology.boundary_faces[face_index].provenance = regions
             .iter()
-            .map(|region| PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: (*region).to_owned(),
-                assembly_path: vec!["root".to_owned()],
+            .map(|region| {
+                PersistentEntityId::new(
+                    PersistentEntityKind::Face,
+                    (*region).to_owned(),
+                    vec!["root".to_owned()],
+                )
             })
             .collect();
         mesh.topology.boundary_faces[face_index].provenance.sort();
