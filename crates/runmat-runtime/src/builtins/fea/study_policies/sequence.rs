@@ -7,7 +7,8 @@ use runmat_analysis_core::{
 
 use super::super::*;
 use crate::builtins::fea::study_values::{
-    from_typed_value, register_immutable_class, to_typed_value, VALUE_FIELD,
+    from_typed_value, register_immutable_runtime_classes, register_immutable_schemas,
+    to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
 use runmat_builtins::fea_contract::study_types::classes;
 
@@ -31,10 +32,10 @@ pub(super) const REFERENCE_STATE_CLASS: &str =
 macro_rules! choice {
     ($function:ident, $builtin:literal, $class:expr, $value:expr $(,)?) => {
         #[runtime_builtin(
-                    name = $builtin,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::study_policies::sequence"
-                )]
+                            name = $builtin,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::study_policies::sequence"
+                        )]
         pub async fn $function() -> BuiltinResult<Value> {
             to_typed_value($builtin, $class, $value)
         }
@@ -381,171 +382,178 @@ pub(crate) fn reference_state(
     from_typed_value(builtin, REFERENCE_STATE_CLASS, value)
 }
 
+const SEQUENCE_POLICY_CLASSES: [ImmutableStudyClass; 9] = [
+    ImmutableStudyClass {
+        class_name: STATE_KIND_CLASS,
+        type_identity: "runmat.fea.state-kind",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("structuralPrimary", "fea.StateKind.structuralPrimary"),
+            ("structuralKinematics", "fea.StateKind.structuralKinematics"),
+            (
+                "structuralStressStrain",
+                "fea.StateKind.structuralStressStrain",
+            ),
+            ("geometricStiffness", "fea.StateKind.geometricStiffness"),
+            ("materialHistory", "fea.StateKind.materialHistory"),
+            ("contactHistory", "fea.StateKind.contactHistory"),
+            ("thermal", "fea.StateKind.thermal"),
+            (
+                "electromagneticStatic",
+                "fea.StateKind.electromagneticStatic",
+            ),
+            (
+                "electromagneticComplex",
+                "fea.StateKind.electromagneticComplex",
+            ),
+            ("acousticComplex", "fea.StateKind.acousticComplex"),
+            ("fluid", "fea.StateKind.fluid"),
+            ("movingMesh", "fea.StateKind.movingMesh"),
+            ("modalBasis", "fea.StateKind.modalBasis"),
+            ("coupledInterface", "fea.StateKind.coupledInterface"),
+            ("integrator", "fea.StateKind.integrator"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STATE_COMPLETENESS_CLASS,
+        type_identity: "runmat.fea.state-completeness",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("complete", "fea.StateCompleteness.complete"),
+            ("checkpoint", "fea.StateCompleteness.checkpoint"),
+            ("partial", "fea.StateCompleteness.partial"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STATE_PERSISTENCE_CLASS,
+        type_identity: "runmat.fea.state-persistence",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("canonical", "fea.StatePersistence.canonical"),
+            (
+                "untilDependentsComplete",
+                "fea.StatePersistence.untilDependentsComplete",
+            ),
+            ("checkpointOnly", "fea.StatePersistence.checkpointOnly"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: STATE_USE_CLASS,
+        type_identity: "runmat.fea.state-use",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("physicalInitialState", "fea.StateUse.physicalInitialState"),
+            ("linearizationPoint", "fea.StateUse.linearizationPoint"),
+            ("prestress", "fea.StateUse.prestress"),
+            ("initialGuess", "fea.StateUse.initialGuess"),
+            ("modalBasis", "fea.StateUse.modalBasis"),
+            ("coupledInterface", "fea.StateUse.coupledInterface"),
+            ("restart", "fea.StateUse.restart"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: INITIAL_CONFLICT_CLASS,
+        type_identity: "runmat.fea.initial-state-conflict-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("reject", "fea.InitialStateConflictPolicy.reject"),
+            (
+                "replaceInitialCondition",
+                "fea.InitialStateConflictPolicy.replaceInitialCondition",
+            ),
+            (
+                "augmentDisjointQuantities",
+                "fea.InitialStateConflictPolicy.augmentDisjointQuantities",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: DEPENDENCY_REASON_CLASS,
+        type_identity: "runmat.fea.sequence-dependency-reason",
+        fields: VALUE_FIELD,
+        methods: &[
+            (
+                "stateTransfer",
+                "fea.SequenceDependencyReason.stateTransfer",
+            ),
+            (
+                "authoredOrdering",
+                "fea.SequenceDependencyReason.authoredOrdering",
+            ),
+            (
+                "sharedInterface",
+                "fea.SequenceDependencyReason.sharedInterface",
+            ),
+            ("adaptation", "fea.SequenceDependencyReason.adaptation"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: TRANSITION_METHOD_CLASS,
+        type_identity: "runmat.fea.state-transition-method",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("reuse", "fea.StateTransitionMethod.reuse"),
+            (
+                "conservativeProjection",
+                "fea.StateTransitionMethod.conservativeProjection",
+            ),
+            ("interpolation", "fea.StateTransitionMethod.interpolation"),
+            ("linearize", "fea.StateTransitionMethod.linearize"),
+            (
+                "deriveOperatorContribution",
+                "fea.StateTransitionMethod.deriveOperatorContribution",
+            ),
+            (
+                "initialGuessOnly",
+                "fea.StateTransitionMethod.initialGuessOnly",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: TOPOLOGY_TRANSITION_CLASS,
+        type_identity: "runmat.fea.topology-transition-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            (
+                "requireIdentical",
+                "fea.TopologyTransitionPolicy.requireIdentical",
+            ),
+            (
+                "projectWithEvidence",
+                "fea.TopologyTransitionPolicy.projectWithEvidence",
+            ),
+            (
+                "adaptedMeshLineage",
+                "fea.TopologyTransitionPolicy.adaptedMeshLineage",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: REFERENCE_STATE_CLASS,
+        type_identity: "runmat.fea.reference-state-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("preserve", "fea.ReferenceStatePolicy.preserve"),
+            (
+                "receivingStepOrigin",
+                "fea.ReferenceStatePolicy.receivingStepOrigin",
+            ),
+            (
+                "explicitLinearizationPoint",
+                "fea.ReferenceStatePolicy.explicitLinearizationPoint",
+            ),
+        ],
+    },
+];
+
 pub(super) fn ensure_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
             STATE_KIND_CLASS,
-            "runmat.fea.state-kind",
-            VALUE_FIELD,
-            &[
-                ("structuralPrimary", "fea.StateKind.structuralPrimary"),
-                ("structuralKinematics", "fea.StateKind.structuralKinematics"),
-                (
-                    "structuralStressStrain",
-                    "fea.StateKind.structuralStressStrain",
-                ),
-                ("geometricStiffness", "fea.StateKind.geometricStiffness"),
-                ("materialHistory", "fea.StateKind.materialHistory"),
-                ("contactHistory", "fea.StateKind.contactHistory"),
-                ("thermal", "fea.StateKind.thermal"),
-                (
-                    "electromagneticStatic",
-                    "fea.StateKind.electromagneticStatic",
-                ),
-                (
-                    "electromagneticComplex",
-                    "fea.StateKind.electromagneticComplex",
-                ),
-                ("acousticComplex", "fea.StateKind.acousticComplex"),
-                ("fluid", "fea.StateKind.fluid"),
-                ("movingMesh", "fea.StateKind.movingMesh"),
-                ("modalBasis", "fea.StateKind.modalBasis"),
-                ("coupledInterface", "fea.StateKind.coupledInterface"),
-                ("integrator", "fea.StateKind.integrator"),
-            ],
-        );
-        register_immutable_class(
-            STATE_COMPLETENESS_CLASS,
-            "runmat.fea.state-completeness",
-            VALUE_FIELD,
-            &[
-                ("complete", "fea.StateCompleteness.complete"),
-                ("checkpoint", "fea.StateCompleteness.checkpoint"),
-                ("partial", "fea.StateCompleteness.partial"),
-            ],
-        );
-        register_immutable_class(
-            STATE_PERSISTENCE_CLASS,
-            "runmat.fea.state-persistence",
-            VALUE_FIELD,
-            &[
-                ("canonical", "fea.StatePersistence.canonical"),
-                (
-                    "untilDependentsComplete",
-                    "fea.StatePersistence.untilDependentsComplete",
-                ),
-                ("checkpointOnly", "fea.StatePersistence.checkpointOnly"),
-            ],
-        );
-        register_immutable_class(
-            STATE_USE_CLASS,
-            "runmat.fea.state-use",
-            VALUE_FIELD,
-            &[
-                ("physicalInitialState", "fea.StateUse.physicalInitialState"),
-                ("linearizationPoint", "fea.StateUse.linearizationPoint"),
-                ("prestress", "fea.StateUse.prestress"),
-                ("initialGuess", "fea.StateUse.initialGuess"),
-                ("modalBasis", "fea.StateUse.modalBasis"),
-                ("coupledInterface", "fea.StateUse.coupledInterface"),
-                ("restart", "fea.StateUse.restart"),
-            ],
-        );
-        register_immutable_class(
-            INITIAL_CONFLICT_CLASS,
-            "runmat.fea.initial-state-conflict-policy",
-            VALUE_FIELD,
-            &[
-                ("reject", "fea.InitialStateConflictPolicy.reject"),
-                (
-                    "replaceInitialCondition",
-                    "fea.InitialStateConflictPolicy.replaceInitialCondition",
-                ),
-                (
-                    "augmentDisjointQuantities",
-                    "fea.InitialStateConflictPolicy.augmentDisjointQuantities",
-                ),
-            ],
-        );
-        register_immutable_class(
-            DEPENDENCY_REASON_CLASS,
-            "runmat.fea.sequence-dependency-reason",
-            VALUE_FIELD,
-            &[
-                (
-                    "stateTransfer",
-                    "fea.SequenceDependencyReason.stateTransfer",
-                ),
-                (
-                    "authoredOrdering",
-                    "fea.SequenceDependencyReason.authoredOrdering",
-                ),
-                (
-                    "sharedInterface",
-                    "fea.SequenceDependencyReason.sharedInterface",
-                ),
-                ("adaptation", "fea.SequenceDependencyReason.adaptation"),
-            ],
-        );
-        register_immutable_class(
-            TRANSITION_METHOD_CLASS,
-            "runmat.fea.state-transition-method",
-            VALUE_FIELD,
-            &[
-                ("reuse", "fea.StateTransitionMethod.reuse"),
-                (
-                    "conservativeProjection",
-                    "fea.StateTransitionMethod.conservativeProjection",
-                ),
-                ("interpolation", "fea.StateTransitionMethod.interpolation"),
-                ("linearize", "fea.StateTransitionMethod.linearize"),
-                (
-                    "deriveOperatorContribution",
-                    "fea.StateTransitionMethod.deriveOperatorContribution",
-                ),
-                (
-                    "initialGuessOnly",
-                    "fea.StateTransitionMethod.initialGuessOnly",
-                ),
-            ],
-        );
-        register_immutable_class(
-            TOPOLOGY_TRANSITION_CLASS,
-            "runmat.fea.topology-transition-policy",
-            VALUE_FIELD,
-            &[
-                (
-                    "requireIdentical",
-                    "fea.TopologyTransitionPolicy.requireIdentical",
-                ),
-                (
-                    "projectWithEvidence",
-                    "fea.TopologyTransitionPolicy.projectWithEvidence",
-                ),
-                (
-                    "adaptedMeshLineage",
-                    "fea.TopologyTransitionPolicy.adaptedMeshLineage",
-                ),
-            ],
-        );
-        register_immutable_class(
-            REFERENCE_STATE_CLASS,
-            "runmat.fea.reference-state-policy",
-            VALUE_FIELD,
-            &[
-                ("preserve", "fea.ReferenceStatePolicy.preserve"),
-                (
-                    "receivingStepOrigin",
-                    "fea.ReferenceStatePolicy.receivingStepOrigin",
-                ),
-                (
-                    "explicitLinearizationPoint",
-                    "fea.ReferenceStatePolicy.explicitLinearizationPoint",
-                ),
-            ],
-        );
-    });
+        ));
+    SCHEMAS.call_once(|| register_immutable_schemas(&SEQUENCE_POLICY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&SEQUENCE_POLICY_CLASSES));
 }
 
 #[cfg(test)]

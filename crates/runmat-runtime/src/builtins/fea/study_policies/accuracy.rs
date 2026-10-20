@@ -6,7 +6,8 @@ use runmat_analysis_core::{
 
 use super::super::*;
 use crate::builtins::fea::study_values::{
-    from_typed_value, register_immutable_class, to_typed_value, VALUE_FIELD,
+    from_typed_value, register_immutable_runtime_classes, register_immutable_schemas,
+    to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
 use runmat_builtins::fea_contract::policy_types::classes;
 
@@ -18,10 +19,10 @@ pub(super) const LIMIT_ACTION_CLASS: &str = classes::ACCURACY_LIMIT_ACTION.displ
 macro_rules! choice {
     ($function:ident, $builtin:literal, $class:expr, $value:expr $(,)?) => {
         #[runtime_builtin(
-                    name = $builtin,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::study_policies::accuracy"
-                )]
+                            name = $builtin,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::study_policies::accuracy"
+                        )]
         pub async fn $function() -> BuiltinResult<Value> {
             to_typed_value($builtin, $class, $value)
         }
@@ -227,49 +228,56 @@ pub(crate) fn limit_action(
     from_typed_value(builtin, LIMIT_ACTION_CLASS, value)
 }
 
+const ACCURACY_POLICY_CLASSES: [ImmutableStudyClass; 4] = [
+    ImmutableStudyClass {
+        class_name: CONTRIBUTION_CLASS,
+        type_identity: "runmat.fea.error-contribution",
+        fields: VALUE_FIELD,
+        methods: &CONTRIBUTION_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: EVIDENCE_CLASS,
+        type_identity: "runmat.fea.required-accuracy-evidence",
+        fields: VALUE_FIELD,
+        methods: &EVIDENCE_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: UNAVAILABLE_CLASS,
+        type_identity: "runmat.fea.unavailable-evidence-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("fail", "fea.UnavailableEvidencePolicy.fail"),
+            (
+                "markIndeterminateExperimental",
+                "fea.UnavailableEvidencePolicy.markIndeterminateExperimental",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: LIMIT_ACTION_CLASS,
+        type_identity: "runmat.fea.accuracy-limit-action",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("refine", "fea.AccuracyLimitAction.refine"),
+            ("tightenSolver", "fea.AccuracyLimitAction.tightenSolver"),
+            ("extendSampling", "fea.AccuracyLimitAction.extendSampling"),
+            ("fail", "fea.AccuracyLimitAction.fail"),
+            (
+                "warnExperimental",
+                "fea.AccuracyLimitAction.warnExperimental",
+            ),
+        ],
+    },
+];
+
 pub(super) fn ensure_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
             CONTRIBUTION_CLASS,
-            "runmat.fea.error-contribution",
-            VALUE_FIELD,
-            &CONTRIBUTION_METHODS,
-        );
-        register_immutable_class(
-            EVIDENCE_CLASS,
-            "runmat.fea.required-accuracy-evidence",
-            VALUE_FIELD,
-            &EVIDENCE_METHODS,
-        );
-        register_immutable_class(
-            UNAVAILABLE_CLASS,
-            "runmat.fea.unavailable-evidence-policy",
-            VALUE_FIELD,
-            &[
-                ("fail", "fea.UnavailableEvidencePolicy.fail"),
-                (
-                    "markIndeterminateExperimental",
-                    "fea.UnavailableEvidencePolicy.markIndeterminateExperimental",
-                ),
-            ],
-        );
-        register_immutable_class(
-            LIMIT_ACTION_CLASS,
-            "runmat.fea.accuracy-limit-action",
-            VALUE_FIELD,
-            &[
-                ("refine", "fea.AccuracyLimitAction.refine"),
-                ("tightenSolver", "fea.AccuracyLimitAction.tightenSolver"),
-                ("extendSampling", "fea.AccuracyLimitAction.extendSampling"),
-                ("fail", "fea.AccuracyLimitAction.fail"),
-                (
-                    "warnExperimental",
-                    "fea.AccuracyLimitAction.warnExperimental",
-                ),
-            ],
-        );
-    });
+        ));
+    SCHEMAS.call_once(|| register_immutable_schemas(&ACCURACY_POLICY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&ACCURACY_POLICY_CLASSES));
 }
 
 const CONTRIBUTION_METHODS: [(&str, &str); 17] = [

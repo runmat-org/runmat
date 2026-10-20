@@ -8,8 +8,8 @@ use runmat_analysis_core::{
 use super::*;
 use crate::builtins::fea::study_policies::{accuracy as policy, observation};
 use crate::builtins::fea::study_values::{
-    from_typed_value, nonempty_id, object_or_cell, register_immutable_class, to_typed_value,
-    VALUE_FIELD,
+    from_typed_value, nonempty_id, object_or_cell, register_immutable_runtime_classes,
+    register_immutable_schemas, to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
 
 use runmat_builtins::fea_contract::policy_types::classes;
@@ -45,7 +45,11 @@ const PLAN_FIELDS: &[&str] = &[
     "resources",
 ];
 
-#[runtime_builtin(name = "fea.AccuracyTarget.observation", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.AccuracyTarget.observation",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn target_observation(id: String) -> BuiltinResult<Value> {
     const NAME: &str = "fea.AccuracyTarget.observation";
     to_typed_value(
@@ -54,7 +58,11 @@ pub async fn target_observation(id: String) -> BuiltinResult<Value> {
         AccuracyTarget::Observation(ObservationId(nonempty_id(NAME, "observation id", id)?)),
     )
 }
-#[runtime_builtin(name = "fea.AccuracyTarget.quantity", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.AccuracyTarget.quantity",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn target_quantity(quantity: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.AccuracyTarget.quantity";
     to_typed_value(
@@ -91,7 +99,11 @@ no_arg_target!(
     AccuracyTarget::ExecutionEquivalence
 );
 
-#[runtime_builtin(name = "fea.AccuracyTolerance.relative", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.AccuracyTolerance.relative",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn tolerance_relative(value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.AccuracyTolerance.relative";
     to_typed_value(
@@ -100,7 +112,11 @@ pub async fn tolerance_relative(value: Value) -> BuiltinResult<Value> {
         AccuracyTolerance::Relative(values::finite_numeric_scalar(NAME, &value, "value")?),
     )
 }
-#[runtime_builtin(name = "fea.AccuracyTolerance.absolute", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.AccuracyTolerance.absolute",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn tolerance_absolute(quantity: Value, value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.AccuracyTolerance.absolute";
     to_typed_value(
@@ -113,7 +129,11 @@ pub async fn tolerance_absolute(quantity: Value, value: Value) -> BuiltinResult<
     )
 }
 
-#[runtime_builtin(name = "fea.NumericalEquivalencePolicy.deterministic", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.NumericalEquivalencePolicy.deterministic",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn equivalence_deterministic() -> BuiltinResult<Value> {
     to_typed_value(
         "fea.NumericalEquivalencePolicy.deterministic",
@@ -121,7 +141,11 @@ pub async fn equivalence_deterministic() -> BuiltinResult<Value> {
         NumericalEquivalencePolicy::Deterministic,
     )
 }
-#[runtime_builtin(name = "fea.NumericalEquivalencePolicy.relativeTolerance", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.NumericalEquivalencePolicy.relativeTolerance",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn equivalence_relative(value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.NumericalEquivalencePolicy.relativeTolerance";
     to_typed_value(
@@ -132,7 +156,11 @@ pub async fn equivalence_relative(value: Value) -> BuiltinResult<Value> {
         )?),
     )
 }
-#[runtime_builtin(name = "fea.NumericalEquivalencePolicy.absoluteTolerance", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.NumericalEquivalencePolicy.absoluteTolerance",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn equivalence_absolute(value: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.NumericalEquivalencePolicy.absoluteTolerance";
     to_typed_value(
@@ -144,7 +172,11 @@ pub async fn equivalence_absolute(value: Value) -> BuiltinResult<Value> {
     )
 }
 
-#[runtime_builtin(name = "fea.AccuracyResourceCeiling.new", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.AccuracyResourceCeiling.new",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn resources(args: Vec<Value>) -> BuiltinResult<Value> {
     const NAME: &str = "fea.AccuracyResourceCeiling.new";
     if args.len() != 5 {
@@ -166,7 +198,11 @@ pub async fn resources(args: Vec<Value>) -> BuiltinResult<Value> {
     serializable_to_object(NAME, &ERROR_INTERNAL, RESOURCES_CLASS, &ceiling)
 }
 
-#[runtime_builtin(name = "fea.AccuracyCriterion.new", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.AccuracyCriterion.new",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn criterion(args: Vec<Value>) -> BuiltinResult<Value> {
     const NAME: &str = "fea.AccuracyCriterion.new";
     if args.len() != 6 {
@@ -195,7 +231,11 @@ pub async fn criterion(args: Vec<Value>) -> BuiltinResult<Value> {
     )
 }
 
-#[runtime_builtin(name = "fea.AccuracyPlan.new", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.AccuracyPlan.new",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn plan(args: Vec<Value>) -> BuiltinResult<Value> {
     const NAME: &str = "fea.AccuracyPlan.new";
     if args.len() != 6 {
@@ -223,7 +263,11 @@ pub async fn plan(args: Vec<Value>) -> BuiltinResult<Value> {
         },
     )
 }
-#[runtime_builtin(name = "fea.AccuracyPlan.experimentalBaseline", binding_variant = "default", builtin_path = "crate::builtins::fea::accuracy")]
+#[runtime_builtin(
+    name = "fea.AccuracyPlan.experimentalBaseline",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::accuracy"
+)]
 pub async fn experimental_plan(id: String) -> BuiltinResult<Value> {
     const NAME: &str = "fea.AccuracyPlan.experimentalBaseline";
     serializable_to_object(
@@ -238,78 +282,83 @@ pub(super) fn accuracy_plan(name: &'static str, value: &Value) -> BuiltinResult<
     object_payload(name, value, PLAN_CLASS)
 }
 
+const ACCURACY_STUDY_CLASSES: [ImmutableStudyClass; 6] = [
+    ImmutableStudyClass {
+        class_name: TARGET_CLASS,
+        type_identity: "runmat.fea.accuracy-target",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("observation", "fea.AccuracyTarget.observation"),
+            ("quantity", "fea.AccuracyTarget.quantity"),
+            ("numericalResult", "fea.AccuracyTarget.numericalResult"),
+            ("globalEquilibrium", "fea.AccuracyTarget.globalEquilibrium"),
+            ("interfaceClosure", "fea.AccuracyTarget.interfaceClosure"),
+            (
+                "executionEquivalence",
+                "fea.AccuracyTarget.executionEquivalence",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: TOLERANCE_CLASS,
+        type_identity: "runmat.fea.accuracy-tolerance",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("relative", "fea.AccuracyTolerance.relative"),
+            ("absolute", "fea.AccuracyTolerance.absolute"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: EQUIVALENCE_CLASS,
+        type_identity: "runmat.fea.numerical-equivalence-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            (
+                "deterministic",
+                "fea.NumericalEquivalencePolicy.deterministic",
+            ),
+            (
+                "relativeTolerance",
+                "fea.NumericalEquivalencePolicy.relativeTolerance",
+            ),
+            (
+                "absoluteTolerance",
+                "fea.NumericalEquivalencePolicy.absoluteTolerance",
+            ),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: RESOURCES_CLASS,
+        type_identity: "runmat.fea.accuracy-resource-ceiling",
+        fields: RESOURCES_FIELDS,
+        methods: &[("new", "fea.AccuracyResourceCeiling.new")],
+    },
+    ImmutableStudyClass {
+        class_name: CRITERION_CLASS,
+        type_identity: "runmat.fea.accuracy-criterion",
+        fields: CRITERION_FIELDS,
+        methods: &[("new", "fea.AccuracyCriterion.new")],
+    },
+    ImmutableStudyClass {
+        class_name: PLAN_CLASS,
+        type_identity: "runmat.fea.accuracy-plan",
+        fields: PLAN_FIELDS,
+        methods: &[
+            ("new", "fea.AccuracyPlan.new"),
+            (
+                "experimentalBaseline",
+                "fea.AccuracyPlan.experimentalBaseline",
+            ),
+        ],
+    },
+];
+
 pub(super) fn ensure_accuracy_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
-            TARGET_CLASS,
-            "runmat.fea.accuracy-target",
-            VALUE_FIELD,
-            &[
-                ("observation", "fea.AccuracyTarget.observation"),
-                ("quantity", "fea.AccuracyTarget.quantity"),
-                ("numericalResult", "fea.AccuracyTarget.numericalResult"),
-                ("globalEquilibrium", "fea.AccuracyTarget.globalEquilibrium"),
-                ("interfaceClosure", "fea.AccuracyTarget.interfaceClosure"),
-                (
-                    "executionEquivalence",
-                    "fea.AccuracyTarget.executionEquivalence",
-                ),
-            ],
-        );
-        register_immutable_class(
-            TOLERANCE_CLASS,
-            "runmat.fea.accuracy-tolerance",
-            VALUE_FIELD,
-            &[
-                ("relative", "fea.AccuracyTolerance.relative"),
-                ("absolute", "fea.AccuracyTolerance.absolute"),
-            ],
-        );
-        register_immutable_class(
-            EQUIVALENCE_CLASS,
-            "runmat.fea.numerical-equivalence-policy",
-            VALUE_FIELD,
-            &[
-                (
-                    "deterministic",
-                    "fea.NumericalEquivalencePolicy.deterministic",
-                ),
-                (
-                    "relativeTolerance",
-                    "fea.NumericalEquivalencePolicy.relativeTolerance",
-                ),
-                (
-                    "absoluteTolerance",
-                    "fea.NumericalEquivalencePolicy.absoluteTolerance",
-                ),
-            ],
-        );
-        register_immutable_class(
-            RESOURCES_CLASS,
-            "runmat.fea.accuracy-resource-ceiling",
-            RESOURCES_FIELDS,
-            &[("new", "fea.AccuracyResourceCeiling.new")],
-        );
-        register_immutable_class(
-            CRITERION_CLASS,
-            "runmat.fea.accuracy-criterion",
-            CRITERION_FIELDS,
-            &[("new", "fea.AccuracyCriterion.new")],
-        );
-        register_immutable_class(
-            PLAN_CLASS,
-            "runmat.fea.accuracy-plan",
-            PLAN_FIELDS,
-            &[
-                ("new", "fea.AccuracyPlan.new"),
-                (
-                    "experimentalBaseline",
-                    "fea.AccuracyPlan.experimentalBaseline",
-                ),
-            ],
-        );
-    });
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(classes::ACCURACY_TARGET);
+    SCHEMAS.call_once(|| register_immutable_schemas(&ACCURACY_STUDY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&ACCURACY_STUDY_CLASSES));
 }
 
 #[cfg(test)]
@@ -367,10 +416,19 @@ mod tests {
         assert!(block_on(target_quantity(Value::String("stress".into()))).is_err());
 
         for (value, expected) in [
-            (block_on(target_numerical_result()), AccuracyTarget::NumericalResult),
+            (
+                block_on(target_numerical_result()),
+                AccuracyTarget::NumericalResult,
+            ),
             (block_on(target_global()), AccuracyTarget::GlobalEquilibrium),
-            (block_on(target_interface()), AccuracyTarget::InterfaceClosure),
-            (block_on(target_equivalence()), AccuracyTarget::ExecutionEquivalence),
+            (
+                block_on(target_interface()),
+                AccuracyTarget::InterfaceClosure,
+            ),
+            (
+                block_on(target_equivalence()),
+                AccuracyTarget::ExecutionEquivalence,
+            ),
         ] {
             let value = value.unwrap();
             assert_eq!(
@@ -399,15 +457,25 @@ mod tests {
         );
         assert!(block_on(tolerance_relative(Value::Bool(true))).is_err());
         assert!(block_on(tolerance_relative(Value::Num(f64::NAN))).is_err());
-        assert!(block_on(tolerance_absolute(Value::String("displacement".into()), Value::Num(1.0))).is_err());
+        assert!(block_on(tolerance_absolute(
+            Value::String("displacement".into()),
+            Value::Num(1.0)
+        ))
+        .is_err());
 
         let deterministic = block_on(equivalence_deterministic()).unwrap();
         let relative = block_on(equivalence_relative(Value::Num(1e-10))).unwrap();
         let absolute = block_on(equivalence_absolute(Value::Num(1e-12))).unwrap();
         for (value, expected) in [
             (deterministic, NumericalEquivalencePolicy::Deterministic),
-            (relative, NumericalEquivalencePolicy::RelativeTolerance(1e-10)),
-            (absolute, NumericalEquivalencePolicy::AbsoluteTolerance(1e-12)),
+            (
+                relative,
+                NumericalEquivalencePolicy::RelativeTolerance(1e-10),
+            ),
+            (
+                absolute,
+                NumericalEquivalencePolicy::AbsoluteTolerance(1e-12),
+            ),
         ] {
             assert_eq!(
                 from_typed_value::<NumericalEquivalencePolicy>("test", EQUIVALENCE_CLASS, &value)
@@ -440,8 +508,14 @@ mod tests {
         let criterion_value: AccuracyCriterion =
             object_payload("test", &value, CRITERION_CLASS).unwrap();
         assert_eq!(criterion_value.criterion_id, "tip_mesh");
-        assert_eq!(criterion_value.contribution, ErrorContributionKind::SpatialDiscretization);
-        assert_eq!(criterion_value.evidence, RequiredAccuracyEvidence::ConvergenceStudy);
+        assert_eq!(
+            criterion_value.contribution,
+            ErrorContributionKind::SpatialDiscretization
+        );
+        assert_eq!(
+            criterion_value.evidence,
+            RequiredAccuracyEvidence::ConvergenceStudy
+        );
         assert!(criterion_value.mandatory);
 
         let numeric_flag = block_on(criterion(vec![
@@ -474,7 +548,10 @@ mod tests {
         let plan_value = accuracy_plan("test", &decoded).unwrap();
         assert_eq!(plan_value.accuracy_plan_id.0, "static_acceptance");
         assert_eq!(plan_value.criteria.len(), 1);
-        assert_eq!(plan_value.unavailable_evidence, UnavailableEvidencePolicy::Fail);
+        assert_eq!(
+            plan_value.unavailable_evidence,
+            UnavailableEvidencePolicy::Fail
+        );
         assert_eq!(plan_value.exceeded_limit, AccuracyLimitAction::Refine);
         assert!(block_on(plan(vec![Value::String("p".into())])).is_err());
     }

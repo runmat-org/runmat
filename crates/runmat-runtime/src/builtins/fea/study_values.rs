@@ -82,20 +82,6 @@ fn register_immutable_schema(
     .unwrap_or_else(|error| panic!("failed to register {class_name}: {error}"));
 }
 
-pub(super) fn register_immutable_class(
-    class_name: &'static str,
-    type_identity: &'static str,
-    fields: &'static [&'static str],
-    methods: &[(&'static str, &'static str)],
-) {
-    register_immutable_schema(class_name, type_identity, fields);
-    register_value_class(
-        class_name,
-        immutable_properties(fields),
-        static_methods(methods.iter().copied()),
-    );
-}
-
 fn validate_immutable_value(object: &ObjectInstance) -> Result<(), String> {
     if object
         .properties
@@ -143,5 +129,111 @@ pub(super) fn nonempty_id(
         ))
     } else {
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// One static constructor per FEA value-class family. Each family registers
+    /// its runtime classes per class registry, so they must resolve on a thread
+    /// whose registry is fresh even after another thread consumed the
+    /// process-once codec schemas.
+    const FAMILY_PROBES: &[(&str, &str)] = &[
+        ("fea.StepObjectRef", "fea.StepObjectRef.constraint"),
+        (
+            "fea.ActivationLifecycle",
+            "fea.ActivationLifecycle.activate",
+        ),
+        ("fea.StepObjectActivation", "fea.StepObjectActivation.new"),
+        ("fea.ComputeBackend", "fea.ComputeBackend.cpu"),
+        (
+            "fea.FormulationRequirement",
+            "fea.FormulationRequirement.experimental",
+        ),
+        ("fea.SolverOptions", "fea.SolverOptions.defaults"),
+        ("fea.ExecutionStep", "fea.ExecutionStep.new"),
+        ("fea.ExecutionPlan", "fea.ExecutionPlan.defaults"),
+        ("fea.AccuracyTarget", "fea.AccuracyTarget.numericalResult"),
+        ("fea.AccuracyTolerance", "fea.AccuracyTolerance.relative"),
+        (
+            "fea.NumericalEquivalencePolicy",
+            "fea.NumericalEquivalencePolicy.deterministic",
+        ),
+        (
+            "fea.AccuracyResourceCeiling",
+            "fea.AccuracyResourceCeiling.new",
+        ),
+        ("fea.AccuracyCriterion", "fea.AccuracyCriterion.new"),
+        ("fea.AccuracyPlan", "fea.AccuracyPlan.experimentalBaseline"),
+        ("fea.ErrorContribution", "fea.ErrorContribution.algebraic"),
+        (
+            "fea.RequiredAccuracyEvidence",
+            "fea.RequiredAccuracyEvidence.convergenceStudy",
+        ),
+        (
+            "fea.UnavailableEvidencePolicy",
+            "fea.UnavailableEvidencePolicy.fail",
+        ),
+        ("fea.AccuracyLimitAction", "fea.AccuracyLimitAction.refine"),
+        (
+            "fea.ObservationQuantity",
+            "fea.ObservationQuantity.displacement",
+        ),
+        ("fea.FieldLocation", "fea.FieldLocation.node"),
+        ("fea.SpatialReduction", "fea.SpatialReduction.moment"),
+        ("fea.SeriesReduction", "fea.SeriesReduction.mean"),
+        ("fea.DiagnosticKind", "fea.DiagnosticKind.convergence"),
+        ("fea.StateKind", "fea.StateKind.thermal"),
+        (
+            "fea.TopologyTransitionPolicy",
+            "fea.TopologyTransitionPolicy.requireIdentical",
+        ),
+        (
+            "fea.IndependentDomain",
+            "fea.IndependentDomain.staticDomain",
+        ),
+        ("fea.ObservationTarget", "fea.ObservationTarget.wholeModel"),
+        ("fea.SignalDomain", "fea.SignalDomain.time"),
+        ("fea.SignalSampling", "fea.SignalSampling.uniform"),
+        ("fea.SignalInterpolation", "fea.SignalInterpolation.linear"),
+        ("fea.SignalKnot", "fea.SignalKnot.jump"),
+        (
+            "fea.InitialConditionTarget",
+            "fea.InitialConditionTarget.wholeModel",
+        ),
+        ("fea.ReferencePoint", "fea.ReferencePoint.fromCoordinates"),
+        ("fea.PeriodicTransform", "fea.PeriodicTransform.identity"),
+        ("fea.Direction", "fea.Direction.vector"),
+        ("fea.PeriodicPairing", "fea.PeriodicPairing.matching"),
+        ("fea.CoordinateFrame", "fea.CoordinateFrame.globalFrame"),
+        ("fea.SpectrumAxis", "fea.SpectrumAxis.frequencyHertz"),
+        ("fea.ResponseSpectrum", "fea.ResponseSpectrum.new"),
+    ];
+
+    fn assert_families_resolve() {
+        super::super::ensure_value_classes_registered();
+        for (class_name, builtin) in FAMILY_PROBES {
+            let class = crate::class_registry::get_class(
+                &runmat_types::ClassIdentity::new(*class_name).expect("class identity"),
+            )
+            .unwrap_or_else(|| panic!("{class_name} is registered in this class registry"));
+            assert!(
+                class
+                    .methods
+                    .values()
+                    .any(|method| method.is_static && method.function_name == *builtin),
+                "{builtin} is a static method of {class_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_fea_value_family_registers_in_each_fresh_class_registry() {
+        assert_families_resolve();
+        for _ in 0..2 {
+            std::thread::spawn(assert_families_resolve)
+                .join()
+                .expect("a fresh registry resolves every FEA value family");
+        }
     }
 }

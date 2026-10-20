@@ -8,7 +8,8 @@ use runmat_analysis_core::{
 
 use super::super::*;
 use crate::builtins::fea::study_values::{
-    from_typed_value, register_immutable_class, to_typed_value, VALUE_FIELD,
+    from_typed_value, register_immutable_runtime_classes, register_immutable_schemas,
+    to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
 
 use runmat_builtins::fea_contract::policy_types::classes;
@@ -26,7 +27,6 @@ pub(super) const EXTREMA_TIE_CLASS: &str = classes::EXTREMA_TIE_POLICY.display_n
 pub(super) const PARTIAL_ACCESS_CLASS: &str = classes::PARTIAL_ACCESS_POLICY.display_name();
 pub(super) const PURPOSE_CLASS: &str = classes::OBSERVATION_PURPOSE.display_name();
 pub(super) const DIAGNOSTIC_KIND_CLASS: &str = classes::DIAGNOSTIC_KIND.display_name();
-
 
 macro_rules! choice {
     ($function:ident, $builtin:literal, $class:expr, $value:expr) => {
@@ -64,16 +64,8 @@ quantity_choices!(
         "fea.ObservationQuantity.acceleration",
         Acceleration
     ),
-    (
-        quantity_strain,
-        "fea.ObservationQuantity.strain",
-        Strain
-    ),
-    (
-        quantity_stress,
-        "fea.ObservationQuantity.stress",
-        Stress
-    ),
+    (quantity_strain, "fea.ObservationQuantity.strain", Strain),
+    (quantity_stress, "fea.ObservationQuantity.stress", Stress),
     (
         quantity_von_mises_stress,
         "fea.ObservationQuantity.vonMisesStress",
@@ -264,11 +256,7 @@ quantity_choices!(
         "fea.ObservationQuantity.residual",
         Residual
     ),
-    (
-        quantity_balance,
-        "fea.ObservationQuantity.balance",
-        Balance
-    ),
+    (quantity_balance, "fea.ObservationQuantity.balance", Balance),
     (
         quantity_constraint_violation,
         "fea.ObservationQuantity.constraintViolation",
@@ -294,21 +282,13 @@ macro_rules! choices {
 
 choices!(
     FIELD_LOCATION_CLASS,
-    (
-        location_node,
-        "fea.FieldLocation.node",
-        FieldLocation::Node
-    ),
+    (location_node, "fea.FieldLocation.node", FieldLocation::Node),
     (
         location_point,
         "fea.FieldLocation.point",
         FieldLocation::Point
     ),
-    (
-        location_cell,
-        "fea.FieldLocation.cell",
-        FieldLocation::Cell
-    ),
+    (location_cell, "fea.FieldLocation.cell", FieldLocation::Cell),
     (
         location_element,
         "fea.FieldLocation.element",
@@ -319,16 +299,8 @@ choices!(
         "fea.FieldLocation.integrationPoint",
         FieldLocation::IntegrationPoint
     ),
-    (
-        location_face,
-        "fea.FieldLocation.face",
-        FieldLocation::Face
-    ),
-    (
-        location_edge,
-        "fea.FieldLocation.edge",
-        FieldLocation::Edge
-    ),
+    (location_face, "fea.FieldLocation.face", FieldLocation::Face),
+    (location_edge, "fea.FieldLocation.edge", FieldLocation::Edge),
     (
         location_interface,
         "fea.FieldLocation.interface",
@@ -349,11 +321,7 @@ choices!(
         "fea.FieldLocation.referencePoint",
         FieldLocation::ReferencePoint
     ),
-    (
-        location_mode,
-        "fea.FieldLocation.mode",
-        FieldLocation::Mode
-    ),
+    (location_mode, "fea.FieldLocation.mode", FieldLocation::Mode),
     (
         location_global,
         "fea.FieldLocation.globalLocation",
@@ -566,7 +534,11 @@ choices!(
     )
 );
 
-#[runtime_builtin(name = "fea.SpatialReduction.moment", binding_variant = "default", builtin_path = "crate::builtins::fea::study_policies::observation")]
+#[runtime_builtin(
+    name = "fea.SpatialReduction.moment",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::study_policies::observation"
+)]
 pub async fn spatial_moment(about: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.SpatialReduction.moment";
     let about = Position::new(super::super::values::position_meters(NAME, &about)?);
@@ -618,7 +590,6 @@ choices!(
     )
 );
 
-
 macro_rules! series_statistic {
     ($function:ident, $builtin:literal, $variant:ident) => {
         #[runtime_builtin(name = $builtin, binding_variant = "default", builtin_path = "crate::builtins::fea::study_policies::observation")]
@@ -639,16 +610,8 @@ series_statistic!(
     "fea.SeriesReduction.rootMeanSquare",
     RootMeanSquare
 );
-series_statistic!(
-    series_mean,
-    "fea.SeriesReduction.mean",
-    Mean
-);
-series_statistic!(
-    series_variance,
-    "fea.SeriesReduction.variance",
-    Variance
-);
+series_statistic!(series_mean, "fea.SeriesReduction.mean", Mean);
+series_statistic!(series_variance, "fea.SeriesReduction.variance", Variance);
 choices!(
     EXTREMA_TIE_CLASS,
     (
@@ -801,113 +764,118 @@ pub(crate) fn diagnostic_kind(
     from_typed_value(builtin, DIAGNOSTIC_KIND_CLASS, value)
 }
 
+const OBSERVATION_POLICY_CLASSES: [ImmutableStudyClass; 13] = [
+    ImmutableStudyClass {
+        class_name: QUANTITY_CLASS,
+        type_identity: "runmat.fea.observation-quantity",
+        fields: VALUE_FIELD,
+        methods: &QUANTITY_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: FIELD_LOCATION_CLASS,
+        type_identity: "runmat.fea.field-location",
+        fields: VALUE_FIELD,
+        methods: &FIELD_LOCATION_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: RECOVERY_CLASS,
+        type_identity: "runmat.fea.recovery-policy",
+        fields: VALUE_FIELD,
+        methods: &RECOVERY_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: COMPONENT_CLASS,
+        type_identity: "runmat.fea.observation-component",
+        fields: VALUE_FIELD,
+        methods: &COMPONENT_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: SIGN_CLASS,
+        type_identity: "runmat.fea.sign-convention",
+        fields: VALUE_FIELD,
+        methods: &SIGN_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: COMPLEX_CLASS,
+        type_identity: "runmat.fea.complex-representation",
+        fields: VALUE_FIELD,
+        methods: &COMPLEX_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: SPATIAL_REDUCTION_CLASS,
+        type_identity: "runmat.fea.spatial-reduction",
+        fields: VALUE_FIELD,
+        methods: &SPATIAL_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: SERIES_REDUCTION_CLASS,
+        type_identity: "runmat.fea.series-reduction",
+        fields: VALUE_FIELD,
+        methods: &SERIES_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: SERIES_WEIGHTING_CLASS,
+        type_identity: "runmat.fea.series-weighting",
+        fields: VALUE_FIELD,
+        methods: &SERIES_WEIGHTING_METHODS,
+    },
+    ImmutableStudyClass {
+        class_name: EXTREMA_TIE_CLASS,
+        type_identity: "runmat.fea.extrema-tie-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("firstCanonical", "fea.ExtremaTiePolicy.firstCanonical"),
+            ("allLocations", "fea.ExtremaTiePolicy.allLocations"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: PARTIAL_ACCESS_CLASS,
+        type_identity: "runmat.fea.partial-access-policy",
+        fields: VALUE_FIELD,
+        methods: &[
+            (
+                "manifestAndChunks",
+                "fea.PartialAccessPolicy.manifestAndChunks",
+            ),
+            ("wholeArtifact", "fea.PartialAccessPolicy.wholeArtifact"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: PURPOSE_CLASS,
+        type_identity: "runmat.fea.observation-purpose",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("publication", "fea.ObservationPurpose.publication"),
+            ("solverControl", "fea.ObservationPurpose.solverControl"),
+            ("visualization", "fea.ObservationPurpose.visualization"),
+            ("downstreamState", "fea.ObservationPurpose.downstreamState"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: DIAGNOSTIC_KIND_CLASS,
+        type_identity: "runmat.fea.diagnostic-kind",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("convergence", "fea.DiagnosticKind.convergence"),
+            ("balance", "fea.DiagnosticKind.balance"),
+            ("constraint", "fea.DiagnosticKind.constraint"),
+            ("contact", "fea.DiagnosticKind.contact"),
+            ("adaptation", "fea.DiagnosticKind.adaptation"),
+            ("resource", "fea.DiagnosticKind.resource"),
+            (
+                "executionEquivalence",
+                "fea.DiagnosticKind.executionEquivalence",
+            ),
+        ],
+    },
+];
+
 pub(super) fn ensure_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
-            QUANTITY_CLASS,
-            "runmat.fea.observation-quantity",
-            VALUE_FIELD,
-            &QUANTITY_METHODS,
-        );
-        register_immutable_class(
-            FIELD_LOCATION_CLASS,
-            "runmat.fea.field-location",
-            VALUE_FIELD,
-            &FIELD_LOCATION_METHODS,
-        );
-        register_immutable_class(
-            RECOVERY_CLASS,
-            "runmat.fea.recovery-policy",
-            VALUE_FIELD,
-            &RECOVERY_METHODS,
-        );
-        register_immutable_class(
-            COMPONENT_CLASS,
-            "runmat.fea.observation-component",
-            VALUE_FIELD,
-            &COMPONENT_METHODS,
-        );
-        register_immutable_class(
-            SIGN_CLASS,
-            "runmat.fea.sign-convention",
-            VALUE_FIELD,
-            &SIGN_METHODS,
-        );
-        register_immutable_class(
-            COMPLEX_CLASS,
-            "runmat.fea.complex-representation",
-            VALUE_FIELD,
-            &COMPLEX_METHODS,
-        );
-        register_immutable_class(
-            SPATIAL_REDUCTION_CLASS,
-            "runmat.fea.spatial-reduction",
-            VALUE_FIELD,
-            &SPATIAL_METHODS,
-        );
-        register_immutable_class(
-            SERIES_REDUCTION_CLASS,
-            "runmat.fea.series-reduction",
-            VALUE_FIELD,
-            &SERIES_METHODS,
-        );
-        register_immutable_class(
-            SERIES_WEIGHTING_CLASS,
-            "runmat.fea.series-weighting",
-            VALUE_FIELD,
-            &SERIES_WEIGHTING_METHODS,
-        );
-        register_immutable_class(
-            EXTREMA_TIE_CLASS,
-            "runmat.fea.extrema-tie-policy",
-            VALUE_FIELD,
-            &[
-                ("firstCanonical", "fea.ExtremaTiePolicy.firstCanonical"),
-                ("allLocations", "fea.ExtremaTiePolicy.allLocations"),
-            ],
-        );
-        register_immutable_class(
-            PARTIAL_ACCESS_CLASS,
-            "runmat.fea.partial-access-policy",
-            VALUE_FIELD,
-            &[
-                (
-                    "manifestAndChunks",
-                    "fea.PartialAccessPolicy.manifestAndChunks",
-                ),
-                ("wholeArtifact", "fea.PartialAccessPolicy.wholeArtifact"),
-            ],
-        );
-        register_immutable_class(
-            PURPOSE_CLASS,
-            "runmat.fea.observation-purpose",
-            VALUE_FIELD,
-            &[
-                ("publication", "fea.ObservationPurpose.publication"),
-                ("solverControl", "fea.ObservationPurpose.solverControl"),
-                ("visualization", "fea.ObservationPurpose.visualization"),
-                ("downstreamState", "fea.ObservationPurpose.downstreamState"),
-            ],
-        );
-        register_immutable_class(
-            DIAGNOSTIC_KIND_CLASS,
-            "runmat.fea.diagnostic-kind",
-            VALUE_FIELD,
-            &[
-                ("convergence", "fea.DiagnosticKind.convergence"),
-                ("balance", "fea.DiagnosticKind.balance"),
-                ("constraint", "fea.DiagnosticKind.constraint"),
-                ("contact", "fea.DiagnosticKind.contact"),
-                ("adaptation", "fea.DiagnosticKind.adaptation"),
-                ("resource", "fea.DiagnosticKind.resource"),
-                (
-                    "executionEquivalence",
-                    "fea.DiagnosticKind.executionEquivalence",
-                ),
-            ],
-        );
-    });
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(classes::OBSERVATION_QUANTITY);
+    SCHEMAS.call_once(|| register_immutable_schemas(&OBSERVATION_POLICY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&OBSERVATION_POLICY_CLASSES));
 }
 
 const QUANTITY_METHODS: [(&str, &str); 48] = [

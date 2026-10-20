@@ -5,7 +5,8 @@ use runmat_analysis_fea::ComputeBackend;
 
 use super::*;
 use crate::builtins::fea::study_values::{
-    from_typed_value, object_or_cell, register_immutable_class, to_typed_value, VALUE_FIELD,
+    from_typed_value, object_or_cell, register_immutable_runtime_classes,
+    register_immutable_schemas, to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
 
 use runmat_builtins::fea_contract::policy_types::classes;
@@ -65,7 +66,11 @@ fn procedure_step(name: &'static str, value: &Value) -> BuiltinResult<ProcedureS
     Ok(steps.remove(0))
 }
 
-#[runtime_builtin(name = "fea.SolverOptions.defaults", binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
+#[runtime_builtin(
+    name = "fea.SolverOptions.defaults",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::execution"
+)]
 pub async fn solver_defaults(step: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.SolverOptions.defaults";
     let step = procedure_step(NAME, &step)?;
@@ -74,7 +79,11 @@ pub async fn solver_defaults(step: Value) -> BuiltinResult<Value> {
     to_typed_value(NAME, SOLVER_OPTIONS_CLASS, options)
 }
 
-#[runtime_builtin(name = "fea.ExecutionStep.new", binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
+#[runtime_builtin(
+    name = "fea.ExecutionStep.new",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::execution"
+)]
 pub async fn execution_step(
     step: Value,
     backend: Value,
@@ -100,7 +109,11 @@ pub async fn execution_step(
     serializable_to_object(NAME, &ERROR_INTERNAL, EXECUTION_STEP_CLASS, &execution)
 }
 
-#[runtime_builtin(name = "fea.ExecutionPlan.new", binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
+#[runtime_builtin(
+    name = "fea.ExecutionPlan.new",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::execution"
+)]
 pub async fn execution_plan(sequence: Value, steps: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ExecutionPlan.new";
     let sequence = super::sequences::sequence_from_value(NAME, &sequence)?;
@@ -112,7 +125,11 @@ pub async fn execution_plan(sequence: Value, steps: Value) -> BuiltinResult<Valu
     serializable_to_object(NAME, &ERROR_INTERNAL, EXECUTION_PLAN_CLASS, &plan)
 }
 
-#[runtime_builtin(name = "fea.ExecutionPlan.defaults", binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
+#[runtime_builtin(
+    name = "fea.ExecutionPlan.defaults",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::execution"
+)]
 pub async fn execution_plan_defaults(
     sequence: Value,
     backend: Value,
@@ -136,49 +153,54 @@ pub(super) fn execution_plan_from_value(
     object_payload(name, value, EXECUTION_PLAN_CLASS)
 }
 
+const EXECUTION_STUDY_CLASSES: [ImmutableStudyClass; 5] = [
+    ImmutableStudyClass {
+        class_name: BACKEND_CLASS,
+        type_identity: "runmat.fea.compute-backend",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("cpu", "fea.ComputeBackend.cpu"),
+            ("gpu", "fea.ComputeBackend.gpu"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: REQUIREMENT_CLASS,
+        type_identity: "runmat.fea.formulation-requirement",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("production", "fea.FormulationRequirement.production"),
+            ("experimental", "fea.FormulationRequirement.experimental"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: SOLVER_OPTIONS_CLASS,
+        type_identity: "runmat.fea.solver-options",
+        fields: VALUE_FIELD,
+        methods: &[("defaults", "fea.SolverOptions.defaults")],
+    },
+    ImmutableStudyClass {
+        class_name: EXECUTION_STEP_CLASS,
+        type_identity: "runmat.fea.execution-step",
+        fields: EXECUTION_STEP_FIELDS,
+        methods: &[("new", "fea.ExecutionStep.new")],
+    },
+    ImmutableStudyClass {
+        class_name: EXECUTION_PLAN_CLASS,
+        type_identity: "runmat.fea.execution-plan",
+        fields: EXECUTION_PLAN_FIELDS,
+        methods: &[
+            ("new", "fea.ExecutionPlan.new"),
+            ("defaults", "fea.ExecutionPlan.defaults"),
+        ],
+    },
+];
+
 pub(super) fn ensure_execution_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
-            BACKEND_CLASS,
-            "runmat.fea.compute-backend",
-            VALUE_FIELD,
-            &[
-                ("cpu", "fea.ComputeBackend.cpu"),
-                ("gpu", "fea.ComputeBackend.gpu"),
-            ],
-        );
-        register_immutable_class(
-            REQUIREMENT_CLASS,
-            "runmat.fea.formulation-requirement",
-            VALUE_FIELD,
-            &[
-                ("production", "fea.FormulationRequirement.production"),
-                ("experimental", "fea.FormulationRequirement.experimental"),
-            ],
-        );
-        register_immutable_class(
-            SOLVER_OPTIONS_CLASS,
-            "runmat.fea.solver-options",
-            VALUE_FIELD,
-            &[("defaults", "fea.SolverOptions.defaults")],
-        );
-        register_immutable_class(
-            EXECUTION_STEP_CLASS,
-            "runmat.fea.execution-step",
-            EXECUTION_STEP_FIELDS,
-            &[("new", "fea.ExecutionStep.new")],
-        );
-        register_immutable_class(
-            EXECUTION_PLAN_CLASS,
-            "runmat.fea.execution-plan",
-            EXECUTION_PLAN_FIELDS,
-            &[
-                ("new", "fea.ExecutionPlan.new"),
-                ("defaults", "fea.ExecutionPlan.defaults"),
-            ],
-        );
-    });
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(classes::COMPUTE_BACKEND);
+    SCHEMAS.call_once(|| register_immutable_schemas(&EXECUTION_STUDY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&EXECUTION_STUDY_CLASSES));
 }
 
 #[cfg(test)]

@@ -6,8 +6,8 @@ use runmat_analysis_core::{
 
 use super::*;
 use crate::builtins::fea::study_values::{
-    from_typed_value, nonempty_id, object_or_cell, register_immutable_class, to_typed_value,
-    VALUE_FIELD,
+    from_typed_value, nonempty_id, object_or_cell, register_immutable_runtime_classes,
+    register_immutable_schemas, to_typed_value, ImmutableStudyClass, VALUE_FIELD,
 };
 
 pub(super) const OBJECT_REF_CLASS: &str =
@@ -23,10 +23,10 @@ const ACTIVATION_FIELDS: &[&str] = &["object", "lifecycle"];
 macro_rules! object_ref_builtin {
     ($function:ident, $builtin:literal, $variant:ident, $descriptor:ident) => {
         #[runtime_builtin(
-                    name = $builtin,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::activations"
-                )]
+                            name = $builtin,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::activations"
+                        )]
         pub async fn $function(id: String) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(
                 &runmat_builtins::$descriptor,
@@ -191,39 +191,46 @@ pub(super) fn activations(
     object_or_cell(name, value, ACTIVATION_CLASS)
 }
 
+const ACTIVATION_STUDY_CLASSES: [ImmutableStudyClass; 3] = [
+    ImmutableStudyClass {
+        class_name: OBJECT_REF_CLASS,
+        type_identity: "runmat.fea.step-object-ref",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("constraint", "fea.StepObjectRef.constraint"),
+            ("boundary", "fea.StepObjectRef.boundary"),
+            ("connector", "fea.StepObjectRef.connector"),
+            ("interface", "fea.StepObjectRef.interface"),
+            ("excitation", "fea.StepObjectRef.excitation"),
+            ("initialCondition", "fea.StepObjectRef.initialCondition"),
+            ("materialParameter", "fea.StepObjectRef.materialParameter"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: LIFECYCLE_CLASS,
+        type_identity: "runmat.fea.activation-lifecycle",
+        fields: VALUE_FIELD,
+        methods: &[
+            ("activate", "fea.ActivationLifecycle.activate"),
+            ("continueFrom", "fea.ActivationLifecycle.continueFrom"),
+            ("modify", "fea.ActivationLifecycle.modify"),
+            ("deactivate", "fea.ActivationLifecycle.deactivate"),
+        ],
+    },
+    ImmutableStudyClass {
+        class_name: ACTIVATION_CLASS,
+        type_identity: "runmat.fea.step-object-activation",
+        fields: ACTIVATION_FIELDS,
+        methods: &[("new", "fea.StepObjectActivation.new")],
+    },
+];
+
 pub(super) fn ensure_activation_classes_registered() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        register_immutable_class(
+    static SCHEMAS: Once = Once::new();
+    static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
             OBJECT_REF_CLASS,
-            "runmat.fea.step-object-ref",
-            VALUE_FIELD,
-            &[
-                ("constraint", "fea.StepObjectRef.constraint"),
-                ("boundary", "fea.StepObjectRef.boundary"),
-                ("connector", "fea.StepObjectRef.connector"),
-                ("interface", "fea.StepObjectRef.interface"),
-                ("excitation", "fea.StepObjectRef.excitation"),
-                ("initialCondition", "fea.StepObjectRef.initialCondition"),
-                ("materialParameter", "fea.StepObjectRef.materialParameter"),
-            ],
-        );
-        register_immutable_class(
-            LIFECYCLE_CLASS,
-            "runmat.fea.activation-lifecycle",
-            VALUE_FIELD,
-            &[
-                ("activate", "fea.ActivationLifecycle.activate"),
-                ("continueFrom", "fea.ActivationLifecycle.continueFrom"),
-                ("modify", "fea.ActivationLifecycle.modify"),
-                ("deactivate", "fea.ActivationLifecycle.deactivate"),
-            ],
-        );
-        register_immutable_class(
-            ACTIVATION_CLASS,
-            "runmat.fea.step-object-activation",
-            ACTIVATION_FIELDS,
-            &[("new", "fea.StepObjectActivation.new")],
-        );
-    });
+        ));
+    SCHEMAS.call_once(|| register_immutable_schemas(&ACTIVATION_STUDY_CLASSES));
+    RUNTIME_CLASSES.ensure(|| register_immutable_runtime_classes(&ACTIVATION_STUDY_CLASSES));
 }
