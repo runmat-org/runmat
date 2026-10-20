@@ -67,13 +67,22 @@ impl RunMatSession {
                 )
             }
             crate::ProcedureTarget::SemanticFunction(function) => {
-                let index = usize::try_from(function.0).map_err(|_| {
-                    runtime_error(
-                        "RunMat:UndefinedExecutableProcedure",
-                        "semantic function identity exceeds this host",
-                    )
+                let origin = runmat_execution::FunctionBindingOrigin::from_revision(
+                    &unit.revision().program_revision,
+                    function,
+                )
+                .map_err(|error| {
+                    runtime_error("RunMat:UndefinedExecutableProcedure", error.to_string())
                 })?;
-                let function = runmat_hir::FunctionId(index);
+                let function = unit
+                    .local_function_for_origin(origin)
+                    .map_err(|error| runtime_error("RunMat:UndefinedExecutableProcedure", error))?
+                    .ok_or_else(|| {
+                        runtime_error(
+                            "RunMat:UndefinedExecutableProcedure",
+                            "executable unit does not own the semantic procedure",
+                        )
+                    })?;
                 let name = unit
                     .functions()
                     .get(function)
@@ -88,7 +97,7 @@ impl RunMatSession {
                 #[cfg(not(target_arch = "wasm32"))]
                 if backend == crate::ExecutableBackendPolicy::ForcedGenericNative
                     && (unit.native_function_id(&name) != Some(function)
-                        || !unit.owns_callable(runmat_types::ProgramFunctionId(function.0 as u32)))
+                        || !unit.owns_callable(function))
                 {
                     return Err(runtime_error(
                         "RunMat:ExecutableBackend",

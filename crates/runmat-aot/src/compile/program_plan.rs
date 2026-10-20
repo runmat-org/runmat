@@ -9,7 +9,7 @@ use crate::{
 
 use super::CompilationPolicy;
 
-pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 5;
+pub const PROGRAM_LINK_PLAN_SCHEMA_VERSION: u16 = 6;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,7 +32,7 @@ pub struct ProgramLinkPlan {
     pub runtime_capabilities: RuntimeArchiveCapabilities,
     pub reachability: ReachabilityReport,
     /// Canonical MIR identities; report node strings are presentation only.
-    pub retained_function_ids: BTreeSet<runmat_types::ProgramFunctionId>,
+    pub retained_function_ids: BTreeSet<runmat_types::FunctionId>,
     pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
     pub interop: runmat_types::InteropManifest,
     pub retained_runtime_families: Vec<RuntimeFamilyRetention>,
@@ -40,7 +40,7 @@ pub struct ProgramLinkPlan {
 }
 
 impl ProgramLinkPlan {
-    pub fn retained_functions(&self) -> BTreeSet<runmat_types::ProgramFunctionId> {
+    pub fn retained_functions(&self) -> BTreeSet<runmat_types::FunctionId> {
         self.retained_function_ids.clone()
     }
 }
@@ -76,19 +76,7 @@ pub fn build_program_link_plan_with_interop(
         .manifest
         .validate_environment(&unit.revision().program_revision.environment())?;
     let (reachability, retained_functions) = unit.reachability_analysis();
-    let retained_function_ids = retained_functions
-        .into_iter()
-        .map(|function| {
-            u32::try_from(function.0)
-                .map(runmat_types::ProgramFunctionId)
-                .map_err(|_| {
-                    AotError::contract(
-                        "aot.compile.function_identity",
-                        "reachable function identity exceeds portable bounds",
-                    )
-                })
-        })
-        .collect::<AotResult<BTreeSet<_>>>()?;
+    let retained_function_ids = retained_functions;
     if policy == CompilationPolicy::ClosedWorld && reachability.has_unknown_edges {
         return Err(AotError::contract(
             "aot.compile.reachability_unknown",
@@ -369,7 +357,7 @@ mod tests {
 
     #[test]
     fn link_plan_retention_uses_typed_wire_field_not_report_spelling() {
-        let retained = BTreeSet::from([runmat_types::ProgramFunctionId(7)]);
+        let retained = BTreeSet::from([runmat_types::FunctionId(7)]);
         let plan = ProgramLinkPlan {
             schema_version: PROGRAM_LINK_PLAN_SCHEMA_VERSION,
             product: runmat_execution::host::NativeProductMode::HostUnselected,

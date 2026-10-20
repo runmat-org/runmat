@@ -3,10 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::ir::*;
 use crate::{NativeCodegenError, NativeCodegenResult};
 use runmat_mir::{BasicBlockId, MirLocalId, MirOutputTarget, MirStmtKind};
-use runmat_types::{CapabilitySet, EffectSet, ProgramFunctionId, RegionContract};
+use runmat_types::{CapabilitySet, EffectSet, FunctionId, RegionContract};
 
 pub(super) fn lower_function(
-    function: ProgramFunctionId,
+    function: FunctionId,
     mir_body_digest: runmat_execution::Digest,
     input: &super::assembly::NativeLoweringInput<'_>,
     metadata: &runmat_mir::MirFunctionMetadata,
@@ -78,7 +78,7 @@ pub(super) fn lower_function(
         .collect::<Vec<_>>();
     binding_locals.sort_by_key(|entry| entry.binding);
     let projection = assembly
-        .lexical_environment_projection(runmat_hir::FunctionId(function.0 as usize))
+        .lexical_environment_projection(function)
         .map_err(|error| {
             NativeCodegenError::new("native.lowering.lexical_environment", error)
                 .at_function(function)
@@ -154,13 +154,7 @@ pub(super) fn lower_function(
             Ok(NativeInheritedStorageBinding {
                 binding: entry.binding,
                 local: local.id,
-                owner: ProgramFunctionId(u32::try_from(entry.owner.0).map_err(|_| {
-                    NativeCodegenError::new(
-                        "native.lowering.inherited_storage",
-                        "canonical storage owner exceeds portable function identity",
-                    )
-                    .at_function(function)
-                })?),
+                owner: entry.owner,
                 name,
                 owner_function,
                 kind,
@@ -221,7 +215,8 @@ pub(super) fn lower_function(
             })
         })
         .collect::<NativeCodegenResult<Vec<_>>>()?;
-    let mut ctx = super::context::FunctionLoweringContext::new(function, metadata.source, analysis);
+    let mut ctx =
+        super::context::FunctionLoweringContext::new(function, metadata.source, analysis)?;
     let mut parameter_sets = BTreeMap::new();
     let mut epoch_parameters = BTreeMap::new();
     for block in &body.blocks {
@@ -242,7 +237,7 @@ pub(super) fn lower_function(
     }
 
     let mut blocks = Vec::with_capacity(body.blocks.len());
-    let expected_sites = super::inventory::expected_sites(function, body)?;
+    let expected_sites = super::inventory::expected_sites(ctx.portable_function, body)?;
     for block in &body.blocks {
         let parameters = parameter_sets.get(&block.id).cloned().ok_or_else(|| {
             NativeCodegenError::new(
@@ -391,7 +386,7 @@ pub(super) fn lower_function(
     let abi = lower_abi(body, function)?;
     let argument_validations = lower_argument_validations(metadata, &locals, &abi, function)?;
     let capabilities = analysis
-        .function(function)
+        .function_for_local(function)
         .ok_or_else(|| {
             NativeCodegenError::new(
                 "native.lowering.function_analysis",
@@ -411,21 +406,12 @@ pub(super) fn lower_function(
         })?;
     Ok(NativeFunction {
         id: function,
+        portable_id: ctx.portable_function,
         mir_body_digest,
         source: metadata.source,
         name: metadata.name.0.clone(),
         source_role: metadata.source_role,
-        lexical_parent: retained_callable_parent
-            .map(|parent| {
-                u32::try_from(parent.0).map(ProgramFunctionId).map_err(|_| {
-                    NativeCodegenError::new(
-                        "native.lowering.lexical_parent",
-                        "lexical parent exceeds portable function identity",
-                    )
-                    .at_function(function)
-                })
-            })
-            .transpose()?,
+        lexical_parent: retained_callable_parent,
         class_method_owner: metadata.class_method_owner.clone(),
         capabilities,
         abi,
@@ -447,7 +433,7 @@ pub(super) fn lower_argument_validations(
     metadata: &runmat_mir::MirFunctionMetadata,
     locals: &[NativeLocalMetadata],
     abi: &NativeFunctionAbi,
-    function: ProgramFunctionId,
+    function: FunctionId,
 ) -> NativeCodegenResult<Vec<NativeFunctionArgumentValidation>> {
     let mut validations = metadata
         .argument_validations
@@ -617,7 +603,7 @@ fn sequence_target_root_local(target: &runmat_mir::MirSequenceTarget) -> Option<
 
 pub(super) fn lower_abi(
     body: &runmat_mir::MirBody,
-    function: ProgramFunctionId,
+    function: FunctionId,
 ) -> NativeCodegenResult<NativeFunctionAbi> {
     let find = |binding| -> NativeCodegenResult<NativeLocalId> {
         body.locals
@@ -664,7 +650,7 @@ fn lower_region_boundaries(
 ) -> NativeCodegenResult<Vec<NativeRegionBoundary>> {
     let mut boundaries = Vec::new();
     for region in regions {
-        if region.id.function != ctx.function {
+        if region.id.function != ctx.portable_function {
             continue;
         }
         if region.entry == point {
@@ -704,7 +690,7 @@ fn region_boundary(
     side_effect_epoch: NativeValueId,
 ) -> NativeCodegenResult<NativeRegionBoundary> {
     let resolve = |value: runmat_types::RegionValueId| {
-        if value.function != ctx.function {
+        if value.function != ctx.portable_function {
             return Err(NativeCodegenError::new(
                 "native.lowering.region_value",
                 "region value belongs to another function",
@@ -774,7 +760,7 @@ fn guard_value(
 
 pub(super) fn checked_local(
     local: MirLocalId,
-    function: ProgramFunctionId,
+    function: FunctionId,
 ) -> NativeCodegenResult<NativeLocalId> {
     u32::try_from(local.0).map(NativeLocalId).map_err(|_| {
         NativeCodegenError::new(
@@ -787,7 +773,7 @@ pub(super) fn checked_local(
 
 pub(super) fn checked_block(
     block: BasicBlockId,
-    function: ProgramFunctionId,
+    function: FunctionId,
 ) -> NativeCodegenResult<NativeBlockId> {
     u32::try_from(block.0).map(NativeBlockId).map_err(|_| {
         NativeCodegenError::new(

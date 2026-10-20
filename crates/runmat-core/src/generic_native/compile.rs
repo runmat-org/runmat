@@ -1,19 +1,19 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 use crate::ExecutableUnit;
 
 pub(super) struct CompiledGenericUnit {
     pub executor: Rc<runmat_native_executor::NativeExecutor>,
-    pub entrypoint: ProgramFunctionId,
+    pub entrypoint: FunctionId,
     pub compilation: runmat_jit::entry::NativeCompilationEvidence,
     #[cfg(test)]
-    pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
+    pub safepoints: BTreeMap<FunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
     #[cfg(test)]
     pub safepoint_locations: BTreeMap<
-        ProgramFunctionId,
+        FunctionId,
         Vec<(
             runmat_native_codegen::NativeSafepointId,
             runmat_native_codegen::NativeSourceLocation,
@@ -23,20 +23,20 @@ pub(super) struct CompiledGenericUnit {
 
 pub(super) struct PreparedGenericUnit {
     native: crate::NativeCompilationInput,
-    entrypoint: ProgramFunctionId,
+    entrypoint: FunctionId,
     specialization: Option<runmat_jit::tiering::RepresentationProfile>,
     prepare_ns: u64,
 }
 
 pub(super) struct BackgroundCompiledGenericUnit {
     pub executor: runmat_native_executor::NativeExecutor,
-    pub entrypoint: ProgramFunctionId,
+    pub entrypoint: FunctionId,
     pub compilation: runmat_jit::entry::NativeCompilationEvidence,
     #[cfg(test)]
-    pub safepoints: BTreeMap<ProgramFunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
+    pub safepoints: BTreeMap<FunctionId, Vec<runmat_native_codegen::NativeSafepointId>>,
     #[cfg(test)]
     pub safepoint_locations: BTreeMap<
-        ProgramFunctionId,
+        FunctionId,
         Vec<(
             runmat_native_codegen::NativeSafepointId,
             runmat_native_codegen::NativeSourceLocation,

@@ -128,7 +128,12 @@ async fn retained_program_owner_validates_caller_and_preserves_original_cold_pro
         .function_registry
         .resolve_name("retainedAsync")
         .unwrap();
-    let function = ProgramFunctionId(u32::try_from(function.0).unwrap());
+    let origin = session
+        .function_registry
+        .get(function)
+        .unwrap()
+        .binding_origin
+        .unwrap();
     let caller = session
         .compile_executable_unit(
             ExecutableSource::new("separate-original-caller", "caller.m", "ans = 0;"),
@@ -139,7 +144,7 @@ async fn retained_program_owner_validates_caller_and_preserves_original_cold_pro
     let guard = session.program_service.enter(&caller);
     let envelope = session
         .program_service
-        .freeze_executable(function, &caller.revision().program_revision)
+        .freeze_executable(origin, &caller.revision().program_revision)
         .unwrap();
     assert_ne!(
         envelope.manifest.identity.program,
@@ -154,17 +159,17 @@ async fn retained_program_owner_validates_caller_and_preserves_original_cold_pro
     );
     assert!(session
         .program_service
-        .freeze_executable(function, &envelope.manifest.identity.program)
+        .freeze_executable(origin, &envelope.manifest.identity.program)
         .is_err());
     let bound = session
         .program_service
-        .freeze_bound_callable(function, "retainedAsync")
+        .freeze_bound_callable(origin, "retainedAsync")
         .unwrap();
     assert_eq!(bound.executable, envelope);
     drop(guard);
     assert!(session
         .program_service
-        .freeze_executable(function, &caller.revision().program_revision)
+        .freeze_executable(origin, &caller.revision().program_revision)
         .is_err());
     let call = DeferredCall {
         console: None,

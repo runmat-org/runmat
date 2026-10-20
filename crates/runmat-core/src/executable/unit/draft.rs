@@ -24,7 +24,7 @@ impl ExecutableUnitDraft {
         revision: ExecutableRevision,
         source_map: ExecutableSourceMap,
         mir: runmat_mir::MirAssembly,
-        analysis: runmat_mir::analysis::AnalysisStore,
+        mut analysis: runmat_mir::analysis::AnalysisStore,
         mut bytecode: runmat_vm::Bytecode,
     ) -> Result<Self, String> {
         source_map.validate_content_revisions()?;
@@ -52,25 +52,27 @@ impl ExecutableUnitDraft {
         {
             return Err("executable references a source ordinal outside its source map".into());
         }
-        let region_contracts = analysis
-            .regions
-            .iter()
-            .map(|region| region.contract.clone())
-            .collect::<Vec<_>>();
         let current_program = revision
             .program_revision
             .identity_digest()
             .map_err(|error| error.to_string())?;
         let compiled_functions = compiled_function_owners(current_program, &mir, &bytecode)?;
+        let analysis_owners = compiled_functions.analysis_owners(&analysis, &bytecode)?;
+        analysis = analysis.project_product_functions(&analysis_owners)?;
+        let region_contracts = analysis
+            .regions
+            .iter()
+            .map(|region| region.contract.clone())
+            .collect::<Vec<_>>();
         bytecode.install_regions_for_product(
             &region_contracts,
-            &compiled_functions.assembly,
+            &analysis_owners,
             &compiled_functions.registered_bodies,
         )?;
         bytecode.install_parallel_regions_for_product(
             &mir,
             &analysis.parallel,
-            &compiled_functions.assembly,
+            &analysis_owners,
             &compiled_functions.registered_bodies,
         )?;
         let coverage = CoveragePlan::instrument_for_product(
@@ -162,7 +164,15 @@ impl ExecutableUnitDraft {
         let mut bytecode = self.bytecode.clone();
         runmat_mir::remap_closed_function_ids(&mut mir, remap)?;
         runmat_vm::remap_decorated_session_definitions(&mut bytecode, published, remap)?;
-        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        let analysis = self.analysis.rebind_closed_functions(remap)?;
+        let current_program = self
+            .revision
+            .program_revision
+            .identity_digest()
+            .map_err(|error| error.to_string())?;
+        let owners = compiled_function_owners(current_program, &mir, &bytecode)?;
+        let analysis =
+            analysis.project_product_functions(&owners.analysis_owners(&analysis, &bytecode)?)?;
         self.mir = mir;
         self.bytecode = bytecode;
         self.analysis = analysis;

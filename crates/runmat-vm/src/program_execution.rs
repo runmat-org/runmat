@@ -21,6 +21,8 @@ mod unit_sources;
 mod unit_admission;
 #[path = "program_execution/request_future.rs"]
 mod request_future;
+#[path = "program_execution/semantic_identity.rs"]
+mod semantic_identity;
 #[path = "program_execution/region_sources.rs"]
 mod region_sources;
 #[path = "program_execution/graph_materialization.rs"]
@@ -78,12 +80,13 @@ pub fn materialize_deferred_call(
                         | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
                     ..
                 } => ProgramCallable::semantic(
-                    ProgramFunctionId(u32::try_from(function.0).map_err(|_| {
-                        ExecutionServiceError::Failed(
-                            "semantic function identity exceeds its portable representation".into(),
-                        )
-                    })?),
-                    descriptor.metadata.display_name.clone(),
+                    semantic_identity::captured_function(call, *function)
+                        .map_err(ExecutionServiceError::Failed)?,
+                    descriptor
+                        .metadata
+                        .display_name
+                        .as_ref()
+                        .map(ToString::to_string),
                 ),
                 runmat_runtime::call::descriptor::CallableTarget::Resolved {
                     identity: runmat_hir::CallableIdentity::Builtin(name),
@@ -500,11 +503,11 @@ fn recipe_supports_capabilities(
 fn callable_capabilities(
     registry: &crate::FunctionRegistry,
     callable: &ProgramCallable,
+    origin_program: Option<Digest>,
 ) -> Result<runmat_types::CapabilitySet, String> {
     let function = |id: ProgramFunctionId| {
-        usize::try_from(id.0)
+        semantic_identity::resolve(registry, id, origin_program)
             .ok()
-            .map(runmat_hir::FunctionId)
             .and_then(|id| registry.get(id))
     };
     match callable {
@@ -945,10 +948,18 @@ async fn execute_function_request(
     let requested_outputs = usize::from(request.requested_outputs);
     let result = match &request.callable {
         runmat_execution::ProgramCallable::Semantic { function, .. } => {
+            let local = match selected_function.map(Ok).unwrap_or_else(|| {
+                let origin_program = semantic_identity::revision_owner(
+                    &request.recipe.program_revision,
+                    &request.artifact.executable_bytes,
+                )?;
+                semantic_identity::resolve(&registry, *function, origin_program)
+            }) {
+                Ok(local) => local,
+                Err(message) => return ProgramExecutionResponse::Failure { message },
+            };
             crate::invoke_semantic_function_value_in_context(
-                selected_function
-                    .map(|selected| selected.0)
-                    .unwrap_or(function.0 as usize),
+                local.0,
                 &arguments,
                 requested_outputs,
                 &registry,
@@ -1487,7 +1498,7 @@ mod tests {
         // builtin worker callable has no call-site source literal to narrow.
         let registry = crate::FunctionRegistry::new(HashMap::new());
         let callable = ProgramCallable::builtin("imread").expect("builtin callable");
-        let capabilities = super::callable_capabilities(&registry, &callable)
+        let capabilities = super::callable_capabilities(&registry, &callable, None)
             .expect("resolve builtin callable requirements");
         assert!(capabilities.0.contains(&CapabilityRequirement::Filesystem));
         assert!(capabilities.0.contains(&CapabilityRequirement::Network));

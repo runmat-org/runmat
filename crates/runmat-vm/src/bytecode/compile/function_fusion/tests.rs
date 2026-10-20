@@ -307,12 +307,10 @@ fn function_local_semantic_windows_survive_executable_materialization() {
 
     let mut remapped = body.clone();
     let destination = runmat_hir::FunctionId(function.0 + 10);
-    let portable = remapped.portable_function;
     let source = remapped.source_id;
     crate::bytecode::remap_session_function(
         &mut remapped,
         destination,
-        portable,
         source,
         &[(function, destination)].into_iter().collect(),
     )

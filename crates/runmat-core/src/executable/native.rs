@@ -36,7 +36,7 @@ pub struct AotObjectDataOptions {
 }
 
 impl NativeCompilationInput {
-    pub fn entrypoint(&self) -> runmat_types::ProgramFunctionId {
+    pub fn entrypoint(&self) -> runmat_types::FunctionId {
         self.entrypoint.compiled()
     }
 
@@ -46,18 +46,16 @@ impl NativeCompilationInput {
     /// executable identity or admit a name-based lookup.
     pub fn with_additional_entrypoints(
         mut self,
-        functions: &std::collections::BTreeSet<runmat_types::ProgramFunctionId>,
+        functions: &std::collections::BTreeSet<runmat_types::FunctionId>,
     ) -> Result<Self, runmat_runtime::RuntimeError> {
         for function in functions {
-            let ordinal = usize::try_from(function.0)
-                .map_err(|_| native_product_error("native entrypoint exceeds this host".into()))?;
-            let local = runmat_hir::FunctionId(ordinal);
-            if !self.mir.bodies.contains_key(&local) || !self.mir.functions.contains_key(&local) {
+            if !self.mir.bodies.contains_key(function) || !self.mir.functions.contains_key(function)
+            {
                 return Err(native_product_error(
                     "additional native entrypoint is absent from retained frozen MIR".into(),
                 ));
             }
-            self.mir.entrypoints.push(local);
+            self.mir.entrypoints.push(*function);
         }
         self.mir.entrypoints.sort_unstable();
         self.mir.entrypoints.dedup();
@@ -100,10 +98,7 @@ impl NativeCompilationInput {
         }
         let registry = runmat_vm::decode_interpreter_program_v2(&self.program_capture)
             .map_err(|error| native_product_error(error.to_string()))?;
-        let function = runmat_hir::FunctionId(
-            usize::try_from(self.entrypoint.compiled().0)
-                .map_err(|_| native_product_error("native entrypoint exceeds this host".into()))?,
-        );
+        let function = self.entrypoint.compiled();
         let body = registry.get(function).ok_or_else(|| {
             native_product_error("selected native function is absent from its capture".into())
         })?;
@@ -136,7 +131,7 @@ impl NativeCompilationInput {
 
     pub fn retain_functions(
         mut self,
-        retained: &std::collections::BTreeSet<runmat_types::ProgramFunctionId>,
+        retained: &std::collections::BTreeSet<runmat_types::FunctionId>,
     ) -> Result<Self, runmat_runtime::RuntimeError> {
         if !retained.contains(&self.entrypoint.compiled()) {
             return Err(native_product_error(
@@ -144,50 +139,57 @@ impl NativeCompilationInput {
             ));
         }
         let retained = class_retention::close(&self, retained)?;
-        let retained_local = retained
+        let retained_portable = retained
             .iter()
             .map(|function| {
-                usize::try_from(function.0)
-                    .map(runmat_hir::FunctionId)
-                    .map_err(|_| native_product_error("function identity exceeds this host".into()))
+                self.analysis
+                    .function_for_local(*function)
+                    .map(|facts| facts.function)
+                    .ok_or_else(|| {
+                        native_product_error(
+                            "retained local function has no portable identity".into(),
+                        )
+                    })
             })
             .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
         self.mir
             .bodies
-            .retain(|function, _| retained_local.contains(function));
+            .retain(|function, _| retained.contains(function));
         self.mir
             .functions
-            .retain(|function, _| retained_local.contains(function));
+            .retain(|function, _| retained.contains(function));
         self.mir
             .entrypoints
-            .retain(|function| retained_local.contains(function));
+            .retain(|function| retained.contains(function));
         self.analysis
             .functions
-            .retain(|function| retained.contains(&function.function));
+            .retain(|function| retained_portable.contains(&function.function));
         self.analysis
             .program_points
-            .retain(|point| retained.contains(&point.point.function));
+            .retain(|point| retained_portable.contains(&point.point.function));
         self.analysis
             .regions
-            .retain(|region| retained.contains(&region.contract.id.function));
+            .retain(|region| retained_portable.contains(&region.contract.id.function));
         for class in &mut self.analysis.classes {
-            class.methods.retain(|function| retained.contains(function));
+            class
+                .methods
+                .retain(|function| retained_portable.contains(function));
         }
         self.interpreter_resume_points
-            .retain(|point, _| retained.contains(&point.function));
+            .retain(|point, _| retained_portable.contains(&point.function));
         self.coverage_sites
-            .retain(|point, _| retained.contains(&point.function));
+            .retain(|point, _| retained_portable.contains(&point.function));
         self.manifest
             .regions
-            .retain(|region| retained.contains(&region.id.function));
+            .retain(|region| retained_portable.contains(&region.id.function));
         self.manifest
             .parallel
             .parfor_regions
-            .retain(|region| retained.contains(&region.id.0.function));
+            .retain(|region| retained_portable.contains(&region.id.0.function));
         self.manifest
             .parallel
             .spmd_regions
-            .retain(|region| retained.contains(&region.id.0.function));
+            .retain(|region| retained_portable.contains(&region.id.0.function));
         self.manifest
             .parallel
             .distributed_values
@@ -565,11 +567,31 @@ mod tests {
             ExecutableSource::new(
                 "native-identity@1",
                 "nativeIdentityProbe.m",
-                "function y = nativeIdentityProbe(x)\ny = x + 1;\nend\nfunction y = nativeIdentityDecoy(x)\ny = x - 1;\nend",
+                "function y = nativeIdentityProbe(x)\ny = nativeIdentitySeed(x) + 1;\nend\nfunction y = nativeIdentityDecoy(x)\ny = x - 1;\nend",
             ),
             None,
         ))
         .expect("compile remapped native fixture");
+        let retained = unit
+            .functions()
+            .resolve_name("nativeIdentitySeed")
+            .expect("retained semantic callee");
+        let retained_origin = unit
+            .functions()
+            .get(retained)
+            .unwrap()
+            .binding_origin
+            .expect("retained callee keeps its original revision");
+        let original = unit
+            .original_dependencies()
+            .get(&retained)
+            .expect("retained callee has its original compiler product");
+        assert_eq!(
+            original.local_function_for_origin(retained_origin).unwrap(),
+            Some(retained)
+        );
+        assert!(!unit.mir().bodies.contains_key(&retained));
+        assert!(unit.analysis().function_for_local(retained).is_none());
         let compiled = unit
             .functions()
             .resolve_name("nativeIdentityProbe")
@@ -579,10 +601,10 @@ mod tests {
             .get(compiled)
             .expect("compiled function body")
             .portable_function;
-        let compiled = runmat_types::ProgramFunctionId(
-            u32::try_from(compiled.0).expect("compiled identity fits native schema"),
+        assert_ne!(
+            compiled.0, portable.0 as usize,
+            "fixture must exercise remapping"
         );
-        assert_ne!(compiled, portable, "fixture must exercise remapping");
 
         let input = unit
             .prepare_native_compilation_for(Some("nativeIdentityProbe"))
@@ -595,6 +617,13 @@ mod tests {
         assert!(assembly.entrypoints.contains(&compiled));
         assert_eq!(assembly.selected_entrypoint, compiled);
         assert_eq!(assembly.selected_portable_entrypoint, portable);
+        assert!(
+            !assembly
+                .functions
+                .iter()
+                .any(|function| function.id == retained),
+            "retained external callee must not acquire a current-product native body"
+        );
         assert_eq!(
             assembly.executable_identity.entrypoint_function,
             Some(portable)
@@ -654,7 +683,6 @@ end
             .reachability_analysis()
             .1
             .into_iter()
-            .map(|function| runmat_types::ProgramFunctionId(u32::try_from(function.0).unwrap()))
             .collect::<BTreeSet<_>>();
         let input = unit
             .prepare_native_compilation()
@@ -724,11 +752,6 @@ end
             .reachability_analysis()
             .1
             .into_iter()
-            .map(|function| {
-                u32::try_from(function.0)
-                    .map(runmat_types::ProgramFunctionId)
-                    .expect("portable function identity")
-            })
             .collect::<BTreeSet<_>>();
         let input = unit
             .prepare_native_compilation()

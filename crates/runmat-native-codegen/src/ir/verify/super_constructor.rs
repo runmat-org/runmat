@@ -2,13 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use runmat_types::{ClassIdentity, ClassMethodRole, MemberAccess, ProgramFunctionId};
+use runmat_types::{ClassIdentity, ClassMethodRole, FunctionId, MemberAccess};
 
 use crate::{NativeAssembly, NativeCodegenError, NativeCodegenResult, NativeFunction};
 
 pub(super) fn verify(
     assembly: &NativeAssembly,
-    functions: &BTreeMap<ProgramFunctionId, &NativeFunction>,
+    functions: &BTreeMap<FunctionId, &NativeFunction>,
 ) -> NativeCodegenResult<()> {
     let declarations = &assembly.class_declarations;
     if declarations

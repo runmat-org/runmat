@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use runmat_hir::FunctionId;
-use runmat_types::ProgramFunctionId;
 
 use super::super::{
     semantic_definition_fingerprint, source_index, Bytecode, FunctionBytecode, FunctionRegistry,
@@ -88,12 +87,8 @@ pub fn remap_decorated_session_definitions(
             .function_registry
             .get_current(*source_id)
             .ok_or_else(|| format!("decorated source function {:?} is absent", source_id))?;
-        let portable = ProgramFunctionId(
-            u32::try_from(destination.0)
-                .map_err(|_| "decorated function destination exceeds portable schema")?,
-        );
         let mut replacement = source.clone();
-        remap_closed_session_function(&mut replacement, destination, portable, remap)?;
+        remap_closed_session_function(&mut replacement, destination, remap)?;
         let prior = published
             .get_current(destination)
             .ok_or_else(|| format!("reused decorated function {destination:?} is absent"))?;

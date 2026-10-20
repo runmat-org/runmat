@@ -4,8 +4,8 @@ use std::rc::Rc;
 mod invocation;
 mod retained;
 
+use runmat_execution::FunctionBindingOrigin;
 use runmat_runtime::context::{RuntimeProgramCallable, RuntimeProgramService};
-use runmat_types::ProgramFunctionId;
 
 use crate::ExecutableUnit;
 
@@ -27,7 +27,7 @@ impl SessionProgramService {
 impl RuntimeProgramService for SessionProgramService {
     fn freeze_executable(
         &self,
-        function: ProgramFunctionId,
+        origin: FunctionBindingOrigin,
         invocation_revision: &runmat_execution::ProgramRevision,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, runmat_runtime::RuntimeError> {
         let active = self.active.borrow();
@@ -39,32 +39,28 @@ impl RuntimeProgramService for SessionProgramService {
                 "invocation revision differs from its active original product",
             ));
         }
-        self.resolve(caller, function)?
-            .portable_envelope_for_function(function)
+        self.resolve(caller, origin)?
+            .portable_envelope_for_function(origin.function)
             .map_err(program_error)
     }
 
     fn freeze_bound_callable(
         &self,
-        function: ProgramFunctionId,
+        origin: FunctionBindingOrigin,
         display_name: &str,
     ) -> Result<RuntimeProgramCallable, runmat_runtime::RuntimeError> {
         let active = self.active.borrow();
         let caller = active
             .last()
             .ok_or_else(|| program_error("no executable is active"))?;
-        let unit = self.resolve(caller, function)?;
-        unit.function_analysis(function).ok_or_else(|| {
-            program_error(format!(
-                "active executable does not contain callable function {}",
-                function.0
-            ))
-        })?;
-        let function_index = usize::try_from(function.0)
-            .map_err(|_| program_error("callable function identity exceeds this host"))?;
+        let unit = self.resolve(caller, origin)?;
+        let function = unit
+            .local_function_for_origin(origin)
+            .map_err(program_error)?
+            .ok_or_else(|| program_error("original callable is absent"))?;
         let bytecode = unit
             .functions()
-            .get(runmat_hir::FunctionId(function_index))
+            .get(function)
             .ok_or_else(|| program_error("active executable callable bytecode is absent"))?;
         if bytecode.display_name != display_name {
             return Err(program_error(format!(
@@ -78,7 +74,7 @@ impl RuntimeProgramService for SessionProgramService {
             .parse::<runmat_execution::Digest>()
             .map_err(|error| program_error(format!("invalid executable source digest: {error}")))?;
         let executable = unit
-            .portable_envelope_for_function(function)
+            .portable_envelope_for_function(origin.function)
             .map_err(program_error)?;
         Ok(RuntimeProgramCallable {
             owner_identity: unit.source().owner_identity.clone(),

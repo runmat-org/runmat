@@ -1538,13 +1538,13 @@ pub trait RuntimeProgramService {
     /// Freeze this function's original product after validating its active caller.
     fn freeze_executable(
         &self,
-        function: runmat_types::ProgramFunctionId,
+        origin: runmat_execution::FunctionBindingOrigin,
         invocation_revision: &runmat_execution::ProgramRevision,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, crate::RuntimeError>;
 
     fn freeze_bound_callable(
         &self,
-        function: runmat_types::ProgramFunctionId,
+        origin: runmat_execution::FunctionBindingOrigin,
         display_name: &str,
     ) -> Result<RuntimeProgramCallable, crate::RuntimeError>;
 }

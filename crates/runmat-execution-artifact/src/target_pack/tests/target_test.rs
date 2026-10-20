@@ -45,6 +45,7 @@ fn paired_entries_and_request_results_keep_exact_product_and_attempt_identity() 
     };
     let compiled = NativeCompiledEntry {
         function: runmat_types::ProgramFunctionId(1),
+        compiled_function: runmat_types::FunctionId(11),
         body: Digest::sha256(b"test body"),
     };
     let mut tests = ["first", "second"]
@@ -62,6 +63,7 @@ fn paired_entries_and_request_results_keep_exact_product_and_attempt_identity() 
         selected_product: product,
         application: NativeCompiledEntry {
             function: runmat_types::ProgramFunctionId(0),
+            compiled_function: runmat_types::FunctionId(10),
             body: Digest::sha256(b"app body"),
         },
         tests,
@@ -83,6 +85,7 @@ fn paired_entries_and_request_results_keep_exact_product_and_attempt_identity() 
     let mut wrong = binding.clone();
     wrong.tests[0].compiled = NativeCompiledEntry {
         function: wrong.application.function,
+        compiled_function: wrong.application.compiled_function,
         body: Digest::sha256(b"different body"),
     };
     assert!(wrong.validate().is_err());

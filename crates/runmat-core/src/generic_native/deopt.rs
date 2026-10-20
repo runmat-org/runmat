@@ -13,7 +13,6 @@ use crate::ExecutableUnit;
 thread_local! {
     static NATIVE_LEXICAL_COMPLETIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(super) fn reset_native_lexical_completions() {
     NATIVE_LEXICAL_COMPLETIONS.with(|count| count.set(0));
@@ -26,7 +25,7 @@ pub(super) fn native_lexical_completions() -> usize {
 
 struct DeoptimizationInvocation {
     executor: Rc<NativeExecutor>,
-    function: runmat_types::ProgramFunctionId,
+    function: runmat_types::FunctionId,
     captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
     arguments: Vec<Value>,
@@ -40,7 +39,7 @@ struct DeoptimizationInvocation {
 
 pub(super) struct DeoptimizationRequest {
     pub executor: Rc<NativeExecutor>,
-    pub function: runmat_types::ProgramFunctionId,
+    pub function: runmat_types::FunctionId,
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
     pub arguments: Vec<Value>,
@@ -261,7 +260,7 @@ async fn resume_interpreter(
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
     dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
 ) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
-    let function_id = runmat_hir::FunctionId(frame.function.0 as usize);
+    let function_id = frame.function;
     let layout = unit
         .vm_layout()
         .functions

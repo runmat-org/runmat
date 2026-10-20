@@ -1,6 +1,7 @@
 mod dependency;
 mod function;
 mod program_point;
+mod projection;
 mod region;
 mod version;
 
@@ -49,6 +50,16 @@ impl Default for AnalysisStore {
 }
 
 impl AnalysisStore {
+    /// Resolve a compiler coordinate through its canonical self binding, never
+    /// by interpreting a portable ordinal as a compiler/session index.
+    pub fn function_for_local(&self, local: runmat_types::FunctionId) -> Option<&FunctionAnalysis> {
+        let mut matches = self.functions.iter().filter(|function| {
+            function.callable.identity == Some(runmat_types::CallableIdentity::BoundFunction(local))
+        });
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first)
+    }
+
     pub fn fusion_stage_at(
         &self,
         point: runmat_types::ProgramPointId,

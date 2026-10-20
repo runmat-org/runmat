@@ -289,7 +289,7 @@ mod tests {
         },
         NativeTarget,
     };
-    use runmat_types::ProgramFunctionId;
+    use runmat_types::FunctionId;
 
     use crate::{
         archive::{build_runtime_archive, RuntimeArchiveCapabilities, RuntimeArchiveEncoding},
@@ -356,7 +356,7 @@ mod tests {
         .unwrap();
         let bytes = b"object".to_vec();
         let target = NativeTarget::current();
-        let function = ProgramFunctionId(1);
+        let function = FunctionId(1);
         let object = RelocatableNativeObject {
             manifest: NativeObjectManifest {
                 schema_version: NATIVE_OBJECT_SCHEMA_VERSION,

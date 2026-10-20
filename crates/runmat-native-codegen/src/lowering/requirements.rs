@@ -44,23 +44,27 @@ pub(super) fn validate_requirements(
 
 pub(super) fn reject_predeclared_capabilities(
     mir: &runmat_mir::MirAssembly,
+    analysis: &runmat_mir::analysis::AnalysisStore,
 ) -> NativeCodegenResult<()> {
     for (function, body) in &mir.bodies {
-        let function = u32::try_from(function.0)
-            .map(runmat_types::ProgramFunctionId)
-            .map_err(|_| {
+        let portable_function = analysis
+            .function_for_local(*function)
+            .ok_or_else(|| {
                 NativeCodegenError::new(
-                    "native.lowering.function_identity",
-                    "MIR function identity exceeds the Native IR schema",
+                    "native.lowering.function_analysis",
+                    "MIR function has no canonical analysis identity",
                 )
-            })?;
+                .at_function(*function)
+            })?
+            .function;
         for block in &body.blocks {
             for (position, statement) in block.statements.iter().enumerate() {
                 if let Some(value) = statement_value(&statement.kind) {
-                    reject_rvalue(function, block.id, position, value)?;
+                    reject_rvalue(*function, portable_function, block.id, position, value)?;
                 }
                 reject_inventory(
-                    function,
+                    *function,
+                    portable_function,
                     block.id,
                     position,
                     runmat_mir::statement_construct_inventory(&statement.kind),
@@ -69,21 +73,27 @@ pub(super) fn reject_predeclared_capabilities(
             match &block.terminator.kind {
                 runmat_mir::MirTerminatorKind::For { iterable, .. }
                 | runmat_mir::MirTerminatorKind::ParFor { iterable, .. } => {
-                    reject_rvalue(function, block.id, block.statements.len(), iterable)?;
+                    reject_rvalue(
+                        *function,
+                        portable_function,
+                        block.id,
+                        block.statements.len(),
+                        iterable,
+                    )?;
                 }
                 runmat_mir::MirTerminatorKind::Spmd { header, .. } => match header.as_ref() {
                     runmat_mir::parallel::MirSpmdHeader::Default => {}
                     runmat_mir::parallel::MirSpmdHeader::One(a) => {
-                        reject_rvalue(function, block.id, block.statements.len(), a)?;
+                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), a)?;
                     }
                     runmat_mir::parallel::MirSpmdHeader::Two(a, b) => {
-                        reject_rvalue(function, block.id, block.statements.len(), a)?;
-                        reject_rvalue(function, block.id, block.statements.len(), b)?;
+                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), a)?;
+                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), b)?;
                     }
                     runmat_mir::parallel::MirSpmdHeader::Three(a, b, c) => {
-                        reject_rvalue(function, block.id, block.statements.len(), a)?;
-                        reject_rvalue(function, block.id, block.statements.len(), b)?;
-                        reject_rvalue(function, block.id, block.statements.len(), c)?;
+                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), a)?;
+                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), b)?;
+                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), c)?;
                     }
                 },
                 _ => {}
@@ -108,13 +118,15 @@ fn statement_value(statement: &runmat_mir::MirStmtKind) -> Option<&runmat_mir::M
 }
 
 fn reject_rvalue(
-    function: runmat_types::ProgramFunctionId,
+    function: runmat_types::FunctionId,
+    portable_function: runmat_types::ProgramFunctionId,
     block: runmat_mir::BasicBlockId,
     position: usize,
     value: &runmat_mir::MirRvalue,
 ) -> NativeCodegenResult<()> {
     reject_inventory(
         function,
+        portable_function,
         block,
         position,
         runmat_mir::rvalue_construct_inventory(value),
@@ -122,7 +134,8 @@ fn reject_rvalue(
 }
 
 fn reject_inventory(
-    function: runmat_types::ProgramFunctionId,
+    function: runmat_types::FunctionId,
+    portable_function: runmat_types::ProgramFunctionId,
     block: runmat_mir::BasicBlockId,
     position: usize,
     inventory: impl IntoIterator<Item = runmat_mir::MirConstructKind>,
@@ -137,10 +150,11 @@ fn reject_inventory(
             "distributed-value and collective Native IR require the R25 distributed core",
         )
         .at_point(runmat_types::ProgramPointId {
-            function,
+            function: portable_function,
             block,
             position,
         })
+        .at_function(function)
         .for_construct(construct));
     }
     Ok(())

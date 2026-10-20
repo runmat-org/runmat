@@ -110,7 +110,7 @@ fn specialized_product_still_rejects_mismatched_selected_entry_profile() {
     .unwrap();
     let error = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: vec![Value::Num(7.0)],
             requested_outputs: 1,
@@ -298,7 +298,7 @@ fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
     let executor = compile_executor(fixture()).unwrap();
     assert!(executor.retained_code_bytes() > 0);
     let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::Num(41.0)]);
 }
@@ -354,7 +354,7 @@ fn native_unknown_symbol_is_rejected_but_string_literal_is_preserved() {
     )))
     .unwrap();
     let error = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .expect_err("an unknown constant must not become a string");
     assert!(error
         .to_string()
@@ -365,7 +365,7 @@ fn native_unknown_symbol_is_rejected_but_string_literal_is_preserved() {
     ))))
     .unwrap();
     let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::String("NaN".into())]);
 }
@@ -375,7 +375,7 @@ fn native_imaginary_numeric_constant_is_not_a_symbol_lookup() {
     let executor =
         compile_executor(constant_fixture(MirConstant::ImaginaryNumber("1e3".into()))).unwrap();
     let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::Complex(0.0, 1000.0)]);
 }
@@ -828,7 +828,7 @@ fn cancellation_exits_without_committing_speculative_outputs() {
     let runtime = runtime_context().with_cancellation_token(source.token());
     source.cancel(runmat_execution::CancellationReason::User);
     assert!(matches!(
-        executor.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime),
+        executor.invoke(FunctionId(0), Vec::new(), 1, runtime),
         Err(NativeExecutorError::Cancelled)
     ));
 }
@@ -1307,10 +1307,10 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
         )
         .unwrap(),
     );
-    let target = OsrTarget::new(Rc::clone(&optimized), ProgramFunctionId(0), point).unwrap();
+    let target = OsrTarget::new(Rc::clone(&optimized), FunctionId(0), point).unwrap();
     let mut invocation = generic
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: Vec::new(),
             requested_outputs: 1,
@@ -1528,7 +1528,7 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
 fn generic_native_structure_assignment_uses_shared_growth_semantics() {
     let executor = compile_executor(structure_growth_fixture()).unwrap();
     let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     let Value::StructArray(array) = execution.outputs.first().unwrap() else {
         panic!("expected grown structure array")
@@ -1639,7 +1639,7 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
     );
     let mut invocation = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: Vec::new(),
             requested_outputs: 1,
@@ -1666,7 +1666,7 @@ fn generic_workspace_first_static_property_prefers_named_local_binding() {
     let executor = compile_executor(workspace_first_static_fixture()).unwrap();
     assert_eq!(
         executor
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
             .unwrap()
             .outputs,
         vec![Value::Num(55.0)]
@@ -2038,7 +2038,7 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
     let executor = compile_executor(assembly.clone()).unwrap();
     let mut invocation = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: Vec::new(),
             requested_outputs: 1,

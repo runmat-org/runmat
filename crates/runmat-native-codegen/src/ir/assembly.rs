@@ -26,10 +26,10 @@ pub struct NativeAssembly {
     pub requirements: NativeRequirements,
     /// Compiler/session identity selected for this product. Portable artifact
     /// identity remains in `executable_identity.entrypoint_function`.
-    pub selected_entrypoint: runmat_types::ProgramFunctionId,
+    pub selected_entrypoint: runmat_types::FunctionId,
     pub selected_portable_entrypoint: runmat_types::ProgramFunctionId,
     pub selected_entrypoint_body: Digest,
-    pub entrypoints: Vec<runmat_types::ProgramFunctionId>,
+    pub entrypoints: Vec<runmat_types::FunctionId>,
     pub functions: Vec<NativeFunction>,
     /// Immutable class parent and constructor declarations lowered from the
     /// same canonical MIR product as these functions.

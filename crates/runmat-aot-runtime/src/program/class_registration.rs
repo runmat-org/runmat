@@ -124,11 +124,10 @@ fn visit<'a>(
             )));
         }
         let function_name = metadata.name.clone();
-        let function = usize::try_from(method.function.0)
-            .map_err(|_| native_error("linked method identity exceeds host indexing"))?;
+        let function = method.function.0;
         let origin = runmat_execution::FunctionBindingOrigin::from_revision(
             executor.program_revision(),
-            method.function,
+            metadata.portable_id,
         )
         .map_err(native_error)?;
         // ProgramInvocationGuards installed the selected source catalog and

@@ -292,9 +292,7 @@ pub(super) fn script_entrypoint(unit: &ExecutableUnit) -> Result<PortableEntrypo
     {
         return Err("executable script bytecode does not identify its primary MIR source".into());
     }
-    let portable = u32::try_from(function.0)
-        .map(runmat_types::ProgramFunctionId)
-        .map_err(|_| "script entrypoint exceeds its portable representation".to_string())?;
+    let portable = unit.portable_function_for_local(function)?;
     Ok(PortableEntrypoint::Callable {
         name: "script".into(),
         compiled_function: function,

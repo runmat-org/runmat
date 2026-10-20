@@ -35,13 +35,19 @@ pub fn validate_paired_product_header(
         ));
     }
     for entry in &header.linked_entries {
-        if assembly.entrypoints.binary_search(&entry.function).is_err()
+        if assembly
+            .entrypoints
+            .binary_search(&entry.compiled_function)
+            .is_err()
             || assembly
                 .functions
-                .binary_search_by_key(&entry.function, |function| function.id)
+                .binary_search_by_key(&entry.compiled_function, |function| function.id)
                 .ok()
                 .and_then(|index| assembly.functions.get(index))
-                .is_none_or(|function| function.mir_body_digest != entry.body)
+                .is_none_or(|function| {
+                    function.portable_id != entry.function
+                        || function.mir_body_digest != entry.body
+                })
         {
             return Err(paired_error(
                 "paired linked entry differs from its admitted Native IR function",

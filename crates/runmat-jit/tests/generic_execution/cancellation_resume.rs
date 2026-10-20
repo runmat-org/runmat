@@ -71,7 +71,7 @@ fn deopt_ownership(cancel: bool) {
     let workspace = NativeWorkspaceInput::empty_for_context(&runtime, BTreeMap::new()).unwrap();
     let mut invocation = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: vec![],
             arguments: vec![],
             requested_outputs: 1,
@@ -169,12 +169,12 @@ fn valid_optimized_osr_cancellation_releases_retained_code_without_entering_targ
             .unwrap(),
         );
         let weak = Rc::downgrade(&optimized);
-        let target = OsrTarget::new(optimized.clone(), ProgramFunctionId(0), point).unwrap();
+        let target = OsrTarget::new(optimized.clone(), FunctionId(0), point).unwrap();
         let source = CancellationSource::new();
         let runtime = runtime_context().with_cancellation_token(source.token());
         let mut invocation = generic
             .begin_request(runmat_native_executor::NativeInvocationRequest {
-                function: ProgramFunctionId(0),
+                function: FunctionId(0),
                 captures: vec![],
                 arguments: vec![],
                 requested_outputs: 1,

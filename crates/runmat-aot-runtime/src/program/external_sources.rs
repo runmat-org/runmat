@@ -15,7 +15,7 @@ pub(super) struct InstalledExternalSources {
     /// Kept by function ID, not display name, so retired sources still reach
     /// the bound-call liveness check instead of falling through to an ID call.
     pub(super) scoped_bindings:
-        Rc<HashMap<runmat_types::ProgramFunctionId, runmat_value::BoundFunctionBinding>>,
+        Rc<HashMap<runmat_types::FunctionId, runmat_value::BoundFunctionBinding>>,
 }
 
 pub(super) fn install(
@@ -47,9 +47,7 @@ pub(super) fn install(
     let retained_program = Arc::new(program.clone());
     for info in functions {
         let function = executor
-            .function_metadata(runmat_types::ProgramFunctionId(
-                u32::try_from(info.function).map_err(native_error)?,
-            ))
+            .function_metadata(runmat_types::FunctionId(info.function))
             .ok_or_else(|| native_error("selected source has no linked native function"))?;
         if function.source_role != info.role || function.name != info.name {
             return Err(Box::new(native_error(

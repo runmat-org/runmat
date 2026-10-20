@@ -10,7 +10,7 @@ use super::abi::AbiTypes;
 use super::site::{HostValues, SiteCallResult, SiteSlots};
 
 pub struct CraneliftFunction {
-    pub function: runmat_types::ProgramFunctionId,
+    pub function: runmat_types::FunctionId,
     pub ir: cranelift_codegen::ir::Function,
 }
 
@@ -19,8 +19,15 @@ pub fn lower_function(
     target: &NativeTarget,
 ) -> NativeCodegenResult<CraneliftFunction> {
     let abi = AbiTypes::for_target(target)?;
+    let symbol_index = u32::try_from(function.id.0).map_err(|_| {
+        NativeCodegenError::new(
+            "native.cranelift.function_identity",
+            "compiled function coordinate exceeds the Cranelift symbol namespace",
+        )
+        .at_function(function.id)
+    })?;
     let mut ir = cranelift_codegen::ir::Function::with_name_signature(
-        cranelift_codegen::ir::UserFuncName::user(0, function.id.0),
+        cranelift_codegen::ir::UserFuncName::user(0, symbol_index),
         abi.entry_signature.clone(),
     );
     let mut builder_context = FunctionBuilderContext::new();
@@ -112,14 +119,20 @@ pub fn lower_function(
     for block in &function.blocks {
         builder.switch_to_block(blocks[&block.id]);
         for instruction in &block.instructions {
-            let result = slots.call(&mut builder, &abi, &host, function.id.0, &instruction.site);
+            let result = slots.call(
+                &mut builder,
+                &abi,
+                &host,
+                function.portable_id.0,
+                &instruction.site,
+            );
             continue_or_exit(&mut builder, result, failure, return_ok);
         }
         let result = slots.call(
             &mut builder,
             &abi,
             &host,
-            function.id.0,
+            function.portable_id.0,
             &block.terminator.site,
         );
         dispatch_terminator(

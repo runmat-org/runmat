@@ -522,28 +522,16 @@ impl FunctionBytecode {
     /// Rebinds every compiler-owned identity when a unit-local function is
     /// installed into a session registry. Control-flow and parallel metadata
     /// must move atomically with the function instruction stream.
-    pub fn rebind_identity(
-        &mut self,
-        function: FunctionId,
-        program_function: runmat_types::ProgramFunctionId,
-    ) {
-        self.rebind_identity_inner(function, program_function, true);
+    pub fn rebind_identity(&mut self, function: FunctionId) {
+        self.rebind_identity_inner(function, true);
     }
 
-    pub(crate) fn rebind_identity_unsealed(
-        &mut self,
-        function: FunctionId,
-        program_function: runmat_types::ProgramFunctionId,
-    ) {
-        self.rebind_identity_inner(function, program_function, false);
+    pub(crate) fn rebind_identity_unsealed(&mut self, function: FunctionId) {
+        self.rebind_identity_inner(function, false);
     }
 
-    fn rebind_identity_inner(
-        &mut self,
-        function: FunctionId,
-        program_function: runmat_types::ProgramFunctionId,
-        reseal_stage: bool,
-    ) {
+    fn rebind_identity_inner(&mut self, function: FunctionId, reseal_stage: bool) {
+        let program_function = self.portable_function;
         #[cfg(not(feature = "native-accel"))]
         let _ = reseal_stage;
         #[cfg(feature = "native-accel")]
@@ -2606,7 +2594,7 @@ mod function_registry_tests {
         let mut function = test_function(3, "f", "");
         function.portable_function = origin.function;
         function.binding_origin = Some(origin);
-        function.rebind_identity(FunctionId(77), runmat_types::ProgramFunctionId(77));
+        function.rebind_identity(FunctionId(77));
         assert_eq!(function.function, FunctionId(77));
         assert_eq!(
             function.portable_function,
@@ -2887,7 +2875,10 @@ mod function_registry_tests {
         bytecode
             .install_regions(
                 std::slice::from_ref(&contract),
-                &std::collections::BTreeSet::from([FunctionId(7)]),
+                &std::collections::BTreeMap::from([(
+                    FunctionId(7),
+                    runmat_types::ProgramFunctionId(7),
+                )]),
             )
             .unwrap();
 
@@ -2926,7 +2917,13 @@ mod function_registry_tests {
             .insert(FunctionId(7), function.clone());
         bytecode.bound_functions.insert(FunctionId(7), function);
         bytecode
-            .install_regions(std::slice::from_ref(&contract))
+            .install_regions(
+                std::slice::from_ref(&contract),
+                &std::collections::BTreeMap::from([(
+                    FunctionId(7),
+                    runmat_types::ProgramFunctionId(7),
+                )]),
+            )
             .unwrap();
         let original = bytecode.function_registry.functions[&FunctionId(7)]
             .regions
@@ -2957,7 +2954,10 @@ mod function_registry_tests {
         bytecode
             .install_regions(
                 std::slice::from_ref(&contract),
-                &std::collections::BTreeSet::from([FunctionId(7)]),
+                &std::collections::BTreeMap::from([(
+                    FunctionId(7),
+                    runmat_types::ProgramFunctionId(7),
+                )]),
             )
             .unwrap();
         bytecode
@@ -2971,7 +2971,10 @@ mod function_registry_tests {
         bytecode
             .install_regions(
                 std::slice::from_ref(&contract),
-                &std::collections::BTreeSet::from([FunctionId(7)]),
+                &std::collections::BTreeMap::from([(
+                    FunctionId(7),
+                    runmat_types::ProgramFunctionId(7),
+                )]),
             )
             .unwrap();
 
@@ -3009,7 +3012,13 @@ mod function_registry_tests {
         bytecode.bound_functions.insert(FunctionId(7), retained);
 
         bytecode
-            .install_regions(&[], &std::collections::BTreeSet::from([FunctionId(8)]))
+            .install_regions(
+                &[],
+                &std::collections::BTreeMap::from([(
+                    FunctionId(8),
+                    runmat_types::ProgramFunctionId(8),
+                )]),
+            )
             .unwrap();
 
         assert_eq!(
@@ -3021,7 +3030,10 @@ mod function_registry_tests {
         let error = bytecode
             .install_regions(
                 std::slice::from_ref(&contract),
-                &std::collections::BTreeSet::from([FunctionId(8)]),
+                &std::collections::BTreeMap::from([(
+                    FunctionId(8),
+                    runmat_types::ProgramFunctionId(8),
+                )]),
             )
             .expect_err("foreign region ownership must fail before mutation");
         assert!(error.contains("outside the compiled assembly"));

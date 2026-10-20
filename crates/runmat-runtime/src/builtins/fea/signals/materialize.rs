@@ -83,8 +83,18 @@ async fn materialize_signals(
                 ))
             }
         };
+        let runmat_execution::value::CallableOwner::Bound(origin) = binding.callable.owner else {
+            return Err(materialization_error(
+                "signal callable has no authenticated bound origin",
+            ));
+        };
+        if origin.function != function {
+            return Err(materialization_error(
+                "signal generator function differs from its authenticated callable origin",
+            ));
+        }
         let program = program_service
-            .freeze_bound_callable(function, display_name)
+            .freeze_bound_callable(origin, display_name)
             .map_err(|error| materialization_error(error.to_string()))?;
         let request = crate::context::RuntimeSignalMaterializationRequest {
             signal: signal.clone(),

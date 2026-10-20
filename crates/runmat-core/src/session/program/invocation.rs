@@ -13,13 +13,11 @@ impl SessionProgramService {
         let current = Rc::new(unit.clone());
         let previous = user_functions::current_external_function_invoker();
         user_functions::install_local_external_function_invoker(Rc::new(move |caller, call| {
-            let owner = u32::try_from(call.function).ok().and_then(|id| {
-                let id = ProgramFunctionId(id);
-                owners
-                    .get(&id)
-                    .cloned()
-                    .or_else(|| current.owns_callable(id).then(|| Rc::clone(&current)))
-            });
+            let id = runmat_types::FunctionId(call.function);
+            let owner = owners
+                .get(&id)
+                .cloned()
+                .or_else(|| current.owns_callable(id).then(|| Rc::clone(&current)));
             let service = Rc::clone(&service);
             let previous = previous.clone();
             // The caller's context carries its live services; the installer's

@@ -65,7 +65,16 @@ fn task_results_retain_managed_members_through_collecting_root_retirement() {
                 &analysis,
             )
             .expect("compile analyzed task");
-            let compiled_functions = mir.bodies.keys().copied().collect();
+            let compiled_functions = mir
+                .bodies
+                .keys()
+                .map(|local| {
+                    let facts = analysis
+                        .function_for_local(*local)
+                        .expect("exact analysis self binding");
+                    (*local, facts.function)
+                })
+                .collect();
             let region_contracts = analysis
                 .regions
                 .iter()

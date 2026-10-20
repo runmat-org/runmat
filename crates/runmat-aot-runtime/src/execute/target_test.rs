@@ -14,7 +14,7 @@ use runmat_execution_artifact::target_test::{
 };
 use runmat_native_executor::{execute::RootedNativeExecution, NativeExecutor};
 use runmat_runtime::{context::host_effect::ManagedHostEffectLedger, RuntimeError};
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 #[path = "target_test/failure.rs"]
 mod failure;
@@ -24,7 +24,7 @@ use failure::{TargetTestInputDecodeFailure, TargetTestTimeout};
 pub(super) struct TestInvocation<'a> {
     pub header: &'a NativePairedProductHeader,
     pub request: &'a NativeTargetTestRequest,
-    pub function: ProgramFunctionId,
+    pub function: FunctionId,
 }
 
 impl<'a> TestInvocation<'a> {
@@ -70,7 +70,7 @@ impl<'a> TestInvocation<'a> {
             .test(&request.suite, &request.test)
             .ok_or_else(|| "paired test entry is absent".to_string())?
             .compiled
-            .function;
+            .compiled_function;
         Ok(Self {
             header,
             request,

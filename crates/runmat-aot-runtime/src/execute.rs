@@ -100,32 +100,9 @@ fn execute_with_linked_authority(
     {
         return Err("standalone foreign program has no captured policy".into());
     }
-    let mut native_sources = assembly
-        .functions
-        .iter()
-        .map(|function| {
-            (
-                function.id,
-                function.source,
-                function.name.as_str(),
-                function.source_role,
-            )
-        })
-        .collect::<Vec<_>>();
-    native_sources.sort_by_key(|function| function.0);
-    if native_sources.len() != program.functions.len()
-        || native_sources
-            .iter()
-            .zip(&program.functions)
-            .any(|(native, manifest)| {
-                native.0 != manifest.function
-                    || native.1 != manifest.source
-                    || native.2 != manifest.name
-                    || native.3 != manifest.role
-            })
-    {
-        return Err("standalone source/function inventory does not match its Native IR".into());
-    }
+    program
+        .validate_function_inventory(&assembly)
+        .map_err(|error| error.to_string())?;
     let ordered_resume_points: Vec<(ProgramPointId, u64)> =
         serde_json::from_slice(&input.resume_points)
             .map_err(|error| format!("standalone resume-point map is invalid: {error}"))?;

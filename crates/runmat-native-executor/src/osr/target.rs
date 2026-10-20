@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use runmat_types::{ProgramFunctionId, ProgramPointId};
+use runmat_types::{FunctionId, ProgramPointId};
 
 use crate::{NativeExecutor, NativeExecutorResult};
 
@@ -12,17 +12,20 @@ use crate::{NativeExecutor, NativeExecutorResult};
 #[derive(Clone)]
 pub struct OsrTarget {
     executor: Rc<NativeExecutor>,
-    function: ProgramFunctionId,
+    function: FunctionId,
     point: ProgramPointId,
 }
 
 impl OsrTarget {
     pub fn new(
         executor: Rc<NativeExecutor>,
-        function: ProgramFunctionId,
+        function: FunctionId,
         point: ProgramPointId,
     ) -> Result<Self, &'static str> {
-        if point.function != function {
+        if executor
+            .function_metadata(function)
+            .is_none_or(|body| point.function != body.portable_id)
+        {
             return Err("OSR loop header must belong to the target function");
         }
         Ok(Self {

@@ -11,7 +11,6 @@ use runmat_runtime::native::{
     NativeCall, NativeExit, NativeHostStatus, NativeSiteOutcome, NativeSiteOutcomeKind,
     NativeSitePhase, NativeSiteRequest,
 };
-use runmat_types::ProgramFunctionId;
 use runmat_value::Value;
 
 static CWD_LOCK: Mutex<()> = Mutex::new(());
@@ -109,7 +108,6 @@ fn standalone_derived_constructor_runs_retained_base_on_same_handle() {
             .reachability_analysis()
             .1
             .into_iter()
-            .map(|id| ProgramFunctionId(u32::try_from(id.0).expect("portable function")))
             .collect::<BTreeSet<_>>();
         let input = input.retain_functions(&retained).expect("retained closure");
         let assembly = input

@@ -50,6 +50,13 @@ impl ClassIdentity {
         &self.0
     }
 
+    /// Physical UTF-8 allocation capacity. Value-domain retained owners use
+    /// this only to quote the original backing they share; semantic code
+    /// should continue to use [`Self::display_name`].
+    pub fn allocation_capacity(&self) -> usize {
+        self.0.capacity()
+    }
+
     pub fn is(&self, expected: StaticClassIdentity) -> bool {
         self == &expected
     }

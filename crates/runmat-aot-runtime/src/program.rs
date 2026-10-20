@@ -1,7 +1,7 @@
 use std::{rc::Rc, sync::Arc};
 
 use runmat_native_executor::execute::{NativeWorkspaceInput, RootedNativeExecution};
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 use runmat_value::{Value, ValueSequence};
 
 mod bound;
@@ -21,7 +21,7 @@ mod tests;
 pub async fn invoke(
     executor: Rc<runmat_native_executor::NativeExecutor>,
     program: &runmat_native_codegen::aot::AotProgramManifest,
-    function: ProgramFunctionId,
+    function: FunctionId,
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -53,7 +53,7 @@ pub async fn invoke(
 pub async fn invoke_workspace(
     executor: Rc<runmat_native_executor::NativeExecutor>,
     program: &runmat_native_codegen::aot::AotProgramManifest,
-    function: ProgramFunctionId,
+    function: FunctionId,
     workspace: NativeWorkspaceInput,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -87,7 +87,7 @@ pub async fn invoke_workspace(
 pub async fn invoke_rooted(
     executor: Rc<runmat_native_executor::NativeExecutor>,
     program: &runmat_native_codegen::aot::AotProgramManifest,
-    function: ProgramFunctionId,
+    function: FunctionId,
     arguments: runmat_runtime::execution::RootedValues,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -157,8 +157,7 @@ impl ProgramInvocationGuards {
             .map(|function| {
                 let source_ordinal = usize::try_from(function.source.0)
                     .map_err(|_| native_error("program source ordinal exceeds host indexing"))?;
-                let function_id = usize::try_from(function.function.0)
-                    .map_err(|_| native_error("program function ordinal exceeds host indexing"))?;
+                let function_id = function.function.0;
                 let source_id = runtime
                     .admitted_program_source_id(function.source)
                     .map_err(source_admission_error)?
@@ -182,7 +181,7 @@ impl ProgramInvocationGuards {
                     binding_origin: Some(
                         runmat_execution::FunctionBindingOrigin::from_revision(
                             &program.executable.program,
-                            function.function,
+                            function.portable_function,
                         )
                         .map_err(native_error)?,
                     ),
@@ -243,11 +242,7 @@ impl ProgramInvocationGuards {
                             "semantic callback selected another standalone runtime owner",
                         ));
                     }
-                    let Ok(function) = u32::try_from(function).map(ProgramFunctionId) else {
-                        return Err(native_error(
-                            "semantic function identity exceeds native schema",
-                        ));
-                    };
+                    let function = FunctionId(function);
                     if !native_functions.contains(&function) {
                         if let Some(previous) = previous {
                             return runtime
@@ -368,11 +363,7 @@ impl ProgramInvocationGuards {
                             "lexical callback selected another standalone runtime owner",
                         ));
                     }
-                    let Ok(function) = u32::try_from(call.function).map(ProgramFunctionId) else {
-                        return Err(native_error(
-                            "lexical function identity exceeds native schema",
-                        ));
-                    };
+                    let function = FunctionId(call.function);
                     if !native_functions.contains(&function) {
                         if let Some(previous) = previous {
                             return runtime.scope(previous(Some(runtime.clone()), call)).await;
@@ -554,7 +545,7 @@ impl ProgramInvocationGuards {
                 } else {
                     Some(
                         runmat_runtime::user_functions::ScopedSemanticNameTarget::Published(
-                            runmat_types::FunctionId(selected.0 as usize),
+                            selected,
                         ),
                     )
                 }
@@ -585,7 +576,7 @@ fn isolated_runtime(
 
 async fn invoke_native_values(
     executor: Rc<runmat_native_executor::NativeExecutor>,
-    function: ProgramFunctionId,
+    function: FunctionId,
     arguments: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,

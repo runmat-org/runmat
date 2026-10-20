@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use runmat_native_codegen::aot::{NativeOptimization, RelocatableNativeObject};
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 use crate::{AotError, AotResult};
 
@@ -14,7 +14,7 @@ pub use paired::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeObjectOptions {
     pub optimization: NativeOptimization,
-    pub retained_functions: Option<BTreeSet<ProgramFunctionId>>,
+    pub retained_functions: Option<BTreeSet<FunctionId>>,
     pub runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
     pub retained_builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
     pub interop: runmat_types::InteropManifest,

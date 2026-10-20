@@ -14448,9 +14448,11 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         .functions()
         .resolve_name("nativeCacheCaller")
         .expect("published function identity");
-    let analysis_function = runmat_types::ProgramFunctionId(
-        u32::try_from(published_function.0).expect("portable function identity"),
-    );
+    let analysis_function = first_unit
+        .functions()
+        .get(published_function)
+        .unwrap()
+        .portable_function;
     assert!(first_unit.mir().bodies.contains_key(&published_function));
     assert!(first_unit.analysis().function(analysis_function).is_some());
     assert!(first_unit
@@ -15214,9 +15216,7 @@ fn distributed_builtin_mapping_retains_partition_facts_in_the_compiled_unit() {
         .expect("mappedDistributed identity");
     let analysis = unit
         .analysis()
-        .function(runmat_types::ProgramFunctionId(
-            u32::try_from(function.0).expect("portable function identity"),
-        ))
+        .function(unit.functions().get(function).unwrap().portable_function)
         .expect("mappedDistributed analysis");
     let runmat_types::ValueKindFact::Distributed(distributed) = &analysis.outputs[0].kind else {
         panic!("mapped output must remain a distributed fact");

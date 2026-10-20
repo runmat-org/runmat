@@ -5,13 +5,12 @@ use runmat_test::descriptor::{ProcedureDescriptor, ProcedureKind};
 use super::{native_product_error, NativeCompilationInput};
 
 impl NativeCompilationInput {
-    /// Exact portable source owner of a function in this frozen compilation.
+    /// Exact source owner of a local function in this frozen compilation.
     pub fn function_source(
         &self,
-        function: runmat_types::ProgramFunctionId,
+        function: runmat_types::FunctionId,
     ) -> Option<&runmat_execution::ExecutableSourceRecordV2> {
-        let local = runmat_hir::FunctionId(usize::try_from(function.0).ok()?);
-        let source = self.mir.functions.get(&local)?.source;
+        let source = self.mir.functions.get(&function)?.source;
         self.source_map
             .entries
             .get(usize::try_from(source.0).ok()?)
@@ -23,7 +22,7 @@ impl NativeCompilationInput {
     pub fn resolve_test_procedure(
         &self,
         procedure: &ProcedureDescriptor,
-    ) -> Result<runmat_types::ProgramFunctionId, runmat_runtime::RuntimeError> {
+    ) -> Result<runmat_types::FunctionId, runmat_runtime::RuntimeError> {
         if procedure.source.semantic_path != procedure.semantic_path
             || !matches!(
                 procedure.kind,
@@ -45,9 +44,7 @@ impl NativeCompilationInput {
             None
         };
         let mut matches = self.mir.functions.iter().filter_map(|(local, metadata)| {
-            let id = u32::try_from(local.0)
-                .ok()
-                .map(runmat_types::ProgramFunctionId)?;
+            let id = *local;
             let source = self.function_source(id)?;
             let kind_matches = match procedure.kind {
                 ProcedureKind::Function => {

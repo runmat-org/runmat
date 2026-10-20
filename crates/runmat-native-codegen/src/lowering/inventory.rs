@@ -13,7 +13,7 @@ pub(super) fn expected_sites(
     let mut sites = Vec::new();
     for block in &body.blocks {
         for (position, statement) in block.statements.iter().enumerate() {
-            let point = point(function, block.id, position)?;
+            let point = point(function, body.function, block.id, position)?;
             if let Some(value) = statement_rvalue(&statement.kind) {
                 sites.push(site(
                     point,
@@ -29,7 +29,7 @@ pub(super) fn expected_sites(
                 runmat_mir::statement_construct_kind(&statement.kind),
             ));
         }
-        let point = point(function, block.id, block.statements.len())?;
+        let point = point(function, body.function, block.id, block.statements.len())?;
         inventory_terminator_rvalues(point, &block.terminator.kind, &mut sites)?;
         sites.push(site(
             point,
@@ -44,7 +44,7 @@ pub(super) fn expected_sites(
             "native.lowering.site_inventory",
             "canonical MIR produced duplicate Native IR sites",
         )
-        .at_function(function));
+        .at_function(body.function));
     }
     Ok(sites)
 }
@@ -138,6 +138,7 @@ fn inventory_terminator_rvalues(
 
 fn point(
     function: ProgramFunctionId,
+    compiled_function: runmat_types::FunctionId,
     block: runmat_mir::BasicBlockId,
     position: usize,
 ) -> NativeCodegenResult<ProgramPointId> {
@@ -148,14 +149,14 @@ fn point(
                 "native.lowering.block_identity",
                 "MIR block identity exceeds the Native IR schema",
             )
-            .at_function(function)
+            .at_function(compiled_function)
         })?,
         position: u32::try_from(position).map_err(|_| {
             NativeCodegenError::new(
                 "native.lowering.position",
                 "MIR statement position exceeds the Native IR schema",
             )
-            .at_function(function)
+            .at_function(compiled_function)
         })?,
     })
 }

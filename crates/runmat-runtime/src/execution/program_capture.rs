@@ -1,6 +1,6 @@
 //! Complete program capture through the active session's typed authority.
 use crate::{context::RuntimeContext, RuntimeError};
-use runmat_types::ProgramFunctionId;
+use runmat_execution::FunctionBindingOrigin;
 
 /// Inseparable original callable revision and its complete portable product.
 pub struct DeferredProgramCapture {
@@ -10,7 +10,7 @@ pub struct DeferredProgramCapture {
 
 pub fn capture_deferred_program(
     runtime: &RuntimeContext,
-    function: ProgramFunctionId,
+    origin: FunctionBindingOrigin,
 ) -> Result<Option<DeferredProgramCapture>, RuntimeError> {
     if !runtime.execution().requires_program_capture() {
         return Ok(None);
@@ -22,7 +22,7 @@ pub fn capture_deferred_program(
         .service_ports()
         .require_program("capture deferred program")
         .map_err(|error| capture_error(error.to_string()))?
-        .freeze_executable(function, invocation_revision)?;
+        .freeze_executable(origin, invocation_revision)?;
     let bytes = program
         .canonical_bytes()
         .map_err(|error| capture_error(error.to_string()))?;

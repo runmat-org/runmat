@@ -1,6 +1,6 @@
-use runmat_types::{ProgramPointId, RegionContract, RegionId};
+use runmat_types::{ProgramFunctionId, ProgramPointId, RegionContract, RegionId};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::program::Bytecode;
 
@@ -37,9 +37,13 @@ impl Bytecode {
     pub fn install_regions(
         &mut self,
         contracts: &[RegionContract],
-        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
+        compiled_functions: &BTreeMap<runmat_hir::FunctionId, ProgramFunctionId>,
     ) -> Result<(), String> {
-        self.install_regions_for_product(contracts, compiled_functions, compiled_functions)
+        self.install_regions_for_product(
+            contracts,
+            compiled_functions,
+            &compiled_functions.keys().copied().collect(),
+        )
     }
 
     /// The assembly may contain a synthetic script owner whose numeric ID
@@ -48,10 +52,13 @@ impl Bytecode {
     pub fn install_regions_for_product(
         &mut self,
         contracts: &[RegionContract],
-        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
+        compiled_functions: &BTreeMap<runmat_hir::FunctionId, ProgramFunctionId>,
         registered_bodies: &BTreeSet<runmat_hir::FunctionId>,
     ) -> Result<(), String> {
-        if !registered_bodies.is_subset(compiled_functions) {
+        if !registered_bodies
+            .iter()
+            .all(|function| compiled_functions.contains_key(function))
+        {
             return Err("region body owners exceed compiled assembly".into());
         }
         let mut contracts = contracts.iter().collect::<Vec<_>>();
@@ -64,16 +71,16 @@ impl Bytecode {
             contract
                 .validate()
                 .map_err(|error| format!("{}: {}", error.path, error.message))?;
-            let function = runmat_hir::FunctionId(
-                usize::try_from(contract.id.function.0)
-                    .map_err(|_| "region function identity exceeds this target".to_string())?,
-            );
-            if !compiled_functions.contains(&function) {
-                return Err(format!(
-                    "region {:?} belongs to a function outside the compiled assembly",
-                    contract.id
-                ));
+            let mut owners = compiled_functions
+                .iter()
+                .filter(|(_, portable)| **portable == contract.id.function);
+            let (function, _) = owners.next().ok_or_else(|| {
+                format!("region {:?} is outside the compiled assembly", contract.id)
+            })?;
+            if owners.next().is_some() {
+                return Err("region portable function has ambiguous compiled owners".into());
             }
+            let function = *function;
             // Region contracts describe this executable's MIR assembly. Prefer
             // its immutable layout over the composed session registry: a
             // persisted function may legitimately reuse a unit-local function

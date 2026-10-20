@@ -6,14 +6,14 @@
 use std::collections::HashMap;
 
 use runmat_execution::{Digest, FunctionBindingOrigin, ProgramRevision};
-use runmat_types::ProgramFunctionId;
+use runmat_types::{FunctionId, ProgramFunctionId};
 use runmat_value::{BoundFunctionAuthority, BoundFunctionBinding};
 
 use super::native_error;
 
 pub(super) struct AdmittedBoundFunctions {
     program: Digest,
-    by_origin: HashMap<FunctionBindingOrigin, ProgramFunctionId>,
+    by_origin: HashMap<FunctionBindingOrigin, FunctionId>,
 }
 
 impl AdmittedBoundFunctions {
@@ -22,20 +22,23 @@ impl AdmittedBoundFunctions {
     ) -> Result<Self, Box<runmat_runtime::RuntimeError>> {
         Self::from_revision(
             &manifest.executable.program,
-            manifest.functions.iter().map(|function| function.function),
+            manifest
+                .functions
+                .iter()
+                .map(|function| (function.function, function.portable_function)),
         )
     }
 
     fn from_revision(
         revision: &ProgramRevision,
-        functions: impl IntoIterator<Item = ProgramFunctionId>,
+        functions: impl IntoIterator<Item = (FunctionId, ProgramFunctionId)>,
     ) -> Result<Self, Box<runmat_runtime::RuntimeError>> {
         let program = revision
             .identity_digest()
             .map_err(|error| Box::new(native_error(error)))?;
         let mut by_origin = HashMap::new();
-        for function in functions {
-            let origin = FunctionBindingOrigin::from_revision(revision, function)
+        for (function, portable_function) in functions {
+            let origin = FunctionBindingOrigin::from_revision(revision, portable_function)
                 .map_err(|error| Box::new(native_error(error)))?;
             if by_origin.insert(origin, function).is_some() {
                 return Err(Box::new(native_error(
@@ -51,7 +54,7 @@ impl AdmittedBoundFunctions {
     pub(super) fn resolve(
         &self,
         binding: &BoundFunctionBinding,
-    ) -> Result<Option<ProgramFunctionId>, Box<runmat_runtime::RuntimeError>> {
+    ) -> Result<Option<FunctionId>, Box<runmat_runtime::RuntimeError>> {
         let BoundFunctionAuthority::Portable { origin } = &binding.authority else {
             return Ok(None);
         };
@@ -63,7 +66,7 @@ impl AdmittedBoundFunctions {
                 "portable function origin is absent from the linked AOT program",
             ))
         })?;
-        if usize::try_from(function.0).ok() != Some(binding.function) {
+        if function.0 != binding.function {
             return Err(Box::new(unavailable(
                 "portable function cache disagrees with its linked AOT origin",
             )));
@@ -102,20 +105,23 @@ mod tests {
         let other = revision("other");
         let admitted = AdmittedBoundFunctions::from_revision(
             &own,
-            [ProgramFunctionId(4), ProgramFunctionId(7)],
+            [
+                (FunctionId(14), ProgramFunctionId(4)),
+                (FunctionId(17), ProgramFunctionId(7)),
+            ],
         )
         .expect("admit native inventory");
         let origin = FunctionBindingOrigin::from_revision(&own, ProgramFunctionId(4)).unwrap();
         assert_eq!(
             admitted
-                .resolve(&BoundFunctionBinding::portable(4, origin))
+                .resolve(&BoundFunctionBinding::portable(14, origin))
                 .unwrap(),
-            Some(ProgramFunctionId(4))
+            Some(FunctionId(14))
         );
         assert_eq!(
             admitted
                 .resolve(&BoundFunctionBinding::portable(
-                    4,
+                    14,
                     FunctionBindingOrigin::from_revision(&other, ProgramFunctionId(4)).unwrap(),
                 ))
                 .unwrap(),
@@ -123,7 +129,7 @@ mod tests {
             "same numeric ID from another program cannot select this body"
         );
         for invalid in [
-            BoundFunctionBinding::portable(7, origin),
+            BoundFunctionBinding::portable(17, origin),
             BoundFunctionBinding::portable(
                 8,
                 FunctionBindingOrigin::from_revision(&own, ProgramFunctionId(8)).unwrap(),
@@ -136,7 +142,7 @@ mod tests {
         }
         assert_eq!(
             admitted
-                .resolve(&BoundFunctionBinding::unavailable(4))
+                .resolve(&BoundFunctionBinding::unavailable(14))
                 .unwrap(),
             None,
             "an unowned local numeric ID never selects a native body"
@@ -147,7 +153,10 @@ mod tests {
     fn duplicate_origin_is_rejected_before_invoker_installation() {
         let error = AdmittedBoundFunctions::from_revision(
             &revision("duplicate"),
-            [ProgramFunctionId(4), ProgramFunctionId(4)],
+            [
+                (FunctionId(14), ProgramFunctionId(4)),
+                (FunctionId(24), ProgramFunctionId(4)),
+            ],
         )
         .err()
         .expect("duplicate function origin must fail");

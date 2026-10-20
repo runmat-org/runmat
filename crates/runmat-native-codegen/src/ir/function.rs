@@ -1,7 +1,7 @@
 use super::{NativeBlock, NativeBlockId, NativeLocalId, NativeMirSite};
 use runmat_types::{
     BindingId, CapabilitySet, FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator,
-    ProgramFunctionId, ProgramSourceId,
+    FunctionId, ProgramSourceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -98,7 +98,7 @@ pub enum NativeInheritedStorageKind {
 pub struct NativeInheritedStorageBinding {
     pub binding: BindingId,
     pub local: NativeLocalId,
-    pub owner: ProgramFunctionId,
+    pub owner: FunctionId,
     pub name: String,
     pub owner_function: String,
     pub kind: NativeInheritedStorageKind,
@@ -154,15 +154,17 @@ impl From<&runmat_mir::MirLocalKind> for NativeLocalKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeFunction {
-    pub id: ProgramFunctionId,
+    pub id: FunctionId,
+    /// Stable portable identity used only by program points and source observations.
+    pub portable_id: runmat_types::ProgramFunctionId,
     /// SHA-256 of the canonical MIR (function metadata, body) pair. This is
     /// source identity, not a hash of generated machine code.
     pub mir_body_digest: runmat_execution::Digest,
     pub source: ProgramSourceId,
     pub name: String,
     pub source_role: runmat_types::FunctionSourceRole,
-    /// Portable ordinal of the lexical parent, if this is nested.
-    pub lexical_parent: Option<ProgramFunctionId>,
+    /// Compiler/session coordinate of the lexical parent, if this is nested.
+    pub lexical_parent: Option<FunctionId>,
     pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     /// Whole-function requirements derived by canonical MIR analysis. Native
     /// executors use this contract when a function becomes an async target;

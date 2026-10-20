@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub(super) struct RetainedPrograms {
-    owners: HashMap<ProgramFunctionId, Rc<ExecutableUnit>>,
+    owners: HashMap<runmat_types::FunctionId, Rc<ExecutableUnit>>,
 }
 
 impl SessionProgramService {
@@ -21,19 +21,16 @@ impl SessionProgramService {
         registry: &runmat_vm::FunctionRegistry,
     ) {
         let mut retained = self.retained.borrow_mut();
-        retained.owners.retain(|id, _| {
-            registry
-                .get(runmat_hir::FunctionId(id.0 as usize))
-                .is_some()
-        });
+        retained.owners.retain(|id, _| registry.get(*id).is_some());
         let owner = Rc::new(unit.clone());
         for analysis in unit.analysis().functions.iter() {
-            if unit.owns_callable(analysis.function)
-                && registry
-                    .get(runmat_hir::FunctionId(analysis.function.0 as usize))
-                    .is_some()
-            {
-                retained.owners.insert(analysis.function, owner.clone());
+            let Some(runmat_types::CallableIdentity::BoundFunction(function)) =
+                &analysis.callable.identity
+            else {
+                continue;
+            };
+            if unit.owns_callable(*function) && registry.get(*function).is_some() {
+                retained.owners.insert(*function, owner.clone());
             }
         }
     }
@@ -46,7 +43,7 @@ impl SessionProgramService {
             .owners
             .iter()
             .filter_map(|(function, owner)| {
-                let id = runmat_hir::FunctionId(function.0 as usize);
+                let id = *function;
                 owner
                     .mir()
                     .functions
@@ -59,17 +56,34 @@ impl SessionProgramService {
     pub(super) fn resolve<'a>(
         &self,
         caller: &'a ExecutableUnit,
-        function: ProgramFunctionId,
+        origin: FunctionBindingOrigin,
     ) -> Result<&'a ExecutableUnit, runmat_runtime::RuntimeError> {
-        if caller.owns_callable(function) {
+        if caller
+            .local_function_for_origin(origin)
+            .map_err(program_error)?
+            .is_some()
+        {
             return Ok(caller);
         }
-        caller
-            .original_dependencies()
-            .get(&function)
-            .map(Rc::as_ref)
-            .ok_or_else(|| {
-                program_error("semantic function has no retained original compiler product")
-            })
+        let mut selected = None;
+        for owner in caller.original_dependencies().values() {
+            if owner
+                .local_function_for_origin(origin)
+                .map_err(program_error)?
+                .is_some()
+            {
+                if let Some(previous) = selected {
+                    if !std::ptr::eq(previous, owner.as_ref()) {
+                        return Err(program_error(
+                            "callable origin has ambiguous original products",
+                        ));
+                    }
+                }
+                selected = Some(owner.as_ref());
+            }
+        }
+        selected.ok_or_else(|| {
+            program_error("callable origin has no retained original compiler product")
+        })
     }
 }

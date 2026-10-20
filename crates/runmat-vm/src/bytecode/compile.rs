@@ -916,10 +916,8 @@ fn compile_semantic_functions(
                     })
                     .transpose()?,
                 binding_origin: None,
-                capabilities: u32::try_from(function.id.0)
-                    .ok()
-                    .map(runmat_types::ProgramFunctionId)
-                    .and_then(|function| analysis.function(function))
+                capabilities: analysis
+                    .function_for_local(function.id)
                     .map(|analysis| analysis.capabilities.clone())
                     .ok_or_else(|| {
                         CompileError::new(format!(

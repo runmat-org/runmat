@@ -37,7 +37,7 @@ fn retained_generated_invocation_releases_suspended_work_on_cancel_or_resume_aba
         drop(activation);
         let executor = compile_executor(fixtures::caught_capture_fixture()).unwrap();
         let mut invocation = executor
-            .begin(ProgramFunctionId(0), vec![], 1, runtime)
+            .begin(FunctionId(0), vec![], 1, runtime)
             .unwrap();
         let NativeInvocationStep::Suspended {
             mut continuation,

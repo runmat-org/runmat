@@ -148,9 +148,14 @@ impl ExecutableUnit {
         &self,
         function: runmat_types::ProgramFunctionId,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
-        let function = runmat_hir::FunctionId(
-            usize::try_from(function.0).map_err(|_| "function identity exceeds this host")?,
-        );
+        let origin = runmat_execution::FunctionBindingOrigin::from_revision(
+            &self.revision().program_revision,
+            function,
+        )
+        .map_err(|e| e.to_string())?;
+        let function = self
+            .local_function_for_origin(origin)?
+            .ok_or("executable does not own the selected portable callable")?;
         let name = self
             .functions()
             .get(function)
@@ -258,17 +263,9 @@ impl ExecutableUnit {
             if !included.iter().all(|function| functions.contains(function)) {
                 return Err("function-only root is absent from selected MIR reachability".into());
             }
-            let functions = functions
-                .into_iter()
-                .map(|function| {
-                    u32::try_from(function.0)
-                        .map(runmat_types::ProgramFunctionId)
-                        .map_err(|_| "selected function exceeds portable analysis identity")
-                })
-                .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
             Some((report, functions))
         };
-        let mut selected_functions = selected_scope
+        let mut selected_local_functions = selected_scope
             .as_ref()
             .map(|(_, functions)| functions.clone())
             .unwrap_or_default();
@@ -279,25 +276,16 @@ impl ExecutableUnit {
         };
         if include_script {
             for function in &script_owners {
-                selected_functions.insert(runmat_types::ProgramFunctionId(
-                    u32::try_from(function.0)
-                        .map_err(|_| "script owner exceeds portable analysis identity")?,
-                ));
+                selected_local_functions.insert(*function);
             }
             if let Some(included) = included {
                 for function in included {
-                    selected_functions.insert(runmat_types::ProgramFunctionId(
-                        u32::try_from(function.0)
-                            .map_err(|_| "selected function exceeds portable analysis identity")?,
-                    ));
+                    selected_local_functions.insert(*function);
                 }
             }
         }
         let selected_report = if selected_scope.is_none() && included.is_some() {
-            let roots = selected_functions
-                .iter()
-                .map(|id| runmat_hir::FunctionId(id.0 as usize))
-                .collect();
+            let roots = selected_local_functions.iter().copied().collect();
             let names = runmat_mir::analysis::ReachabilityNames {
                 sources: self
                     .source_map()
@@ -311,6 +299,11 @@ impl ExecutableUnit {
         } else {
             None
         };
+        let selected_functions = selected_local_functions
+            .into_iter()
+            .filter(|function| !self.original_dependencies().contains_key(function))
+            .map(|function| self.portable_function_for_local(function))
+            .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
         let inferred = match (&selected_scope, &selected_report) {
             (Some((report, _)), _) | (_, Some(report)) => {
                 Self::inferred_interop_manifest_for_report(report)

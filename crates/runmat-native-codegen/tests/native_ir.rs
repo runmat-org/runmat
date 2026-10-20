@@ -397,8 +397,8 @@ fn relocatable_object_is_bound_to_the_exact_native_product() {
     assert_eq!(first.manifest.native_cache_key, assembly.native_cache_key);
     assert_eq!(first.manifest.object_bytes, first.bytes.len() as u64);
     assert_eq!(first.manifest.functions.len(), 1);
-    assert_eq!(first.manifest.functions[0].function, ProgramFunctionId(0));
-    assert_eq!(first.manifest.entrypoint, ProgramFunctionId(0));
+    assert_eq!(first.manifest.functions[0].function, FunctionId(0));
+    assert_eq!(first.manifest.entrypoint, FunctionId(0));
     assert_eq!(first.manifest.functions[0].symbol, "runmat_aot_entry");
     assert!(first.manifest.data.is_empty());
     assert_eq!(
@@ -803,9 +803,9 @@ fn selected_entrypoint_preserves_the_complete_mir_entrypoint_inventory() {
     let assembly = lower_with(&mir, &analysis, &manifest).unwrap();
     assert_eq!(
         assembly.entrypoints,
-        vec![ProgramFunctionId(0), ProgramFunctionId(1)]
+        vec![FunctionId(0), FunctionId(1)]
     );
-    assert_eq!(assembly.selected_entrypoint, ProgramFunctionId(0));
+    assert_eq!(assembly.selected_entrypoint, FunctionId(0));
     assert_eq!(
         assembly.selected_portable_entrypoint,
         manifest.identity.entrypoint_function.unwrap()
@@ -1158,7 +1158,7 @@ fn generic_ir_round_trips_prints_deterministically_and_tracks_effect_epochs() {
         .unwrap();
     let next_epoch = effectful.effect_epoch_output.unwrap();
     assert_eq!(block.terminator.frame_state.side_effect_epoch, next_epoch);
-    assert!(analyze_liveness(&assembly).contains_key(&ProgramFunctionId(0)));
+    assert!(analyze_liveness(&assembly).contains_key(&FunctionId(0)));
 }
 
 #[test]
@@ -1428,7 +1428,7 @@ fn native_cache_identity_binds_target_and_abi() {
     assert_eq!(tampered.verify().unwrap_err().code, "native.ir.cache_key");
     let mut wrong_selected = assembly.clone();
     wrong_selected.selected_entrypoint =
-        ProgramFunctionId(wrong_selected.selected_entrypoint.0.saturating_add(1));
+        FunctionId(wrong_selected.selected_entrypoint.0.saturating_add(1));
     assert_eq!(
         wrong_selected.verify().unwrap_err().code,
         "native.ir.cache_key",

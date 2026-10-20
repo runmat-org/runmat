@@ -384,14 +384,6 @@ fn native_function_capabilities(
     state: &super::state::HostState,
     function: runmat_types::FunctionId,
 ) -> NativeExecutorResult<runmat_types::CapabilitySet> {
-    let Some(function) = u32::try_from(function.0)
-        .ok()
-        .map(runmat_types::ProgramFunctionId)
-    else {
-        return Err(NativeExecutorError::Host(
-            "async function identity exceeds its portable representation".into(),
-        ));
-    };
     state
         .functions
         .iter()
@@ -492,13 +484,7 @@ pub(super) fn evaluate_operand(
             if let runmat_types::CallableIdentity::BoundFunction(function)
             | runmat_types::CallableIdentity::AnonymousFunction(function) = identity
             {
-                let function = u32::try_from(function.0)
-                    .map(runmat_types::ProgramFunctionId)
-                    .map_err(|_| {
-                        NativeExecutorError::Host(
-                            "function handle identity exceeds native schema".into(),
-                        )
-                    })?;
+                let function = *function;
                 if let Some(target) = state.program_function(function) {
                     let name = target.name.clone();
                     let source_role = target.source_role;
@@ -524,7 +510,7 @@ pub(super) fn evaluate_operand(
                         )
                     } else {
                         runmat_runtime::call::closures::semantic_closure_value(
-                            runmat_types::FunctionId(function.0 as usize),
+                            function,
                             name,
                             captures,
                             source_role,

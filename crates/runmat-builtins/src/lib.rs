@@ -427,7 +427,7 @@ impl Type {
                 shape: Some(h.shape().iter().map(|&d| Some(d)).collect()),
             },
             Value::Object(object) => Type::Object {
-                class_name: Some(object.class_name.clone()),
+                class_name: Some(object.class_name().clone()),
                 shape: Some(vec![Some(1), Some(1)]),
             },
             Value::ObjectArray(array) => Type::Object {
@@ -435,7 +435,7 @@ impl Type {
                 shape: Some(array.shape().iter().copied().map(Some).collect()),
             },
             Value::HandleObject(handle) => Type::Object {
-                class_name: Some(handle.class_name.clone()),
+                class_name: Some(handle.class_name.as_identity().clone()),
                 shape: Some(vec![Some(1), Some(1)]),
             },
             Value::Listener(_) => Type::Unknown,

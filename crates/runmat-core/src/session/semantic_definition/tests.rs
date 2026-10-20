@@ -489,7 +489,7 @@ fn repeated_captured_definition_survives_workspace_growth() {
                 .resolve_name(name)
                 .expect("definition remains published");
             let mut next = second.get(next_id).unwrap().clone();
-            next.rebind_identity(*id, runmat_types::ProgramFunctionId(id.0 as u32));
+            next.rebind_identity(*id);
             let before = super::fingerprint(original).unwrap();
             let after = super::fingerprint(&next).unwrap();
             assert_eq!(

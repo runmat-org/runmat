@@ -6,7 +6,7 @@ use std::{
 
 use runmat_gc::{Trace, Tracer};
 use runmat_runtime::user_functions;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 use runmat_value::{Value, ValueSequence};
 
 use crate::ExecutableUnit;
@@ -169,9 +169,7 @@ pub(crate) async fn invoke(
                         .and_then(|function| function.class_method_owner.clone())
                 });
             let runtime = runtime.with_constructor_receiver_for_method(method_owner.as_ref());
-            let is_native = u32::try_from(function)
-                .map(ProgramFunctionId)
-                .is_ok_and(|function| semantic_native_functions.contains(&function));
+            let is_native = semantic_native_functions.contains(&FunctionId(function));
             Box::pin(async move {
                 if !same_owner {
                     return Err(super::error::stage(
@@ -254,9 +252,7 @@ pub(crate) async fn invoke(
             let dynamic_admission = bound_dynamic_admission.clone();
             let executor = Rc::clone(&bound_executor);
             let unit = bound_unit.clone();
-            let is_native = u32::try_from(binding.function)
-                .map(ProgramFunctionId)
-                .is_ok_and(|function| bound_native_functions.contains(&function));
+            let is_native = bound_native_functions.contains(&FunctionId(binding.function));
             // Select the exact body before the sibling future can be queued.
             // A later same-name class publication must not replace its
             // invocation-owned class defaults or constructor role.
@@ -475,9 +471,7 @@ pub(crate) async fn invoke(
                     ));
                 }
                 let runtime = isolated_procedure_runtime(runtime);
-                if u32::try_from(call.function)
-                    .map(ProgramFunctionId)
-                    .is_ok_and(|id| unit.owns_callable(id))
+                if unit.owns_callable(FunctionId(call.function))
                 {
                     return invoke_vm_with_admission(
                         call.function,
@@ -536,9 +530,7 @@ pub(crate) async fn invoke(
                 .get(&runmat_hir::FunctionId(call.function))
                 .and_then(|metadata| metadata.class_method_owner.as_ref());
             let runtime = runtime.with_constructor_receiver_for_method(method_owner);
-            let is_native = u32::try_from(call.function)
-                .map(ProgramFunctionId)
-                .is_ok_and(|function| lexical_native_functions.contains(&function));
+            let is_native = lexical_native_functions.contains(&FunctionId(call.function));
             Box::pin(async move {
                 let _call_roots = call_roots?;
                 if !same_owner {
@@ -747,12 +739,8 @@ async fn invoke_vm_with_rooted_admission(
 
 fn program_function(
     function: runmat_hir::FunctionId,
-) -> Result<ProgramFunctionId, runmat_runtime::RuntimeError> {
-    u32::try_from(function.0)
-        .map(ProgramFunctionId)
-        .map_err(|_| {
-            super::error::stage("NativeProcedure", "function identity exceeds native schema")
-        })
+) -> Result<FunctionId, runmat_runtime::RuntimeError> {
+    Ok(function)
 }
 
 fn isolated_procedure_runtime(

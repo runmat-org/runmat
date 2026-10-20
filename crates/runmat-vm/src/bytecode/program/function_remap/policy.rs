@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use runmat_hir::FunctionId;
-use runmat_types::{CallableIdentity, ProgramFunctionId};
+use runmat_types::CallableIdentity;
 
 use super::grammar::with_instruction_function_references;
 use crate::bytecode::{
@@ -32,7 +32,7 @@ fn remap_function_with_policy(
     let lexical_parent = project_lexical_parent(function, remap)?;
     let inherited_storage = project_inherited_storage(function, remap)?;
     if let Some(destination) = remap.get(&function.function).copied() {
-        function.rebind_identity(destination, function.portable_function);
+        function.rebind_identity(destination);
     }
     function.lexical_parent = lexical_parent;
     function.inherited_storage_slots = inherited_storage;
@@ -120,18 +120,10 @@ pub(crate) fn remap_eval_local_instruction(
 pub fn remap_session_function(
     function: &mut FunctionBytecode,
     destination: FunctionId,
-    program_function: ProgramFunctionId,
     source: Option<BytecodeSourceRef>,
     remap: &HashMap<FunctionId, FunctionId>,
 ) -> Result<(), String> {
-    remap_session_function_with_policy(
-        function,
-        destination,
-        program_function,
-        source,
-        remap,
-        RemapPolicy::EvalLocal,
-    )
+    remap_session_function_with_policy(function, destination, source, remap, RemapPolicy::EvalLocal)
 }
 
 /// Rebind a proved closed product body after fresh session IDs have been
@@ -140,14 +132,12 @@ pub fn remap_session_function(
 pub fn remap_closed_session_function(
     function: &mut FunctionBytecode,
     destination: FunctionId,
-    program_function: ProgramFunctionId,
     remap: &HashMap<FunctionId, FunctionId>,
 ) -> Result<(), String> {
     let source = function.source_id;
     remap_session_function_with_policy(
         function,
         destination,
-        program_function,
         source,
         remap,
         RemapPolicy::ClosedUnit,
@@ -157,7 +147,6 @@ pub fn remap_closed_session_function(
 fn remap_session_function_with_policy(
     function: &mut FunctionBytecode,
     destination: FunctionId,
-    program_function: ProgramFunctionId,
     source: Option<BytecodeSourceRef>,
     remap: &HashMap<FunctionId, FunctionId>,
     policy: RemapPolicy,
@@ -167,7 +156,7 @@ fn remap_session_function_with_policy(
     let mut next = function.clone();
     next.lexical_parent = project_lexical_parent(&next, remap)?;
     next.inherited_storage_slots = project_inherited_storage(&next, remap)?;
-    next.rebind_identity_unsealed(destination, program_function);
+    next.rebind_identity_unsealed(destination);
     next.source_id = source;
     let context = RemapContext { ids: remap, policy };
     for instruction in &mut next.instructions {

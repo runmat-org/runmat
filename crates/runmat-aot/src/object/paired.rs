@@ -185,13 +185,16 @@ pub fn emit_selected_paired_native_objects(
     let bodies = common
         .functions
         .iter()
-        .map(|function| (function.id, function.mir_body_digest))
+        .map(|function| (function.id, (function.portable_id, function.mir_body_digest)))
         .collect::<BTreeMap<_, _>>();
+    let (application_function, application_body) = bodies
+        .get(&frozen.entrypoint())
+        .copied()
+        .ok_or_else(|| invalid("application entrypoint is absent from common Native IR"))?;
     let application = NativeCompiledEntry {
-        function: frozen.entrypoint(),
-        body: *bodies
-            .get(&frozen.entrypoint())
-            .ok_or_else(|| invalid("application entrypoint is absent from common Native IR"))?,
+        function: application_function,
+        compiled_function: frozen.entrypoint(),
+        body: application_body,
     };
     let mut tests = Vec::with_capacity(plan.tests().count());
     for descriptor in plan.tests() {
@@ -221,13 +224,17 @@ pub fn emit_selected_paired_native_objects(
         if derived != descriptor.id {
             return Err(invalid("test identity differs from its frozen procedure"));
         }
-        let body = *bodies
+        let (portable_function, body) = *bodies
             .get(&function)
             .ok_or_else(|| invalid("typed test compiler entry is absent from common Native IR"))?;
         tests.push(NativeTestEntry {
             suite: descriptor.suite_id.clone(),
             test: descriptor.id.clone(),
-            compiled: NativeCompiledEntry { function, body },
+            compiled: NativeCompiledEntry {
+                function: portable_function,
+                compiled_function: function,
+                body,
+            },
         });
     }
     tests.sort_by(|left, right| (&left.suite, &left.test).cmp(&(&right.suite, &right.test)));
@@ -258,10 +265,10 @@ pub fn emit_selected_paired_native_objects(
         linked_entries: binding
             .tests
             .iter()
-            .map(|entry| (entry.compiled.function, entry.compiled.body))
+            .map(|entry| (entry.compiled.compiled_function, entry.compiled.clone()))
             .collect::<BTreeMap<_, _>>()
             .into_iter()
-            .map(|(function, body)| NativeCompiledEntry { function, body })
+            .map(|(_, entry)| entry)
             .collect(),
     };
     application_header
@@ -272,9 +279,14 @@ pub fn emit_selected_paired_native_objects(
         .map_err(|error| invalid(format!("test header: {error}")))?;
 
     let mut application_retained = BTreeSet::new();
-    application_retained.insert(application.function);
+    application_retained.insert(application.compiled_function);
     let mut test_retained = application_retained.clone();
-    test_retained.extend(binding.tests.iter().map(|entry| entry.compiled.function));
+    test_retained.extend(
+        binding
+            .tests
+            .iter()
+            .map(|entry| entry.compiled.compiled_function),
+    );
     let application_input = frozen
         .clone()
         .retain_functions(&application_retained)
@@ -286,7 +298,7 @@ pub fn emit_selected_paired_native_objects(
             &binding
                 .tests
                 .iter()
-                .map(|entry| entry.compiled.function)
+                .map(|entry| entry.compiled.compiled_function)
                 .collect(),
         )
         .map_err(|error| invalid(format!("test entrypoints: {error}")))?;

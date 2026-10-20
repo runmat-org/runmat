@@ -3,7 +3,7 @@
 use runmat_mir::{MirCallee, MirExpressionStep, MirRvalue, MirStmtKind};
 use runmat_types::{
     ClassIdentity, EventDeclaration, MemberAccess, MemberName, MethodAttributes, MethodName,
-    ProgramFunctionId, PropertyAttributes,
+    FunctionId, PropertyAttributes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ pub use runmat_mir::MirClassDefaultLiteral as NativeClassDefaultLiteral;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeConstructorMethod {
-    pub function: ProgramFunctionId,
+    pub function: FunctionId,
     pub access: MemberAccess,
 }
 
@@ -43,7 +43,7 @@ pub struct NativeClassProperty {
 #[serde(deny_unknown_fields)]
 pub struct NativeClassMethod {
     pub name: MethodName,
-    pub function: ProgramFunctionId,
+    pub function: FunctionId,
     pub is_static: bool,
     pub attributes: MethodAttributes,
 }

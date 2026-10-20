@@ -116,13 +116,13 @@ impl Bytecode {
         &mut self,
         mir: &MirAssembly,
         manifest: &ParallelManifest,
-        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
+        compiled_functions: &BTreeMap<runmat_hir::FunctionId, ProgramFunctionId>,
     ) -> Result<(), String> {
         self.install_parallel_regions_for_product(
             mir,
             manifest,
             compiled_functions,
-            compiled_functions,
+            &compiled_functions.keys().copied().collect(),
         )
     }
 
@@ -132,17 +132,20 @@ impl Bytecode {
         &mut self,
         mir: &MirAssembly,
         manifest: &ParallelManifest,
-        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
+        compiled_functions: &BTreeMap<runmat_hir::FunctionId, ProgramFunctionId>,
         registered_bodies: &BTreeSet<runmat_hir::FunctionId>,
     ) -> Result<(), String> {
-        if !registered_bodies.is_subset(compiled_functions) {
+        if !registered_bodies
+            .iter()
+            .all(|id| compiled_functions.contains_key(id))
+        {
             return Err("parallel body owners exceed compiled assembly".into());
         }
         manifest
             .validate()
             .map_err(|error| format!("{}: {}", error.path, error.message))?;
-        for function in manifest_function_owners(manifest)? {
-            if !compiled_functions.contains(&function) {
+        for function in manifest_function_owners(manifest) {
+            if !compiled_functions.values().any(|owner| *owner == function) {
                 return Err(format!(
                     "parallel metadata belongs to function {function:?} outside the compiled assembly"
                 ));
@@ -150,7 +153,9 @@ impl Bytecode {
         }
         let mir_parfor_regions = mir
             .bodies
-            .values()
+            .iter()
+            .filter(|(function, _)| compiled_functions.contains_key(function))
+            .map(|(_, body)| body)
             .flat_map(|body| &body.blocks)
             .filter_map(|block| match &block.terminator.kind {
                 MirTerminatorKind::ParFor { region, .. } => Some(*region),
@@ -184,7 +189,9 @@ impl Bytecode {
             .ok_or_else(|| "parallel bytecode requires the canonical VM layout".to_string())?;
         let mir_spmd_regions = mir
             .bodies
-            .values()
+            .iter()
+            .filter(|(function, _)| compiled_functions.contains_key(function))
+            .map(|(_, body)| body)
             .flat_map(|body| &body.blocks)
             .filter_map(|block| match &block.terminator.kind {
                 MirTerminatorKind::Spmd { region, .. } => Some(*region),
@@ -209,7 +216,7 @@ impl Bytecode {
 
         let mut mapped_parfor = Vec::with_capacity(manifest.parfor_regions.len());
         for contract in &manifest.parfor_regions {
-            let function = function_id(contract.id)?;
+            let function = function_id(contract.id, compiled_functions)?;
             let resume_points = self
                 .compiled_resume_points(layout, function)
                 .ok_or_else(|| {
@@ -218,12 +225,18 @@ impl Bytecode {
                         contract.id
                     )
                 })?;
-            mapped_parfor.push(map_parfor_region(mir, layout, resume_points, contract)?);
+            mapped_parfor.push(map_parfor_region(
+                mir,
+                layout,
+                resume_points,
+                function,
+                contract,
+            )?);
         }
         mapped_parfor.sort_by_key(|region| region.contract.id);
         let mut mapped_spmd = Vec::with_capacity(manifest.spmd_regions.len());
         for contract in &manifest.spmd_regions {
-            let function = function_id(contract.id)?;
+            let function = function_id(contract.id, compiled_functions)?;
             let resume_points = self
                 .compiled_resume_points(layout, function)
                 .ok_or_else(|| {
@@ -232,7 +245,13 @@ impl Bytecode {
                         contract.id
                     )
                 })?;
-            mapped_spmd.push(map_spmd_region(mir, layout, resume_points, contract)?);
+            mapped_spmd.push(map_spmd_region(
+                mir,
+                layout,
+                resume_points,
+                function,
+                contract,
+            )?);
         }
         mapped_spmd.sort_by_key(|region| region.contract.id);
 
@@ -250,7 +269,7 @@ impl Bytecode {
         }
 
         for region in mapped_parfor {
-            let function = function_id(region.contract.id)?;
+            let function = function_id(region.contract.id, compiled_functions)?;
             let is_entrypoint = layout
                 .entrypoints
                 .values()
@@ -274,7 +293,7 @@ impl Bytecode {
             }
         }
         for region in mapped_spmd {
-            let function = function_id(region.contract.id)?;
+            let function = function_id(region.contract.id, compiled_functions)?;
             let is_entrypoint = layout
                 .entrypoints
                 .values()
@@ -298,7 +317,7 @@ impl Bytecode {
             }
         }
         for contract in &manifest.distributed_values {
-            let function = program_function_id(contract.id.function)?;
+            let function = program_function_id(contract.id.function, compiled_functions)?;
             let is_entrypoint = layout
                 .entrypoints
                 .values()
@@ -322,7 +341,7 @@ impl Bytecode {
             }
         }
         for contract in &manifest.collectives {
-            let function = function_id(contract.id.region)?;
+            let function = function_id(contract.id.region, compiled_functions)?;
             let is_entrypoint = layout
                 .entrypoints
                 .values()
@@ -421,9 +440,7 @@ fn clear_parallel_metadata(function: &mut crate::FunctionBytecode) {
     function.collective_contracts.clear();
 }
 
-fn manifest_function_owners(
-    manifest: &ParallelManifest,
-) -> Result<BTreeSet<runmat_hir::FunctionId>, String> {
+fn manifest_function_owners(manifest: &ParallelManifest) -> BTreeSet<ProgramFunctionId> {
     manifest
         .parfor_regions
         .iter()
@@ -446,7 +463,6 @@ fn manifest_function_owners(
                 .iter()
                 .map(|contract| contract.id.region.0.function),
         )
-        .map(program_function_id)
         .collect()
 }
 
@@ -454,9 +470,9 @@ fn map_parfor_region(
     mir: &MirAssembly,
     layout: &crate::VmAssemblyLayout,
     resume_points: &BTreeMap<ProgramPointId, usize>,
+    function: runmat_hir::FunctionId,
     contract: &ParforContract,
 ) -> Result<BytecodeParforRegion, String> {
-    let function = function_id(contract.id)?;
     let body = mir.bodies.get(&function).ok_or_else(|| {
         format!(
             "parallel region {:?} has no MIR owning function",
@@ -543,9 +559,9 @@ fn map_spmd_region(
     mir: &MirAssembly,
     layout: &crate::VmAssemblyLayout,
     resume_points: &BTreeMap<ProgramPointId, usize>,
+    function: runmat_hir::FunctionId,
     contract: &SpmdContract,
 ) -> Result<BytecodeSpmdRegion, String> {
-    let function = function_id(contract.id)?;
     let body = mir
         .bodies
         .get(&function)
@@ -624,14 +640,27 @@ fn slot_for(
         .ok_or_else(|| format!("parallel region {region:?} local {local:?} has no VM slot"))
 }
 
-fn function_id(region: ParallelRegionId) -> Result<runmat_hir::FunctionId, String> {
-    program_function_id(region.0.function)
+fn function_id(
+    region: ParallelRegionId,
+    owners: &BTreeMap<runmat_hir::FunctionId, ProgramFunctionId>,
+) -> Result<runmat_hir::FunctionId, String> {
+    program_function_id(region.0.function, owners)
 }
 
-fn program_function_id(function: ProgramFunctionId) -> Result<runmat_hir::FunctionId, String> {
-    usize::try_from(function.0)
-        .map(runmat_hir::FunctionId)
-        .map_err(|_| "parallel function identity exceeds this target".to_string())
+fn program_function_id(
+    function: ProgramFunctionId,
+    owners: &BTreeMap<runmat_hir::FunctionId, ProgramFunctionId>,
+) -> Result<runmat_hir::FunctionId, String> {
+    let mut matches = owners.iter().filter(|(_, portable)| **portable == function);
+    let (local, _) = matches
+        .next()
+        .ok_or_else(|| format!("parallel function {function:?} has no compiled owner"))?;
+    if matches.next().is_some() {
+        return Err(format!(
+            "parallel function {function:?} has ambiguous compiled owners"
+        ));
+    }
+    Ok(*local)
 }
 
 fn program_point(
@@ -727,7 +756,7 @@ mod tests {
         assert!(!assembly.bodies.contains_key(&FunctionId(7)));
 
         bytecode
-            .install_parallel_regions(&assembly, &ParallelManifest::empty(), &BTreeSet::new())
+            .install_parallel_regions(&assembly, &ParallelManifest::empty(), &BTreeMap::new())
             .unwrap();
 
         assert_eq!(
@@ -760,7 +789,7 @@ mod tests {
                     distributed_values: Vec::new(),
                     collectives: Vec::new(),
                 },
-                &BTreeSet::new(),
+                &BTreeMap::new(),
             )
             .expect_err("foreign parallel ownership must fail before mutation");
         assert!(error.contains("outside the compiled assembly"));

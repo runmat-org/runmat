@@ -310,7 +310,7 @@ fn abandoning_suspended_rhs_drops_owned_future_without_replaying_effects() {
     let executor = compile_executor(fixtures::caught_capture_fixture()).unwrap();
     let mut invocation = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: vec![],
             arguments: vec![],
             requested_outputs: 1,

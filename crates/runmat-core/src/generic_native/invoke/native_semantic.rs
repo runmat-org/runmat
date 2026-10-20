@@ -1,7 +1,7 @@
 //! The one native semantic call path for ordinary and bound nested functions.
 use std::rc::Rc;
 
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 use crate::ExecutableUnit;
 
@@ -21,7 +21,7 @@ pub(super) fn bound_native_completions() -> usize {
 }
 
 pub(super) struct RootedInvocation {
-    pub function: ProgramFunctionId,
+    pub function: FunctionId,
     pub arguments: runmat_runtime::call::RootedFunctionArguments,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,

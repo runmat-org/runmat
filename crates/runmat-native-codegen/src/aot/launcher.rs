@@ -14,7 +14,7 @@ use super::AotBuiltinBinding;
 
 pub(super) fn define_resolver(
     module: &mut ObjectModule,
-    functions: &[(runmat_types::ProgramFunctionId, FuncId)],
+    functions: &[(runmat_types::FunctionId, FuncId)],
 ) -> NativeCodegenResult<FuncId> {
     if functions.is_empty()
         || functions.len() > 65_536
@@ -51,11 +51,18 @@ pub(super) fn define_resolver(
     builder.switch_to_block(entry);
     let requested = builder.block_params(entry)[0];
     for (function, linked) in linked {
+        let function_index = u32::try_from(function.0).map_err(|_| {
+            NativeCodegenError::new(
+                "native.object.function_resolver",
+                "compiled function coordinate exceeds the AOT resolver ABI",
+            )
+            .at_function(function)
+        })?;
         let found = builder.create_block();
         let next = builder.create_block();
         let matches = builder
             .ins()
-            .icmp_imm(IntCC::Equal, requested, i64::from(function.0));
+            .icmp_imm(IntCC::Equal, requested, i64::from(function_index));
         builder.ins().brif(matches, found, &[], next, &[]);
         builder.switch_to_block(found);
         let address = builder.ins().func_addr(pointer, linked);

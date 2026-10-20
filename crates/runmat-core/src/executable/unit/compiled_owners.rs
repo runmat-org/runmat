@@ -9,6 +9,51 @@ pub(super) struct CompiledProductOwners {
     pub(super) registered_bodies: BTreeSet<runmat_hir::FunctionId>,
 }
 
+impl CompiledProductOwners {
+    /// The only publication bridge between compiler coordinates and the
+    /// current immutable revision. Inherited registry bodies are deliberately
+    /// absent, even when their portable ordinals coincide with current ones.
+    pub(super) fn analysis_owners(
+        &self,
+        analysis: &runmat_mir::analysis::AnalysisStore,
+        bytecode: &runmat_vm::Bytecode,
+    ) -> Result<
+        std::collections::BTreeMap<runmat_hir::FunctionId, runmat_types::ProgramFunctionId>,
+        String,
+    > {
+        self.assembly
+            .iter()
+            .map(|local| {
+                let facts = analysis.function_for_local(*local).ok_or_else(|| {
+                    format!("compiled function {local:?} has no unique analysis self binding")
+                })?;
+                let portable = if self.registered_bodies.contains(local) {
+                    let body = bytecode
+                        .function_registry
+                        .get(*local)
+                        .ok_or("compiled function lost its original bytecode owner")?;
+                    let origin = body
+                        .binding_origin
+                        .ok_or("compiled function has no immutable origin")?;
+                    if body.function != *local || origin.function != body.portable_function {
+                        return Err(
+                            "compiled function coordinates disagree with its original identity"
+                                .into(),
+                        );
+                    }
+                    body.portable_function
+                } else {
+                    // A synthetic script is owned by the exact MIR/layout
+                    // entrypoint, never by a numerically overlapping inherited
+                    // registry body. Its original analysis ordinal is unchanged.
+                    facts.function
+                };
+                Ok((*local, portable))
+            })
+            .collect()
+    }
+}
+
 /// Select only bodies authored by this immutable product. MIR retains bodies
 /// and declarations imported for whole-program analysis, but those inherited
 /// definitions keep their earlier region and parallel compilation metadata.
@@ -78,6 +123,11 @@ pub(super) fn compiled_function_owners(
         let origin = body
             .binding_origin
             .ok_or_else(|| format!("MIR function {function:?} has no immutable binding origin"))?;
+        if body.function != function || origin.function != body.portable_function {
+            return Err(format!(
+                "MIR function {function:?} has inconsistent original coordinates"
+            ));
+        }
         if origin.program == current_program {
             assembly.insert(function);
             registered_bodies.insert(function);

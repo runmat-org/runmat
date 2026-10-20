@@ -33,6 +33,8 @@ pub(crate) use draft::ExecutableUnitDraft;
 mod class_products;
 #[path = "unit/selected_runtime.rs"]
 mod selected_runtime;
+#[path = "unit/function_identity.rs"]
+mod function_identity;
 
 /// Immutable canonical compilation product reusable across invocations.
 #[derive(Clone, Debug)]
@@ -49,7 +51,7 @@ pub struct ExecutableUnit {
     portable_selection: Option<Rc<PortableSelection>>,
     /// Original compiler products this unit's deferred callables depend on.
     pub(super) original_dependencies:
-        std::collections::BTreeMap<runmat_types::ProgramFunctionId, Rc<ExecutableUnit>>,
+        std::collections::BTreeMap<runmat_types::FunctionId, Rc<ExecutableUnit>>,
     /// Contracts of a restored portable product, reproduced exactly on re-export.
     pub(super) imported_contract: Option<Rc<ImportedPortableContract>>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -322,10 +324,17 @@ impl ExecutableUnit {
                 ))
             }
         };
-        let program_function = runmat_types::ProgramFunctionId(
-            u32::try_from(function.0)
-                .map_err(|_| "function identity exceeds the portable analysis schema")?,
-        );
+        let bytecode = self
+            .functions
+            .get(*function)
+            .ok_or_else(|| format!("function `{name}` has no executable interface"))?;
+        let program_function = bytecode.portable_function;
+        let origin = bytecode
+            .binding_origin
+            .ok_or("function has no original binding identity")?;
+        if self.local_function_for_origin(origin)? != Some(*function) {
+            return Err("function interface is not owned by this executable revision".into());
+        }
         let analysis = self
             .function_analysis(program_function)
             .ok_or_else(|| format!("function `{name}` has no static analysis facts"))?;
@@ -334,10 +343,6 @@ impl ExecutableUnit {
                 "static callable facts for function `{name}` are incomplete"
             ));
         }
-        let bytecode = self
-            .functions
-            .get(*function)
-            .ok_or_else(|| format!("function `{name}` has no executable interface"))?;
         if bytecode.input_slots.len() != analysis.callable.parameters.len() {
             return Err(format!(
                 "parameter identities and static facts for function `{name}` do not agree"

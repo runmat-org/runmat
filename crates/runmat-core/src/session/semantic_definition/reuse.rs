@@ -67,9 +67,8 @@ pub(in crate::session) fn unchanged_closed_product_remap(
         let target = *remap.get(local)?;
         let mut normalized = function.clone();
         let source = normalized.source_id.or(bytecode.source_id);
-        let portable = runmat_types::ProgramFunctionId(u32::try_from(target.0).ok()?);
         runmat_vm::rebind_session_source(&mut normalized, source).ok()?;
-        runmat_vm::remap_closed_session_function(&mut normalized, target, portable, &remap).ok()?;
+        runmat_vm::remap_closed_session_function(&mut normalized, target, &remap).ok()?;
         let incoming_fingerprint = super::fingerprint(&normalized);
         let published_fingerprint = super::fingerprint(published.get(target)?);
         if incoming_fingerprint.ok()? != published_fingerprint.ok()? {
