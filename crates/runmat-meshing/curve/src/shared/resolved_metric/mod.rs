@@ -167,18 +167,11 @@ impl ResolvedCurveMetricField {
                 .consume_allocation_bytes(slots)
                 .map_err(control_error)?;
         }
-        let mut face_local = Vec::with_capacity(topology.faces.len());
-        for face in &topology.faces {
-            let local = resolver
-                .local_sources(&incidence.incident_face_entities(face))
-                .map_err(|error| {
-                    SharedCurveError::invalid_request(
-                        "boundary face local metric",
-                        error.to_string(),
-                    )
-                })?;
+        let mut face_local = Vec::with_capacity(face_metrics.len());
+        let mut face_uniform = Vec::with_capacity(face_metrics.len());
+        for sizing in face_metrics.into_values() {
             if let Some(control) = control {
-                let bytes = (local.capacity() as u64)
+                let bytes = (sizing.local.capacity() as u64)
                     .checked_mul(
                         std::mem::size_of::<runmat_meshing_size::metric::LocalMetricSource>()
                             as u64,
@@ -190,11 +183,12 @@ impl ResolvedCurveMetricField {
                     .consume_allocation_bytes(bytes)
                     .map_err(control_error)?;
             }
-            face_local.push(local);
+            face_uniform.push(sizing.uniform);
+            face_local.push(sizing.local);
         }
         Ok(Self {
             by_edge: records,
-            face_metrics: face_metrics.into_values().collect(),
+            face_metrics: face_uniform,
             face_local,
             resolver,
         })

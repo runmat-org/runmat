@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 mod directional;
 mod exact_faces;
-pub use exact_faces::ExactFaceMetricResolutionError;
+pub use exact_faces::{ExactFaceMetricResolutionError, ExactFaceSizing};
 mod subspace;
 pub use subspace::DirectionalMetricEnvelope;
 mod index;

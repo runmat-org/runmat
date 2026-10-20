@@ -5,9 +5,8 @@ use crate::ExactFaceChartParameterization;
 use runmat_geometry_core::{
     ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, PersistentEntityId,
 };
-use runmat_meshing_core::{MetricContributionScope, MetricFieldRequest};
+use runmat_meshing_core::MetricFieldRequest;
 use runmat_meshing_size::{
-    grading::grade_metric_evaluations,
     incidence::TopologyMetricIncidence,
     metric::{ResolvedMetricEvaluation, ResolvedMetricField},
 };
@@ -44,7 +43,7 @@ impl<'a> PreparedFaceMetricValidation<'a> {
             let world_transform = transforms
                 .world_transform_for(&face.id)
                 .map_err(control_error)?;
-            let metric = resolved.remove(&face.id).ok_or_else(|| {
+            let sizing = resolved.remove(&face.id).ok_or_else(|| {
                 ExactFaceMetricError::new(
                     ExactFaceMetricErrorKind::InvalidRequest,
                     Some(&face.id),
@@ -59,7 +58,8 @@ impl<'a> PreparedFaceMetricValidation<'a> {
                     error.to_string(),
                 )
             };
-            let local = resolver.local_sources(&incident).map_err(request_error)?;
+            let metric = sizing.uniform;
+            let local = sizing.local;
             let provenance = resolver.resolve(&incident).map_err(request_error)?;
             reference.insert(
                 face.id.clone(),
@@ -102,7 +102,7 @@ fn resolve_face_metrics(
 ) -> Result<
     (
         ResolvedMetricField,
-        BTreeMap<PersistentEntityId, runmat_meshing_size::metric::ResolvedMetricEvaluation>,
+        BTreeMap<PersistentEntityId, runmat_meshing_size::metric::ExactFaceSizing>,
     ),
     ExactFaceMetricError,
 > {
@@ -122,49 +122,19 @@ fn resolve_face_metrics(
         )
     })?;
     let incidence = TopologyMetricIncidence::new(topology);
-    for contribution in &request.contributions {
-        checkpoint(control)?;
-        let entity = match &contribution.scope {
-            MetricContributionScope::Region { region_id } => region_id,
-            MetricContributionScope::Entity { entity_id } => entity_id,
-        };
-        if !incidence.knows(entity) {
-            return Err(ExactFaceMetricError::new(
-                ExactFaceMetricErrorKind::InvalidRequest,
-                None,
-                format!("metric contribution references unknown exact entity {entity:?}"),
-            ));
-        }
-    }
-    let mut by_face = topology
-        .faces
-        .iter()
-        .map(|face| {
-            checkpoint(control)?;
-            resolver
-                .resolve_constant(&incidence.incident_face_entities(face))
-                .map(|metric| (face.id.clone(), metric))
-                .map_err(|error| {
-                    ExactFaceMetricError::new(
-                        ExactFaceMetricErrorKind::InvalidEvaluation,
-                        Some(&face.id),
-                        error.to_string(),
-                    )
-                })
-        })
-        .collect::<Result<BTreeMap<_, _>, _>>()?;
-    grade_metric_evaluations(
-        request.maximum_grading_ratio,
-        &TopologyMetricIncidence::face_adjacency(topology),
-        &mut by_face,
-    )
-    .map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            None,
-            error.to_string(),
-        )
-    })?;
+    let by_face = resolver
+        .resolve_exact_faces(topology, &incidence, Some(control))
+        .map_err(|error| {
+            let kind = match &error {
+                runmat_meshing_size::metric::ExactFaceMetricResolutionError::Metric(_) => {
+                    ExactFaceMetricErrorKind::InvalidRequest
+                }
+                runmat_meshing_size::metric::ExactFaceMetricResolutionError::Control(error) => {
+                    ExactFaceMetricErrorKind::GeometryEvaluation(error.kind)
+                }
+            };
+            ExactFaceMetricError::new(kind, None, error.to_string())
+        })?;
     Ok((resolver, by_face))
 }
 

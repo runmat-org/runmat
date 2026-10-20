@@ -130,24 +130,47 @@ impl ResolvedMetricField {
             }
             intersection::deduplicate(&self.request, &mut applicable);
             let metric = intersection::combine(&self.request, &applicable)?;
-            let characteristic_length_m = metric.conservative_minimum_length_m()?;
-            let points = &self.request.entity_supports[support].points_m;
-            let mut minimum = [f64::INFINITY; 3];
-            let mut maximum = [f64::NEG_INFINITY; 3];
-            for point in points {
-                for axis in 0..3 {
-                    minimum[axis] = minimum[axis].min(point[axis]);
-                    maximum[axis] = maximum[axis].max(point[axis]);
-                }
-            }
-            sources.push(LocalMetricSource {
-                support,
-                metric,
-                characteristic_length_m,
-                bounds: (minimum, maximum),
-            });
+            sources.push(self.supported_source(support, metric)?);
         }
         Ok(sources)
+    }
+
+    /// A tensor graded from the support of `entity`, if that entity has one.
+    pub(crate) fn source_on(
+        &self,
+        entity: &PersistentEntityId,
+        metric: MetricTensor3,
+    ) -> Result<Option<LocalMetricSource>, MetricContractError> {
+        self.support_index(entity)
+            .map(|support| self.supported_source(support, metric))
+            .transpose()
+    }
+
+    pub(crate) fn has_supports(&self) -> bool {
+        !self.request.entity_supports.is_empty()
+    }
+
+    fn supported_source(
+        &self,
+        support: usize,
+        metric: MetricTensor3,
+    ) -> Result<LocalMetricSource, MetricContractError> {
+        let characteristic_length_m = metric.conservative_minimum_length_m()?;
+        let points = &self.request.entity_supports[support].points_m;
+        let mut minimum = [f64::INFINITY; 3];
+        let mut maximum = [f64::NEG_INFINITY; 3];
+        for point in points {
+            for axis in 0..3 {
+                minimum[axis] = minimum[axis].min(point[axis]);
+                maximum[axis] = maximum[axis].max(point[axis]);
+            }
+        }
+        Ok(LocalMetricSource {
+            support,
+            metric,
+            characteristic_length_m,
+            bounds: (minimum, maximum),
+        })
     }
 
     /// Evaluate `constant` intersected with every local source graded to `point_m`.

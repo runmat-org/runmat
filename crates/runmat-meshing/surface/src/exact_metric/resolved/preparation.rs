@@ -62,13 +62,12 @@ impl ResolvedFaceMetricField {
                     error.to_string(),
                 )
             })?;
-            let resolved = resolved_by_face
+            let sizing = resolved_by_face
                 .remove(&face.id)
                 .expect("resolved every exact face");
+            let resolved = sizing.uniform;
+            let local = sizing.local;
             let incident = incidence.incident_face_entities(face);
-            let local = resolver
-                .local_sources(&incident)
-                .map_err(|error| invalid_request(error.to_string()))?;
             // Provenance names every source that can act on the face, graded or uniform.
             let provenance_sources = resolver
                 .resolve(&incident)
