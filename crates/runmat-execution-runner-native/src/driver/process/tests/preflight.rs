@@ -63,9 +63,11 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
             owned_work: None,
             requested_outputs: 0,
         },
+        // Enough for the native invocation and its parent monitor; this test is about
+        // failures that happen before any process launches.
         resources: ResourceRequest {
             cpu_millicores: 1000,
-            memory_bytes: 1024,
+            memory_bytes: 512 * 1024 * 1024,
             scratch_bytes: 1024,
             max_wall_millis: 10000,
             max_artifact_bytes: 1024,
@@ -246,8 +248,9 @@ fn provider_failure_and_cancellation_commit_the_original_observation_and_account
             if cancelled {
                 AttemptDisposition::Cancelled
             } else {
+                // An unreadable stored program is a store failure, not program behavior.
                 AttemptDisposition::Failed {
-                    kind: runmat_execution_runner::AttemptFailureKind::Execution,
+                    kind: runmat_execution_runner::AttemptFailureKind::Infrastructure,
                 }
             }
         );
